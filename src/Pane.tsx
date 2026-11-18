@@ -13,7 +13,7 @@ interface PaneProps {
   entries: Entry[];
   locations: QuickLocation[];
   activate: () => void;
-  onRow: (entry: Entry) => void;
+  onRow: (entry: Entry, range: boolean, mark: boolean) => void;
   onOpen: (entry: Entry) => void;
   onPath: (path: string) => void;
   onHistory: (offset: number) => void;
@@ -33,16 +33,18 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   const [filterOpen, setFilterOpen] = useState(false);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const locationsBox = useRef<HTMLDivElement>(null);
+  const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = entries.length ? Math.max(0, entries.findIndex((entry) => entry.name === pane.selected)) : -1;
 
   useEffect(() => setAddress(path), [path]);
   useEffect(() => {
-    if (active && selected >= 0) list.current?.querySelector("[aria-selected='true']")?.scrollIntoView({ block: "nearest" });
+    if (active && selected >= 0) list.current?.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
   }, [selected, path, active]);
   useEffect(() => {
     if (!locationsOpen) return;
+    locationsBox.current?.querySelector<HTMLButtonElement>(".location-popup button")?.focus();
     function closeOutside(event: PointerEvent) {
       if (event.target instanceof Node && !locationsBox.current?.contains(event.target)) setLocationsOpen(false);
     }
@@ -55,8 +57,16 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
       setFilterOpen(true);
       requestAnimationFrame(() => filterField.current?.focus());
     };
+    const showLocations = () => {
+      setLocationsOpen((open) => !open);
+      locationsButton.current?.focus();
+    };
     target?.addEventListener("dirlume-filter", show);
-    return () => target?.removeEventListener("dirlume-filter", show);
+    target?.addEventListener("dirlume-locations", showLocations);
+    return () => {
+      target?.removeEventListener("dirlume-filter", show);
+      target?.removeEventListener("dirlume-locations", showLocations);
+    };
   }, [side]);
 
   function submitAddress(event: FormEvent) {
@@ -114,9 +124,23 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
             }} />
         </form>
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
-          if (event.key === "Escape") { setLocationsOpen(false); list.current?.focus(); }
+          if (!locationsOpen) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setLocationsOpen(false);
+            list.current?.focus();
+          }
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault();
+            const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".location-popup button"));
+            if (!buttons.length) return;
+            const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            const direction = event.key === "ArrowUp" ? -1 : 1;
+            const next = current < 0 ? (direction > 0 ? 0 : buttons.length - 1) : (current + direction + buttons.length) % buttons.length;
+            buttons[next].focus();
+          }
         }}>
-          <button className="icon-button location-trigger" aria-label={`Locations for ${side} pane`}
+          <button ref={locationsButton} className="icon-button location-trigger" aria-label={`Locations for ${side} pane`}
             aria-expanded={locationsOpen} onClick={() => setLocationsOpen(!locationsOpen)}><HardDrive /><ChevronDown /></button>
           {locationsOpen && (
             <div className="location-popup">
@@ -153,13 +177,13 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
         ))}
       </div>
       <div id={`${side}-files`} ref={list} className="file-list" role="listbox" aria-label={`${side} files`}
-        aria-busy={pane.loading} aria-activedescendant={selected < 0 ? undefined : `${side}-file-${selected}`} tabIndex={0}>
+        aria-multiselectable="true" aria-busy={pane.loading} aria-activedescendant={selected < 0 ? undefined : `${side}-file-${selected}`} tabIndex={0}>
         {entries.map((entry, index) => {
           const size = pane.sizes.get(entry.name);
           const measuring = pane.measuring.includes(entry.name);
           return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
-            key={entry.name} role="option" aria-selected={index === selected} title={entry.name}
-            onClick={() => { onRow(entry); list.current?.focus({ preventScroll: true }); }}
+            key={entry.name} role="option" aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
+            onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> : <File />}
               <span>{entry.name}</span>{entry.link && <Link2 className="link-icon" aria-label="Link" />}</span>

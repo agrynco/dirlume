@@ -4,8 +4,8 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU32, Ordering},
-        Mutex,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -17,7 +17,7 @@ use reqwest::{
     Certificate,
 };
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{ipc::Channel, State};
 
 use crate::{
     kswitcher, local,
@@ -57,11 +57,11 @@ fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Operation {
     Open { name: String },
-    Copy { name: String, target: String },
-    Move { name: String, target: String },
     Rename { name: String, new_name: String },
     CreateFolder { name: String },
+    CreateFile { name: String },
     Recycle { name: String },
+    Delete { name: String },
 }
 
 #[tauri::command]
@@ -69,20 +69,18 @@ async fn operate(directory: String, operation: Operation) -> Result<()> {
     blocking(move || {
         match operation {
             Operation::Open { name } => open::that(selected(&directory, &name).map_err(message)?),
-            Operation::Copy { name, target } => local::copy_into(
-                &selected(&directory, &name).map_err(message)?,
-                local::absolute(&target).map_err(message)?,
-            ),
-            Operation::Move { name, target } => local::move_item(
-                &selected(&directory, &name).map_err(message)?,
-                selected(&target, &name).map_err(message)?,
-            ),
             Operation::Rename { name, new_name } => local::move_item(
                 &selected(&directory, &name).map_err(message)?,
                 selected(&directory, &new_name).map_err(message)?,
             ),
             Operation::CreateFolder { name } => {
                 fs::create_dir(selected(&directory, &name).map_err(message)?)
+            }
+            Operation::CreateFile { name } => {
+                fs::File::create_new(selected(&directory, &name).map_err(message)?).map(drop)
+            }
+            Operation::Delete { name } => {
+                local::permanently_delete(&selected(&directory, &name).map_err(message)?)
             }
             Operation::Recycle { name } => {
                 return trash::delete(selected(&directory, &name).map_err(message)?)
@@ -150,17 +148,30 @@ impl Connection {
         serde_json::from_slice(&bytes).map_err(message)
     }
 
-    fn download_file(&self, segments: Vec<String>, file: &mut fs::File) -> Result<()> {
-        let mut response = self.request("v1/download", segments, Duration::from_secs(60 * 60))?;
+    fn download_file(
+        &self,
+        segments: Vec<String>,
+        file: &mut fs::File,
+        mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ) -> Result<()> {
+        let name = PathBuf::from(segments.last().cloned().unwrap_or_default());
+        let response = self.request("v1/download", segments, Duration::from_secs(60 * 60))?;
         let length = response.content_length();
-        let bytes = io::copy(&mut response, file).map_err(message)?;
-        if length.is_some_and(|length| length != bytes) {
-            return Err("The download was incomplete.".to_owned());
-        }
-        Ok(())
+        local::copy_stream(response, file, length, |bytes, total| {
+            progress(&name, bytes, total)
+        })
+        .map_err(message)
     }
 
-    fn download_tree(&self, segments: Vec<String>, target: &Path) -> Result<()> {
+    fn download_tree(
+        &self,
+        segments: Vec<String>,
+        target: &Path,
+        progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ) -> Result<()> {
+        if let Some(name) = segments.last() {
+            progress(Path::new(name), 0, None).map_err(message)?;
+        }
         let listing = self.list(segments.clone())?;
         if listing.omitted > 0 {
             return Err("The server could not list every item in this folder.".to_owned());
@@ -174,15 +185,322 @@ impl Connection {
             let mut path = segments.clone();
             path.push(item.name);
             if item.directory {
-                self.download_tree(path, &destination)?;
+                self.download_tree(path, &destination, progress)?;
             } else {
                 let mut file = fs::File::create_new(destination).map_err(message)?;
-                self.download_file(path, &mut file)?;
+                self.download_file(path, &mut file, &mut *progress)?;
                 file.sync_all().map_err(message)?;
             }
         }
         Ok(())
     }
+}
+
+#[derive(Default)]
+struct TransferSessions(Mutex<HashMap<u32, Arc<AtomicBool>>>);
+
+#[tauri::command]
+fn begin_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
+    state
+        .0
+        .lock()
+        .map_err(message)?
+        .insert(id, Arc::new(AtomicBool::new(false)));
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
+    if let Some(flag) = state.0.lock().map_err(message)?.get(&id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn finish_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
+    state.0.lock().map_err(message)?.remove(&id);
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum TransferSource {
+    Local {
+        directory: String,
+        name: String,
+    },
+    Server {
+        connection: u32,
+        segments: Vec<String>,
+        folder: bool,
+    },
+    Kswitcher {
+        directory: String,
+        peer: String,
+        path: String,
+        name: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConflictPolicy {
+    Ask,
+    Skip,
+    Overwrite,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferRequest {
+    source: TransferSource,
+    destination: String,
+    multiple: bool,
+    moving: bool,
+    policy: ConflictPolicy,
+    ask_read_only: bool,
+    approved: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+enum TransferOutcome {
+    Completed,
+    Skipped,
+    Conflict {
+        path: String,
+        bytes: u64,
+        read_only: bool,
+        replaceable: bool,
+        revision: String,
+    },
+}
+
+#[derive(Clone, Serialize)]
+struct TransferProgress {
+    file: String,
+    bytes: u64,
+    total: Option<u64>,
+}
+
+fn transfer_target(
+    destination: &str,
+    name: &str,
+    source: Option<&Path>,
+    multiple: bool,
+) -> io::Result<PathBuf> {
+    let name = local::name_component(name)?;
+    let path = Path::new(destination);
+    let destination = if path.is_absolute() {
+        path.to_owned()
+    } else if let Some(source) = source.filter(|_| !multiple) {
+        source
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Choose an absolute destination.",
+                )
+            })?
+            .join(local::name_component(destination)?)
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Choose an absolute destination folder.",
+        ));
+    };
+    if destination.is_dir() {
+        return Ok(destination.join(name));
+    }
+    if multiple
+        || source.is_none()
+        || destination
+            .as_os_str()
+            .to_string_lossy()
+            .ends_with(std::path::is_separator)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::NotADirectory,
+            "The destination folder does not exist.",
+        ));
+    }
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Enter a valid destination name.",
+            )
+        })?;
+    local::name_component(name)?;
+    Ok(destination)
+}
+
+fn revision(metadata: &fs::Metadata) -> String {
+    format!(
+        "{:?}:{}:{}",
+        metadata.modified().ok(),
+        metadata.len(),
+        metadata.permissions().readonly()
+    )
+}
+
+#[tauri::command]
+async fn transfer_item(
+    id: u32,
+    request: TransferRequest,
+    output: Channel<TransferProgress>,
+    sessions: State<'_, TransferSessions>,
+    connections: State<'_, Connections>,
+) -> Result<TransferOutcome> {
+    let cancelled = sessions
+        .0
+        .lock()
+        .map_err(message)?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| "The transfer session has closed.".to_owned())?;
+    let connection = match &request.source {
+        TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
+        _ => None,
+    };
+    blocking(move || {
+        let (name, source) = match &request.source {
+            TransferSource::Local { directory, name } => (
+                name.as_str(),
+                Some(selected(directory, name).map_err(message)?),
+            ),
+            TransferSource::Server { segments, .. } => (
+                segments.last().ok_or("Choose a remote item.")?.as_str(),
+                None,
+            ),
+            TransferSource::Kswitcher { name, .. } => (name.as_str(), None),
+        };
+        let target = transfer_target(
+            &request.destination,
+            name,
+            source.as_deref(),
+            request.multiple,
+        )
+        .map_err(message)?;
+        let mut progress = |path: &Path, bytes, total| {
+            if cancelled.load(Ordering::Relaxed) {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Transfer canceled.",
+                ));
+            }
+            let file = path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned();
+            let _ = output.send(TransferProgress { file, bytes, total });
+            Ok(())
+        };
+        progress(Path::new(name), 0, None).map_err(message)?;
+
+        let mut replace = None;
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                if let Some(source) = &source {
+                    if same_file::is_same_file(source, &target).unwrap_or(false) {
+                        return Err("Source and destination are the same item.".into());
+                    }
+                }
+                if matches!(request.policy, ConflictPolicy::Skip) {
+                    return Ok(TransferOutcome::Skipped);
+                }
+                let read_only = metadata.permissions().readonly();
+                let replaceable = metadata.is_file()
+                    && !local::is_link(&metadata)
+                    && source
+                        .as_ref()
+                        .and_then(|path| fs::symlink_metadata(path).ok())
+                        .is_some_and(|metadata| metadata.is_file() && !local::is_link(&metadata));
+                let current = revision(&metadata);
+                let approved = request.approved.as_deref() == Some(&current);
+                let overwrite = request.approved.is_none()
+                    && matches!(request.policy, ConflictPolicy::Overwrite)
+                    && (!read_only || !request.ask_read_only);
+                if !replaceable || (!approved && !overwrite) {
+                    return Ok(TransferOutcome::Conflict {
+                        path: target.to_string_lossy().into_owned(),
+                        bytes: metadata.len(),
+                        read_only,
+                        replaceable,
+                        revision: current,
+                    });
+                }
+                replace = Some(current);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(message(error)),
+        }
+
+        match request.source {
+            TransferSource::Local { .. } => {
+                let source = source.ok_or("Choose a local item.")?;
+                if request.moving {
+                    if replace.is_some() {
+                        fs::rename(source, target).map_err(message)?;
+                    } else {
+                        local::move_item(&source, target).map_err(message)?;
+                    }
+                } else {
+                    local::copy_to(&source, &target, replace.is_some(), |path, bytes, total| {
+                        if total.is_none()
+                            && path == source
+                            && replace.is_some()
+                            && fs::symlink_metadata(&target).ok().as_ref().map(revision) != replace
+                        {
+                            return Err(io::Error::new(
+                                io::ErrorKind::AlreadyExists,
+                                "The destination changed during the copy.",
+                            ));
+                        }
+                        progress(path, bytes, total)
+                    })
+                    .map_err(message)?;
+                }
+            }
+            TransferSource::Server {
+                segments, folder, ..
+            } => {
+                let connection = connection.ok_or("Connect to the server first.")?;
+                if folder {
+                    let parent = target
+                        .parent()
+                        .ok_or("Choose a local destination folder.")?;
+                    let workspace = tempfile::tempdir_in(parent).map_err(message)?;
+                    let staged = workspace.path().join("download");
+                    connection.download_tree(segments, &staged, &mut progress)?;
+                    progress(&target, 0, None).map_err(message)?;
+                    renamest::rename_exclusive(staged, target).map_err(message)?;
+                } else {
+                    download_to(&target, |file| {
+                        connection.download_file(segments, file, &mut progress)
+                    })?;
+                }
+            }
+            TransferSource::Kswitcher {
+                directory,
+                peer,
+                path,
+                ..
+            } => {
+                kswitcher::download(&directory, &peer, &path, target)?;
+            }
+        }
+        Ok(TransferOutcome::Completed)
+    })
+    .await
 }
 
 #[derive(Default)]
@@ -257,37 +575,7 @@ async fn disconnect_server(id: u32, state: State<'_, Connections>) -> Result<()>
     .await
 }
 
-#[tauri::command]
-async fn download_server(
-    id: u32,
-    segments: Vec<String>,
-    target: String,
-    directory: bool,
-    state: State<'_, Connections>,
-) -> Result<()> {
-    let connection = state.get(id)?;
-    blocking(move || {
-        let name = segments
-            .last()
-            .ok_or_else(|| "Choose a file or folder to download.".to_owned())?;
-        let path = selected(&target, name).map_err(message)?;
-        if !directory {
-            return download_to(&path, |file| connection.download_file(segments, file));
-        }
-        local::ensure_absent(&path).map_err(message)?;
-        let workspace =
-            tempfile::tempdir_in(local::absolute(&target).map_err(message)?).map_err(message)?;
-        let staged = workspace.path().join("download");
-        connection.download_tree(segments, &staged)?;
-        renamest::rename_exclusive(staged, path).map_err(message)
-    })
-    .await
-}
-
-pub(crate) fn download_to(
-    path: &Path,
-    write: impl FnOnce(&mut fs::File) -> Result<()>,
-) -> Result<()> {
+fn download_to(path: &Path, write: impl FnOnce(&mut fs::File) -> Result<()>) -> Result<()> {
     local::ensure_absent(path).map_err(message)?;
     let directory = path
         .parent()
@@ -464,28 +752,34 @@ async fn list_kswitcher(
     blocking(move || kswitcher::list(&directory, &peer, &path)).await
 }
 
-#[tauri::command]
-async fn download_kswitcher(
-    directory: String,
-    peer: String,
-    path: String,
-    name: String,
-    target: String,
-) -> Result<()> {
-    blocking(move || {
-        kswitcher::download(
-            &directory,
-            &peer,
-            &path,
-            selected(&target, &name).map_err(message)?,
-        )
-    })
-    .await
-}
-
 pub fn run() {
+    let context = tauri::generate_context!();
+    #[cfg(all(windows, feature = "ui-automation"))]
+    let context = {
+        let mut context = context;
+        if let Some(port) = std::env::var("DIRLUME_CDP_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|port| *port > 0)
+        {
+            if let Some(window) = context
+                .config_mut()
+                .app
+                .windows
+                .iter_mut()
+                .find(|window| window.label == "main")
+            {
+                let existing = window.additional_browser_args.take().unwrap_or_default();
+                window.additional_browser_args = Some(format!(
+                    "{existing} --remote-debugging-address=127.0.0.1 --remote-debugging-port={port}"
+                ));
+            }
+        }
+        context
+    };
     tauri::Builder::default()
         .manage(Connections::default())
+        .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
         .manage(watch::Measurements::default())
@@ -496,7 +790,6 @@ pub fn run() {
             connect_server,
             list_server,
             disconnect_server,
-            download_server,
             read_text,
             read_server_text,
             save_text,
@@ -504,7 +797,10 @@ pub fn run() {
             has_kswitcher_bridge,
             kswitcher_peers,
             list_kswitcher,
-            download_kswitcher,
+            begin_transfer,
+            cancel_transfer,
+            finish_transfer,
+            transfer_item,
             terminal::open_terminal,
             terminal::write_terminal,
             terminal::resize_terminal,
@@ -514,6 +810,6 @@ pub fn run() {
             watch::measure_folders,
             watch::cancel_measurement
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("cannot start Dirlume");
 }

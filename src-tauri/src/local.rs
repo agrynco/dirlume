@@ -1,8 +1,8 @@
 use std::{
     fs,
-    io::{self, ErrorKind},
+    io::{self, ErrorKind, Read, Write},
     path::{Component, Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -248,11 +248,20 @@ pub fn is_link(metadata: &fs::Metadata) -> bool {
     metadata.is_symlink()
 }
 
-pub fn copy_into(source: &Path, directory: &Path) -> io::Result<()> {
-    let name = source.file_name().ok_or_else(|| {
-        io::Error::new(ErrorKind::InvalidInput, "Choose a file or folder to copy.")
-    })?;
-    let directory = directory.canonicalize()?;
+pub fn copy_to(
+    source: &Path,
+    target: &Path,
+    replace: bool,
+    mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+) -> io::Result<()> {
+    let name = target
+        .file_name()
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Enter a destination name."))?;
+    let directory = target
+        .parent()
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Choose a destination folder."))?
+        .canonicalize()?;
+    let target = directory.join(name);
     let metadata = fs::symlink_metadata(source)?;
     if metadata.is_dir() && !is_link(&metadata) {
         let source = source.canonicalize()?;
@@ -265,17 +274,33 @@ pub fn copy_into(source: &Path, directory: &Path) -> io::Result<()> {
             }
         }
     }
-    let target = directory.join(name);
-    ensure_absent(&target)?;
+    if !replace {
+        ensure_absent(&target)?;
+    } else if same_file::is_same_file(source, &target)? {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Source and destination are the same item.",
+        ));
+    }
     let workspace = tempfile::Builder::new()
         .prefix(".dirlume-")
         .tempdir_in(directory)?;
     let staged = workspace.path().join("copy");
-    copy_entry(source, &staged, metadata)?;
-    renamest::rename_exclusive(staged, target)
+    copy_entry(source, &staged, metadata, &mut progress)?;
+    progress(source, 0, None)?;
+    if replace {
+        fs::rename(staged, target)
+    } else {
+        renamest::rename_exclusive(staged, target)
+    }
 }
 
-fn copy_entry(source: &Path, destination: &Path, metadata: fs::Metadata) -> io::Result<()> {
+fn copy_entry(
+    source: &Path,
+    destination: &Path,
+    metadata: fs::Metadata,
+    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+) -> io::Result<()> {
     if is_link(&metadata) {
         return Err(io::Error::new(
             ErrorKind::Unsupported,
@@ -283,6 +308,7 @@ fn copy_entry(source: &Path, destination: &Path, metadata: fs::Metadata) -> io::
         ));
     }
     if metadata.is_dir() {
+        progress(source, 0, None)?;
         fs::create_dir(destination)?;
         for child in fs::read_dir(source)? {
             let child = child?;
@@ -291,10 +317,20 @@ fn copy_entry(source: &Path, destination: &Path, metadata: fs::Metadata) -> io::
                 &path,
                 &destination.join(child.file_name()),
                 fs::symlink_metadata(&path)?,
+                progress,
             )?;
         }
     } else if metadata.is_file() {
-        fs::copy(source, destination)?;
+        let input = fs::File::open(source)?;
+        let mut output = fs::File::create_new(destination)?;
+        copy_stream(input, &mut output, Some(metadata.len()), |bytes, total| {
+            progress(source, bytes, total)
+        })?;
+        if let Ok(modified) = metadata.modified() {
+            output.set_times(fs::FileTimes::new().set_modified(modified))?;
+        }
+        output.sync_all()?;
+        output.set_permissions(metadata.permissions())?;
     } else {
         return Err(io::Error::new(
             ErrorKind::Unsupported,
@@ -302,6 +338,53 @@ fn copy_entry(source: &Path, destination: &Path, metadata: fs::Metadata) -> io::
         ));
     }
     Ok(())
+}
+
+pub fn copy_stream(
+    mut reader: impl Read,
+    mut writer: impl Write,
+    total: Option<u64>,
+    mut progress: impl FnMut(u64, Option<u64>) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut buffer = vec![0; 256 * 1024];
+    let mut written = 0;
+    progress(written, total)?;
+    let mut last_display = Instant::now();
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..count])?;
+        written += count as u64;
+        if last_display.elapsed() >= Duration::from_millis(50) {
+            progress(written, total)?;
+            last_display = Instant::now();
+        }
+    }
+    if total.is_some_and(|value| value != written) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "The source changed or the transfer was incomplete.",
+        ));
+    }
+    progress(written, total)
+}
+
+pub fn permanently_delete(path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_dir() && !is_link(&metadata) {
+        return fs::remove_dir_all(path);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            return fs::remove_dir(path);
+        }
+    }
+    fs::remove_file(path)
 }
 
 pub fn ensure_absent(path: &Path) -> io::Result<()> {
@@ -380,13 +463,41 @@ mod tests {
         fs::create_dir_all(source.join("nested")).unwrap();
         fs::create_dir(&target).unwrap();
         fs::write(source.join("nested/test.txt"), b"original").unwrap();
-        copy_into(&source, &target).unwrap();
+        copy_to(&source, &target.join("source"), false, |_, _, _| Ok(())).unwrap();
         let copy = target.join("source/nested/test.txt");
         assert_eq!(fs::read(&copy).unwrap(), b"original");
         fs::write(&copy, b"destination").unwrap();
-        assert!(copy_into(&source, &target).is_err());
+        assert!(copy_to(&source, &target.join("source"), false, |_, _, _| Ok(())).is_err());
         assert_eq!(fs::read(&copy).unwrap(), b"destination");
-        assert!(copy_into(&source, &source.join("nested")).is_err());
+        assert!(
+            copy_to(&source, &source.join("nested/source"), false, |_, _, _| Ok(
+                ()
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn canceled_copy_keeps_the_existing_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.bin");
+        let destination = temp.path().join("destination.bin");
+        fs::write(&source, b"abcdefgh").unwrap();
+        fs::write(&destination, b"keep").unwrap();
+        let mut observed = 0;
+        let result = copy_to(&source, &destination, true, |_, bytes, total| {
+            if bytes > 0 {
+                assert_eq!(total, Some(8));
+                observed = bytes;
+                return Err(io::Error::new(ErrorKind::Interrupted, "Transfer canceled."));
+            }
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::Interrupted);
+        assert_eq!(observed, 8);
+        assert_eq!(fs::read(&source).unwrap(), b"abcdefgh");
+        assert_eq!(fs::read(&destination).unwrap(), b"keep");
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 2);
     }
 
     #[test]

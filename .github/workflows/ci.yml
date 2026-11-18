@@ -70,8 +70,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/ensure-webview.ps1
+      - name: Build Windows UI automation fixture
+        if: runner.os == 'Windows'
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --features server,ui-automation,tauri/custom-protocol
       - name: Test Windows desktop application
         if: runner.os == 'Windows'
+        env:
+          DIRLUME_BUILD_PROFILE: debug
+          DIRLUME_INTERNAL_CDP: '1'
         run: node scripts/desktop-smoke.mjs
       - name: Package artifacts
         run: node scripts/package.mjs collect "${{ matrix.platform }}"

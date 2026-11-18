@@ -1,45 +1,69 @@
+import { readSchemes, type Scheme, type Theme } from "./appearance";
+
 export const commands = {
   switchPane: { label: "Switch pane", key: "Tab" },
   swap: { label: "Swap panes", key: "Ctrl+U" },
   upRow: { label: "Previous item", key: "ArrowUp" },
   downRow: { label: "Next item", key: "ArrowDown" },
-  firstRow: { label: "First item", key: "Home" },
-  lastRow: { label: "Last item", key: "End" },
+  firstRow: { label: "First item", key: "ArrowLeft" },
+  lastRow: { label: "Last item", key: "ArrowRight" },
   pageUp: { label: "Previous page", key: "PageUp" },
   pageDown: { label: "Next page", key: "PageDown" },
-  mark: { label: "Mark or unmark item", key: "Space" },
+  mark: { label: "Mark or unmark item", key: "Insert" },
   open: { label: "Open", key: "Enter" },
   parent: { label: "Parent folder", key: "Backspace" },
   back: { label: "Back", key: "Alt+ArrowLeft" },
   forward: { label: "Forward", key: "Alt+ArrowRight" },
   address: { label: "Go to path", key: "Ctrl+L" },
   refresh: { label: "Refresh", key: "Ctrl+R" },
-  filter: { label: "Filter folder", key: "Ctrl+F" },
+  refreshAlternate: { label: "Refresh (alternate)", key: "F2" },
+  filter: { label: "Filter folder", key: "" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
-  rename: { label: "Rename", key: "F2" },
+  rename: { label: "Rename", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
-  cancelMeasure: { label: "Cancel folder size scan", key: "Escape" },
+  cancelMeasure: { label: "Clear command line or cancel folder size scan", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
+  newFile: { label: "New file", key: "Shift+F4" },
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
   mkdir: { label: "New folder", key: "F7" },
   recycle: { label: "Move to Trash", key: "F8" },
+  delete: { label: "Delete permanently", key: "Shift+Delete" },
+  menu: { label: "Open commands menu", key: "F9" },
+  close: { label: "Close main window", key: "F10" },
+  leftLocations: { label: "Left pane sources", key: "Alt+F1" },
+  rightLocations: { label: "Right pane sources", key: "Alt+F2" },
+  shrinkLeft: { label: "Move pane divider left", key: "Ctrl+ArrowLeft" },
+  growLeft: { label: "Move pane divider right", key: "Ctrl+ArrowRight" },
   compare: { label: "Compare files", key: "Shift+F11" },
-  terminal: { label: "Open or close terminal", key: "Ctrl+`" },
+  terminal: { label: "Show or hide file panels", key: "Ctrl+O" },
+  commandPath: { label: "Insert selected path in command line", key: "Ctrl+F" },
+  commandName: { label: "Insert selected name in command line", key: "Ctrl+Enter" },
+  previousCommand: { label: "Previous command", key: "Ctrl+E" },
+  commandHistory: { label: "Command history", key: "Alt+F8" },
   connect: { label: "Connect to a remote machine", key: "Ctrl+Shift+K" },
   settings: { label: "Options", key: "Ctrl+," },
   saveText: { label: "Save text", key: "Ctrl+S" },
-  previousChange: { label: "Previous difference", key: "Alt+ArrowUp" },
-  nextChange: { label: "Next difference", key: "Alt+ArrowDown" },
+  saveTextAlternate: { label: "Save text (alternate)", key: "F2" },
+  closeText: { label: "Close the viewer or editor", key: "F10" },
+  previousChange: { label: "Previous difference", key: "F7" },
+  nextChange: { label: "Next difference", key: "F8" },
 } as const;
 
 export type Command = keyof typeof commands;
 export type Bindings = Record<Command, string>;
-export type Theme = "system" | "dark" | "light" | "slate";
 export type Provider = "server" | "kswitcher";
+
+export function commandScope(command: Command) {
+  if (command === "saveText" || command === "saveTextAlternate" || command === "closeText") return "text";
+  if (command === "previousChange" || command === "nextChange") return "compare";
+  return "main";
+}
 
 export interface Preferences {
   theme: Theme;
+  activeScheme: string | null;
+  schemes: Scheme[];
   hidden: boolean;
   provider: Provider;
   kswitcher: string;
@@ -55,23 +79,41 @@ export const defaultBindings = Object.fromEntries(
 
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
-    theme: "system", provider: "server", hidden: false, kswitcher: "", shortcuts: defaultBindings,
+    theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, kswitcher: "", shortcuts: defaultBindings,
   };
   try {
-    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as Partial<Preferences> | null;
+    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as (Partial<Preferences> & { bindingDefaults?: number }) | null;
     if (!saved) return defaults;
     const shortcuts = { ...defaultBindings };
+    const oldDefaults: Partial<Bindings> = {
+      firstRow: "Home", lastRow: "End", mark: "Space", rename: "F2",
+      filter: mac ? "Meta+F" : "Ctrl+F", terminal: mac ? "Meta+`" : "Ctrl+`",
+      previousChange: "Alt+ArrowUp", nextChange: "Alt+ArrowDown",
+    };
+    const configured = new Set<Command>();
     for (const command of commandNames) {
       const value = saved.shortcuts?.[command];
-      if (typeof value === "string") shortcuts[command] = value;
+      if (typeof value !== "string" || (!saved.bindingDefaults && value === oldDefaults[command])) continue;
+      shortcuts[command] = value;
+      configured.add(command);
     }
-    const enabled = Object.values(shortcuts).filter(Boolean);
+    const enabled = new Set<string>();
+    for (const command of [...configured, ...commandNames.filter((command) => !configured.has(command))]) {
+      const value = shortcuts[command];
+      if (!value) continue;
+      const binding = `${commandScope(command)}:${value}`;
+      if (enabled.has(binding)) shortcuts[command] = "";
+      else enabled.add(binding);
+    }
+    const schemes = readSchemes(saved.schemes);
     return {
       theme: saved.theme === "dark" || saved.theme === "light" || saved.theme === "slate" ? saved.theme : "system",
+      activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
+      schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
       hidden: saved.hidden === true,
       kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
-      shortcuts: new Set(enabled).size === enabled.length ? shortcuts : defaultBindings,
+      shortcuts,
     };
   } catch {
     return defaults;
@@ -79,7 +121,7 @@ export function readPreferences(): Preferences {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  localStorage.setItem(preferenceKey, JSON.stringify(preferences));
+  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 2 }));
 }
 
 export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }) {

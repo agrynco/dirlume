@@ -1,49 +1,71 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
-  ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FolderPlus, FolderTree,
-  Calculator, LoaderCircle, Pencil, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
+  ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
+  Calculator, Menu, Pencil, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, describeError, placePath, windowsClient, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { Pane } from "./Pane";
 import { Settings } from "./Settings";
+import { applyAppearance } from "./appearance";
 import { TextDialog, CompareDialog } from "./TextTools";
+import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
   applyListing, childPlace, emptyPane, localPath, opposite, parentPlace, readPlace, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, eventShortcut, persistPreferences, readPreferences, showShortcut, type Command } from "./preferences";
+import { commandNames, commands, commandScope, eventShortcut, persistPreferences, readPreferences, showShortcut, type Command } from "./preferences";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 
 type ActionModal =
-  | { kind: "mkdir" | "rename"; path: string; name: string }
-  | { kind: "recycle"; path: string; names: string[] };
+  | { kind: "mkdir" | "rename" | "newFile"; path: string; name: string }
+  | { kind: "recycle" | "delete"; path: string; names: string[] };
 
 type Modal =
   | { kind: "settings" }
   | { kind: "connect"; side: Side }
   | ({ kind: "view" | "edit" } & NamedFile)
   | { kind: "compare"; left: NamedFile; right: NamedFile }
+  | { kind: "transfer"; transfer: Transfer }
+  | { kind: "menu" | "commandHistory" }
   | ActionModal;
 
 const rowCommands = {
   firstRow: 0, lastRow: Number.POSITIVE_INFINITY, upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
 };
 
+function shellArgument(value: string) {
+  return `'${value.replaceAll("'", windowsClient ? "''" : "'\\''")}'`;
+}
+
 export default function App() {
   const [panes, setPanes] = useState({ left: emptyPane, right: emptyPane });
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [active, setActive] = useState<Side>("left");
   const [preferences, setPreferences] = useState(readPreferences);
+  const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
+  const theme = scheme?.base ?? preferences.theme;
   const [modal, setModal] = useState<Modal | null>(null);
-  const [busy, setBusy] = useState(false);
+  const busy = modal?.kind === "transfer";
   const [terminal, setTerminal] = useState<{ id: number; path: string } | null>(null);
+  const [panelsHidden, setPanelsHidden] = useState(false);
+  const [split, setSplit] = useState(50);
+  const [commandLine, setCommandLine] = useState("");
+  const [pendingCommands, setPendingCommands] = useState<string[]>([]);
+  const commandInput = useRef<HTMLInputElement>(null);
+  const [historyItems, setHistoryItems] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]");
+      return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 1000) : [];
+    } catch { return []; }
+  });
+  const historyIndex = useRef(-1);
+  const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
   const request = useRef({ left: 0, right: 0 });
-  const running = useRef(false);
   const nextSession = useRef(0);
   const watchId = useRef(0);
   const measureId = useRef(0);
@@ -59,7 +81,7 @@ export default function App() {
   }), [panes, preferences.hidden]);
   const current = entries[active].find((entry) => entry.name === pane.selected) ?? entries[active][0];
   const local = pane.place?.kind === "local" ? pane.place : null;
-  const canTransfer = Boolean(current && other.place?.kind === "local");
+  const canTransfer = Boolean(current && pane.place);
 
   const updatePane = useCallback((side: Side, updater: (pane: PaneState) => PaneState) => {
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
@@ -138,22 +160,26 @@ export default function App() {
 
   useEffect(() => {
     persistPreferences(preferences);
-    const system = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      const theme = preferences.theme === "system" ? system.matches ? "dark" : "light" : preferences.theme;
-      document.documentElement.dataset.theme = theme;
-    };
-    apply();
-    system.addEventListener("change", apply);
-    return () => system.removeEventListener("change", apply);
   }, [preferences]);
 
   useEffect(() => {
+    localStorage.setItem("dirlume.command-history", JSON.stringify(historyItems));
+  }, [historyItems]);
+
+  useLayoutEffect(() => {
+    const system = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => applyAppearance(theme, scheme);
+    apply();
+    system.addEventListener("change", apply);
+    return () => system.removeEventListener("change", apply);
+  }, [theme, scheme]);
+
+  useEffect(() => {
     if (isTauri()) {
-      const theme = preferences.theme === "system" ? null : preferences.theme === "slate" ? "dark" : preferences.theme;
-      void getCurrentWindow().setTheme(theme).catch(() => {});
+      const nativeTheme = theme === "system" ? null : theme === "slate" ? "dark" : theme;
+      void getCurrentWindow().setTheme(nativeTheme).catch(() => {});
     }
-  }, [preferences.theme]);
+  }, [theme]);
 
   function focus(side: Side) {
     setActive(side);
@@ -210,26 +236,6 @@ export default function App() {
     }));
   }
 
-  async function run(label: string, task: () => Promise<void>) {
-    if (running.current) return;
-    running.current = true;
-    setBusy(true);
-    setStatus({ text: label });
-    try {
-      await task();
-      setStatus({ text: "Completed" });
-      refresh("left");
-      refresh("right");
-    } catch (error) {
-      setStatus({ text: describeError(error), error: true });
-      refresh("left");
-      refresh("right");
-    } finally {
-      running.current = false;
-      setBusy(false);
-    }
-  }
-
   async function batch(items: string[], action: (name: string) => Promise<void>) {
     for (const [index, name] of items.entries()) {
       try {
@@ -243,7 +249,10 @@ export default function App() {
   function transfer(kind: "copy" | "move") {
     const source = pane.place;
     const target = other.place;
-    if (!source || target?.kind !== "local" || !current || pane.loading || other.loading) return;
+    if (!source || !current || pane.loading) {
+      setStatus({ text: "Select a file or folder in the active pane." });
+      return;
+    }
     const marks = entries[active].filter(({ name }) => pane.marked.includes(name));
     const items = marks.length ? marks : [current];
     if (source.kind !== "local" && kind === "move") return;
@@ -251,13 +260,71 @@ export default function App() {
       setStatus({ text: source.kind === "kswitcher" ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
       return;
     }
-    const directories = new Set(items.filter((entry) => entry.directory).map((entry) => entry.name));
-    void run(kind === "copy" ? "Copying…" : "Moving…", () => batch(items.map((item) => item.name), (name) => {
-      if (source.kind === "local") return api.operate(source.path, { kind, name, target: target.path });
-      if (source.kind === "server") return api.download(source.id, [...source.segments, name], target.path, directories.has(name));
-      const file = childPlace(source, name) as typeof source;
-      return api.downloadKSwitcher(source.directory, source.peer, file.path, name, target.path);
+    setModal({ kind: "transfer", transfer: { kind, source, items, target: target?.kind === "local" ? target.path : "" } });
+  }
+
+  function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
+    const names = entries[side].map(({ name }) => name);
+    const index = names.indexOf(entry.name);
+    const anchor = names.indexOf(selectionAnchor.current[side] ?? panes[side].selected ?? entry.name);
+    if (!range) selectionAnchor.current[side] = entry.name;
+    const start = anchor < 0 ? index : anchor;
+    const group = range ? names.slice(Math.min(index, start), Math.max(index, start) + 1) : [];
+    updatePane(side, (pane) => ({
+      ...pane, selected: entry.name,
+      marked: range ? [...new Set([...pane.marked, ...group])] : mark
+        ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
+        : pane.marked,
     }));
+  }
+
+  function resizeSplit(value: number) {
+    setSplit(Math.max(20, Math.min(80, value)));
+  }
+
+  function openTerminal() {
+    if (!local) {
+      setStatus({ text: "Choose a local folder to open a terminal.", error: true });
+      return false;
+    }
+    if (!terminal) setTerminal({ id: ++nextSession.current, path: local.path });
+    return true;
+  }
+
+  function closeTerminal() {
+    setTerminal(null);
+    setPendingCommands([]);
+    setPanelsHidden(false);
+    commandInput.current?.focus();
+  }
+
+  function submitCommand(event: FormEvent) {
+    event.preventDefault();
+    if (!commandLine.trim()) {
+      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, "\r"]);
+      else if (current) open(active, current);
+      return;
+    }
+    if (!local || !openTerminal()) return;
+    const path = shellArgument(local.path);
+    const prefix = windowsClient ? `Set-Location -LiteralPath ${path} -ErrorAction Stop; ` : `cd -- ${path} && `;
+    setPendingCommands((commands) => [...commands, `${prefix}${commandLine}\r`]);
+    setHistoryItems((items) => [commandLine, ...items].slice(0, 1000));
+    historyIndex.current = -1;
+    setCommandLine("");
+  }
+
+  function insertCommand(value: string) {
+    const input = commandInput.current;
+    if (!input) return;
+    const start = input.selectionStart ?? commandLine.length;
+    const end = input.selectionEnd ?? start;
+    const quoted = /^[\p{Letter}\p{Number}_.:/\\-]+$/u.test(value) ? value : shellArgument(value);
+    setCommandLine(commandLine.slice(0, start) + quoted + commandLine.slice(end));
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + quoted.length, start + quoted.length);
+    });
   }
 
   function fileFor(side: Side): NamedFile | null {
@@ -307,13 +374,18 @@ export default function App() {
       return;
     }
     switch (command) {
-      case "switchPane": focus(opposite(active)); break;
+      case "switchPane":
+        if (panelsHidden) break;
+        if (document.activeElement === commandInput.current) setActive(opposite(active));
+        else focus(opposite(active));
+        break;
       case "swap": {
         if (panes.left.loading || panes.right.loading || busy) break;
         cancelScan("left");
         cancelScan("right");
         setPanes((current) => ({ left: current.right, right: current.left }));
         connected.current = { left: connected.current.right, right: connected.current.left };
+        selectionAnchor.current = { left: selectionAnchor.current.right, right: selectionAnchor.current.left };
         focus(opposite(active));
         break;
       }
@@ -327,38 +399,72 @@ export default function App() {
       case "parent": parent(active); break;
       case "back": history(active, -1); break;
       case "forward": history(active, 1); break;
+      case "refreshAlternate":
       case "refresh": refresh(active); break;
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": setModal({ kind: "settings" }); break;
-      case "terminal":
-        if (terminal) { setTerminal(null); focus(active); }
-        else if (local) setTerminal({ id: ++nextSession.current, path: local.path });
-        else setStatus({ text: "Choose a local folder to open a terminal.", error: true });
+      case "menu": setModal({ kind: "menu" }); break;
+      case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
+      case "leftLocations":
+      case "rightLocations": {
+        if (panelsHidden) setPanelsHidden(false);
+        const side = command === "leftLocations" ? "left" : "right";
+        setActive(side);
+        requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
         break;
+      }
+      case "shrinkLeft": resizeSplit(split - 1); break;
+      case "growLeft": resizeSplit(split + 1); break;
+      case "terminal":
+        if (panelsHidden) setPanelsHidden(false);
+        else if (terminal || openTerminal()) setPanelsHidden(true);
+        requestAnimationFrame(() => commandInput.current?.focus());
+        break;
+      case "commandPath":
+      case "commandName":
+        if (local && current) insertCommand(command === "commandPath" ? placePath(childPlace(local, current.name)) : current.name);
+        break;
+      case "previousCommand": {
+        const previous = historyItems[historyIndex.current + 1];
+        if (previous !== undefined) {
+          historyIndex.current++;
+          setCommandLine(previous);
+          requestAnimationFrame(() => commandInput.current?.focus());
+        }
+        break;
+      }
+      case "commandHistory": setModal({ kind: "commandHistory" }); break;
       case "connect": setModal({ kind: "connect", side: active }); break;
       case "mark": {
-        if (current) updatePane(active, (pane) => ({
-          ...pane, selected: current.name,
-          marked: pane.marked.includes(current.name) ? pane.marked.filter((name) => name !== current.name) : [...pane.marked, current.name],
-        }));
+        if (current) {
+          selectRow(active, current, false, true);
+          const index = entries[active].findIndex(({ name }) => name === current.name);
+          const following = entries[active][index + 1];
+          if (following) updatePane(active, (pane) => ({ ...pane, selected: following.name }));
+        }
         break;
       }
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
       case "rename":
+      case "newFile":
       case "mkdir":
-        if (local && !busy && !pane.loading && (command === "mkdir" || current)) {
+        if (local && !busy && !pane.loading && (command !== "rename" || current)) {
           setModal({ kind: command, path: local.path, name: command === "rename" ? current.name : "" });
         }
         break;
+      case "delete":
       case "recycle":
         if (local && current && !busy && !pane.loading) {
           const names = entries[active].filter(({ name }) => pane.marked.includes(name)).map(({ name }) => name);
-          setModal({ kind: "recycle", path: local.path, names: names.length ? names : [current.name] });
+          setModal({ kind: command, path: local.path, names: names.length ? names : [current.name] });
         }
         break;
-      case "cancelMeasure": cancelScan(active); break;
+      case "cancelMeasure":
+        if (commandLine) { setCommandLine(""); historyIndex.current = -1; }
+        else cancelScan(active);
+        break;
       case "view":
       case "edit": {
         if (command === "view" && measureEntries.length) {
@@ -385,11 +491,18 @@ export default function App() {
     if (modal || event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
     const shortcut = eventShortcut(event);
-    const command = shortcut && commandNames.find((command) => preferences.shortcuts[command] === shortcut);
-    if (!command || command === "saveText") return;
-    if (target.closest("input, select, textarea, [contenteditable], .terminal-card") && command !== "terminal") return;
-    if ((command in rowCommands || command === "switchPane" || command === "mark" || command === "open") &&
-        !target.closest(".file-list")) return;
+    const command = shortcut && commandNames.find((command) => commandScope(command) === "main" && preferences.shortcuts[command] === shortcut);
+    if (!command) return;
+    if (target.closest(".terminal-card")) return;
+    const inCommandLine = target === commandInput.current;
+    const onFiles = target.closest(".file-list");
+    const inField = target.closest("input, select, textarea, [contenteditable]");
+    const fileNavigation = command in rowCommands || command === "open";
+    const fileKey = /^F\d{1,2}$/.test(event.key);
+    if (inField && !fileKey && command !== "terminal" &&
+        (!inCommandLine || (fileNavigation && (commandLine || panelsHidden)))) return;
+    if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
+    if (panelsHidden && (fileNavigation || ["mark", "copy", "move", "recycle", "delete"].includes(command))) return;
     event.preventDefault();
     perform(command);
   }
@@ -399,7 +512,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app${terminal ? " has-terminal" : ""}`} onKeyDown={keyDown}>
+    <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}`} onKeyDown={keyDown}>
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
@@ -409,26 +522,49 @@ export default function App() {
           <button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
             title={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</button>
           <button className="icon-button" aria-label="Terminal" aria-pressed={terminal !== null}
-            title={keyLabel("terminal")} onClick={() => perform("terminal")}><TerminalIcon /></button>
+            onClick={() => { if (terminal) closeTerminal(); else openTerminal(); }}><TerminalIcon /></button>
+          <button className="icon-button" aria-label="Commands" title={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></button>
           <button className="icon-button" aria-label="Options" title={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></button>
         </div>
       </header>
-      <main className="workspace">
+      <main className="workspace" hidden={panelsHidden}
+        style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} pane={panes[side]} entries={entries[side]} locations={locations}
-            activate={() => setActive(side)} onRow={(entry) => updatePane(side, (pane) => ({ ...pane, selected: entry.name }))}
+            activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onOpen={(entry) => open(side, entry)} onPath={(path) => { void load(side, localPath(path)); }}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} />
         ))}
+        <div className="pane-divider" role="separator" aria-label="Pane divider" aria-orientation="vertical"
+          aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
+          onDoubleClick={() => resizeSplit(50)}
+          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+            const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+            if (bounds) resizeSplit((event.clientX - bounds.left) / bounds.width * 100);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              resizeSplit(split + (event.key === "ArrowLeft" ? -1 : 1));
+            }
+          }} />
       </main>
       {terminal && (
         <Suspense fallback={<div className="terminal-card pane-empty">Opening terminal…</div>}>
-          <TerminalPanel key={terminal.id} session={terminal} theme={preferences.theme} shortcut={preferences.shortcuts.terminal}
-            onClose={() => { setTerminal(null); focus(active); }} />
+          <TerminalPanel key={terminal.id} session={terminal} theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal}
+            pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
+            onShortcut={() => perform("terminal")} onClose={closeTerminal} />
         </Suspense>
       )}
+      <form className="command-bar" onSubmit={submitCommand}>
+        <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
+        <input ref={commandInput} aria-label="Command line" type="text" value={commandLine} autoFocus autoComplete="off"
+          spellCheck={false} placeholder="Enter a command" onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
+      </form>
       <nav className="actionbar" aria-label="File actions">
         {([
           { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
@@ -437,6 +573,7 @@ export default function App() {
           { command: "copy", label: local ? "Copy" : "Download", Icon: local ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
           { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: !local || !canTransfer || busy },
           { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !current || busy },
+          { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || busy },
           { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || busy },
           { command: "recycle", label: "Trash", Icon: Trash2, disabled: !local || !current || busy },
           { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
@@ -449,11 +586,27 @@ export default function App() {
       </nav>
       <footer className={`statusbar${status.error ? " danger" : ""}`}>
         <span role={status.error ? "alert" : "status"} title={status.text}>
-          {busy && <LoaderCircle className="spin" />} {status.text}
+          {status.text}
         </span>
         <span>{pane.place && pane.place.kind !== "local" ? pane.place.address : "Local file system"}</span>
       </footer>
       {modal?.kind === "settings" && <Settings preferences={preferences} onChange={setPreferences} onClose={() => setModal(null)} />}
+      {modal?.kind === "transfer" && (
+        <TransferDialog transfer={modal.transfer} onClose={() => setModal(null)}
+          onFinished={() => { refresh("left"); refresh("right"); }} />
+      )}
+      {modal?.kind === "menu" && (
+        <Dialog title="Commands" onClose={() => setModal(null)}>
+          <div className="dialog-body command-menu">
+            {(["view", "edit", "newFile", "copy", "move", "mkdir", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
+              .map((command) => <button key={command} type="button" onClick={() => { setModal(null); perform(command); }}>
+                {commands[command].label}<kbd>{keyLabel(command)}</kbd>
+              </button>)}
+          </div>
+        </Dialog>
+      )}
+      {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
+        onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "connect" && (
         <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => setModal({ kind: "settings" })}
           onConnect={(place, listing) => { routeRemote(modal.side, place, listing); setModal(null); }}
@@ -461,15 +614,16 @@ export default function App() {
       )}
       {(modal?.kind === "view" || modal?.kind === "edit") && (
         <TextDialog file={modal} editing={modal.kind === "edit"} saveShortcut={preferences.shortcuts.saveText}
+          alternateSaveShortcut={preferences.shortcuts.saveTextAlternate} closeShortcut={preferences.shortcuts.closeText}
           onSaved={() => { refresh("left"); refresh("right"); }} onClose={() => setModal(null)} />
       )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange} onClose={() => setModal(null)} />}
-      {(modal?.kind === "mkdir" || modal?.kind === "rename" || modal?.kind === "recycle") && (
+      {(modal?.kind === "mkdir" || modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)} onSubmit={async (operation) => {
-          if (modal.kind === "recycle") {
+          if ("names" in modal) {
             try {
-              await batch(modal.names, (name) => api.operate(modal.path, { kind: "recycle", name }));
+              await batch(modal.names, (name) => api.operate(modal.path, { kind: modal.kind, name }));
             } finally {
               refresh("left");
               refresh("right");
@@ -478,11 +632,35 @@ export default function App() {
             await api.operate(modal.path, operation);
             refresh("left");
             refresh("right");
+            if (modal.kind === "newFile") {
+              setModal({ kind: "edit", place: { kind: "local", path: modal.path, parent: null }, name: operation.name });
+              return;
+            }
           }
           setModal(null);
         }} />
       )}
     </div>
+  );
+}
+
+function CommandHistory({ commands, onChoose, onClose }: {
+  commands: string[];
+  onChoose: (command: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const matches = [...new Set(commands)].filter((command) => command.toLowerCase().includes(query.toLowerCase()));
+  return (
+    <Dialog title="Command history" onClose={onClose}>
+      <div className="dialog-body command-menu">
+        <label className="field">Search commands
+          <input data-initial-focus type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        {matches.length ? matches.map((command) => <button key={command} title={command} onClick={() => onChoose(command)}>{command}</button>) :
+          <p>No commands found.</p>}
+      </div>
+    </Dialog>
   );
 }
 
@@ -494,7 +672,9 @@ function FileDialog({ modal, onClose, onSubmit }: {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState(false);
-  const title = modal.kind === "mkdir" ? "New folder" : modal.kind === "rename" ? "Rename" : "Move to Trash";
+  const titles = { mkdir: "New folder", newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
+  const title = titles[modal.kind];
+  const removing = "names" in modal;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -503,6 +683,7 @@ function FileDialog({ modal, onClose, onSubmit }: {
     setError("");
     try {
       await onSubmit(modal.kind === "mkdir" ? { kind: "create_folder", name } :
+        modal.kind === "newFile" ? { kind: "create_file", name } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined);
     } catch (error) {
       setError(describeError(error));
@@ -515,8 +696,10 @@ function FileDialog({ modal, onClose, onSubmit }: {
     <Dialog title={title} onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
-          {modal.kind === "recycle"
-            ? <p>Move {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : `${modal.names.length} items`} to Trash?</p>
+          {removing
+            ? <p className={modal.kind === "delete" ? "delete-warning" : undefined}>{modal.kind === "delete" ? "Permanently delete " : "Move "}
+              {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : `${modal.names.length} items`}
+              {modal.kind === "delete" ? "?" : " to Trash?"}</p>
             : <label className="field">Name
               <input data-initial-focus value={name} type="text" required onChange={(event) => setName(event.target.value)}
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
@@ -524,10 +707,10 @@ function FileDialog({ modal, onClose, onSubmit }: {
           {error && <p className="dialog-error" role="alert">{error}</p>}
         </div>
         <div className="dialog-footer">
-          <button type="button" data-initial-focus={modal.kind === "recycle" ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</button>
-          <button type="submit" className={modal.kind === "recycle" ? "negative" : "primary"}
-            disabled={waiting || (modal.kind !== "recycle" && (!name || name === modal.name && modal.kind === "rename"))}>
-            {waiting ? "Working…" : modal.kind === "mkdir" ? "Create" : title}
+          <button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</button>
+          <button type="submit" className={removing ? "negative" : "primary"}
+            disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
+            {waiting ? "Working…" : modal.kind === "mkdir" || modal.kind === "newFile" ? "Create" : title}
           </button>
         </div>
       </form>

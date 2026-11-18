@@ -2,7 +2,24 @@
 
 Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri 2, Rust, React, TypeScript, and Vite. The window layout takes its cues from Revqora. The [migration checklist](docs/migration.md) tracks feature parity with KSwitcher Files.
 
-The two panes have independent folder navigation, sorting, filtering, and file selection. Copy, move, rename, create folders, and send items to Trash. Local panes refresh automatically when files change. Built-in tools view, edit, and compare local text files and render Markdown. The terminal starts an interactive shell in the active local folder. Use **Options** to select a color scheme for the entire application or change, disable, and reset keyboard shortcuts.
+The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress. Choose whether to ask, skip, or overwrite existing local files. Cross-volume moves and folder merging are pending.
+
+Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **Fonts** section controls the family and size independently for each area. Changes apply immediately. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding.
+
+| Default keys | Action |
+| --- | --- |
+| Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
+| Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
+| F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
+| F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
+| F5 / F6 | Open the Copy or Rename or move dialog. |
+| F7 / F8 / Shift+Delete | Create a folder, send selected items to Trash, or permanently delete after confirmation. |
+| Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
+| Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
+| Ctrl+E / Alt+F8 | Recall earlier commands or open command history. |
+| Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
+
+The command line beneath the panes dispatches commands to the embedded shell from the active local folder.
 
 ## Build
 
@@ -25,7 +42,7 @@ cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default
 node scripts/server-smoke.mjs
 ```
 
-On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files.
+On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature.
 
 ## Remote sources
 

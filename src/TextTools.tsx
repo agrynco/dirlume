@@ -11,10 +11,12 @@ function normalized(text: string) {
   return text.replaceAll(/\r\n?/g, "\n");
 }
 
-export function TextDialog({ file, editing, saveShortcut, onSaved, onClose }: {
+export function TextDialog({ file, editing, saveShortcut, alternateSaveShortcut, closeShortcut, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   saveShortcut: string;
+  alternateSaveShortcut: string;
+  closeShortcut: string;
   onSaved: () => void;
   onClose: () => void;
 }) {
@@ -58,15 +60,22 @@ export function TextDialog({ file, editing, saveShortcut, onSaved, onClose }: {
     }
   }
 
+  function close() {
+    if (saving) return;
+    if (dirty) setConfirm(true);
+    else onClose();
+  }
+
   return (
-    <Dialog title={file.name} wide onClose={() => {
-      if (saving) return;
-      if (dirty) setConfirm(true);
-      else onClose();
-    }} onKeyDown={(event) => {
-      if (editing && saveShortcut && eventShortcut(event) === saveShortcut) {
+    <Dialog title={file.name} wide onClose={close} onKeyDown={(event) => {
+      const shortcut = eventShortcut(event);
+      if (!shortcut) return;
+      if (editing && (shortcut === saveShortcut || shortcut === alternateSaveShortcut)) {
         event.preventDefault();
         void save();
+      } else if (shortcut === closeShortcut) {
+        event.preventDefault();
+        close();
       }
     }}>
       <div className="text-toolbar">
@@ -102,7 +111,7 @@ export function TextDialog({ file, editing, saveShortcut, onSaved, onClose }: {
             {editing && <button className="primary" disabled={!dirty || saving} title={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
               <Save /> {saving ? "Saving…" : "Save"}
             </button>}
-            <button onClick={() => { if (dirty) setConfirm(true); else onClose(); }} disabled={saving}>Close</button>
+            <button onClick={close} disabled={saving}>Close</button>
           </>
         )}
       </footer>

@@ -50,9 +50,20 @@ export interface SizeResult {
 }
 
 export type Operation =
-  | { kind: "open" | "create_folder" | "recycle"; name: string }
-  | { kind: "copy" | "move"; name: string; target: string }
+  | { kind: "open" | "create_folder" | "create_file" | "recycle" | "delete"; name: string }
   | { kind: "rename"; name: string; new_name: string };
+
+export type TransferSource =
+  | { kind: "local"; directory: string; name: string }
+  | { kind: "server"; connection: number; segments: string[]; folder: boolean }
+  | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string };
+
+export type ConflictPolicy = "ask" | "skip" | "overwrite";
+export type TransferConflict = {
+  kind: "conflict"; path: string; bytes: number; readOnly: boolean; replaceable: boolean; revision: string;
+};
+export type TransferOutcome = { kind: "completed" | "skipped" } | TransferConflict;
+export type TransferProgress = { file: string; bytes: number; total: number | null };
 
 interface Connection {
   id: number;
@@ -74,8 +85,6 @@ export const api = {
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
   listServer: (id: number, segments: string[]) =>
     invoke<Listing>("list_server", { id, segments }),
-  download: (id: number, segments: string[], target: string, directory: boolean) =>
-    invoke<void>("download_server", { id, segments, target, directory }),
   readText: (directory: string, name: string) =>
     invoke<TextDocument>("read_text", { directory, name }),
   readServerText: (id: number, segments: string[]) =>
@@ -87,8 +96,6 @@ export const api = {
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
   listKSwitcher: (directory: string, peer: string, path: string) =>
     invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
-  downloadKSwitcher: (directory: string, peer: string, path: string, name: string, target: string) =>
-    invoke<void>("download_kswitcher", { directory, peer, path, name, target }),
   openTerminal: (id: number, directory: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<void>("open_terminal", { id, directory, rows, cols, output }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
@@ -100,6 +107,13 @@ export const api = {
   measureFolders: (id: number, directory: string, names: string[], output: Channel<SizeResult>) =>
     invoke<void>("measure_folders", { id, directory, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
+  beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
+  cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
+  finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
+  transfer: (id: number, request: {
+    source: TransferSource; destination: string; multiple: boolean; moving: boolean;
+    policy: ConflictPolicy; askReadOnly: boolean; approved: string | null;
+  }, output: Channel<TransferProgress>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
 
 export function placePath(place: Place) {

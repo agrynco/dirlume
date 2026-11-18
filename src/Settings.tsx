@@ -1,10 +1,11 @@
 import { useState, type KeyboardEvent } from "react";
 import { Delete, RotateCcw } from "lucide-react";
 import { Dialog } from "./Dialog";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { windowsClient } from "./api";
 import {
-  commandNames, commands, defaultBindings, eventShortcut, showShortcut,
-  type Command, type Preferences, type Provider, type Theme,
+  commandNames, commands, commandScope, defaultBindings, eventShortcut, showShortcut,
+  type Command, type Preferences, type Provider,
 } from "./preferences";
 
 export function Settings({ preferences, onChange, onClose }: {
@@ -12,7 +13,7 @@ export function Settings({ preferences, onChange, onClose }: {
   onChange: (value: Preferences) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"general" | "shortcuts">("general");
+  const [tab, setTab] = useState<"general" | "appearance" | "shortcuts">("general");
   const [capture, setCapture] = useState<Command | null>(null);
   const [conflict, setConflict] = useState("");
 
@@ -22,7 +23,8 @@ export function Settings({ preferences, onChange, onClose }: {
     if (event.key === "Escape") return setCapture(null);
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
-    const existing = commandNames.find((item) => item !== command && preferences.shortcuts[item] === shortcut);
+    const existing = commandNames.find((item) => item !== command && commandScope(item) === commandScope(command) &&
+      preferences.shortcuts[item] === shortcut);
     if (existing) {
       setConflict(`${showShortcut(shortcut)} is assigned to ${commands[existing].label}.`);
       return;
@@ -36,18 +38,11 @@ export function Settings({ preferences, onChange, onClose }: {
     <Dialog title="Options" onClose={onClose}>
       <nav className="dialog-tabs" aria-label="Options sections">
         <button type="button" aria-pressed={tab === "general"} onClick={() => setTab("general")}>General</button>
+        <button type="button" aria-pressed={tab === "appearance"} onClick={() => setTab("appearance")}>Appearance</button>
         <button type="button" aria-pressed={tab === "shortcuts"} onClick={() => setTab("shortcuts")}>Keyboard shortcuts</button>
       </nav>
       {tab === "general" ? (
         <div className="dialog-body settings-general">
-          <label className="setting"><span>Color scheme</span>
-            <select value={preferences.theme} onChange={(event) => onChange({ ...preferences, theme: event.target.value as Theme })}>
-              <option value="system">System</option>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-              <option value="slate">Slate</option>
-            </select>
-          </label>
           <label className="setting"><span>Show hidden files</span>
             <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
           </label>
@@ -64,6 +59,8 @@ export function Settings({ preferences, onChange, onClose }: {
             </label>
           )}
         </div>
+      ) : tab === "appearance" ? (
+        <AppearanceSettings preferences={preferences} onChange={onChange} />
       ) : (
         <>
           <div className="shortcut-list">
