@@ -3,8 +3,7 @@ import { ArrowDown, ArrowUp, Save } from "lucide-react";
 import { diffLines } from "diff";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, describeError, type TextDocument } from "./api";
-import type { NamedFile } from "./App";
+import { api, describeError, placePath, readPlaceText, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { eventShortcut, showShortcut } from "./preferences";
 
@@ -27,10 +26,11 @@ export function TextDialog({ file, editing, saveShortcut, onSaved, onClose }: {
   const [confirm, setConfirm] = useState(false);
   const dirty = Boolean(document && normalized(document.text) !== text);
   const isMarkdown = /\.(md|markdown)$/i.test(file.name);
+  const path = placePath(file.place);
 
   useEffect(() => {
     let cancelled = false;
-    api.readText(file.path, file.name).then((value) => {
+    readPlaceText(file).then((value) => {
       if (!cancelled) {
         setDocument(value);
         setText(normalized(value.text));
@@ -39,16 +39,16 @@ export function TextDialog({ file, editing, saveShortcut, onSaved, onClose }: {
       if (!cancelled) setError(describeError(error));
     });
     return () => { cancelled = true; };
-  }, [file.path, file.name]);
+  }, [file]);
 
   async function save() {
-    if (!document || !dirty || saving) return;
+    if (!document || !dirty || saving || file.place.kind !== "local") return;
     setSaving(true);
     setError("");
     const eol = document.text.includes("\r\n") ? "\r\n" : document.text.includes("\r") ? "\r" : "\n";
     const updated = text.replaceAll("\n", eol);
     try {
-      await api.saveText(file.path, file.name, document.text, updated);
+      await api.saveText(file.place.path, file.name, document.text, updated);
       setDocument({ ...document, text: updated });
       onSaved();
     } catch (error) {
@@ -70,7 +70,7 @@ export function TextDialog({ file, editing, saveShortcut, onSaved, onClose }: {
       }
     }}>
       <div className="text-toolbar">
-        <span title={file.path}>{file.path}</span>
+        <span title={path}>{path}</span>
         {isMarkdown && <button onClick={() => setPreview(!preview)}>{preview ? "Source" : "Preview"}</button>}
       </div>
       {error && <p className="dialog-error" role="alert">{error}</p>}
@@ -179,7 +179,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.readText(left.path, left.name), api.readText(right.path, right.name)])
+    Promise.all([readPlaceText(left), readPlaceText(right)])
       .then(([left, right]) => { if (!cancelled) setDocuments({ left: left.text, right: right.text }); },
         (error: unknown) => { if (!cancelled) setError(describeError(error)); });
     return () => { cancelled = true; };

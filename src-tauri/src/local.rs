@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
-    name: String,
-    directory: bool,
-    link: bool,
+    pub(crate) name: String,
+    pub(crate) directory: bool,
+    pub(crate) link: bool,
     hidden: bool,
     size: Option<u64>,
     modified: Option<u64>,

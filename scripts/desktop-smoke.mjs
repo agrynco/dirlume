@@ -107,13 +107,23 @@ try {
     await page.getByRole("button", { name: "Connect", exact: true }).click();
     await page.getByLabel("Server invitation").fill(invitation);
     await page.getByRole("dialog").getByRole("button", { name: "Connect", exact: true }).click();
-    await page.getByRole("option", { name: /^folder/ }).dblclick();
+    const remote = page.getByRole("listbox", { name: "left files", exact: true });
+    const local = page.getByRole("listbox", { name: "right files", exact: true });
+    await remote.getByRole("option", { name: /^folder/ }).click();
+    await page.keyboard.press("F5");
+    await local.getByRole("option", { name: /^folder/ }).waitFor();
+    assert.deepEqual(await readFile(join(dst, "folder", "файл.bin")), bytes);
+    await remote.getByRole("option", { name: /^folder/ }).dblclick();
+    await remote.getByRole("option", { name: /^remote.md/ }).click();
+    await page.keyboard.press("F3");
+    await page.getByRole("heading", { name: "Remote Markdown" }).waitFor();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.getByRole("option", { name: /^файл.bin/ }).click();
     await page.keyboard.press("F5");
     await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^файл.bin/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "файл.bin")), bytes);
   });
-  console.log("Verified the native desktop, local copy, keyboard settings, theme, Markdown, directory watching, terminal and remote download.");
+  console.log("Verified local copy, folder sizes, keyboard settings, themes, terminal, directory watching, remote Markdown and remote downloads.");
 } finally {
   await browser?.close();
   await close(child);

@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, type Entry, type KSwitcherPeer, type Listing, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, describeError, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { Pane } from "./Pane";
 import { Settings } from "./Settings";
@@ -25,14 +25,9 @@ type ActionModal =
 type Modal =
   | { kind: "settings" }
   | { kind: "connect"; side: Side }
-  | { kind: "view" | "edit"; path: string; name: string }
+  | ({ kind: "view" | "edit" } & NamedFile)
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | ActionModal;
-
-export interface NamedFile {
-  path: string;
-  name: string;
-}
 
 const rowCommands = {
   firstRow: 0, lastRow: Number.POSITIVE_INFINITY, upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
@@ -252,13 +247,14 @@ export default function App() {
     const marks = entries[active].filter(({ name }) => pane.marked.includes(name));
     const items = marks.length ? marks : [current];
     if (source.kind !== "local" && kind === "move") return;
-    if (source.kind !== "local" && items.some((entry) => entry.directory || entry.link)) {
-      setStatus({ text: "Choose regular remote files to download.", error: true });
+    if (source.kind !== "local" && items.some((entry) => entry.link || (source.kind === "kswitcher" && entry.directory))) {
+      setStatus({ text: source.kind === "kswitcher" ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
       return;
     }
+    const directories = new Set(items.filter((entry) => entry.directory).map((entry) => entry.name));
     void run(kind === "copy" ? "Copying…" : "Moving…", () => batch(items.map((item) => item.name), (name) => {
       if (source.kind === "local") return api.operate(source.path, { kind, name, target: target.path });
-      if (source.kind === "server") return api.download(source.id, [...source.segments, name], target.path);
+      if (source.kind === "server") return api.download(source.id, [...source.segments, name], target.path, directories.has(name));
       const file = childPlace(source, name) as typeof source;
       return api.downloadKSwitcher(source.directory, source.peer, file.path, name, target.path);
     }));
@@ -267,7 +263,8 @@ export default function App() {
   function fileFor(side: Side): NamedFile | null {
     const place = panes[side].place;
     const entry = entries[side].find((entry) => entry.name === panes[side].selected) ?? entries[side][0];
-    return place?.kind === "local" && entry && !entry.directory ? { path: place.path, name: entry.name } : null;
+    return place && place.kind !== "kswitcher" && entry && !entry.directory && !entry.link
+      ? { place, name: entry.name } : null;
   }
 
   const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && pane.marked.includes(entry.name));
@@ -369,15 +366,16 @@ export default function App() {
           break;
         }
         const file = fileFor(active);
-        if (file) setModal({ kind: command, ...file });
+        if (file && (command === "view" || file.place.kind === "local")) setModal({ kind: command, ...file });
         break;
       }
       case "compare": {
-        const marked = local ? entries[active].filter((entry) => !entry.directory && pane.marked.includes(entry.name)) : [];
-        const left = local && marked.length === 2 ? { path: local.path, name: marked[0].name } : fileFor("left");
-        const right = local && marked.length === 2 ? { path: local.path, name: marked[1].name } : fileFor("right");
+        const place = pane.place?.kind !== "kswitcher" ? pane.place : null;
+        const marked = place ? entries[active].filter((entry) => !entry.directory && !entry.link && pane.marked.includes(entry.name)) : [];
+        const left = place && marked.length === 2 ? { place, name: marked[0].name } : fileFor("left");
+        const right = place && marked.length === 2 ? { place, name: marked[1].name } : fileFor("right");
         if (left && right) setModal({ kind: "compare", left, right });
-        else setStatus({ text: "Choose a local text file in each pane to compare.", error: true });
+        else setStatus({ text: "Choose a text file in each pane to compare.", error: true });
         break;
       }
     }
@@ -434,14 +432,14 @@ export default function App() {
       <nav className="actionbar" aria-label="File actions">
         {([
           { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
-            disabled: !local || !current || (current.directory && !measureEntries.length) },
+            disabled: !fileFor(active) && (!local || !measureEntries.length) },
           { command: "edit", label: "Edit", Icon: Pencil, disabled: !local || !current || current.directory },
           { command: "copy", label: local ? "Copy" : "Download", Icon: local ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
           { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: !local || !canTransfer || busy },
           { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !current || busy },
           { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || busy },
           { command: "recycle", label: "Trash", Icon: Trash2, disabled: !local || !current || busy },
-          { command: "compare", label: "Compare", Icon: FileDiff, disabled: !local },
+          { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
           { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
         ] as const).map(({ command, label, Icon, disabled }) => (
           <button key={command} disabled={disabled} onClick={() => perform(command)} title={keyLabel(command)}>

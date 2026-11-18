@@ -30,6 +30,12 @@ export type Place =
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
 export type RemotePlace = Exclude<Place, { kind: "local" }>;
+export type TextPlace = Extract<Place, { kind: "local" | "server" }>;
+
+export interface NamedFile {
+  place: TextPlace;
+  name: string;
+}
 
 export interface KSwitcherPeer {
   id: string;
@@ -68,10 +74,12 @@ export const api = {
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
   listServer: (id: number, segments: string[]) =>
     invoke<Listing>("list_server", { id, segments }),
-  download: (id: number, segments: string[], target: string) =>
-    invoke<void>("download_server", { id, segments, target }),
+  download: (id: number, segments: string[], target: string, directory: boolean) =>
+    invoke<void>("download_server", { id, segments, target, directory }),
   readText: (directory: string, name: string) =>
     invoke<TextDocument>("read_text", { directory, name }),
+  readServerText: (id: number, segments: string[]) =>
+    invoke<TextDocument>("read_server_text", { id, segments }),
   saveText: (directory: string, name: string, original: string, text: string) =>
     invoke<void>("save_text", { directory, name, original, text }),
   openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
@@ -97,6 +105,11 @@ export const api = {
 export function placePath(place: Place) {
   if (place.kind === "server") return "/" + place.segments.join("/");
   return place.path;
+}
+
+export function readPlaceText(file: NamedFile) {
+  const { place, name } = file;
+  return place.kind === "local" ? api.readText(place.path, name) : api.readServerText(place.id, [...place.segments, name]);
 }
 
 export function folderLabel(place: Place) {

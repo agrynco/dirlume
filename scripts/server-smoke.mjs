@@ -67,6 +67,7 @@ export async function withServer(check) {
   await mkdir(join(root, "folder"), { recursive: true });
   const bytes = Buffer.from([0, 1, 2, 100, 200, 255]);
   await writeFile(join(root, "folder", "файл.bin"), bytes);
+  await writeFile(join(root, "folder", "remote.md"), "# Remote Markdown\n");
   await writeFile(join(temp, "outside.txt"), "private");
   const child = spawn(executable, ["serve", "--root", root, "--state-dir", state,
     "--host", "127.0.0.1", "--bind", `127.0.0.1:${listenPort}`], { windowsHide: true });

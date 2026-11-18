@@ -149,6 +149,40 @@ impl Connection {
         }
         serde_json::from_slice(&bytes).map_err(message)
     }
+
+    fn download_file(&self, segments: Vec<String>, file: &mut fs::File) -> Result<()> {
+        let mut response = self.request("v1/download", segments, Duration::from_secs(60 * 60))?;
+        let length = response.content_length();
+        let bytes = io::copy(&mut response, file).map_err(message)?;
+        if length.is_some_and(|length| length != bytes) {
+            return Err("The download was incomplete.".to_owned());
+        }
+        Ok(())
+    }
+
+    fn download_tree(&self, segments: Vec<String>, target: &Path) -> Result<()> {
+        let listing = self.list(segments.clone())?;
+        if listing.omitted > 0 {
+            return Err("The server could not list every item in this folder.".to_owned());
+        }
+        fs::create_dir(target).map_err(message)?;
+        for item in listing.entries {
+            if item.link {
+                return Err(format!("Cannot download a linked item ({}).", item.name));
+            }
+            let destination = target.join(local::name_component(&item.name).map_err(message)?);
+            let mut path = segments.clone();
+            path.push(item.name);
+            if item.directory {
+                self.download_tree(path, &destination)?;
+            } else {
+                let mut file = fs::File::create_new(destination).map_err(message)?;
+                self.download_file(path, &mut file)?;
+                file.sync_all().map_err(message)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -228,24 +262,24 @@ async fn download_server(
     id: u32,
     segments: Vec<String>,
     target: String,
+    directory: bool,
     state: State<'_, Connections>,
 ) -> Result<()> {
     let connection = state.get(id)?;
     blocking(move || {
         let name = segments
             .last()
-            .ok_or_else(|| "Choose a file to download.".to_owned())?;
+            .ok_or_else(|| "Choose a file or folder to download.".to_owned())?;
         let path = selected(&target, name).map_err(message)?;
-        download_to(&path, |file| {
-            let mut response =
-                connection.request("v1/download", segments, Duration::from_secs(60 * 60))?;
-            let length = response.content_length();
-            let bytes = io::copy(&mut response, file).map_err(message)?;
-            if length.is_some_and(|length| length != bytes) {
-                return Err("The download was incomplete.".to_owned());
-            }
-            Ok(())
-        })
+        if !directory {
+            return download_to(&path, |file| connection.download_file(segments, file));
+        }
+        local::ensure_absent(&path).map_err(message)?;
+        let workspace =
+            tempfile::tempdir_in(local::absolute(&target).map_err(message)?).map_err(message)?;
+        let staged = workspace.path().join("download");
+        connection.download_tree(segments, &staged)?;
+        renamest::rename_exclusive(staged, path).map_err(message)
     })
     .await
 }
@@ -287,9 +321,12 @@ fn load_text(path: &Path) -> Result<TextDocument> {
     if !metadata.is_file() || local::is_link(&metadata) {
         return Err("Choose a regular text file.".to_owned());
     }
+    decode_text(fs::File::open(path).map_err(message)?)
+}
+
+fn decode_text(reader: impl Read) -> Result<TextDocument> {
     let mut bytes = Vec::new();
-    fs::File::open(path)
-        .map_err(message)?
+    reader
         .take(TEXT_LIMIT + 1)
         .read_to_end(&mut bytes)
         .map_err(message)?;
@@ -342,6 +379,19 @@ fn load_text(path: &Path) -> Result<TextDocument> {
 #[tauri::command]
 async fn read_text(directory: String, name: String) -> Result<TextDocument> {
     blocking(move || load_text(&selected(&directory, &name).map_err(message)?)).await
+}
+
+#[tauri::command]
+async fn read_server_text(
+    id: u32,
+    segments: Vec<String>,
+    state: State<'_, Connections>,
+) -> Result<TextDocument> {
+    let connection = state.get(id)?;
+    blocking(move || {
+        decode_text(connection.request("v1/download", segments, Duration::from_secs(45))?)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -448,6 +498,7 @@ pub fn run() {
             disconnect_server,
             download_server,
             read_text,
+            read_server_text,
             save_text,
             open_kswitcher,
             has_kswitcher_bridge,

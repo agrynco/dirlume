@@ -16,7 +16,7 @@ Issue an invitation on the host after starting the server.
 dirlume-server invite --state-dir /var/lib/dirlume
 ```
 
-Share the invitation privately. It includes the address, TLS certificate, and token for reading the shared folder. In Dirlume, open **Connect**, paste the invitation, and choose **Connect**. **Download** copies files to the local folder in the other pane. The desktop app keeps the invitation in memory for the session. To change the address or revoke an invitation, stop the server and restart it with a new state directory.
+Share the invitation privately. It includes the address, TLS certificate, and token for reading the shared folder. In Dirlume, open **Connect**, paste the invitation, and choose **Connect**. **Download** copies files or entire folders to the local folder in the other pane. **View** opens text or Markdown, and **Compare** can use text files from both panes. The desktop app keeps the invitation in memory for the session. To change the address or revoke an invitation, stop the server and restart it with a new state directory.
 
 ## Run continuously
 
