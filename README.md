@@ -16,6 +16,7 @@ Use **Search settings** above the Options tree to find a section or shortcut. Dr
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
+| Ctrl+Wheel | Change the font size of the file pane, viewer, or editor under the pointer. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
 | Esc inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
 | Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |

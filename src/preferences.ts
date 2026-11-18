@@ -39,6 +39,7 @@ export const commands = {
   rightLocations: { label: "Right pane sources", key: "Alt+F2" },
   shrinkLeft: { label: "Move pane divider left", key: "Ctrl+ArrowLeft" },
   growLeft: { label: "Move pane divider right", key: "Ctrl+ArrowRight" },
+  zoomFont: { label: "Font zoom with mouse wheel", key: "Ctrl+Wheel" },
   compare: { label: "Compare files", key: "Shift+F11" },
   terminal: { label: "Show or hide file panels", key: "Ctrl+O" },
   commandPath: { label: "Insert selected path in command line", key: "Ctrl+F" },
@@ -66,6 +67,7 @@ export type Bindings = Record<Command, string>;
 export type Provider = "server" | "kswitcher";
 
 export function commandScope(command: Command) {
+  if (command === "zoomFont") return "wheel";
   if (command === "ftpSources") return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "viewAsHex") return "viewer";
@@ -87,8 +89,9 @@ export interface Preferences {
 const preferenceKey = "dirlume.preferences.v1";
 const mac = /Mac/i.test(navigator.userAgent);
 export const commandNames = Object.keys(commands) as Command[];
+export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wheel"];
 export const defaultBindings = Object.fromEntries(
-  commandNames.map((command) => [command, mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument"
+  commandNames.map((command) => [command, mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
 ) as Bindings;
 
@@ -160,6 +163,10 @@ export function quickSearchSeed(event: KeyboardEvent, binding: string): string |
   // Option on macOS can emit a symbol or dead key for a physical letter key.
   if (mac && /^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase();
   return null;
+}
+
+export function wheelShortcut(event: WheelEvent) {
+  return eventShortcut({ key: "Wheel", ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey });
 }
 
 export function showShortcut(shortcut: string) {

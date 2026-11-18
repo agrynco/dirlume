@@ -7,7 +7,7 @@ import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { windowsClient } from "./api";
 import {
-  commandNames, commands, commandScope, defaultBindings, eventShortcut, showShortcut,
+  commandNames, commands, commandScope, defaultBindings, eventShortcut, showShortcut, wheelBindings,
   type Command, type Preferences, type Provider,
 } from "./preferences";
 
@@ -139,7 +139,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             {visibleCommands.map((command) => (
               <div key={command} className="shortcut-setting">
                 <span>{commands[command].label}</span>
-                {capture === command ? (
+                {command === "zoomFont" ? (
+                  <select className="shortcut-key" aria-label={`Change shortcut for ${commands[command].label}`}
+                    value={preferences.shortcuts[command]}
+                    onChange={(event) => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: event.target.value } })}>
+                    <option value="">Unassigned</option>
+                    {wheelBindings.map((binding) => <option key={binding} value={binding}>{showShortcut(binding)}</option>)}
+                  </select>
+                ) : capture === command ? (
                   <input aria-label={`New shortcut for ${commands[command].label}`} readOnly autoFocus
                     placeholder="Press a shortcut" onKeyDown={(event) => assign(event, command)}
                     onBlur={() => { setCapture(null); setConflict(""); }} />

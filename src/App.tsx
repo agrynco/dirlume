@@ -912,7 +912,7 @@ export default function App() {
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
-            ftpShortcut={preferences.shortcuts.ftpSources} />
+            ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont} />
         ))}
         <div className="pane-divider" role="separator" aria-label="Pane divider" aria-orientation="vertical"
           aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
@@ -935,7 +935,7 @@ export default function App() {
           <TextWindow key={id} file={file} editing={editing} active={activeDocument === id} theme={theme}
             saveShortcut={preferences.shortcuts.saveText} alternateSaveShortcut={preferences.shortcuts.saveTextAlternate}
             closeShortcut={preferences.shortcuts.closeText} cancelShortcut={preferences.shortcuts.cancelText}
-            hexShortcut={preferences.shortcuts.viewAsHex}
+            hexShortcut={preferences.shortcuts.viewAsHex} zoomShortcut={preferences.shortcuts.zoomFont}
             anchor={linkedAnchor?.id === id ? linkedAnchor.anchor : null}
             onOpenDocument={(target, anchor) => openDocument(target, false, anchor)}
             onDirtyChange={(dirty) => {

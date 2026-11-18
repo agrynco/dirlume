@@ -125,8 +125,33 @@ try {
       throw new Error(`Could not navigate the ${side} pane: ${await page.getByRole("alert").allTextContents()}`, { cause: error });
     }
   }
+  const fontSize = (selector) => page.locator(selector).evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+  async function wheelFont(selector, deltaY, modifier = "Control") {
+    await page.locator(selector).hover();
+    if (modifier) await page.keyboard.down(modifier);
+    try {
+      await page.mouse.wheel(0, deltaY);
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    } finally {
+      if (modifier) await page.keyboard.up(modifier);
+    }
+  }
   await navigate("left", src);
   await navigate("right", dst);
+  const leftFont = await fontSize("#left-pane");
+  const rightFont = await fontSize("#right-pane");
+  const activePane = await page.locator(".pane.active").getAttribute("id");
+  await wheelFont("#left-files", -120);
+  assert.ok(await fontSize("#left-pane") > leftFont, "Ctrl+Wheel should enlarge the hovered pane's font.");
+  assert.equal(await fontSize("#right-pane"), rightFont);
+  assert.equal(await page.locator(".pane.active").getAttribute("id"), activePane);
+  await wheelFont("#left-files", 120);
+  await wheelFont("#right-files", -120);
+  assert.equal(await fontSize("#left-pane"), leftFont);
+  assert.ok(await fontSize("#right-pane") > rightFont);
+  await wheelFont("#right-files", 120);
+  await wheelFont("#right-files", -120, "");
+  assert.equal(await fontSize("#right-pane"), rightFont, "Unmodified wheel input should leave font size alone.");
   const leftAddress = page.getByLabel("left path", { exact: true });
   const leftSuggestions = page.getByRole("listbox", { name: "left path suggestions", exact: true });
   await leftAddress.fill(join(src, "me"));
@@ -302,6 +327,21 @@ try {
   const resizeGrip = optionsDialog.getByRole("button", { name: "Resize Options" });
   await resizeGrip.press("ArrowRight");
   assert.ok((await optionsDialog.boundingBox()).width >= sizeAfter.width + 15);
+
+  await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  const zoomBinding = optionsDialog.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true });
+  assert.equal(await zoomBinding.inputValue(), "Ctrl+Wheel");
+  await zoomBinding.selectOption("Alt+Wheel");
+  await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await wheelFont("#left-files", -120);
+  assert.equal(await fontSize("#left-pane"), leftFont);
+  await wheelFont("#left-files", -120, "Alt");
+  assert.ok(await fontSize("#left-pane") > leftFont);
+  await wheelFont("#left-files", 120, "Alt");
+  await leftAddress.press("Alt+Control+S");
+  await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  await zoomBinding.selectOption("Ctrl+Wheel");
+  await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
 
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   const panelsSection = optionsDialog.getByRole("button", { name: "Panels", exact: true });
@@ -540,12 +580,21 @@ try {
   const diagram = page.getByRole("img", { name: "Mermaid diagram" });
   await diagram.waitFor();
   assert.ok(await diagram.evaluate((image) => image.complete && image.naturalWidth > 0));
+  const markdownSurface = ".text-window:not([hidden]) .markdown";
+  const markdownFont = await fontSize(markdownSurface);
+  await wheelFont(markdownSurface, -120);
+  const enlargedMarkdown = await fontSize(markdownSurface);
+  assert.ok(enlargedMarkdown > markdownFont, "Ctrl+Wheel should enlarge Markdown preview text.");
   if (process.env.DIRLUME_DOCUMENT_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_DOCUMENT_SCREENSHOT, scale: "css" });
   await page.keyboard.press("Control+Tab");
   await left.getByRole("option", { name: /^sample.rs/ }).click();
   await page.keyboard.press("F4");
   const sourceEditor = page.getByRole("textbox", { name: "Edit sample.rs" });
   await sourceEditor.locator(".syntax-keyword").first().waitFor();
+  const codeSurface = ".text-window:not([hidden]) .cm-scroller";
+  const sourceFont = await fontSize(codeSurface);
+  await wheelFont(codeSurface, 120);
+  assert.ok(await fontSize(codeSurface) < sourceFont, "Ctrl+Wheel should shrink the editor's font.");
   await sourceEditor.fill("fn main() { let retained = true; }");
   await sourceEditor.press("Control+Alt+S");
   await optionsDialog.waitFor();
@@ -563,6 +612,7 @@ try {
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("Control+Shift+Tab");
   await diagram.waitFor();
+  assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Switching documents should preserve each document's font size.");
   await page.keyboard.press("Control+Tab");
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("F2");
@@ -578,6 +628,10 @@ try {
   await page.keyboard.press("F4");
   await raw.waitFor();
   assert.match(await raw.innerText(), /EF BB BF 41 00 09 0D 0A FF/);
+  const hexSurface = ".text-window:not([hidden]) .hex-view";
+  const hexFont = await fontSize(hexSurface);
+  await wheelFont(hexSurface, -120);
+  assert.ok(await fontSize(hexSurface) > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
   await page.getByRole("button", { name: "Close", exact: true }).click();
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 

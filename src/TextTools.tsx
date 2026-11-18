@@ -8,6 +8,7 @@ import { HexViewer } from "./HexViewer";
 import { MarkdownPreview, type MarkdownAnchor, type TaskMarker } from "./MarkdownPreview";
 import { eventShortcut, showShortcut } from "./preferences";
 import { systemTheme, type Theme } from "./appearance";
+import { useFontZoom } from "./useFontZoom";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
 
@@ -15,7 +16,7 @@ function normalized(text: string) {
   return text.replaceAll(/\r\n?/g, "\n");
 }
 
-export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -25,6 +26,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   closeShortcut: string;
   cancelShortcut: string;
   hexShortcut: string;
+  zoomShortcut: string;
   anchor: MarkdownAnchor | null;
   onOpenDocument: (file: NamedFile, anchor?: MarkdownAnchor) => void;
   onDirtyChange: (dirty: boolean) => void;
@@ -46,6 +48,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const isMarkdown = /\.(md|markdown)$/i.test(file.name);
   const path = placePath(file.place);
   const section = useRef<HTMLElement>(null);
+  const { scale, style: zoomStyle } = useFontZoom(section, zoomShortcut);
   const light = (theme === "system" ? system : theme) === "light";
 
   useLayoutEffect(() => {
@@ -122,7 +125,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }
 
   return (
-    <section ref={section} hidden={!active} className="text-window" aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
+    <section ref={section} style={zoomStyle} hidden={!active} className="text-window" aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
@@ -161,7 +164,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">Loading text tools…</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
-              value={text} onChange={setText} />
+              fontScale={scale} value={text} onChange={setText} />
           </Suspense>
         </div>
       </>}
