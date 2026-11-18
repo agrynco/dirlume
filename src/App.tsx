@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
@@ -765,17 +766,17 @@ export default function App() {
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
-          <button className="toolbar-button" title={keyLabel("connect")} onClick={() => perform("connect")}><Server /> Connect</button>
-          <button className="icon-button" aria-label="Find files" title={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
-            onClick={() => perform("search")}><Search /></button>
+          <Button className="toolbar-button" shortcut={keyLabel("connect")} onClick={() => perform("connect")}><Server /> Connect</Button>
+          <Button className="icon-button" aria-label="Find files" shortcut={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
+            onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
-          <button className="icon-button" aria-label="Swap panes" title={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></button>
-          <button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
-            title={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</button>
-          <button className="icon-button" aria-label="Toggle terminal" aria-pressed={terminal !== null}
-            onClick={toggleTerminal}><TerminalIcon /></button>
-          <button className="icon-button" aria-label="Commands" title={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></button>
-          <button className="icon-button" aria-label="Options" title={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></button>
+          <Button className="icon-button" aria-label="Swap panes" shortcut={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
+          <Button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
+            shortcut={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
+          <Button className="icon-button" aria-label="Toggle terminal" aria-pressed={terminal !== null}
+            onClick={toggleTerminal}><TerminalIcon /></Button>
+          <Button className="icon-button" aria-label="Commands" shortcut={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></Button>
+          <Button className="icon-button" aria-label="Options" shortcut={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></Button>
         </div>
       </header>
       <main className="workspace" hidden={panelsHidden}
@@ -834,15 +835,15 @@ export default function App() {
         </Suspense>
       )}
       <form className="command-bar" onSubmit={submitCommand}>
-        <button type="button" className="toolbar-button" aria-pressed={terminal !== null} onClick={toggleTerminal}>
+        <Button type="button" className="toolbar-button" aria-pressed={terminal !== null} onClick={toggleTerminal}>
           <TerminalIcon /> Terminal
-        </button>
+        </Button>
         <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
         <input ref={commandInput} aria-label="Command line" type="text" value={commandLine} autoFocus autoComplete="off"
           spellCheck={false} placeholder="Enter a command" onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
       </form>
       <nav className="actionbar" aria-label="File actions">
-        {processPanels[active] ? <button type="button" onClick={() => showProcesses(active, false)}>Back to files</button> : ([
+        {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>Back to files</Button> : ([
           { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
             disabled: !fileFor(active) && (!local || !measureEntries.length) },
           { command: "edit", label: "Edit", Icon: Pencil, disabled: !local || !current || current.directory },
@@ -855,19 +856,19 @@ export default function App() {
           { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
           { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
         ] as const).map(({ command, label, Icon, disabled }) => (
-          <button key={command} disabled={disabled} onClick={() => perform(command)} title={keyLabel(command)}>
+          <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}>
             <Icon /><span>{label}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}
-          </button>
+          </Button>
         ))}
       </nav>
       <nav className="document-bar" aria-label="Open documents" aria-hidden={!documents.length}>
         {documents.length > 0 && <>
-          <button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> Files</button>
+          <Button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> Files</Button>
           {documents.map(({ id, file, editing }) => (
-            <button key={id} type="button" aria-label={`${editing ? "Edit" : "View"} ${file.name}`}
+            <Button key={id} type="button" aria-label={`${editing ? "Edit" : "View"} ${file.name}`}
               title={placePath(file.place)} aria-pressed={activeDocument === id} onClick={() => selectDocument(id)}>
               {editing ? <Pencil /> : <Eye />}<span>{file.name}</span>
-            </button>
+            </Button>
           ))}
         </>}
       </nav>
@@ -882,15 +883,15 @@ export default function App() {
         <Dialog title="Unsaved changes" onClose={() => setModal(null)}>
           <div className="dialog-body"><p>Some editors have unsaved changes. Discard them and exit Dirlume?</p></div>
           <footer className="dialog-footer">
-            <button type="button" data-initial-focus onClick={() => setModal(null)}>Keep working</button>
-            <button type="button" className="negative" onClick={() => {
+            <Button type="button" data-initial-focus onClick={() => setModal(null)}>Keep working</Button>
+            <Button type="button" className="negative" onClick={() => {
               exitConfirmed.current = true;
               void getCurrentWindow().close().catch((error: unknown) => {
                 exitConfirmed.current = false;
                 setModal(null);
                 setStatus({ text: describeError(error), error: true });
               });
-            }}>Discard changes and exit</button>
+            }}>Discard changes and exit</Button>
           </footer>
         </Dialog>
       )}
@@ -916,9 +917,9 @@ export default function App() {
         <Dialog title="Commands" onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
             {(["view", "edit", "newFile", "copy", "move", "copyClipboard", "pasteClipboard", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
-              .map((command) => <button key={command} type="button" onClick={() => { setModal(null); perform(command); }}>
+              .map((command) => <Button key={command} type="button" shortcut={keyLabel(command)} onClick={() => { setModal(null); perform(command); }}>
                 {commands[command].label}<kbd>{keyLabel(command)}</kbd>
-              </button>)}
+              </Button>)}
           </div>
         </Dialog>
       )}
@@ -927,12 +928,12 @@ export default function App() {
       {modal?.kind === "fileActions" && (
         <Dialog title="File actions" onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
-            {modal.entry && <button type="button" disabled={paneItem(panes[modal.side], modal.entry)?.place.kind !== "local"}
-              onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>Copy files to clipboard</button>}
-            <button type="button" disabled={panes[modal.side].place?.kind !== "local" || Boolean(panes[modal.side].search)}
-              onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>Paste files</button>
+            {modal.entry && <Button type="button" disabled={paneItem(panes[modal.side], modal.entry)?.place.kind !== "local"}
+              onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>Copy files to clipboard</Button>}
+            <Button type="button" disabled={panes[modal.side].place?.kind !== "local" || Boolean(panes[modal.side].search)}
+              onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>Paste files</Button>
           </div>
-          <footer className="dialog-footer"><button type="button" onClick={() => setModal(null)}>Close</button></footer>
+          <footer className="dialog-footer"><Button type="button" onClick={() => setModal(null)}>Close</Button></footer>
         </Dialog>
       )}
       {modal?.kind === "connect" && (
@@ -979,7 +980,7 @@ function CommandHistory({ commands, onChoose, onClose }: {
         <label className="field">Search commands
           <input data-initial-focus type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
-        {matches.length ? matches.map((command) => <button key={command} title={command} onClick={() => onChoose(command)}>{command}</button>) :
+        {matches.length ? matches.map((command) => <Button key={command} title={command} onClick={() => onChoose(command)}>{command}</Button>) :
           <p>No commands found.</p>}
       </div>
     </Dialog>
@@ -1032,14 +1033,14 @@ function FileDialog({ modal, onClose, onSubmit }: {
           {windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
         </div>
         <div className="dialog-footer">
-          {windowsClient && isLockError(error) && <button type="button" onClick={() => setLockPaths(
+          {windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
-          )}>Find locking processes</button>}
-          <button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</button>
-          <button type="submit" className={removing ? "negative" : "primary"}
+          )}>Find locking processes</Button>}
+          <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</Button>
+          <Button type="submit" className={removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? "Working…" : modal.kind === "mkdir" || modal.kind === "newFile" ? "Create" : title}
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>
@@ -1132,10 +1133,10 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
           {error && <p className="dialog-error" role="alert">{error}</p>}
         </div>
         <div className="dialog-footer">
-          <button type="button" onClick={onOptions} disabled={waiting}>Connection options</button>
-          <button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" && bridge === null) || (bridge !== false && !value.trim())}>
+          <Button type="button" onClick={onOptions} disabled={waiting}>Connection options</Button>
+          <Button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" && bridge === null) || (bridge !== false && !value.trim())}>
             {waiting ? "Connecting…" : bridge === false ? "Open KSwitcher Files" : "Connect"}
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>

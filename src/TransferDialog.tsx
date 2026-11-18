@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
@@ -181,8 +182,8 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
             </label>}
           </div>
           <footer className="dialog-footer">
-            <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit" className="primary" disabled={!destination}>{verb}</button>
+            <Button type="button" onClick={onClose}>Cancel</Button>
+            <Button type="submit" className="primary" disabled={!destination}>{verb}</Button>
           </footer>
         </form>
       ) : (
@@ -209,21 +210,21 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
               <>
                 {windowsClient && blocked?.place.kind === "local" && moving && isLockError(error) && (
                   <>
-                    <button type="button" onClick={() => {
+                    <Button type="button" onClick={() => {
                       if (!blocked || blocked.place.kind !== "local") return;
                       const paths = [placePath(childPlace(blocked.place, blocked.entry.name))];
                       if (/^(?:[a-z]:[\\/]|\\\\)/i.test(destination)) {
                         paths.push(placePath(childPlace(localPath(destination), blocked.entry.name)));
                       }
                       setLockPaths(paths);
-                    }}>Find locking processes</button>
-                    <button type="button" onClick={() => setPhase("setup")}>Retry</button>
+                    }}>Find locking processes</Button>
+                    <Button type="button" onClick={() => setPhase("setup")}>Retry</Button>
                   </>
                 )}
-                <button ref={action} type="button" className="primary" onClick={onClose}>Done</button>
+                <Button ref={action} type="button" className="primary" onClick={onClose}>Done</Button>
               </>
             ) : (
-              <button type="button" onClick={cancel} disabled={canceling}>{canceling ? "Canceling…" : "Cancel"}</button>
+              <Button type="button" onClick={cancel} disabled={canceling}>{canceling ? "Canceling…" : "Cancel"}</Button>
             )}
           </footer>
         </>
@@ -247,11 +248,11 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         </div>
         <footer className="dialog-footer">
           {conflict.replaceable && (
-            <button type="button" className={conflict.directory ? "primary" : "negative"} disabled={answering === conflict}
-              onClick={() => { void resolve("overwrite"); }}>{conflict.directory ? "Merge" : "Overwrite"}</button>
+            <Button type="button" className={conflict.directory ? "primary" : "negative"} disabled={answering === conflict}
+              onClick={() => { void resolve("overwrite"); }}>{conflict.directory ? "Merge" : "Overwrite"}</Button>
           )}
-          <button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>Skip</button>
-          <button type="button" onClick={cancel}>Cancel</button>
+          <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>Skip</Button>
+          <Button type="button" onClick={cancel}>Cancel</Button>
         </footer>
       </Dialog>
     )}

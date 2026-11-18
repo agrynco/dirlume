@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
@@ -149,7 +150,7 @@ export default function TerminalPanel({ session, theme, scheme, shortcut, pendin
   return (
     <section className="terminal-card" aria-label="Terminal">
       <header><h2>Terminal</h2><span title={session.path}>{session.path}</span>
-        <button type="button" className="icon-button" aria-label="Close terminal" onClick={onClose}><X /></button>
+        <Button type="button" className="icon-button" aria-label="Close terminal" onClick={onClose}><X /></Button>
       </header>
       <div className="terminal-surface" ref={container} />
     </section>

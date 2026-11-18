@@ -1013,6 +1013,7 @@ dependencies = [
  "font-kit",
  "notify",
  "open",
+ "png",
  "portable-pty",
  "rcgen",
  "renamest",

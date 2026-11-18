@@ -92,6 +92,151 @@ fn wide(path: &Path) -> Vec<u16> {
     path.as_os_str().encode_wide().chain(Some(0)).collect()
 }
 
+#[derive(PartialEq, Eq, Hash)]
+enum IconKey {
+    Type(String),
+    File(PathBuf, u64, Option<std::time::SystemTime>),
+}
+
+#[derive(Default)]
+pub struct ShellIcons(std::sync::Mutex<std::collections::HashMap<IconKey, Option<String>>>);
+
+impl ShellIcons {
+    pub fn icon(&self, path: &Path) -> Option<String> {
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        let key = if matches!(
+            extension.as_str(),
+            "exe" | "dll" | "ico" | "lnk" | "com" | "msi" | "cpl" | "ani" | "cur" | "scr"
+        ) {
+            let metadata = fs::metadata(path).ok()?;
+            IconKey::File(path.to_owned(), metadata.len(), metadata.modified().ok())
+        } else {
+            IconKey::Type(extension)
+        };
+        let mut cache = self.0.lock().ok()?;
+        if cache.len() >= 1024 && !cache.contains_key(&key) {
+            cache.clear();
+        }
+        cache.entry(key).or_insert_with(|| shell_icon(path)).clone()
+    }
+}
+
+#[tauri::command]
+pub async fn file_icons(
+    items: Vec<crate::file_clipboard::ClipboardPath>,
+    app: tauri::AppHandle,
+) -> Result<Vec<Option<String>>> {
+    use tauri::Manager;
+    crate::desktop::blocking(move || {
+        let icons = app.state::<ShellIcons>();
+        Ok(items
+            .iter()
+            .map(|item| {
+                let directory = local::absolute(&item.directory).ok()?;
+                let name = local::name_component(&item.name).ok()?;
+                icons.icon(&directory.join(name))
+            })
+            .collect())
+    })
+    .await
+}
+
+fn shell_icon(path: &Path) -> Option<String> {
+    use base64::engine::general_purpose::STANDARD;
+    use windows::Win32::{
+        Foundation::SIZE,
+        Graphics::Gdi::{
+            CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
+            BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        },
+        System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED},
+        UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY},
+    };
+
+    let path = wide(path);
+    // This runs on a blocking worker. Release the shell object and GDI
+    // handles before leaving this COM apartment.
+    let (rgba, width, height) = unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().ok()?;
+        let pixels = (|| {
+            let item: IShellItemImageFactory =
+                SHCreateItemFromParsingName(PCWSTR(path.as_ptr()), None::<&IBindCtx>).ok()?;
+            let bitmap = item
+                .GetImage(SIZE { cx: 24, cy: 24 }, SIIGBF_ICONONLY)
+                .ok()?;
+            let image = (|| {
+                let mut object = BITMAP::default();
+                if GetObjectW(
+                    bitmap.into(),
+                    size_of::<BITMAP>() as i32,
+                    Some((&mut object as *mut BITMAP).cast()),
+                ) == 0
+                {
+                    return None;
+                }
+                let (width, height) = (object.bmWidth, object.bmHeight.abs());
+                if !(1..=256).contains(&width) || !(1..=256).contains(&height) {
+                    return None;
+                }
+                let mut info = BITMAPINFO {
+                    bmiHeader: BITMAPINFOHEADER {
+                        biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: width,
+                        biHeight: -height,
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let mut pixels = vec![0u8; width as usize * height as usize * 4];
+                let dc = CreateCompatibleDC(None);
+                if dc.is_invalid() {
+                    return None;
+                }
+                let lines = GetDIBits(
+                    dc,
+                    bitmap,
+                    0,
+                    height as u32,
+                    Some(pixels.as_mut_ptr().cast()),
+                    &mut info,
+                    DIB_RGB_COLORS,
+                );
+                let _ = DeleteDC(dc);
+                (lines == height).then_some((pixels, width as u32, height as u32))
+            })();
+            let _ = DeleteObject(bitmap.into());
+            image
+        })();
+        CoUninitialize();
+        pixels?
+    };
+
+    let mut rgba = rgba;
+    let (pixels, _) = rgba.as_chunks_mut::<4>();
+    if !pixels.iter().any(|pixel| pixel[3] != 0) {
+        return None;
+    }
+    for pixel in pixels {
+        pixel.swap(0, 2);
+        let alpha = u16::from(pixel[3]);
+        if (1..255).contains(&alpha) {
+            for channel in &mut pixel[..3] {
+                *channel = (u16::from(*channel) * 255 / alpha).min(255) as u8;
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.write_header().ok()?.write_image_data(&rgba).ok()?;
+    }
+    Some(STANDARD.encode(bytes))
+}
+
 fn show_item_menu(hwnd: HWND, path: &Path) -> Result<()> {
     if MENU_HANDLERS.with(|handlers| handlers.borrow().is_some()) {
         return Err("A Windows context menu is already open.".to_owned());

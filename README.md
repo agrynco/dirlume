@@ -6,6 +6,8 @@ The two panes have independent folder navigation, sorting, filtering, and file s
 
 Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, browse the installed font families or enter a name and set the size for each area. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
+Use **Search settings** above the Options tree to find a section or shortcut. The preview below the settings shows draft colors and fonts before you apply them. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
+
 | Default keys | Action |
 | --- | --- |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
@@ -32,7 +34,7 @@ Viewers and editors use the same syntax highlighting and let you change the dete
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
-Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
+Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort the table, or search by name or PID. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
 
 ## Build
 

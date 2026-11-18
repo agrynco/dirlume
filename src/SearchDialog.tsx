@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { describeError, placePath, type Place } from "./api";
 import { Dialog } from "./Dialog";
@@ -149,14 +150,14 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
           )}
         </div>
         <footer className="dialog-footer">
-          <button type="button" onClick={onClose}>Close</button>
-          {current && <button type="button" onClick={() => reveal(current)}>Go to file</button>}
-          {current && !running && <button type="button" onClick={() => {
+          <Button type="button" onClick={onClose}>Close</Button>
+          {current && <Button type="button" onClick={() => reveal(current)}>Go to file</Button>}
+          {current && !running && <Button type="button" onClick={() => {
             const { mask, matches, incomplete } = snapshot.current;
             onShowResults(mask, matches, incomplete, current.relativePath);
-          }}>Show in panel</button>}
-          {running ? <button type="button" onClick={stop}>Stop</button> :
-            <button type="submit" className="primary" disabled={!mask.trim()}>Search</button>}
+          }}>Show in panel</Button>}
+          {running ? <Button type="button" onClick={stop}>Stop</Button> :
+            <Button type="submit" className="primary" disabled={!mask.trim()}>Search</Button>}
         </footer>
       </form>
     </Dialog>

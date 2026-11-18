@@ -907,18 +907,23 @@ pub fn run() {
         }
         context
     };
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(Connections::default())
         .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
         .manage(watch::Measurements::default())
         .manage(crate::processes::ProcessMonitor::default())
-        .manage(crate::file_clipboard::FileClipboard::default())
+        .manage(crate::file_clipboard::FileClipboard::default());
+    #[cfg(windows)]
+    let builder = builder.manage(crate::windows_shell::ShellIcons::default());
+    builder
         .invoke_handler(tauri::generate_handler![
             locations,
             requested_location,
             crate::processes::list_processes,
+            #[cfg(windows)]
+            crate::processes::process_icons,
             crate::processes::terminate_processes,
             crate::file_clipboard::copy_file_references,
             crate::file_clipboard::clipboard_files,
@@ -928,6 +933,8 @@ pub fn run() {
             crate::windows_shell::open_elevated,
             #[cfg(windows)]
             crate::windows_shell::locking_processes,
+            #[cfg(windows)]
+            crate::windows_shell::file_icons,
             installed_fonts,
             list_directory,
             operate,

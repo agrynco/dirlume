@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { isValidElement, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
 import { diffLines } from "diff";
@@ -118,12 +119,12 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
     }}>
       <header className="document-heading">
         <h2>{file.name}</h2>
-        <button className="icon-button" type="button" aria-label="Close document" onClick={close} disabled={saving}><X /></button>
+        <Button className="icon-button" type="button" aria-label="Close document" onClick={close} disabled={saving}><X /></Button>
       </header>
       <div className="text-toolbar">
         <span title={path}>{path}</span>
-        {isMarkdown && document && !hex && <button onClick={() => setPreview(!preview)}>{preview ? "Source" : "Preview"}</button>}
-        {!editing && <button title={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>Hex</button>}
+        {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? "Source" : "Preview"}</Button>}
+        {!editing && <Button shortcut={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>Hex</Button>}
       </div>
       {error && <p className="dialog-error" role="alert">{error}</p>}
       {hex ? <HexViewer file={file} /> : readError ? <p className="dialog-error" role="alert">{readError}</p> :
@@ -154,16 +155,16 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
       </>}
       <footer className="dialog-footer">
         {document && <span className="footer-message">{document.encoding.replaceAll("_", " ").toUpperCase()}{dirty ? " · Modified" : ""}</span>}
-        {editing && <button className="primary" disabled={!dirty || saving} title={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
+        {editing && <Button className="primary" disabled={!dirty || saving} shortcut={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
           <Save /> {saving ? "Saving…" : "Save"}
-        </button>}
-        <button onClick={close} disabled={saving}>Close</button>
+        </Button>}
+        <Button onClick={close} disabled={saving}>Close</Button>
       </footer>
       {confirm && <Dialog title="Unsaved changes" onClose={() => setConfirm(false)}>
         <div className="dialog-body"><p>Discard the unsaved changes to <strong>{file.name}</strong>?</p></div>
         <footer className="dialog-footer">
-          <button type="button" data-initial-focus onClick={() => setConfirm(false)}>Keep editing</button>
-          <button type="button" className="negative" onClick={onClose}>Discard changes</button>
+          <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>Keep editing</Button>
+          <Button type="button" className="negative" onClick={onClose}>Discard changes</Button>
         </footer>
       </Dialog>}
     </section>
@@ -262,8 +263,8 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       }
     }}>
       <div className="comparison-toolbar">
-        <button disabled={!groups} title={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> Previous</button>
-        <button disabled={!groups} title={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> Next</button>
+        <Button disabled={!groups} shortcut={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> Previous</Button>
+        <Button disabled={!groups} shortcut={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> Next</Button>
         <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
         <label><input type="checkbox" checked={whitespace} onChange={(event) => {
           setWhitespace(event.target.checked); setCurrent(0);

@@ -6,7 +6,9 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use crate::desktop::{blocking, message, Result};
 
 #[derive(Default)]
-pub struct ProcessMonitor(Mutex<Option<System>>);
+pub struct ProcessMonitor {
+    system: Mutex<Option<System>>,
+}
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,7 +53,7 @@ pub async fn list_processes(app: tauri::AppHandle) -> Result<Vec<ProcessInfo>> {
     use tauri::Manager;
     blocking(move || {
         let state = app.state::<ProcessMonitor>();
-        let mut slot = state.0.lock().map_err(message)?;
+        let mut slot = state.system.lock().map_err(message)?;
         if slot.is_none() {
             *slot = Some(System::new().map_err(message)?);
         }
@@ -59,9 +61,43 @@ pub async fn list_processes(app: tauri::AppHandle) -> Result<Vec<ProcessInfo>> {
         system.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
-            ProcessRefreshKind::nothing().with_cpu().with_memory(),
+            ProcessRefreshKind::nothing()
+                .with_cpu()
+                .with_memory()
+                .with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
         );
         Ok(system.processes().values().map(ProcessInfo::from).collect())
+    })
+    .await
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn process_icons(
+    ids: Vec<ProcessId>,
+    app: tauri::AppHandle,
+) -> Result<Vec<Option<String>>> {
+    use tauri::Manager;
+    blocking(move || {
+        let state = app.state::<ProcessMonitor>();
+        let paths = {
+            let system = state.system.lock().map_err(message)?;
+            ids.iter()
+                .map(|id| {
+                    system
+                        .as_ref()
+                        .and_then(|system| system.process(sysinfo::Pid::from_u32(id.pid)))
+                        .filter(|process| process.start_time() == id.started)
+                        .and_then(sysinfo::Process::exe)
+                        .map(std::path::Path::to_path_buf)
+                })
+                .collect::<Vec<_>>()
+        };
+        let icons = app.state::<crate::windows_shell::ShellIcons>();
+        Ok(paths
+            .into_iter()
+            .map(|path| path.and_then(|path| icons.icon(&path)))
+            .collect())
     })
     .await
 }

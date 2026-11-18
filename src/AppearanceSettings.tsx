@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
@@ -9,15 +10,14 @@ import type { Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { Dialog } from "./Dialog";
 
-type Section = keyof typeof colorGroups | "fonts";
-const colorSections = Object.keys(colorGroups) as (keyof typeof colorGroups)[];
+export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const baseThemes = ["dark", "light", "slate"] as const;
 
-export function AppearanceSettings({ preferences, onChange }: {
+export function AppearanceSettings({ section, preferences, onChange }: {
+  section: AppearanceSection;
   preferences: Preferences;
   onChange: (value: Preferences) => void;
 }) {
-  const [section, setSection] = useState<Section>("panels");
   const [deleting, setDeleting] = useState(false);
   const [system, setSystem] = useState(systemTheme);
   const [palette, setPalette] = useState<Palette>({});
@@ -76,7 +76,7 @@ export function AppearanceSettings({ preferences, onChange }: {
             </optgroup>}
           </select>
         </label>
-        <button type="button" className="appearance-button" onClick={() => create()}><Plus /> New scheme</button>
+        <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> New scheme</Button>
       </div>
       {active ? (
         <div className="appearance-header scheme-identity">
@@ -89,21 +89,15 @@ export function AppearanceSettings({ preferences, onChange }: {
               {baseThemes.map((item) => <option key={item} value={item}>{builtInThemes[item]}</option>)}
             </select>
           </label>
-          <button type="button" className="icon-button appearance-button" aria-label="Delete scheme"
-            title="Delete scheme" onClick={() => setDeleting(!deleting)}><Trash2 /></button>
+          <Button type="button" className="icon-button appearance-button" aria-label="Delete scheme"
+            title="Delete scheme" onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
         </div>
       ) : <p className="appearance-hint">Create a custom scheme to change these colors and fonts.</p>}
       {active && deleting && <div className="scheme-confirm">
         <span>Delete this color scheme?</span>
-        <button type="button" onClick={() => setDeleting(false)}>Keep scheme</button>
-        <button type="button" className="negative" onClick={() => remove(active)}>Delete scheme</button>
+        <Button type="button" onClick={() => setDeleting(false)}>Keep scheme</Button>
+        <Button type="button" className="negative" onClick={() => remove(active)}>Delete scheme</Button>
       </div>}
-      <nav className="appearance-sections" aria-label="Appearance sections">
-        {colorSections.map((key) => (
-          <button key={key} type="button" aria-pressed={section === key} onClick={() => setSection(key)}>{colorGroups[key].label}</button>
-        ))}
-        <button type="button" aria-pressed={section === "fonts"} onClick={() => setSection("fonts")}>Fonts</button>
-      </nav>
       {section === "fonts" ? (
         <div className="font-settings">
           {fontKeys.map((group) => <FontFields key={`${active?.id ?? preferences.theme}-${group}`} group={group}
@@ -151,8 +145,8 @@ function ColorField({ label, value, disabled, custom, onChange }: {
           setHex(change);
           if (isHexColor(change)) onChange(change.toLowerCase());
         }} />
-      <button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()}`}
-        title="Reset color" disabled={!custom} onClick={() => onChange()}><RotateCcw /></button>
+      <Button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()}`}
+        title="Reset color" disabled={!custom} onClick={() => onChange()}><RotateCcw /></Button>
     </div>
   );
 }
@@ -177,8 +171,8 @@ function FontFields({ group, font, disabled, onChange }: {
             value={font?.family ?? ""} disabled={disabled} maxLength={maxFontFamilyLength}
             onChange={(event) => onChange({ ...font, family: event.target.value || undefined })} />
         </label>
-        <button type="button" className="icon-button" aria-label={`Browse installed fonts for ${label.toLowerCase()}`}
-          title="Browse installed fonts" onClick={() => setChoosing(true)}><ChevronDown /></button>
+        <Button type="button" className="icon-button" aria-label={`Browse installed fonts for ${label.toLowerCase()}`}
+          title="Browse installed fonts" onClick={() => setChoosing(true)}><ChevronDown /></Button>
       </div>
       <label className="field">Size (px)
         <input aria-label={`${label} font size`} type="number" min={minFontSize} max={maxFontSize}
@@ -192,9 +186,9 @@ function FontFields({ group, font, disabled, onChange }: {
             }
           }} />
       </label>
-      <button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()} font`}
+      <Button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()} font`}
         title="Reset font" disabled={disabled || (!font?.family && !font?.size)}
-        onClick={() => onChange()}><RotateCcw /></button>
+        onClick={() => onChange()}><RotateCcw /></Button>
       {choosing && <FontPicker current={font?.family ?? ""} onClose={() => setChoosing(false)}
         onChoose={(family) => { onChange({ ...font, family }); setChoosing(false); }} />}
     </fieldset>
@@ -241,8 +235,8 @@ function FontPicker({ current, onClose, onChoose }: {
           )}
         </div>
         <footer className="dialog-footer">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary" disabled={!choice}>Use font</button>
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" className="primary" disabled={!choice}>Use font</Button>
         </footer>
       </form>
     </Dialog>

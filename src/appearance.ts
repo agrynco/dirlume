@@ -163,8 +163,7 @@ export function readSchemes(value: unknown): Scheme[] {
   return result;
 }
 
-export function applyAppearance(theme: Theme, scheme: Scheme | null) {
-  const root = document.documentElement;
+export function applyAppearance(theme: Theme, scheme: Scheme | null, root = document.documentElement) {
   root.dataset.theme = scheme?.base ?? (theme === "system" ? systemTheme() : theme);
   for (const color of colors) {
     const value = scheme?.colors[color];

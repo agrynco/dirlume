@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
@@ -18,6 +18,7 @@ await writeFile(join(src, "second.txt"), "Second file\n");
 await writeFile(join(src, "guide.md"), "# Getting started\n\n**Dirlume** on Windows.\n\n```mermaid\nflowchart LR\n  A[Files] --> B[Preview]\n```\n");
 await writeFile(join(src, "sample.rs"), "fn main() { let ready = true; }\n");
 await writeFile(join(src, "control.bin"), Buffer.from([0xef, 0xbb, 0xbf, 0x41, 0, 9, 13, 10, 255]));
+await copyFile(join(process.env.SystemRoot ?? "C:/Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), join(src, "sample-app.exe"));
 await writeFile(join(src, "drag-file.txt"), "Dragged file");
 await mkdir(join(src, "drag-folder"));
 await writeFile(join(src, "drag-folder", "child.txt"), "Dragged folder");
@@ -83,6 +84,10 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => { pageErrors.push(error.message); });
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Find files" }).getAttribute("title"), "Find files (Alt+F7)");
+  assert.equal(await page.getByRole("region", { name: "right pane" }).getByRole("button", { name: "Refresh folder" }).getAttribute("title"), "Refresh folder");
+  assert.deepEqual(await page.locator("button:visible").evaluateAll((buttons) =>
+    buttons.filter((button) => !button.title.trim()).map((button) => button.textContent)), []);
   await page.waitForFunction(() => ["left", "right"].every((side) =>
     document.getElementById(`${side}-address`)?.value &&
     document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
@@ -145,6 +150,7 @@ try {
   await leftPane.getByRole("button", { name: "Close search results" }).click();
   await leftPane.getByRole("heading", { name: "bulk" }).waitFor();
   await navigate("left", src);
+  await left.getByRole("option", { name: /^sample-app\.exe/ }).locator(".native-file-icon").waitFor();
   await left.getByRole("option", { name: /^notes.txt/ }).click({ modifiers: ["Control"] });
   await left.getByRole("option", { name: /^second.txt/ }).click({ modifiers: ["Control"] });
   assert.equal(await left.getByRole("option", { selected: true }).count(), 2);
@@ -224,8 +230,15 @@ try {
   const textName = left.getByRole("option", { name: /^guide\.md/ }).locator(".file-name");
   const foreground = (element) => element.evaluate((name) => getComputedStyle(name).color);
   assert.notEqual(await foreground(sourceName), await foreground(textName));
-  await page.getByRole("button", { name: "File types", exact: true }).click();
+  const searchSettings = page.getByRole("searchbox", { name: "Search settings", exact: true });
+  await searchSettings.fill("office documents");
+  await searchSettings.press("Enter");
+  await page.getByRole("heading", { name: "File types", exact: true }).waitFor();
   await page.getByLabel("Source code hex").fill("#7c2144");
+  const exampleSource = page.getByRole("region", { name: "Settings preview" }).getByText("main.rs", { exact: true });
+  assert.equal(await foreground(exampleSource), "rgb(124, 33, 68)");
+  assert.notEqual(await foreground(sourceName), "rgb(124, 33, 68)");
+  await searchSettings.fill("");
   await page.getByRole("button", { name: "Fonts", exact: true }).click();
   await page.getByRole("button", { name: "Browse installed fonts for file panels", exact: true }).click();
   const fontPicker = page.getByRole("dialog", { name: "Installed fonts", exact: true });
@@ -298,15 +311,26 @@ try {
   await left.focus();
   await page.keyboard.press("Alt+F1");
   await leftPane.getByRole("button", { name: "Processes", exact: true }).click();
-  const taskList = leftPane.getByRole("listbox", { name: "Running processes" });
-  const task = taskList.getByRole("option", { name: new RegExp(`^\\s*${lockedBy.pid}\\s`) });
-  const taskId = await task.getAttribute("value");
-  await taskList.selectOption(taskId);
-  await taskList.focus();
+  const taskList = leftPane.getByRole("grid", { name: "Running processes" });
+  const pidHeader = taskList.getByRole("columnheader", { name: "PID" });
+  await pidHeader.getByRole("button").click();
+  assert.equal(await pidHeader.getAttribute("aria-sort"), "ascending");
+  const pids = await taskList.locator("tbody tr td:nth-child(2)").allTextContents();
+  assert.deepEqual(pids.map(Number), pids.map(Number).sort((a, b) => a - b));
+  await pidHeader.getByRole("button").click();
+  assert.equal(await pidHeader.getAttribute("aria-sort"), "descending");
+  await leftPane.getByRole("searchbox", { name: "Find process" }).fill(String(lockedBy.pid));
+  const task = taskList.getByRole("row").filter({ has: page.getByRole("gridcell", { name: String(lockedBy.pid), exact: true }) });
+  await task.locator(".process-icon").waitFor();
+  await task.click();
   await page.keyboard.press("F8");
   const endProcesses = page.getByRole("dialog", { name: "End processes", exact: true });
   await endProcesses.getByText(new RegExp(`PID ${lockedBy.pid}\\)`)).waitFor();
   await endProcesses.getByRole("button", { name: "Cancel", exact: true }).click();
+  if (process.env.DIRLUME_PROCESSES_SCREENSHOT) {
+    await leftPane.getByRole("searchbox", { name: "Find process" }).fill("");
+    await page.screenshot({ path: process.env.DIRLUME_PROCESSES_SCREENSHOT, scale: "css" });
+  }
   await leftPane.getByRole("button", { name: "Close processes" }).click();
   await left.getByRole("option", { name: /^locked-by-process.txt/ }).click();
   await page.keyboard.press("Shift+Delete");
@@ -380,6 +404,11 @@ try {
   const unsaved = page.getByRole("dialog", { name: "Unsaved changes" });
   await unsaved.getByText(/Discard the unsaved changes/).waitFor();
   await unsaved.getByRole("button", { name: "Keep editing" }).click();
+  await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "Files", exact: true }).click();
+  await page.keyboard.press("F10");
+  await unsaved.getByRole("button", { name: "Keep working", exact: true }).click();
+  await page.keyboard.press("Control+Shift+Tab");
+  assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("Control+Shift+Tab");
   await diagram.waitFor();
   await page.keyboard.press("Control+Tab");
@@ -515,10 +544,18 @@ try {
   await page.getByRole("button", { name: "Options", exact: true }).click();
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   assert.equal(await page.getByLabel("Scheme name").inputValue(), "Blueprint");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const exit = new Promise((complete) => child.once("exit", complete));
+  const closeKey = page.keyboard.press("F10").catch((error) => {
+    if (!page.isClosed()) throw error;
+  });
+  const status = await Promise.race([exit, setTimeout(8000, "timeout", { ref: false })]);
+  await closeKey;
+  assert.equal(status, 0, "Dirlume should exit after closing a workspace with no unsaved changes.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {
   if (lockedBy) await close(lockedBy);
-  await browser?.close();
+  await browser?.close().catch(() => {});
   await close(child);
   if (otherVolume) await rm(otherVolume, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
   for (let attempt = 0; ; attempt++) {

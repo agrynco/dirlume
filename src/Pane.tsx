@@ -1,12 +1,14 @@
+import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { folderLabel, placePath, type Entry, type QuickLocation } from "./api";
-import { formatDate, formatSize, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
+import { formatDate, formatSize, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
+import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 
 interface PaneProps {
   side: Side;
@@ -56,6 +58,22 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
   const start = search ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
   const end = search ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
+  const displayed = entries.slice(start, end);
+  const fileIcons = new Map<string, { directory: string; name: string }>();
+  const byName = new Map<string, string>();
+  if (windowsClient && !processView) {
+    for (const item of displayed) {
+      if (item.directory) continue;
+      const source = paneItem(pane, item);
+      if (source?.place.kind !== "local") continue;
+      const { entry, place } = source;
+      const key = fileIconKey(place.path, entry.name, entry.size, entry.modified);
+      if (!key) continue;
+      fileIcons.set(key, { directory: place.path, name: entry.name });
+      byName.set(item.name, key);
+    }
+  }
+  const icons = useWindowsIcons(fileIcons, api.fileIcons);
 
   useEffect(() => setAddress(path), [path]);
   useLayoutEffect(() => {
@@ -151,15 +169,15 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
           {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name" title={pane.place.address}>Remote</span>}
         </div>
         <div className="pane-tools">
-          {processView && <button className="icon-button" aria-label="Close processes" title="Close processes"
-            onClick={() => onProcesses(false)}><X /></button>}
+          {processView && <Button className="icon-button" aria-label="Close processes" title="Close processes"
+            onClick={() => onProcesses(false)}><X /></Button>}
           {search && !processView && <>
-            <button className="icon-button" aria-label="Go to selected file" title="Go to selected file" disabled={selected < 0}
-              onClick={() => onRevealResult(entries[selected])}><ArrowUpRight /></button>
-            <button className="icon-button" aria-label="Close search results" title="Close search results"
-              onClick={onCloseResults}><X /></button>
+            <Button className="icon-button" aria-label="Go to selected file" title="Go to selected file" disabled={selected < 0}
+              onClick={() => onRevealResult(entries[selected])}><ArrowUpRight /></Button>
+            <Button className="icon-button" aria-label="Close search results" title="Close search results"
+              onClick={onCloseResults}><X /></Button>
           </>}
-          {!processView && <button className="icon-button" aria-label="Filter folder" aria-pressed={filterOpen}
+          {!processView && <Button className="icon-button" aria-label="Filter folder" aria-pressed={filterOpen}
             onClick={() => {
               if (filterOpen) {
                 setFilterOpen(false);
@@ -169,16 +187,16 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
                 setFilterOpen(true);
                 requestAnimationFrame(() => filterField.current?.focus());
               }
-            }}><Search /></button>}
-          {!processView && <button className="icon-button" aria-label="Refresh folder" disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
+            }}><Search /></Button>}
+          {!processView && <Button className="icon-button" aria-label="Refresh folder" disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
             {pane.loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
-          </button>}
+          </Button>}
         </div>
       </header>
       <div className="navigation">
-        <button className="icon-button" aria-label="Back" disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></button>
-        <button className="icon-button" aria-label="Forward" disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></button>
-        <button className="icon-button" aria-label="Parent folder" disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></button>
+        <Button className="icon-button" aria-label="Back" disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
+        <Button className="icon-button" aria-label="Forward" disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
+        <Button className="icon-button" aria-label="Parent folder" disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
         <form className="address" onSubmit={submitAddress}>
           <input id={`${side}-address`} aria-label={`${side} path`} value={address} readOnly={Boolean(isRemote)} type="text"
             spellCheck={false} autoComplete="off" onChange={(event) => setAddress(event.target.value)}
@@ -206,17 +224,17 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
             buttons[next].focus();
           }
         }}>
-          <button ref={locationsButton} className="icon-button location-trigger" aria-label={`Locations for ${side} pane`}
-            aria-expanded={locationsOpen} onClick={() => setLocationsOpen(!locationsOpen)}><HardDrive /><ChevronDown /></button>
+          <Button ref={locationsButton} className="icon-button location-trigger" aria-label={`Locations for ${side} pane`}
+            aria-expanded={locationsOpen} onClick={() => setLocationsOpen(!locationsOpen)}><HardDrive /><ChevronDown /></Button>
           {locationsOpen && (
             <div className="location-popup">
               {locations.map((location) => (
-                <button key={location.path} title={location.path} onClick={() => { onPath(location.path); setLocationsOpen(false); list.current?.focus(); }}>
+                <Button key={location.path} title={location.path} onClick={() => { onPath(location.path); setLocationsOpen(false); list.current?.focus(); }}>
                   <Folder /> {location.label}
-                </button>
+                </Button>
               ))}
-              <button onClick={() => { setLocationsOpen(false); onProcesses(true); }}><Activity /> Processes</button>
-              <button onClick={() => { setLocationsOpen(false); onRemote(); }}><Server /> Remote machine</button>
+              <Button onClick={() => { setLocationsOpen(false); onProcesses(true); }}><Activity /> Processes</Button>
+              <Button onClick={() => { setLocationsOpen(false); onRemote(); }}><Server /> Remote machine</Button>
             </div>
           )}
         </div>
@@ -234,14 +252,14 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
                 list.current?.focus();
               } else if (event.key === "Enter") list.current?.focus();
             }} />
-          <button className="icon-button" aria-label="Close filter" onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></button>
+          <Button className="icon-button" aria-label="Close filter" onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
       <div className="file-columns">
         {columns.map(({ key, label }) => (
-          <button key={key} type="button" className={`col-${key}`} onClick={() => onSort(key)} title={`Sort by ${label.toLowerCase()}`}>
+          <Button key={key} type="button" className={`col-${key}`} onClick={() => onSort(key)} title={`Sort by ${label.toLowerCase()}`}>
             {label}{pane.sort.column === key && (pane.sort.asc ? <ArrowUp /> : <ArrowDown />)}
-          </button>
+          </Button>
         ))}
       </div>
       <div id={`${side}-files`} ref={list} className={search ? "file-list result-list" : "file-list"} role="listbox" aria-label={`${side} files`}
@@ -255,8 +273,9 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
           <div ref={rowProbe} className="result-row-probe" aria-hidden="true" />
           <div aria-hidden="true" style={{ height: start * viewport.rowHeight }} />
         </>}
-        {entries.slice(start, end).map((entry, offset) => {
+        {displayed.map((entry, offset) => {
           const index = start + offset;
+          const icon = icons.get(byName.get(entry.name) ?? "");
           const size = pane.sizes.get(entry.name);
           const measuring = pane.measuring.includes(entry.name);
           return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
@@ -268,7 +287,8 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
             draggable onDragStart={(event) => { if (!onStartDrag(entry, event.dataTransfer)) event.preventDefault(); }}
             onDragEnd={onEndDrag}
             onDoubleClick={() => onOpen(entry)}>
-            <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> : <File />}
+            <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
+              icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
               <span>{entry.name}</span>{entry.link && <Link2 className="link-icon" aria-label="Link" />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label="Measuring folder" /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>

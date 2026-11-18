@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
 
@@ -26,7 +27,7 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false }: {
       onCancel={(event) => { event.preventDefault(); onClose(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>
-        <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X /></button>
+        <Button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X /></Button>
       </header>
       {children}
     </dialog>

@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { Button } from "./Button";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Cpu, Search } from "lucide-react";
 import { api, describeError, type ProcessInfo } from "./api";
 import { Dialog } from "./Dialog";
 import { formatSize, type Side } from "./panes";
+import { useWindowsIcons } from "./useWindowsIcons";
 
 export function ElevationButton({ directory }: { directory: string }) {
   const [error, setError] = useState("");
   return (
     <div className="elevation-action">
-      <button type="button" onClick={() => {
+      <Button type="button" onClick={() => {
         setError("");
         void api.openElevated(directory).catch((failure: unknown) => setError(describeError(failure)));
-      }}>Open as administrator</button>
+      }}>Open as administrator</Button>
       {error && <p role="alert">{error}</p>}
     </div>
   );
@@ -19,21 +22,17 @@ export function ElevationButton({ directory }: { directory: string }) {
 const processKey = ({ pid, started }: ProcessInfo) => `${pid}-${started}`;
 const byProcessName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-function Processes({ items, selected, onChange, showUsage, id, size }: {
+function Processes({ items, selected, onChange }: {
   items: ProcessInfo[];
   selected: string[];
   onChange: (selected: string[]) => void;
-  showUsage?: boolean;
-  id?: string;
-  size: number;
 }) {
   return (
-    <select id={id} aria-label={showUsage ? "Running processes" : "Locking processes"} multiple size={size} value={selected}
+    <select aria-label="Locking processes" multiple size={8} value={selected}
       onChange={(event) => onChange(Array.from(event.currentTarget.selectedOptions, ({ value }) => value))}>
       {items.map((process) => (
         <option value={processKey(process)} key={processKey(process)} disabled={!process.canTerminate}>
-          {showUsage ? `${String(process.pid).padStart(6)}    ${process.cpu.toFixed(1).padStart(6)}%    ${formatSize(process.memory).padStart(10)}    ${process.name}` :
-            `${process.name || "Process"} (PID ${process.pid})`}
+          {process.name || "Process"} (PID {process.pid})
         </option>
       ))}
     </select>
@@ -71,12 +70,18 @@ function EndProcesses({ items, onClose, onFinished }: {
         {error && <p className="dialog-error process-error" role="alert">{error}</p>}
       </div>
       <footer className="dialog-footer">
-        <button type="button" data-initial-focus disabled={working} onClick={onClose}>Cancel</button>
-        <button type="button" className="negative" disabled={working} onClick={() => { void end(); }}>End {items.length === 1 ? "process" : `${items.length} processes`}</button>
+        <Button type="button" data-initial-focus disabled={working} onClick={onClose}>Cancel</Button>
+        <Button type="button" className="negative" disabled={working} onClick={() => { void end(); }}>End {items.length === 1 ? "process" : `${items.length} processes`}</Button>
       </footer>
     </Dialog>
   );
 }
+
+const processColumns = [
+  { key: "name", label: "Process" }, { key: "pid", label: "PID" },
+  { key: "cpu", label: "CPU" }, { key: "memory", label: "Memory" },
+] as const;
+type ProcessColumn = (typeof processColumns)[number]["key"];
 
 export function ProcessBrowser({ side }: { side: Side }) {
   const [items, setItems] = useState<ProcessInfo[]>([]);
@@ -84,7 +89,23 @@ export function ProcessBrowser({ side }: { side: Side }) {
   const [ending, setEnding] = useState<ProcessInfo[]>([]);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const marked = items.filter((process) => process.canTerminate && selected.includes(processKey(process)));
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<{ column: ProcessColumn; asc: boolean }>({ column: "name", asc: true });
+  const [focused, setFocused] = useState("");
+  const anchor = useRef("");
+  const table = useRef<HTMLTableElement>(null);
+  const visible = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    const { column, asc } = sort;
+    return items.filter((process) => !query || process.name.toLowerCase().includes(query) || String(process.pid).includes(query))
+      .sort((a, b) => {
+        const order = column === "name" ? byProcessName.compare(a.name, b.name) : a[column] - b[column];
+        return (asc ? order : -order) || a.pid - b.pid;
+      });
+  }, [filter, items, sort]);
+  const processIcons = useMemo(() => new Map(visible.map((item) => [processKey(item), { pid: item.pid, started: item.started }])), [visible]);
+  const icons = useWindowsIcons(processIcons, api.processIcons);
+  const marked = visible.filter((process) => process.canTerminate && selected.includes(processKey(process)));
   const endRequest = useRef(() => {});
   endRequest.current = () => { if (marked.length) setEnding(marked); };
 
@@ -97,7 +118,7 @@ export function ProcessBrowser({ side }: { side: Side }) {
       try {
         const processes = await api.listProcesses();
         if (!closed) {
-          setItems(processes.sort((a, b) => byProcessName.compare(a.name, b.name) || a.pid - b.pid));
+          setItems(processes);
           setError("");
         }
       } catch (failure) {
@@ -118,13 +139,80 @@ export function ProcessBrowser({ side }: { side: Side }) {
     return () => element?.removeEventListener("dirlume-end-processes", end);
   }, [side]);
 
+  function changeSelection(index: number, range: boolean, toggle: boolean) {
+    const item = visible[index];
+    if (!item) return;
+    const key = processKey(item);
+    const from = visible.findIndex((process) => processKey(process) === anchor.current);
+    setFocused(key);
+    if (range && from >= 0) {
+      setSelected(visible.slice(Math.min(from, index), Math.max(from, index) + 1).filter((process) => process.canTerminate).map(processKey));
+    } else {
+      anchor.current = key;
+      if (!item.canTerminate) {
+        if (!toggle) setSelected([]);
+      } else if (toggle) {
+        setSelected((previous) => previous.includes(key) ? previous.filter((id) => id !== key) : [...previous, key]);
+      } else setSelected([key]);
+    }
+  }
+
   return (
     <div className="process-browser">
-      <p className="process-columns" aria-hidden="true">   PID       CPU        Memory    Process</p>
-      <Processes id={`${side}-files`} items={items} selected={selected} onChange={setSelected} showUsage size={12} />
+      <label className="process-search">
+        <Search aria-hidden="true" />
+        <input type="search" aria-label="Find process" placeholder="Find by name or PID" value={filter} onChange={(event) => {
+          setFilter(event.target.value);
+          setFocused("");
+          setSelected([]);
+          anchor.current = "";
+        }} />
+      </label>
+      <div className="process-scroll">
+        <table ref={table} id={`${side}-files`} className="process-table file-list" tabIndex={0}
+          role="grid" aria-label="Running processes" aria-multiselectable="true"
+          aria-activedescendant={focused && visible.some((item) => processKey(item) === focused) ? `${side}-process-${focused}` : undefined}
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget || !visible.length) return;
+            const index = visible.findIndex((item) => processKey(item) === focused);
+            const next = event.key === "Home" ? 0 : event.key === "End" ? visible.length - 1 :
+              event.key === "ArrowDown" ? Math.min(visible.length - 1, index + 1) :
+              event.key === "ArrowUp" ? Math.max(0, index - 1) : event.key === " " ? Math.max(0, index) : null;
+            if (next === null) return;
+            event.preventDefault();
+            event.stopPropagation();
+            changeSelection(next, event.shiftKey, event.key === " ");
+            document.getElementById(`${side}-process-${processKey(visible[next])}`)?.scrollIntoView({ block: "nearest" });
+          }}>
+          <thead><tr>{processColumns.map(({ key, label }) => (
+            <th key={key} scope="col" className={`process-col-${key}`}
+              aria-sort={sort.column === key ? sort.asc ? "ascending" : "descending" : undefined}>
+              <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : key === "name" || key === "pid" })}>
+                {label}{sort.column === key && (sort.asc ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
+              </Button>
+            </th>
+          ))}</tr></thead>
+          <tbody>{visible.map((process, index) => {
+            const key = processKey(process);
+            const icon = icons.get(key);
+            return <tr key={key} id={`${side}-process-${key}`} aria-selected={selected.includes(key)}
+              data-current={focused === key} onClick={(event) => {
+                changeSelection(index, event.shiftKey, event.ctrlKey || event.metaKey);
+                table.current?.focus({ preventScroll: true });
+              }}>
+              <td className="process-cell-name" title={process.name}><span>
+                {icon ? <img className="process-icon" src={`data:image/png;base64,${icon}`} alt="" /> : <Cpu aria-hidden="true" />}
+                <span>{process.name || "Process"}</span>
+              </span></td>
+              <td>{process.pid}</td><td>{process.cpu.toFixed(1)}%</td><td>{formatSize(process.memory)}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+        {!visible.length && <p className="pane-empty">{filter ? "No processes match the search." : "Loading processes…"}</p>}
+      </div>
       {error && <p role="alert" className="pane-error">{error}</p>}
-      <div className="pane-footer"><span>{items.length} processes</span>
-        <button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>End selected</button></div>
+      <div className="pane-footer"><span>{filter ? `${visible.length} of ${items.length}` : items.length} processes</span>
+        <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>End selected</Button></div>
       {ending.length > 0 && (
         <EndProcesses items={ending} onClose={() => setEnding([])} onFinished={() => {
           setEnding([]);
@@ -163,14 +251,14 @@ export function LockDialog({ paths, onClose }: { paths: string[]; onClose: () =>
           {error ? <p role="alert" className="dialog-error">{error}</p> :
             items === null ? <p role="status">Checking files…</p> :
             !items.length ? <p role="status">Windows found no processes using these files.</p> :
-            <Processes items={items} selected={selected} onChange={setSelected} size={8} />}
+            <Processes items={items} selected={selected} onChange={setSelected} />}
           {partial && <p>Only some files could be checked.</p>}
         </div>
         <footer className="dialog-footer">
-          <button type="button" onClick={onClose}>Close</button>
-          <button type="button" disabled={!items?.some((process) => process.canTerminate)}
-            onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>Select all</button>
-          <button type="button" className="negative" disabled={!marked.length} onClick={() => setEnding(true)}>End selected</button>
+          <Button type="button" onClick={onClose}>Close</Button>
+          <Button type="button" disabled={!items?.some((process) => process.canTerminate)}
+            onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>Select all</Button>
+          <Button type="button" className="negative" disabled={!marked.length} onClick={() => setEnding(true)}>End selected</Button>
         </footer>
       </Dialog>
       {ending && <EndProcesses items={marked} onClose={() => setEnding(false)} onFinished={() => {

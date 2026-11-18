@@ -1,3 +1,4 @@
+import { Button } from "./Button";
 import { useEffect, useState, type FormEvent } from "react";
 import { describeError, readPlaceBytes, type BytePage, type NamedFile } from "./api";
 
@@ -39,11 +40,11 @@ export function HexViewer({ file }: { file: NamedFile }) {
   return (
     <>
       <div className="text-toolbar hex-toolbar">
-        <button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>Previous page</button>
-        <button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>Next page</button>
+        <Button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>Previous page</Button>
+        <Button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>Next page</Button>
         <form onSubmit={goTo}>
           <input aria-label="Byte offset" placeholder="0x0000" value={address} onChange={(event) => setAddress(event.target.value)} />
-          <button type="submit" disabled={!Number.isSafeInteger(addressValue) || !page || addressValue >= page.length}>Go to offset</button>
+          <Button type="submit" disabled={!Number.isSafeInteger(addressValue) || !page || addressValue >= page.length}>Go to offset</Button>
         </form>
         {page && <span>{page.length.toLocaleString()} bytes</span>}
       </div>
