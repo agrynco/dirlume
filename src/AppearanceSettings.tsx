@@ -1,15 +1,15 @@
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
-import { ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
   basePalette, builtInThemes, colorGroups, fontGroups, fontKeys, isHexColor,
-  maxFontFamilyLength, maxFontSize, maxSchemeNameLength, minFontSize, systemTheme,
+  maxFontSize, maxSchemeNameLength, minFontSize, systemTheme,
   type Color, type Font, type FontGroup, type Palette, type Scheme, type Theme,
 } from "./appearance";
 import type { Preferences } from "./preferences";
 import { api, describeError } from "./api";
-import { Dialog } from "./Dialog";
 import { ColorPicker } from "./ColorPicker";
+import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
 import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts } from "./viewFonts";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
@@ -43,6 +43,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
   const [system, setSystem] = useState(systemTheme);
   const [palette, setPalette] = useState<Palette>({});
   const [picker, setPicker] = useState<{ color: Color; label: string; initial: string; previous: Preferences } | null>(null);
+  const [installed, setInstalled] = useState<InstalledFonts>(null);
   const active = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
   const base = active?.base ?? (preferences.theme === "system" ? system : preferences.theme);
   const overrides = active?.colors;
@@ -55,6 +56,16 @@ export function AppearanceSettings({ section, preferences, onChange }: {
   }, []);
 
   useLayoutEffect(() => setPalette(basePalette(base, overrides)), [base, overrides]);
+
+  useEffect(() => {
+    if (section !== "fonts") return;
+    let current = true;
+    void api.installedFonts().then(
+      (families) => { if (current) setInstalled({ families }); },
+      (error: unknown) => { if (current) setInstalled({ families: [], error: describeError(error) }); },
+    );
+    return () => { current = false; };
+  }, [section]);
 
   function select(value: string) {
     const custom = preferences.schemes.find(({ id }) => value === `custom:${id}`);
@@ -134,7 +145,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
           <Button type="button" className="icon-button appearance-button" aria-label="Delete scheme"
             title="Delete scheme" onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
         </div>
-      ) : <p className="appearance-hint">{section === "fonts" ? "Choose an installed font to create a custom scheme." :
+      ) : <p className="appearance-hint">{section === "fonts" ? "Changing a font family creates a custom scheme." :
         "Editing a color creates a custom scheme."}</p>}
       {active && deleting && <div className="scheme-confirm">
         <span>Delete this color scheme?</span>
@@ -143,8 +154,8 @@ export function AppearanceSettings({ section, preferences, onChange }: {
       </div>}
       {section === "fonts" ? (
         <div className="font-settings">
-          {fontKeys.map((group) => <FontFields key={`${active?.id ?? preferences.theme}-${group}`} group={group}
-            font={active?.fonts[group]} disabled={!active}
+          {fontKeys.map((group) => <FontFields key={group} group={group}
+            font={active?.fonts[group]} installed={installed} disabled={!active}
             onChange={(font) => setFont(group, font)} />)}
         </div>
       ) : (
@@ -164,7 +175,6 @@ export function AppearanceSettings({ section, preferences, onChange }: {
     </div>
   );
 }
-
 function ColorField({ label, value, custom, onChange, onOpen }: {
   label: string;
   value: string;
@@ -192,27 +202,20 @@ function ColorField({ label, value, custom, onChange, onOpen }: {
   );
 }
 
-function FontFields({ group, font, disabled, onChange }: {
+function FontFields({ group, font, installed, disabled, onChange }: {
   group: FontGroup;
   font: Font | undefined;
+  installed: InstalledFonts;
   disabled: boolean;
   onChange: (value?: Font) => void;
 }) {
   const label = fontGroups[group].label;
-  const [choosing, setChoosing] = useState(false);
 
   return (
     <fieldset className="font-setting">
       <legend>{label}</legend>
-      <div className="font-family-field">
-        <label className="field">Font family
-          <input aria-label={`${label} font family`} type="text" placeholder="Default font"
-            value={font?.family ?? ""} disabled={disabled} maxLength={maxFontFamilyLength}
-            onChange={(event) => onChange({ ...font, family: event.target.value || undefined })} />
-        </label>
-        <Button type="button" className="icon-button" aria-label={`Browse installed fonts for ${label.toLowerCase()}`}
-          title="Browse installed fonts" onClick={() => setChoosing(true)}><ChevronDown /></Button>
-      </div>
+      <FontFamilyField label={label} value={font?.family ?? ""} installed={installed} builtIn={disabled}
+        onChange={(family) => onChange({ ...font, family: family || undefined })} />
       <label className="field">Size (px)
         <FontSizeInput label={label} size={font?.size} min={minFontSize} max={maxFontSize} disabled={disabled}
           onChange={(size) => onChange({ ...font, size })} />
@@ -220,8 +223,6 @@ function FontFields({ group, font, disabled, onChange }: {
       <Button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()} font`}
         title="Reset font" disabled={disabled || (!font?.family && !font?.size)}
         onClick={() => onChange()}><RotateCcw /></Button>
-      {choosing && <FontPicker current={font?.family ?? ""} onClose={() => setChoosing(false)}
-        onChoose={(family) => { onChange({ ...font, family }); setChoosing(false); }} />}
     </fieldset>
   );
 }
@@ -246,52 +247,4 @@ function FontSizeInput({ label, size, min, max, disabled, onChange }: {
       if (!value) onChange();
       else if (Number.isInteger(valueAsNumber) && valueAsNumber >= min && valueAsNumber <= max) onChange(valueAsNumber);
     }} />;
-}
-
-function FontPicker({ current, onClose, onChoose }: {
-  current: string;
-  onClose: () => void;
-  onChoose: (family: string) => void;
-}) {
-  const [families, setFamilies] = useState<string[] | null>(null);
-  const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState(current);
-  useEffect(() => {
-    let canceled = false;
-    void api.installedFonts().then(
-      (fonts) => { if (!canceled) setFamilies(fonts); },
-      (failure: unknown) => { if (!canceled) setError(describeError(failure)); },
-    );
-    return () => { canceled = true; };
-  }, []);
-  const search = query.trim().toLocaleLowerCase();
-  const matches = families?.filter((family) => family.toLocaleLowerCase().includes(search)) ?? [];
-  const choice = matches.includes(selected) ? selected : matches[0] ?? "";
-
-  return (
-    <Dialog title="Installed fonts" onClose={onClose}>
-      <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); if (choice) onChoose(choice); }}>
-        <div className="dialog-body font-picker">
-          <label className="field">Search fonts
-            <input type="search" data-initial-focus value={query} onChange={(event) => setQuery(event.target.value)} />
-          </label>
-          {matches.length > 0 ? (
-            <select size={8} aria-label="Font families" value={choice} onChange={(event) => setSelected(event.target.value)}>
-              {matches.map((family) => <option key={family} value={family}>{family}</option>)}
-            </select>
-          ) : error ? (
-            <p role="alert" className="dialog-error">{error}</p>
-          ) : (
-            <p role="status">{families === null ? "Loading system fonts…" :
-              families.length === 0 ? "No system fonts available." : "No matching fonts."}</p>
-          )}
-        </div>
-        <footer className="dialog-footer">
-          <Button type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" className="primary" disabled={!choice}>Use font</Button>
-        </footer>
-      </form>
-    </Dialog>
-  );
 }
