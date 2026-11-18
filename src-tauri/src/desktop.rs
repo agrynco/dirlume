@@ -1108,6 +1108,7 @@ pub fn run() {
         context
     };
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Connections::default())
         .manage(ftp::FtpState::default())
         .manage(TransferSessions::default())
