@@ -1,0 +1,102 @@
+name: CI and releases
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dirlume-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: windows-x64, runner: windows-2025, bundles: nsis }
+          - { platform: linux-x64, runner: ubuntu-22.04, bundles: 'deb,appimage' }
+          - { platform: macos-arm64, runner: macos-15, bundles: dmg }
+          - { platform: macos-x64, runner: macos-15-intel, bundles: dmg }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Linux desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 patchelf
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Check package and release versions
+        run: node scripts/package.mjs check
+      - name: Build and type-check React
+        run: npm run build
+      - name: Check Rust format
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Lint Rust desktop and server
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features server -- -D warnings
+      - name: Verify filesystem and server
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features server
+      - name: Bundle desktop app
+        run: npm run tauri -- build --ci --bundles "${{ matrix.bundles }}" -- --locked
+      - name: Build headless server
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default-features --features server --bin dirlume-server
+      - name: Test two-process TLS access
+        run: node scripts/server-smoke.mjs
+      - name: Test Windows desktop application
+        if: runner.os == 'Windows'
+        run: node scripts/desktop-smoke.mjs
+      - name: Package artifacts
+        run: node scripts/package.mjs collect "${{ matrix.platform }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dirlume-${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dirlume-*
+          path: release
+          merge-multiple: true
+      - name: Publish checked packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum --check --strict *.sha256)
+          options=()
+          if [[ "$TAG" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "Dirlume $TAG" "${options[@]}" release/*
