@@ -298,6 +298,11 @@ export default function App() {
     commandInput.current?.focus();
   }
 
+  function toggleTerminal() {
+    if (terminal) closeTerminal();
+    else openTerminal();
+  }
+
   function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (!commandLine.trim()) {
@@ -521,8 +526,8 @@ export default function App() {
           <button className="icon-button" aria-label="Swap panes" title={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></button>
           <button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
             title={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</button>
-          <button className="icon-button" aria-label="Terminal" aria-pressed={terminal !== null}
-            onClick={() => { if (terminal) closeTerminal(); else openTerminal(); }}><TerminalIcon /></button>
+          <button className="icon-button" aria-label="Toggle terminal" aria-pressed={terminal !== null}
+            onClick={toggleTerminal}><TerminalIcon /></button>
           <button className="icon-button" aria-label="Commands" title={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></button>
           <button className="icon-button" aria-label="Options" title={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></button>
         </div>
@@ -561,6 +566,9 @@ export default function App() {
         </Suspense>
       )}
       <form className="command-bar" onSubmit={submitCommand}>
+        <button type="button" className="toolbar-button" aria-pressed={terminal !== null} onClick={toggleTerminal}>
+          <TerminalIcon /> Terminal
+        </button>
         <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
         <input ref={commandInput} aria-label="Command line" type="text" value={commandLine} autoFocus autoComplete="off"
           spellCheck={false} placeholder="Enter a command" onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />

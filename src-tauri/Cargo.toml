@@ -19,7 +19,7 @@ required-features = ["server"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:notify", "dep:portable-pty", "dep:reqwest", "dep:tauri"]
+desktop = ["dep:font-kit", "dep:notify", "dep:portable-pty", "dep:reqwest", "dep:tauri"]
 ui-automation = ["desktop", "tauri/devtools"]
 server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util"]
 
@@ -37,6 +37,7 @@ base64 = "0.22"
 cap-std = { version = "4", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 dirs = "6"
+font-kit = { version = "0.14", optional = true }
 notify = { version = "8.2", optional = true }
 open = "5"
 portable-pty = { version = "0.9", optional = true }

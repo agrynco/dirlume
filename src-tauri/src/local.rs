@@ -112,7 +112,7 @@ fn valid_platform_name(_: &str) -> bool {
     true
 }
 
-fn display_path(path: &Path) -> io::Result<String> {
+pub(crate) fn display_path(path: &Path) -> io::Result<String> {
     let path = path.to_str().ok_or_else(|| {
         io::Error::new(
             ErrorKind::InvalidData,
@@ -254,6 +254,26 @@ pub fn copy_to(
     replace: bool,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
 ) -> io::Result<()> {
+    let target = transfer_path(source, target)?;
+    let directory = target.parent().expect("transfer path has a parent");
+    let metadata = fs::symlink_metadata(source)?;
+    if !replace {
+        ensure_absent(&target)?;
+    }
+    let workspace = tempfile::Builder::new()
+        .prefix(".dirlume-")
+        .tempdir_in(directory)?;
+    let staged = workspace.path().join("copy");
+    copy_entry(source, &staged, metadata, &mut progress)?;
+    progress(source, 0, None)?;
+    if replace {
+        replace_file(&staged, &target)
+    } else {
+        renamest::rename_exclusive(staged, target)
+    }
+}
+
+pub fn transfer_path(source: &Path, target: &Path) -> io::Result<PathBuf> {
     let name = target
         .file_name()
         .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Enter a destination name."))?;
@@ -262,6 +282,12 @@ pub fn copy_to(
         .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Choose a destination folder."))?
         .canonicalize()?;
     let target = directory.join(name);
+    if same_file::is_same_file(source, &target).unwrap_or(false) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Source and destination are the same item.",
+        ));
+    }
     let metadata = fs::symlink_metadata(source)?;
     if metadata.is_dir() && !is_link(&metadata) {
         let source = source.canonicalize()?;
@@ -274,25 +300,49 @@ pub fn copy_to(
             }
         }
     }
-    if !replace {
-        ensure_absent(&target)?;
-    } else if same_file::is_same_file(source, &target)? {
+    Ok(target)
+}
+
+pub fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(target)?;
+    if !metadata.is_file() || is_link(&metadata) {
         return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "Source and destination are the same item.",
+            ErrorKind::AlreadyExists,
+            "The destination is no longer a regular file.",
         ));
     }
-    let workspace = tempfile::Builder::new()
-        .prefix(".dirlume-")
-        .tempdir_in(directory)?;
-    let staged = workspace.path().join("copy");
-    copy_entry(source, &staged, metadata, &mut progress)?;
-    progress(source, 0, None)?;
-    if replace {
-        fs::rename(staged, target)
-    } else {
-        renamest::rename_exclusive(staged, target)
+    with_writable_file(target, || fs::rename(source, target))
+}
+
+#[cfg_attr(
+    windows,
+    allow(
+        clippy::permissions_set_readonly_false,
+        reason = "This only clears the Windows read-only attribute"
+    )
+)]
+pub fn with_writable_file(path: &Path, action: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.permissions().readonly() && metadata.is_file() && !is_link(&metadata) {
+            let original = metadata.permissions();
+            let identity = same_file::Handle::from_path(path)?;
+            let mut writable = original.clone();
+            writable.set_readonly(false);
+            fs::set_permissions(path, writable)?;
+            let result = action();
+            if result.is_err()
+                && same_file::Handle::from_path(path).is_ok_and(|handle| handle == identity)
+            {
+                fs::set_permissions(path, original)?;
+            }
+            return result;
+        }
     }
+    #[cfg(not(windows))]
+    let _ = path;
+    action()
 }
 
 fn copy_entry(
@@ -399,16 +449,7 @@ pub fn ensure_absent(path: &Path) -> io::Result<()> {
 }
 
 pub fn move_item(source: &Path, target: PathBuf) -> io::Result<()> {
-    renamest::rename_exclusive(source, target).map_err(|error| {
-        if error.kind() == ErrorKind::CrossesDevices {
-            io::Error::new(
-                ErrorKind::CrossesDevices,
-                "Move requires the same volume. Use Copy between volumes.",
-            )
-        } else {
-            error
-        }
-    })
+    renamest::rename_exclusive(source, target)
 }
 
 #[cfg(feature = "desktop")]

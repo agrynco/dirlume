@@ -2,9 +2,9 @@
 
 Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri 2, Rust, React, TypeScript, and Vite. The window layout takes its cues from Revqora. The [migration checklist](docs/migration.md) tracks feature parity with KSwitcher Files.
 
-The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress. Choose whether to ask, skip, or overwrite existing local files. Cross-volume moves and folder merging are pending.
+The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
-Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **Fonts** section controls the family and size independently for each area. Changes apply immediately. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding.
+Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. In **Fonts**, browse the installed font families or enter a name and set the size for each area. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
 | Default keys | Action |
 | --- | --- |
@@ -19,7 +19,7 @@ Use **Options → Appearance → New scheme** to save your own colors for the wi
 | Ctrl+E / Alt+F8 | Recall earlier commands or open command history. |
 | Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
 
-The command line beneath the panes dispatches commands to the embedded shell from the active local folder.
+Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The command line also sends commands to the shell from the active local folder. Terminal colors adapt to the background of the active color scheme.
 
 ## Build
 

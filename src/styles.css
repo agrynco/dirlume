@@ -315,6 +315,9 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .transfer-meter span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .transfer-meter span:last-child { flex: none; color: var(--muted); }
 .transfer-body progress { width: 100%; accent-color: var(--accent-fill); }
+.conflict-details { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.conflict-details :is(th, td) { padding: 5px 8px; border-block: 1px solid var(--line); text-align: left; }
+.conflict-details td { color: var(--muted); }
 .delete-warning { padding: 10px; background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); }
 .command-menu button { justify-content: space-between; border-color: var(--line); white-space: normal; overflow-wrap: anywhere; }
 .dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--raised); }
@@ -363,6 +366,9 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
   border-radius: var(--radius);
 }
 .font-setting legend { padding-inline: 4px; font-weight: 600; }
+.font-family-field { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; align-items: end; }
+.font-family-field button { min-height: 34px; }
+.font-picker { display: grid; gap: 10px; }
 .font-setting input { width: 100%; }
 .font-setting .icon-button { margin-bottom: 3px; }
 .shortcut-list { min-height: 0; overflow: auto; padding: 4px 14px; scrollbar-width: thin; }

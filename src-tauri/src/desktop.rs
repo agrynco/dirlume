@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc, Mutex,
+        mpsc, Arc, Mutex,
     },
     time::Duration,
 };
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
 
 use crate::{
-    kswitcher, local,
+    kswitcher, local, local_transfer,
     protocol::{Invitation, RemoteListing, RemotePath},
     terminal, watch,
 };
@@ -42,6 +42,20 @@ pub(crate) async fn blocking<T: Send + 'static>(
 #[tauri::command]
 async fn locations() -> Result<Vec<local::Location>> {
     blocking(|| Ok(local::locations())).await
+}
+
+#[tauri::command]
+async fn installed_fonts() -> Result<Vec<String>> {
+    blocking(|| {
+        let mut families = font_kit::source::SystemSource::new()
+            .all_families()
+            .map_err(message)?;
+        families.retain(|name| !name.trim().is_empty());
+        families.sort_by_cached_key(|name| name.to_lowercase());
+        families.dedup();
+        Ok(families)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -197,7 +211,99 @@ impl Connection {
 }
 
 #[derive(Default)]
-struct TransferSessions(Mutex<HashMap<u32, Arc<AtomicBool>>>);
+struct TransferSessions(Mutex<HashMap<u32, Arc<TransferSession>>>);
+
+#[derive(Default)]
+struct TransferSession {
+    cancelled: AtomicBool,
+    pending: Mutex<Option<PendingConflict>>,
+    remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
+}
+
+struct PendingConflict {
+    reply: mpsc::SyncSender<local_transfer::Decision>,
+    remember_index: Option<usize>,
+    replaceable: bool,
+}
+
+impl TransferSession {
+    fn cancel(&self) -> Result<()> {
+        self.cancelled.store(true, Ordering::Relaxed);
+        self.pending.lock().map_err(message)?.take();
+        Ok(())
+    }
+
+    fn ask(
+        &self,
+        conflict: local_transfer::Conflict,
+        output: &Channel<TransferEvent>,
+    ) -> io::Result<local_transfer::Decision> {
+        let index = conflict
+            .allow_remember
+            .then_some(usize::from(conflict.directory));
+        if let Some(index) = index {
+            if let Some(decision) = self
+                .remembered
+                .lock()
+                .map_err(|error| io::Error::other(message(error)))?[index]
+            {
+                return Ok(decision);
+            }
+        }
+        let (reply, answer) = mpsc::sync_channel(1);
+        {
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|error| io::Error::other(message(error)))?;
+            if self.cancelled.load(Ordering::Relaxed) {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Transfer canceled.",
+                ));
+            }
+            *pending = Some(PendingConflict {
+                reply,
+                remember_index: index,
+                replaceable: conflict.replaceable,
+            });
+        }
+        if let Err(error) = output.send(TransferEvent::Conflict { conflict }) {
+            let _ = self.cancel();
+            return Err(io::Error::other(message(error)));
+        }
+        answer
+            .recv()
+            .map_err(|_| io::Error::new(io::ErrorKind::Interrupted, "Transfer canceled."))
+    }
+
+    fn answer(&self, decision: local_transfer::Decision, remember: bool) -> Result<()> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(message)?
+            .take()
+            .ok_or("There is no pending conflict.")?;
+        if !pending.replaceable && matches!(decision, local_transfer::Decision::Overwrite) {
+            return Err("The destination cannot be replaced.".to_owned());
+        }
+        if let Some(index) = pending.remember_index.filter(|_| remember) {
+            self.remembered.lock().map_err(message)?[index] = Some(decision);
+        }
+        pending.reply.send(decision).map_err(message)
+    }
+}
+
+impl TransferSessions {
+    fn get(&self, id: u32) -> Result<Arc<TransferSession>> {
+        self.0
+            .lock()
+            .map_err(message)?
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| "The transfer session has closed.".to_owned())
+    }
+}
 
 #[tauri::command]
 fn begin_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
@@ -205,22 +311,34 @@ fn begin_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
         .0
         .lock()
         .map_err(message)?
-        .insert(id, Arc::new(AtomicBool::new(false)));
+        .insert(id, Arc::new(TransferSession::default()));
     Ok(())
 }
 
 #[tauri::command]
 fn cancel_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
-    if let Some(flag) = state.0.lock().map_err(message)?.get(&id) {
-        flag.store(true, Ordering::Relaxed);
+    if let Ok(session) = state.get(id) {
+        session.cancel()?;
     }
     Ok(())
 }
 
 #[tauri::command]
 fn finish_transfer(id: u32, state: State<'_, TransferSessions>) -> Result<()> {
-    state.0.lock().map_err(message)?.remove(&id);
+    if let Some(session) = state.0.lock().map_err(message)?.remove(&id) {
+        session.cancel()?;
+    }
     Ok(())
+}
+
+#[tauri::command]
+fn resolve_transfer(
+    id: u32,
+    decision: local_transfer::Decision,
+    remember: bool,
+    state: State<'_, TransferSessions>,
+) -> Result<()> {
+    state.get(id)?.answer(decision, remember)
 }
 
 #[derive(Deserialize)]
@@ -244,23 +362,14 @@ enum TransferSource {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ConflictPolicy {
-    Ask,
-    Skip,
-    Overwrite,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TransferRequest {
     source: TransferSource,
     destination: String,
     multiple: bool,
     moving: bool,
-    policy: ConflictPolicy,
+    policy: local_transfer::Policy,
     ask_read_only: bool,
-    approved: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -272,20 +381,19 @@ struct TransferRequest {
 enum TransferOutcome {
     Completed,
     Skipped,
-    Conflict {
-        path: String,
-        bytes: u64,
-        read_only: bool,
-        replaceable: bool,
-        revision: String,
-    },
 }
 
 #[derive(Clone, Serialize)]
-struct TransferProgress {
-    file: String,
-    bytes: u64,
-    total: Option<u64>,
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum TransferEvent {
+    Progress {
+        file: String,
+        bytes: u64,
+        total: Option<u64>,
+    },
+    Conflict {
+        conflict: local_transfer::Conflict,
+    },
 }
 
 fn transfer_target(
@@ -342,30 +450,15 @@ fn transfer_target(
     Ok(destination)
 }
 
-fn revision(metadata: &fs::Metadata) -> String {
-    format!(
-        "{:?}:{}:{}",
-        metadata.modified().ok(),
-        metadata.len(),
-        metadata.permissions().readonly()
-    )
-}
-
 #[tauri::command]
 async fn transfer_item(
     id: u32,
     request: TransferRequest,
-    output: Channel<TransferProgress>,
+    output: Channel<TransferEvent>,
     sessions: State<'_, TransferSessions>,
     connections: State<'_, Connections>,
 ) -> Result<TransferOutcome> {
-    let cancelled = sessions
-        .0
-        .lock()
-        .map_err(message)?
-        .get(&id)
-        .cloned()
-        .ok_or_else(|| "The transfer session has closed.".to_owned())?;
+    let session = sessions.get(id)?;
     let connection = match &request.source {
         TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
         _ => None,
@@ -390,7 +483,7 @@ async fn transfer_item(
         )
         .map_err(message)?;
         let mut progress = |path: &Path, bytes, total| {
-            if cancelled.load(Ordering::Relaxed) {
+            if session.cancelled.load(Ordering::Relaxed) {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
                     "Transfer canceled.",
@@ -401,75 +494,47 @@ async fn transfer_item(
                 .unwrap_or(path.as_os_str())
                 .to_string_lossy()
                 .into_owned();
-            let _ = output.send(TransferProgress { file, bytes, total });
+            let _ = output.send(TransferEvent::Progress { file, bytes, total });
             Ok(())
         };
         progress(Path::new(name), 0, None).map_err(message)?;
 
-        let mut replace = None;
+        if let Some(source) = source {
+            let options = local_transfer::Options {
+                moving: request.moving,
+                policy: request.policy,
+                ask_read_only: request.ask_read_only,
+            };
+            let completed =
+                local_transfer::transfer(&source, &target, &options, progress, |conflict| {
+                    session.ask(conflict, &output)
+                })
+                .map_err(message)?;
+            return Ok(if completed {
+                TransferOutcome::Completed
+            } else {
+                TransferOutcome::Skipped
+            });
+        }
+
         match fs::symlink_metadata(&target) {
             Ok(metadata) => {
-                if let Some(source) = &source {
-                    if same_file::is_same_file(source, &target).unwrap_or(false) {
-                        return Err("Source and destination are the same item.".into());
-                    }
+                if request.policy != local_transfer::Policy::Skip {
+                    session
+                        .ask(
+                            local_transfer::Conflict::remote(&target, &metadata),
+                            &output,
+                        )
+                        .map_err(message)?;
                 }
-                if matches!(request.policy, ConflictPolicy::Skip) {
-                    return Ok(TransferOutcome::Skipped);
-                }
-                let read_only = metadata.permissions().readonly();
-                let replaceable = metadata.is_file()
-                    && !local::is_link(&metadata)
-                    && source
-                        .as_ref()
-                        .and_then(|path| fs::symlink_metadata(path).ok())
-                        .is_some_and(|metadata| metadata.is_file() && !local::is_link(&metadata));
-                let current = revision(&metadata);
-                let approved = request.approved.as_deref() == Some(&current);
-                let overwrite = request.approved.is_none()
-                    && matches!(request.policy, ConflictPolicy::Overwrite)
-                    && (!read_only || !request.ask_read_only);
-                if !replaceable || (!approved && !overwrite) {
-                    return Ok(TransferOutcome::Conflict {
-                        path: target.to_string_lossy().into_owned(),
-                        bytes: metadata.len(),
-                        read_only,
-                        replaceable,
-                        revision: current,
-                    });
-                }
-                replace = Some(current);
+                return Ok(TransferOutcome::Skipped);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(message(error)),
         }
 
         match request.source {
-            TransferSource::Local { .. } => {
-                let source = source.ok_or("Choose a local item.")?;
-                if request.moving {
-                    if replace.is_some() {
-                        fs::rename(source, target).map_err(message)?;
-                    } else {
-                        local::move_item(&source, target).map_err(message)?;
-                    }
-                } else {
-                    local::copy_to(&source, &target, replace.is_some(), |path, bytes, total| {
-                        if total.is_none()
-                            && path == source
-                            && replace.is_some()
-                            && fs::symlink_metadata(&target).ok().as_ref().map(revision) != replace
-                        {
-                            return Err(io::Error::new(
-                                io::ErrorKind::AlreadyExists,
-                                "The destination changed during the copy.",
-                            ));
-                        }
-                        progress(path, bytes, total)
-                    })
-                    .map_err(message)?;
-                }
-            }
+            TransferSource::Local { .. } => return Err("Choose a local item.".to_owned()),
             TransferSource::Server {
                 segments, folder, ..
             } => {
@@ -785,6 +850,7 @@ pub fn run() {
         .manage(watch::Measurements::default())
         .invoke_handler(tauri::generate_handler![
             locations,
+            installed_fonts,
             list_directory,
             operate,
             connect_server,
@@ -800,6 +866,7 @@ pub fn run() {
             begin_transfer,
             cancel_transfer,
             finish_transfer,
+            resolve_transfer,
             transfer_item,
             terminal::open_terminal,
             terminal::write_terminal,

@@ -3,6 +3,8 @@ mod desktop;
 #[cfg(feature = "desktop")]
 mod kswitcher;
 mod local;
+#[cfg(feature = "desktop")]
+mod local_transfer;
 mod protocol;
 #[cfg(feature = "server")]
 pub mod server;

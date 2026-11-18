@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, placePath, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, placePath, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
-import { childPlace, formatSize } from "./panes";
+import { childPlace, formatDate, formatSize } from "./panes";
 
 export interface Transfer {
   kind: "copy" | "move";
@@ -11,8 +11,9 @@ export interface Transfer {
   target: string;
 }
 
-type Decision = "overwrite" | "skip" | "cancel";
+type Decision = "overwrite" | "skip";
 let nextSession = 0;
+const integer = new Intl.NumberFormat();
 
 function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
@@ -39,25 +40,37 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
   const [skipped, setSkipped] = useState(0);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState<TransferConflict | null>(null);
+  const [remember, setRemember] = useState(false);
+  const [answering, setAnswering] = useState<TransferConflict | null>(null);
   const [canceling, setCanceling] = useState(false);
   const running = useRef<number | null>(null);
   const cancelled = useRef(false);
-  const decision = useRef<((answer: Decision) => void) | null>(null);
   const action = useRef<HTMLButtonElement>(null);
-  const conflictCancel = useRef<HTMLButtonElement>(null);
   const moving = transfer.kind === "move";
   const verb = moving ? "Move" : transfer.source.kind === "local" ? "Copy" : "Download";
   const itemCount = transfer.items.length;
 
   useEffect(() => {
     if (phase === "done") action.current?.focus();
-    if (conflict) conflictCancel.current?.focus();
-  }, [phase, conflict]);
+  }, [phase]);
 
-  function resolve(answer: Decision) {
-    decision.current?.(answer);
-    decision.current = null;
-    setConflict(null);
+  useEffect(() => () => {
+    if (running.current !== null) void api.cancelTransfer(running.current).catch(() => {});
+  }, []);
+
+  async function resolve(answer: Decision) {
+    const id = running.current;
+    if (id === null || !conflict || answering === conflict) return;
+    setAnswering(conflict);
+    try {
+      await api.resolveTransfer(id, answer, remember);
+      setConflict((current) => current === conflict ? null : current);
+    } catch (failure) {
+      setError(describeError(failure));
+      await api.cancelTransfer(id).catch(() => {});
+    } finally {
+      setAnswering((current) => current === conflict ? null : current);
+    }
   }
 
   function cancel() {
@@ -67,7 +80,7 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
     }
     cancelled.current = true;
     setCanceling(true);
-    resolve("cancel");
+    setConflict(null);
     void api.cancelTransfer(running.current).catch(() => {});
   }
 
@@ -79,8 +92,12 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
     setPhase("working");
     let totalBytes = 0;
     let previousBytes = 0;
-    const output = new Channel<TransferProgress>();
+    const output = new Channel<TransferEvent>();
     output.onmessage = (event) => {
+      if (event.kind === "conflict") {
+        if (!cancelled.current) { setRemember(false); setConflict(event.conflict); }
+        return;
+      }
       if (event.bytes === 0) previousBytes = 0;
       totalBytes += Math.max(0, event.bytes - previousBytes);
       previousBytes = event.bytes;
@@ -95,20 +112,9 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         previousBytes = 0;
         const request = {
           source: itemSource(transfer.source, item), destination, moving,
-          multiple: itemCount > 1, policy, askReadOnly, approved: null as string | null,
+          multiple: itemCount > 1, policy, askReadOnly,
         };
-        let result = await api.transfer(id, request, output);
-        while (result.kind === "conflict" && !cancelled.current) {
-          const current = result;
-          const answer = await new Promise<Decision>((resolve) => {
-            decision.current = resolve;
-            setConflict(current);
-          });
-          if (answer === "cancel") break;
-          if (answer === "skip") { result = { kind: "skipped" }; break; }
-          result = await api.transfer(id, { ...request, approved: current.revision }, output);
-        }
-        if (result.kind === "conflict") break;
+        const result = await api.transfer(id, request, output);
         if (result.kind === "completed") setCompleted((count) => count + 1);
         else setSkipped((count) => count + 1);
         setProcessed(index + 1);
@@ -119,6 +125,7 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
       await api.finishTransfer(id).catch(() => {});
       running.current = null;
       output.onmessage = () => {};
+      setConflict(null);
       setPhase("done");
       onFinished();
     }
@@ -126,7 +133,8 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
 
   const status = error ? "Transfer stopped" : cancelled.current ? "Transfer canceled" : "Transfer complete";
   return (
-    <Dialog title={phase === "done" ? status : conflict ? "File already exists" : phase === "working" ?
+    <>
+    <Dialog title={phase === "done" ? status : phase === "working" ?
       (moving ? "Moving…" : verb === "Download" ? "Downloading…" : "Copying…") : (moving ? "Rename or move" : verb)}
       onClose={cancel}>
       {phase === "setup" ? (
@@ -143,7 +151,11 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
             <label className="setting"><span>Existing files</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">Ask</option><option value="skip">Skip</option>
-                {transfer.source.kind === "local" && <option value="overwrite">Overwrite</option>}
+                {transfer.source.kind === "local" && <>
+                  <option value="overwrite">Overwrite</option>
+                  <option value="rename">Rename incoming item</option>
+                  <option value="newer">Overwrite older files only</option>
+                </>}
               </select>
             </label>
             {transfer.source.kind === "local" && <label className="transfer-checkbox">
@@ -158,14 +170,6 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
       ) : (
         <>
           <div className="dialog-body transfer-body">
-            {conflict ? (
-              <>
-                <p><strong>{conflict.path}</strong></p>
-                <p>{formatSize(conflict.bytes)}{conflict.readOnly ? " · Read-only" : ""}</p>
-                {!conflict.replaceable && <p>Skip this item or choose another destination.</p>}
-              </>
-            ) : (
-              <>
                 <div className="transfer-meter">
                   <span title={progress?.file}>{progress?.file ?? "Preparing…"}</span>
                   <span>{progress?.total == null ? formatSize(progress?.bytes ?? null) : `${formatSize(progress.bytes)} / ${formatSize(progress.total)}`}</span>
@@ -179,22 +183,50 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
                 <progress aria-label="Overall transfer progress" max={itemCount} value={processed} />
                 {phase === "done" && <p role="status">{completed} completed{skipped ? `, ${skipped} skipped` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{error}</p>}
-              </>
-            )}
           </div>
           <footer className="dialog-footer">
             {phase === "done" ? (
               <button ref={action} type="button" className="primary" onClick={onClose}>Done</button>
             ) : (
-              <>
-                <button ref={conflictCancel} type="button" onClick={cancel} disabled={canceling}>{canceling ? "Canceling…" : "Cancel"}</button>
-                {conflict && <button type="button" onClick={() => resolve("skip")}>Skip</button>}
-                {conflict?.replaceable && <button type="button" className="negative" onClick={() => resolve("overwrite")}>Overwrite</button>}
-              </>
+              <button type="button" onClick={cancel} disabled={canceling}>{canceling ? "Canceling…" : "Cancel"}</button>
             )}
           </footer>
         </>
       )}
     </Dialog>
+    {conflict && (
+      <Dialog key={conflict.path} title={conflict.directory ? "Folder already exists" : "File already exists"} onClose={cancel}>
+        <div className="dialog-body transfer-body">
+          <p><strong>{conflict.path}</strong>{conflict.readOnly ? " (read-only)" : ""}</p>
+          <table className="conflict-details">
+            <tbody>
+              {conflict.incoming && <ConflictDetails label="Incoming" details={conflict.incoming} />}
+              <ConflictDetails label="Existing" details={conflict.existing} />
+            </tbody>
+          </table>
+          {conflict.directory && conflict.replaceable && <p>Merge the folders and handle conflicting files individually.</p>}
+          {!conflict.replaceable && <p>Skip this item or choose another destination.</p>}
+          {conflict.allowRemember && <label className="transfer-checkbox">
+            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> Remember choice
+          </label>}
+        </div>
+        <footer className="dialog-footer">
+          {conflict.replaceable && (
+            <button type="button" className={conflict.directory ? "primary" : "negative"} disabled={answering === conflict}
+              onClick={() => { void resolve("overwrite"); }}>{conflict.directory ? "Merge" : "Overwrite"}</button>
+          )}
+          <button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>Skip</button>
+          <button type="button" onClick={cancel}>Cancel</button>
+        </footer>
+      </Dialog>
+    )}
+    </>
   );
+}
+
+function ConflictDetails({ label, details }: { label: string; details: TransferEntryDetails }) {
+  return <tr><th scope="row">{label}</th>
+    <td>{details.directory ? "Folder" : `${integer.format(details.size)} B`}</td>
+    <td>{formatDate(details.modified)}</td>
+  </tr>;
 }

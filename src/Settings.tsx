@@ -8,14 +8,20 @@ import {
   type Command, type Preferences, type Provider,
 } from "./preferences";
 
-export function Settings({ preferences, onChange, onClose }: {
+export function Settings({ preferences: saved, onChange: applyPreferences, onClose }: {
   preferences: Preferences;
   onChange: (value: Preferences) => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"general" | "appearance" | "shortcuts">("general");
+  const [preferences, onChange] = useState(saved);
   const [capture, setCapture] = useState<Command | null>(null);
   const [conflict, setConflict] = useState("");
+  const hasChanges = JSON.stringify(preferences) !== JSON.stringify(saved);
+
+  function apply() {
+    if (hasChanges) applyPreferences(preferences);
+  }
 
   function assign(event: KeyboardEvent, command: Command) {
     event.preventDefault();
@@ -94,7 +100,8 @@ export function Settings({ preferences, onChange, onClose }: {
             <RotateCcw /> Restore defaults
           </button>
         )}
-        <button type="button" className="primary" onClick={onClose}>Done</button>
+        <button type="button" disabled={!hasChanges} onClick={apply}>Apply</button>
+        <button type="button" className="primary" onClick={() => { apply(); onClose(); }}>Done</button>
       </footer>
     </Dialog>
   );

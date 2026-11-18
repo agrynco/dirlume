@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { X } from "lucide-react";
 import { api, describeError, type TerminalOutput } from "./api";
@@ -8,15 +8,38 @@ import { eventShortcut } from "./preferences";
 import type { Scheme, Theme } from "./appearance";
 import "@xterm/xterm/css/xterm.css";
 
-function terminalAppearance() {
+const lightAnsi: ITheme = {
+  red: "#a12033", green: "#245d26", yellow: "#765000", blue: "#164ea5", magenta: "#783179", cyan: "#005e67",
+  brightRed: "#ae304b", brightGreen: "#306b35", brightYellow: "#815500", brightBlue: "#245bb5",
+  brightMagenta: "#88428b", brightCyan: "#006b74",
+};
+const darkAnsi: ITheme = {
+  red: "#ee808a", green: "#91cf94", yellow: "#dfb758", blue: "#81b0f1", magenta: "#dba0e6", cyan: "#72d0d5",
+  brightRed: "#ffa2a8", brightGreen: "#a9ebb1", brightYellow: "#f8d477", brightBlue: "#a5caff",
+  brightMagenta: "#efbff4", brightCyan: "#9ee9ed",
+};
+
+function isLightBackground(hex: string) {
+  // Choose the ANSI palette against the resolved background, including custom schemes.
+  const luminance = [1, 3, 5].map((offset) => {
+    const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * luminance[0] + 0.7152 * luminance[1] + 0.0722 * luminance[2] > 0.179;
+}
+
+function terminalAppearance(): ITerminalOptions {
   const root = getComputedStyle(document.documentElement);
   const value = (name: string) => root.getPropertyValue(name).trim();
+  const background = value("--text-bg");
   return {
     fontFamily: value("--mono"),
     fontSize: Number.parseFloat(value("--mono-size")),
+    minimumContrastRatio: 4.5,
     theme: {
-      background: value("--text-bg"), foreground: value("--text-ink"),
-      cursor: value("--accent"), selectionBackground: value("--panel-selection"),
+      ...(isLightBackground(background) ? lightAnsi : darkAnsi),
+      background, foreground: value("--text-ink"),
+      cursor: value("--accent"), cursorAccent: background, selectionBackground: value("--panel-selection"),
     },
   };
 }

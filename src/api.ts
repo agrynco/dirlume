@@ -58,12 +58,15 @@ export type TransferSource =
   | { kind: "server"; connection: number; segments: string[]; folder: boolean }
   | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string };
 
-export type ConflictPolicy = "ask" | "skip" | "overwrite";
+export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
+export type TransferEntryDetails = { size: number; modified: number | null; directory: boolean };
 export type TransferConflict = {
-  kind: "conflict"; path: string; bytes: number; readOnly: boolean; replaceable: boolean; revision: string;
+  path: string; directory: boolean; readOnly: boolean; replaceable: boolean; allowRemember: boolean;
+  incoming: TransferEntryDetails | null; existing: TransferEntryDetails;
 };
-export type TransferOutcome = { kind: "completed" | "skipped" } | TransferConflict;
+export type TransferOutcome = { kind: "completed" | "skipped" };
 export type TransferProgress = { file: string; bytes: number; total: number | null };
+export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
 
 interface Connection {
   id: number;
@@ -96,6 +99,7 @@ export const api = {
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
   listKSwitcher: (directory: string, peer: string, path: string) =>
     invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
+  installedFonts: () => invoke<string[]>("installed_fonts"),
   openTerminal: (id: number, directory: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<void>("open_terminal", { id, directory, rows, cols, output }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
@@ -110,10 +114,12 @@ export const api = {
   beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
   cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
   finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
+  resolveTransfer: (id: number, decision: "overwrite" | "skip", remember: boolean) =>
+    invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; multiple: boolean; moving: boolean;
-    policy: ConflictPolicy; askReadOnly: boolean; approved: string | null;
-  }, output: Channel<TransferProgress>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
+    policy: ConflictPolicy; askReadOnly: boolean;
+  }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
 
 export function placePath(place: Place) {
