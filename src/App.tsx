@@ -845,11 +845,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const target = event.target as HTMLElement;
     if (target.closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
-    const defaultOptionsKey = preferences.shortcuts.settings === commands.settings.key &&
-      event.code === "KeyS" && event.ctrlKey && event.altKey && !event.metaKey && !event.shiftKey &&
-      !event.getModifierState("AltGraph");
+    // Use the physical letter for these defaults when the keyboard layout changes.
+    const physical = /^Key[A-Z]$/.test(event.code) && !event.getModifierState("AltGraph")
+      ? eventShortcut(event, event.code.slice(3)) : "";
     const command = commandNames.find((command) => shortcut && commandScope(command) === "main" &&
-      preferences.shortcuts[command] === shortcut) ?? (defaultOptionsKey ? "settings" : undefined);
+      preferences.shortcuts[command] === shortcut) ?? (["settings", "hidden"] as const).find((command) =>
+      commands[command].key === physical && preferences.shortcuts[command] === physical);
     if (target.closest(".terminal-card")) return;
     if (command === "settings") {
       event.preventDefault();
@@ -877,7 +878,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || ["mark", "copy", "move", "recycle", "delete"].includes(command))) return;
     event.preventDefault();
-    perform(command);
+    if (command !== "hidden" || !event.repeat) perform(command);
   }
 
   function keyLabel(command: Command) {
