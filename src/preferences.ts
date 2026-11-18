@@ -157,8 +157,8 @@ export function persistPreferences(preferences: Preferences) {
   localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 3 }));
 }
 
-export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }) {
-  const { key, ctrlKey, metaKey, altKey, shiftKey } = event;
+export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {
+  const { ctrlKey, metaKey, altKey, shiftKey } = event;
   if (["Control", "Meta", "Alt", "Shift", "Unidentified", "Dead", "Process"].includes(key)) return "";
   return [
     ...(ctrlKey ? ["Ctrl"] : []),
