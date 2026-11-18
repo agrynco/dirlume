@@ -55,6 +55,9 @@ export const commands = {
   cancelText: { label: "Exit the viewer or editor", key: "Escape" },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
+  ftpSources: { label: "Select FTP in the sources menu", key: "1" },
+  addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
+  editFtpProfile: { label: "Edit FTP connection", key: "F4" },
 } as const;
 
 export type Command = keyof typeof commands;
@@ -62,6 +65,8 @@ export type Bindings = Record<Command, string>;
 export type Provider = "server" | "kswitcher";
 
 export function commandScope(command: Command) {
+  if (command === "ftpSources") return "sources";
+  if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";

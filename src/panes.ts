@@ -47,7 +47,7 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
   const entries = pane.search
     ? Array.from(pane.search.matches.values(), ({ entry, relativePath }) => ({ ...entry, name: relativePath }))
     : pane.entries;
-  return entries
+  const visible = entries
     .filter((entry) => (hidden || !entry.hidden) && (!filter || entry.name.toLocaleLowerCase().includes(filter)))
     .sort((a, b) => {
       if (a.directory !== b.directory) return a.directory ? -1 : 1;
@@ -56,6 +56,10 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
       const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
       return asc ? order : -order;
     });
+  if (!pane.search && pane.place?.kind === "ftp" && pane.place.segments.length) {
+    visible.unshift({ name: "..", directory: true, link: false, hidden: false, size: null, modified: null });
+  }
+  return visible;
 }
 
 export function showSearchResults(pane: PaneState, mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {
@@ -71,7 +75,7 @@ export function closeSearchResults(pane: PaneState): PaneState {
 }
 
 export function paneItem(pane: PaneState, entry?: Entry): { place: Place; entry: Entry } | null {
-  if (!entry || !pane.place) return null;
+  if (!entry || entry.name === ".." || !pane.place) return null;
   if (pane.search) {
     const match = pane.search.matches.get(entry.name);
     return match ? { place: match.directory, entry: match.entry } : null;
@@ -86,7 +90,7 @@ export function localPath(path: string): Place {
 }
 
 export function childPlace(place: Place, name: string): Place {
-  if (place.kind === "server") return { ...place, segments: [...place.segments, name] };
+  if (place.kind === "server" || place.kind === "ftp") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
     return { ...place, path, parent: null };
@@ -96,7 +100,7 @@ export function childPlace(place: Place, name: string): Place {
 }
 
 export function parentPlace(place: Place): Place | null {
-  if (place.kind === "server") {
+  if (place.kind === "server" || place.kind === "ftp") {
     return place.segments.length ? { ...place, segments: place.segments.slice(0, -1) } : null;
   }
   if (place.kind === "kswitcher") return place.parent === null ? null : { ...place, path: place.parent, parent: null };
@@ -104,6 +108,7 @@ export function parentPlace(place: Place): Place | null {
 }
 
 export async function readPlace(place: Place): Promise<{ place: Place; listing: Listing }> {
+  if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
     const listing = await api.listKSwitcher(place.directory, place.peer, place.path);
@@ -122,6 +127,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   pane = closeSearchResults(pane);
   const samePlace = JSON.stringify(pane.place) === JSON.stringify(place);
   const retained = new Set(listing.entries.map((entry) => entry.name));
+  if (place.kind === "ftp" && place.segments.length) retained.add("..");
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
     : pane.history;

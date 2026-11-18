@@ -19,7 +19,7 @@ required-features = ["server"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:clipboard-rs", "dep:font-kit", "dep:notify", "dep:png", "dep:portable-pty", "dep:reqwest", "dep:sysinfo", "dep:tauri", "dep:windows"]
+desktop = ["dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:keyring", "dep:notify", "dep:png", "dep:portable-pty", "dep:reqwest", "dep:ring", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:uuid", "dep:windows"]
 ui-automation = ["desktop", "tauri/devtools"]
 server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util"]
 
@@ -37,7 +37,9 @@ base64 = "0.22"
 cap-std = { version = "4", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 clipboard-rs = { version = "0.3", default-features = false, features = ["wayland"], optional = true }
+codepage = { version = "0.1", optional = true }
 dirs = "6"
+encoding_rs = { version = "0.8", optional = true }
 font-kit = { version = "0.14", optional = true }
 notify = { version = "8.2", optional = true }
 open = "5"
@@ -50,6 +52,7 @@ same-file = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 subtle = { version = "2", optional = true }
+suppaftp = { version = "13", optional = true }
 sysinfo = { version = "0.40", default-features = false, features = ["system"], optional = true }
 tauri = { version = "2", optional = true , features = [] }
 tempfile = "3"
@@ -57,8 +60,16 @@ tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"], optiona
 tokio-util = { version = "0.7", features = ["io"], optional = true }
 trash = "5"
 url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v4"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust", "vendored"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", features = ["apple-native"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"], optional = true }
 png = { version = "0.18", optional = true }
 windows = { version = "0.62", features = ["Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_RestartManager", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"], optional = true }
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_LibraryLoader"] }
+windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_LibraryLoader"] }

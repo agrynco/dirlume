@@ -62,6 +62,31 @@ pub struct Conflict {
 }
 
 impl Conflict {
+    pub fn ftp(
+        path: &str,
+        incoming: &fs::Metadata,
+        existing: &suppaftp::list::File,
+        replaceable: bool,
+    ) -> Self {
+        Self {
+            path: path.to_owned(),
+            directory: existing.is_directory(),
+            read_only: false,
+            replaceable,
+            allow_remember: replaceable,
+            incoming: Some(EntryDetails::from(incoming)),
+            existing: EntryDetails {
+                size: existing.size() as u64,
+                modified: existing
+                    .modified()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|time| time.as_secs()),
+                directory: existing.is_directory(),
+            },
+        }
+    }
+
     pub fn remote(target: &Path, existing: &fs::Metadata) -> Self {
         Self {
             path: local::display_path(target)
@@ -245,7 +270,7 @@ fn transfer_entry(
     Ok(true)
 }
 
-fn verify_folder(path: &Path, identity: &same_file::Handle) -> io::Result<()> {
+pub(crate) fn verify_folder(path: &Path, identity: &same_file::Handle) -> io::Result<()> {
     let current = fs::symlink_metadata(path)?;
     if current.is_dir()
         && !local::is_link(&current)
@@ -284,14 +309,14 @@ fn available_name(path: &Path) -> io::Result<PathBuf> {
     ))
 }
 
-struct FileRevision {
+pub(crate) struct FileRevision {
     identity: same_file::Handle,
     size: u64,
     modified: SystemTime,
 }
 
 impl FileRevision {
-    fn capture(path: &Path, metadata: &fs::Metadata) -> io::Result<Self> {
+    pub(crate) fn capture(path: &Path, metadata: &fs::Metadata) -> io::Result<Self> {
         let revision = Self {
             identity: same_file::Handle::from_path(path)?,
             size: metadata.len(),
@@ -301,7 +326,7 @@ impl FileRevision {
         Ok(revision)
     }
 
-    fn verify(&self, path: &Path) -> io::Result<()> {
+    pub(crate) fn verify(&self, path: &Path) -> io::Result<()> {
         let current = fs::symlink_metadata(path)?;
         if current.is_file()
             && !local::is_link(&current)

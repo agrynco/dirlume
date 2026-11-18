@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
 
 use crate::{
-    kswitcher, local, local_transfer,
+    ftp, ftp_transfer, kswitcher, local, local_transfer,
     protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
     terminal, watch,
 };
@@ -377,6 +377,10 @@ enum TransferSource {
         path: String,
         name: String,
     },
+    Ftp {
+        connection: u32,
+        segments: Vec<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -384,6 +388,7 @@ enum TransferSource {
 struct TransferRequest {
     source: TransferSource,
     destination: String,
+    ftp_destination: Option<u32>,
     multiple: bool,
     moving: bool,
     policy: local_transfer::Policy,
@@ -399,6 +404,14 @@ struct TransferRequest {
 enum TransferOutcome {
     Completed,
     Skipped,
+}
+
+fn transfer_outcome(completed: bool) -> TransferOutcome {
+    if completed {
+        TransferOutcome::Completed
+    } else {
+        TransferOutcome::Skipped
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -419,6 +432,7 @@ fn transfer_target(
     name: &str,
     source: Option<&Path>,
     multiple: bool,
+    allow_rename: bool,
 ) -> io::Result<PathBuf> {
     let name = local::name_component(name)?;
     let path = Path::new(destination);
@@ -444,7 +458,7 @@ fn transfer_target(
         return Ok(destination.join(name));
     }
     if multiple
-        || source.is_none()
+        || !allow_rename
         || destination
             .as_os_str()
             .to_string_lossy()
@@ -475,31 +489,33 @@ async fn transfer_item(
     output: Channel<TransferEvent>,
     sessions: State<'_, TransferSessions>,
     connections: State<'_, Connections>,
+    ftp_state: State<'_, ftp::FtpState>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
     let connection = match &request.source {
         TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
         _ => None,
     };
+    let ftp_source = match &request.source {
+        TransferSource::Ftp { connection, .. } => Some(ftp_state.connection(*connection)?),
+        _ => None,
+    };
+    let ftp_destination = request
+        .ftp_destination
+        .map(|id| ftp_state.connection(id))
+        .transpose()?;
     blocking(move || {
         let (name, source) = match &request.source {
             TransferSource::Local { directory, name } => (
                 name.as_str(),
                 Some(selected(directory, name).map_err(message)?),
             ),
-            TransferSource::Server { segments, .. } => (
+            TransferSource::Server { segments, .. } | TransferSource::Ftp { segments, .. } => (
                 segments.last().ok_or("Choose a remote item.")?.as_str(),
                 None,
             ),
             TransferSource::Kswitcher { name, .. } => (name.as_str(), None),
         };
-        let target = transfer_target(
-            &request.destination,
-            name,
-            source.as_deref(),
-            request.multiple,
-        )
-        .map_err(message)?;
         let mut progress = |path: &Path, bytes, total| {
             if session.cancelled.load(Ordering::Relaxed) {
                 return Err(io::Error::new(
@@ -517,22 +533,65 @@ async fn transfer_item(
         };
         progress(Path::new(name), 0, None).map_err(message)?;
 
+        let mut ask = |conflict| session.ask(conflict, &output);
+        if let Some(ftp_destination) = ftp_destination {
+            if request.moving
+                || !matches!(
+                    request.policy,
+                    local_transfer::Policy::Ask
+                        | local_transfer::Policy::Skip
+                        | local_transfer::Policy::Overwrite
+                )
+            {
+                return Err("Choose a supported FTP copy option.".to_owned());
+            }
+            let source = source
+                .as_deref()
+                .ok_or("Choose a local source for the FTP upload.")?;
+            let mut ftp = ftp_destination.open()?;
+            let target = ftp_transfer::upload_destination(
+                &mut ftp,
+                &request.destination,
+                name,
+                request.multiple,
+            )?;
+            let complete = ftp_transfer::upload(
+                &mut ftp,
+                source,
+                &target,
+                request.policy,
+                &mut progress,
+                &mut ask,
+            )?;
+            return Ok(transfer_outcome(complete));
+        }
+        let target = transfer_target(
+            &request.destination,
+            name,
+            source.as_deref(),
+            request.multiple,
+            source.is_some() || ftp_source.is_some(),
+        )
+        .map_err(message)?;
+        let options = local_transfer::Options {
+            moving: request.moving,
+            policy: request.policy,
+            ask_read_only: request.ask_read_only,
+        };
+        if let TransferSource::Ftp { segments, .. } = &request.source {
+            if request.moving {
+                return Err("Use Copy to download FTP items.".to_owned());
+            }
+            let mut ftp = ftp_source
+                .ok_or("Connect to the FTP server first.")?
+                .open()?;
+            return ftp_transfer::download(&mut ftp, segments, &target, &options, progress, ask)
+                .map(transfer_outcome);
+        }
         if let Some(source) = source {
-            let options = local_transfer::Options {
-                moving: request.moving,
-                policy: request.policy,
-                ask_read_only: request.ask_read_only,
-            };
-            let completed =
-                local_transfer::transfer(&source, &target, &options, progress, |conflict| {
-                    session.ask(conflict, &output)
-                })
-                .map_err(message)?;
-            return Ok(if completed {
-                TransferOutcome::Completed
-            } else {
-                TransferOutcome::Skipped
-            });
+            return local_transfer::transfer(&source, &target, &options, progress, ask)
+                .map(transfer_outcome)
+                .map_err(message);
         }
 
         match fs::symlink_metadata(&target) {
@@ -552,7 +611,9 @@ async fn transfer_item(
         }
 
         match request.source {
-            TransferSource::Local { .. } => return Err("Choose a local item.".to_owned()),
+            TransferSource::Local { .. } | TransferSource::Ftp { .. } => {
+                return Err("Choose a supported transfer source.".to_owned())
+            }
             TransferSource::Server {
                 segments, folder, ..
             } => {
@@ -685,6 +746,8 @@ enum Encoding {
 struct TextDocument {
     text: String,
     encoding: Encoding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision: Option<String>,
 }
 
 fn open_regular_file(path: &Path) -> Result<fs::File> {
@@ -748,7 +811,11 @@ fn decode_text(reader: impl Read) -> Result<TextDocument> {
     if text.contains('\0') {
         return Err("The file contains binary data.".to_owned());
     }
-    Ok(TextDocument { text, encoding })
+    Ok(TextDocument {
+        text,
+        encoding,
+        revision: None,
+    })
 }
 
 #[tauri::command]
@@ -802,6 +869,123 @@ async fn read_server_bytes(
     .await
 }
 
+fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    match encoding {
+        Encoding::Utf8 => buffer.extend_from_slice(text.as_bytes()),
+        Encoding::Utf8Bom => {
+            buffer.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+            buffer.extend_from_slice(text.as_bytes());
+        }
+        Encoding::Utf16Be | Encoding::Utf16Le => {
+            let little = matches!(encoding, Encoding::Utf16Le);
+            buffer.extend_from_slice(if little { &[0xff, 0xfe] } else { &[0xfe, 0xff] });
+            for word in text.encode_utf16() {
+                buffer.extend_from_slice(&if little {
+                    word.to_le_bytes()
+                } else {
+                    word.to_be_bytes()
+                });
+            }
+        }
+    }
+    if buffer.len() as u64 > TEXT_LIMIT {
+        return Err("Text files can be at most 8 MiB.".to_owned());
+    }
+    Ok(buffer)
+}
+
+fn ftp_text_revision(entry: &suppaftp::list::File, bytes: &[u8]) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    format!("{:?}:{}", entry.modified(), URL_SAFE_NO_PAD.encode(digest))
+}
+
+fn load_ftp_text(session: &mut ftp::Session, segments: &[String]) -> Result<TextDocument> {
+    let before = session.regular(segments)?;
+    let length = before.size() as u64;
+    if length > TEXT_LIMIT {
+        return Err("Text files can be at most 8 MiB.".to_owned());
+    }
+    let bytes = session.read_limited(segments, 0, length, length)?;
+    if session.regular(segments)? != before {
+        return Err("The FTP file changed while it was being opened.".to_owned());
+    }
+    let revision = ftp_text_revision(&before, &bytes);
+    let mut document = decode_text(bytes.as_slice())?;
+    document.revision = Some(revision);
+    Ok(document)
+}
+
+#[tauri::command]
+async fn read_ftp_text(
+    id: u32,
+    segments: Vec<String>,
+    state: State<'_, ftp::FtpState>,
+) -> Result<TextDocument> {
+    let connection = state.connection(id)?;
+    blocking(move || load_ftp_text(&mut connection.open()?, &segments)).await
+}
+
+#[tauri::command]
+async fn read_ftp_bytes(
+    id: u32,
+    segments: Vec<String>,
+    offset: u64,
+    state: State<'_, ftp::FtpState>,
+) -> Result<BytePage> {
+    let connection = state.connection(id)?;
+    blocking(move || {
+        let mut session = connection.open()?;
+        let length = session.regular(&segments)?.size() as u64;
+        let data =
+            session.read_limited(&segments, offset, crate::protocol::BYTE_PAGE_SIZE, length)?;
+        Ok(BytePage { length, data })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn save_ftp_text(
+    id: u32,
+    segments: Vec<String>,
+    revision: String,
+    text: String,
+    state: State<'_, ftp::FtpState>,
+) -> Result<TextDocument> {
+    let connection = state.connection(id)?;
+    blocking(move || {
+        let mut session = connection.open()?;
+        let document = load_ftp_text(&mut session, &segments)?;
+        if document.revision.as_deref() != Some(revision.as_str()) {
+            return Err("The FTP file changed on the server. Reopen it before saving.".to_owned());
+        }
+        let buffer = encode_text(document.encoding, &text)?;
+        let staged = session.upload_to_stage(&segments, &mut buffer.as_slice(), |_| Ok(()))?;
+        let result = (|| {
+            if load_ftp_text(&mut session, &segments)?.revision != document.revision {
+                return Err(
+                    "The FTP file changed on the server. Reopen it before saving.".to_owned(),
+                );
+            }
+            session.rename_stage(&staged, &segments)
+        })();
+        if let Err(error) = result {
+            session.remove_stage(&staged);
+            return Err(error);
+        }
+        let revision = session
+            .regular(&segments)
+            .ok()
+            .map(|entry| ftp_text_revision(&entry, &buffer));
+        Ok(TextDocument {
+            text,
+            encoding: document.encoding,
+            revision,
+        })
+    })
+    .await
+}
+
 #[tauri::command]
 async fn save_text(directory: String, name: String, original: String, text: String) -> Result<()> {
     blocking(move || {
@@ -810,28 +994,7 @@ async fn save_text(directory: String, name: String, original: String, text: Stri
         if document.text != original {
             return Err("The file changed on disk. Reopen it before saving.".to_owned());
         }
-        let mut buffer = Vec::new();
-        match document.encoding {
-            Encoding::Utf8 => buffer.extend_from_slice(text.as_bytes()),
-            Encoding::Utf8Bom => {
-                buffer.extend_from_slice(&[0xef, 0xbb, 0xbf]);
-                buffer.extend_from_slice(text.as_bytes());
-            }
-            Encoding::Utf16Be | Encoding::Utf16Le => {
-                let little = matches!(document.encoding, Encoding::Utf16Le);
-                buffer.extend_from_slice(if little { &[0xff, 0xfe] } else { &[0xfe, 0xff] });
-                for word in text.encode_utf16() {
-                    buffer.extend_from_slice(&if little {
-                        word.to_le_bytes()
-                    } else {
-                        word.to_be_bytes()
-                    });
-                }
-            }
-        }
-        if buffer.len() as u64 > TEXT_LIMIT {
-            return Err("Text files can be at most 8 MiB.".to_owned());
-        }
+        let buffer = encode_text(document.encoding, &text)?;
         let metadata = fs::metadata(&path).map_err(message)?;
         let mut staged =
             tempfile::NamedTempFile::new_in(local::absolute(&directory).map_err(message)?)
@@ -909,6 +1072,7 @@ pub fn run() {
     };
     let builder = tauri::Builder::default()
         .manage(Connections::default())
+        .manage(ftp::FtpState::default())
         .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
@@ -941,6 +1105,18 @@ pub fn run() {
             connect_server,
             list_server,
             disconnect_server,
+            ftp::ftp_profiles,
+            ftp::ftp_windows_code_page,
+            ftp::save_ftp_profile,
+            ftp::remove_ftp_profile,
+            ftp::connect_ftp,
+            ftp::disconnect_ftp,
+            ftp::list_ftp,
+            ftp::rename_ftp,
+            ftp::delete_ftp,
+            read_ftp_text,
+            read_ftp_bytes,
+            save_ftp_text,
             read_text,
             read_server_text,
             read_bytes,

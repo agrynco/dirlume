@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
+import { testFtp } from "./ftp-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -44,6 +45,7 @@ const child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
       ? { DIRLUME_CDP_PORT: String(debuggingPort) }
       : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
     WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
+    DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
   },
 });
 let browser;
@@ -291,7 +293,11 @@ try {
   const draft = page.getByRole("listbox", { name: "right files" }).getByRole("option", { name: /^draft.md/ });
   await draft.click();
   await page.keyboard.press("F8");
-  await page.getByRole("dialog", { name: "Move to Trash" }).getByRole("button", { name: "Cancel" }).click();
+  const trashDialog = page.getByRole("dialog", { name: "Move to Trash" });
+  await trashDialog.getByRole("button", { name: "Cancel" }).click();
+  await trashDialog.waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.getElementById("right-files")?.getAttribute("aria-busy") === "false");
+  await draft.click();
   await page.keyboard.press("Shift+Delete");
   const deleteDialog = page.getByRole("dialog", { name: "Delete permanently" });
   assert.equal(await deleteDialog.getByRole("button", { name: "Cancel" }).evaluate((button) => document.activeElement === button), true);
@@ -545,6 +551,11 @@ try {
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   assert.equal(await page.getByLabel("Scheme name").inputValue(), "Blueprint");
   await page.getByRole("button", { name: "Done", exact: true }).click();
+  if (process.env.DIRLUME_FTP_PYTHON) {
+    await page.getByRole("button", { name: "View guide.md" }).click();
+    await page.keyboard.press("Escape");
+    await testFtp(page, temp, src, dst, join(temp, "ftp-config"));
+  }
   const exit = new Promise((complete) => child.once("exit", complete));
   const closeKey = page.keyboard.press("F10").catch((error) => {
     if (!page.isClosed()) throw error;

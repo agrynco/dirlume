@@ -73,11 +73,15 @@ jobs:
       - name: Build Windows UI automation fixture
         if: runner.os == 'Windows'
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --features server,ui-automation,tauri/custom-protocol
+      - name: Install FTP smoke fixture dependency
+        if: runner.os == 'Windows'
+        run: python -m pip install pyftpdlib==2.2.0
       - name: Test Windows desktop application
         if: runner.os == 'Windows'
         env:
           DIRLUME_BUILD_PROFILE: debug
           DIRLUME_INTERNAL_CDP: '1'
+          DIRLUME_FTP_PYTHON: python
         run: node scripts/desktop-smoke.mjs
       - name: Package artifacts
         run: node scripts/package.mjs collect "${{ matrix.platform }}"

@@ -9,6 +9,7 @@ import { formatDate, formatSize, paneItem, parentPlace, type PaneState, type Sid
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
+import { eventShortcut, showShortcut } from "./preferences";
 
 interface PaneProps {
   side: Side;
@@ -26,6 +27,8 @@ interface PaneProps {
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
   onRemote: () => void;
+  onFtp: () => void;
+  ftpShortcut: string;
   onCloseResults: () => void;
   onRevealResult: (entry: Entry) => void;
   onStartDrag: (entry: Entry, data: DataTransfer) => boolean;
@@ -40,7 +43,7 @@ interface PaneProps {
 const columns = [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "modified", label: "Modified" }] as const;
 
 export function Pane({ side, active, pane, entries, locations, activate, onRow, onOpen, onPath,
-  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onCloseResults, onRevealResult,
+  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const path = pane.place ? placePath(pane.place) : "";
   const [address, setAddress] = useState(path);
@@ -131,14 +134,15 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
 
   function submitAddress(event: FormEvent) {
     event.preventDefault();
-    if ((pane.place && pane.place.kind !== "local") || address === path) return;
+    if ((pane.place && pane.place.kind !== "local" && pane.place.kind !== "ftp") || address === path) return;
     onPath(address);
     list.current?.focus();
   }
 
   const title = processView ? "Processes" : search ? "Search results" : pane.place ? folderLabel(pane.place) : side === "left" ? "Left pane" : "Right pane";
   const isRemote = pane.place && pane.place.kind !== "local";
-  const folders = entries.reduce((count, entry) => count + Number(entry.directory), 0);
+  const folderItems = entries.filter(({ name }) => name !== "..");
+  const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
   const marked = entries.filter(({ name }) => markedSet.has(name));
   const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
@@ -198,7 +202,7 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
         <Button className="icon-button" aria-label="Forward" disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
         <Button className="icon-button" aria-label="Parent folder" disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
         <form className="address" onSubmit={submitAddress}>
-          <input id={`${side}-address`} aria-label={`${side} path`} value={address} readOnly={Boolean(isRemote)} type="text"
+          <input id={`${side}-address`} aria-label={`${side} path`} value={address} readOnly={Boolean(isRemote && pane.place?.kind !== "ftp")} type="text"
             spellCheck={false} autoComplete="off" onChange={(event) => setAddress(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
@@ -209,6 +213,13 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
         </form>
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
           if (!locationsOpen) return;
+          if (ftpShortcut && eventShortcut(event) === ftpShortcut) {
+            event.preventDefault();
+            event.stopPropagation();
+            setLocationsOpen(false);
+            onFtp();
+            return;
+          }
           if (event.key === "Escape") {
             event.preventDefault();
             setLocationsOpen(false);
@@ -234,6 +245,7 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
                 </Button>
               ))}
               <Button onClick={() => { setLocationsOpen(false); onProcesses(true); }}><Activity /> Processes</Button>
+              <Button shortcut={showShortcut(ftpShortcut)} onClick={() => { setLocationsOpen(false); onFtp(); }}><Server /> FTP</Button>
               <Button onClick={() => { setLocationsOpen(false); onRemote(); }}><Server /> Remote machine</Button>
             </div>
           )}
@@ -283,8 +295,8 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
             data-file-color={entry.directory ? undefined : fileColor(entry.name)}
             aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
-            onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onContext(entry); }}
-            draggable onDragStart={(event) => { if (!onStartDrag(entry, event.dataTransfer)) event.preventDefault(); }}
+            onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (entry.name !== "..") onContext(entry); }}
+            draggable={entry.name !== ".."} onDragStart={(event) => { if (!onStartDrag(entry, event.dataTransfer)) event.preventDefault(); }}
             onDragEnd={onEndDrag}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
@@ -307,7 +319,7 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
       <footer className="pane-footer">
         <span>{search ? `${entries.length} ${entries.length === 1 ? "match" : "matches"}` :
-          <>{folders} {folders === 1 ? "folder" : "folders"}<span className="dot" />{entries.length - folders} {entries.length - folders === 1 ? "file" : "files"}</>}</span>
+          <>{folders} {folders === 1 ? "folder" : "folders"}<span className="dot" />{folderItems.length - folders} {folderItems.length - folders === 1 ? "file" : "files"}</>}</span>
         <span>{marked.length ? `${marked.length} marked · ${complete ? "" : "≥ "}${formatSize(markedBytes)}` :
           search ? pane.search?.incomplete ? "Partial results" : "" : pane.omitted ? `${pane.omitted} unavailable` : ""}</span>
       </footer>

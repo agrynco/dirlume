@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
+import { FtpDialog } from "./FtpDialog";
 import { Pane } from "./Pane";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
@@ -25,13 +26,16 @@ import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow } from "
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
 
-type ActionModal =
+type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" }>;
+
+type ActionModal = (
   | { kind: "mkdir" | "rename" | "newFile"; path: string; name: string }
-  | { kind: "recycle" | "delete"; path: string; names: string[] };
+  | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[] }
+) & { ftp?: FtpPlace };
 
 type Modal =
   | { kind: "settings" }
-  | { kind: "connect"; side: Side }
+  | { kind: "connect" | "ftp"; side: Side }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
@@ -42,6 +46,14 @@ type Modal =
 const rowCommands = {
   firstRow: 0, lastRow: Number.POSITIVE_INFINITY, upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
 };
+
+function sameConnection(left: Place | null, right: Place) {
+  return (left?.kind === "server" || left?.kind === "ftp") && left.kind === right.kind && left.id === right.id;
+}
+
+function disconnect(place: NetworkPlace) {
+  void (place.kind === "ftp" ? api.disconnectFtp(place.id) : api.disconnect(place.id)).catch(() => {});
+}
 
 function shellArgument(value: string) {
   return `'${value.replaceAll("'", windowsClient ? "''" : "'\\''")}'`;
@@ -80,6 +92,7 @@ export default function App() {
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
   const request = useRef({ left: 0, right: 0 });
+  const listingPending = useRef({ left: false, right: false });
   const nextSession = useRef(0);
   const watchId = useRef(0);
   const measureId = useRef(0);
@@ -87,16 +100,19 @@ export default function App() {
   const drag = useRef<{ side: Side; source: Place; items: Transfer["items"] } | null>(null);
   const latest = useRef(panes);
   latest.current = panes;
-  const connected = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
+  const connected = useRef<Record<Side, NetworkPlace | null>>({ left: null, right: null });
   const pane = panes[active];
   const other = panes[opposite(active)];
   const entries = useMemo(() => ({
     left: visibleEntries(panes.left, preferences.hidden),
     right: visibleEntries(panes.right, preferences.hidden),
   }), [panes, preferences.hidden]);
-  const current = entries[active].find((entry) => entry.name === pane.selected) ?? entries[active][0];
+  const currentRow = entries[active].find((entry) => entry.name === pane.selected) ?? entries[active][0];
+  const current = currentRow?.name === ".." ? undefined : currentRow;
   const currentItem = paneItem(pane, current);
   const local = pane.place?.kind === "local" ? pane.place : null;
+  const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
+  const otherFtp = !other.search && other.place?.kind === "ftp";
   const canTransfer = Boolean(current && pane.place);
 
   const updatePane = useCallback((side: Side, updater: (pane: PaneState) => PaneState) => {
@@ -111,17 +127,20 @@ export default function App() {
     updatePane(side, (pane) => ({ ...pane, measuring: [] }));
   }, [updatePane]);
 
-  const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | number = "push", reveal?: string) => {
-    if (action !== "refresh") cancelScan(side);
+  const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | "background" | number = "push", reveal?: string) => {
+    const background = action === "background";
+    if (background && listingPending.current[side]) return false;
+    if (action !== "refresh" && !background) cancelScan(side);
     const ticket = ++request.current[side];
-    updatePane(side, (pane) => ({ ...pane, loading: true, error: "", elevationPath: undefined }));
+    listingPending.current[side] = true;
+    if (!background) updatePane(side, (pane) => ({ ...pane, loading: true, error: "", elevationPath: undefined }));
     try {
       const result = await readPlace(place);
       if (ticket !== request.current[side]) return false;
       const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
       if (reveal !== undefined && !found) setStatus({ text: `File no longer found: ${reveal}`, error: true });
       updatePane(side, (pane) => {
-        const listing = applyListing(pane, result.place, result.listing, action);
+        const listing = applyListing(pane, result.place, result.listing, background ? "refresh" : action);
         return found ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
       });
       return true;
@@ -132,6 +151,8 @@ export default function App() {
           elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined }));
       }
       return false;
+    } finally {
+      if (request.current[side] === ticket) listingPending.current[side] = false;
     }
   }, [cancelScan, updatePane]);
 
@@ -173,8 +194,8 @@ export default function App() {
       const refreshWatchedFolder = () => {
         const current = latest.current[side];
         if (stopped || current.place?.kind !== "local" || current.place.path !== path) return;
-        if (current.loading) timer = window.setTimeout(refreshWatchedFolder, 150);
-        else void load(side, current.place, "refresh");
+        if (listingPending.current[side]) timer = window.setTimeout(refreshWatchedFolder, 150);
+        else void load(side, current.place, "background");
       };
       changes.onmessage = () => {
         window.clearTimeout(timer);
@@ -198,8 +219,8 @@ export default function App() {
     if (!leftRemote && !rightRemote) return;
     const timer = window.setInterval(() => {
       for (const side of ["left", "right"] as const) {
-        const { loading, place } = latest.current[side];
-        if (place && place.kind !== "local" && !loading) void load(side, place, "refresh");
+        const { place } = latest.current[side];
+        if (place && place.kind !== "local") void load(side, place, "background");
       }
     }, 5000);
     return () => window.clearInterval(timer);
@@ -255,7 +276,7 @@ export default function App() {
   function openDocument(file: NamedFile, editing: boolean) {
     const existing = documents.find((item) => item.editing === editing && item.file.name === file.name &&
       item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
-      (file.place.kind === "local" || item.file.place.kind === "server" && item.file.place.id === file.place.id));
+      (file.place.kind === "local" || sameConnection(item.file.place, file.place)));
     if (existing) {
       selectDocument(existing.id);
     } else {
@@ -270,9 +291,9 @@ export default function App() {
     if (index < 0) return;
     const remaining = documents.filter((document) => document.id !== id);
     const { place } = documents[index].file;
-    if (place.kind === "server" && !Object.values(connected.current).includes(place.id) &&
-        !remaining.some(({ file }) => file.place.kind === "server" && file.place.id === place.id)) {
-      void api.disconnect(place.id).catch(() => {});
+    if (place.kind !== "local" && !Object.values(connected.current).some((connection) => sameConnection(connection, place)) &&
+        !remaining.some(({ file }) => sameConnection(file.place, place))) {
+      disconnect(place);
     }
     setDocuments(remaining);
     dirtyDocuments.current.delete(id);
@@ -297,11 +318,10 @@ export default function App() {
     showProcesses(side, false);
     cancelScan(side);
     ++request.current[side];
+    listingPending.current[side] = false;
     const previous = connected.current[side];
-    if (previous !== null && !documents.some(({ file }) => file.place.kind === "server" && file.place.id === previous)) {
-      void api.disconnect(previous).catch(() => {});
-    }
-    connected.current[side] = place.kind === "server" ? place.id : null;
+    if (previous && !documents.some(({ file }) => sameConnection(file.place, previous))) disconnect(previous);
+    connected.current[side] = place.kind === "kswitcher" ? null : place;
     setActive(side);
     updatePane(side, (pane) => {
       const history = pane.history.slice(0, pane.position + 1).filter((location) => location.kind === "local");
@@ -310,11 +330,14 @@ export default function App() {
   }
 
   function open(side: Side, entry: Entry) {
+    if (entry.name === "..") { parent(side); return; }
     const item = paneItem(panes[side], entry);
     if (!item || panes[side].loading) return;
     const { place, entry: file } = item;
     if (file.directory) {
       void load(side, childPlace(place, file.name));
+    } else if (place.kind === "ftp" && !file.link) {
+      openDocument({ place, name: file.name }, false);
     } else if (place.kind === "local") {
       void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
         setStatus({ text: describeError(error), error: true }));
@@ -403,11 +426,19 @@ export default function App() {
 
   function openTransfer(kind: Transfer["kind"], source: Place, items: Transfer["items"], target: Place | null, chooseOperation = false) {
     if (!items.length) return;
+    if (target?.kind === "ftp" && source.kind !== "local") {
+      setStatus({ text: "Choose a local source for the FTP upload.", error: true });
+      return;
+    }
     if (source.kind !== "local" && items.some(({ entry }) => entry.link || (source.kind === "kswitcher" && entry.directory))) {
       setStatus({ text: source.kind === "kswitcher" ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
       return;
     }
-    setModal({ kind: "transfer", transfer: { kind, source, items, target: target?.kind === "local" ? target.path : "", chooseOperation } });
+    setModal({ kind: "transfer", transfer: {
+      kind, source, items, chooseOperation,
+      target: target?.kind === "local" || target?.kind === "ftp" ? placePath(target) : "",
+      ftpDestination: target?.kind === "ftp" ? target.id : undefined,
+    } });
   }
 
   function transfer(kind: "copy" | "move") {
@@ -416,8 +447,12 @@ export default function App() {
       setStatus({ text: "Select a file or folder in the active pane." });
       return;
     }
-    if (kind === "move" && (source.kind !== "local" || pane.search)) return;
-    openTransfer(kind, source, transferItems(active, current), other.search ? null : other.place);
+    if (kind === "move" && (pane.search || (source.kind !== "local" && source.kind !== "ftp"))) return;
+    if (kind === "move" && source.kind === "ftp") {
+      setModal({ kind: "rename", path: placePath(source), name: current.name, ftp: source });
+      return;
+    }
+    openTransfer(kind, source, transferItems(active, current), other.search || (kind === "move" && otherFtp) ? null : other.place);
   }
 
   function startDrag(side: Side, entry: Entry, data: DataTransfer) {
@@ -433,7 +468,8 @@ export default function App() {
 
   function canDrop(side: Side, data: DataTransfer) {
     const target = panes[side];
-    return Boolean(!modal && drag.current && drag.current.side !== side && target.place?.kind === "local" &&
+    const supported = target.place?.kind === "local" || (target.place?.kind === "ftp" && drag.current?.source.kind === "local");
+    return Boolean(!modal && drag.current && drag.current.side !== side && supported &&
       !target.search && !processPanels[side] && !target.loading && data.types.includes(fileDrag));
   }
 
@@ -481,7 +517,7 @@ export default function App() {
     drag.current = null;
     if (!payload) return;
     openTransfer("copy", payload.source, payload.items, panes[side].place,
-      payload.source.kind === "local" && !panes[payload.side].search);
+      payload.source.kind === "local" && panes[side].place?.kind === "local" && !panes[payload.side].search);
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
@@ -490,10 +526,10 @@ export default function App() {
     const anchor = names.indexOf(selectionAnchor.current[side] ?? panes[side].selected ?? entry.name);
     if (!range) selectionAnchor.current[side] = entry.name;
     const start = anchor < 0 ? index : anchor;
-    const group = range ? names.slice(Math.min(index, start), Math.max(index, start) + 1) : [];
+    const group = range ? names.slice(Math.min(index, start), Math.max(index, start) + 1).filter((name) => name !== "..") : [];
     updatePane(side, (pane) => ({
       ...pane, selected: entry.name,
-      marked: range ? [...new Set([...pane.marked, ...group])] : mark
+      marked: range ? [...new Set([...pane.marked, ...group])] : mark && entry.name !== ".."
         ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
         : pane.marked.includes(entry.name) ? pane.marked : [],
     }));
@@ -528,7 +564,7 @@ export default function App() {
     event.preventDefault();
     if (!commandLine.trim()) {
       if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, "\r"]);
-      else if (current) open(active, current);
+      else if (currentRow) open(active, currentRow);
       return;
     }
     if (!local || !openTerminal()) return;
@@ -560,10 +596,13 @@ export default function App() {
   }
 
   const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && pane.marked.includes(entry.name));
-  const measureEntries = markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
+  const canMeasure = Boolean(local || ftp) && !pane.search;
+  const measureEntries = !canMeasure ? [] : ftp && currentRow?.name === ".."
+    ? entries[active].filter((entry) => entry.directory && !entry.link && entry.name !== "..")
+    : markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
 
   function measure() {
-    if (!local || pane.loading || !measureEntries.length) return;
+    if ((!local && !ftp) || pane.loading || !measureEntries.length) return;
     cancelScan(active);
     const id = ++measureId.current;
     scans.current[active] = id;
@@ -577,7 +616,9 @@ export default function App() {
         measuring: pane.measuring.filter((name) => name !== result.name),
       }));
     };
-    void api.measureFolders(id, local.path, names, output).catch((error: unknown) => {
+    const source = ftp ? { kind: "ftp" as const, connection: ftp.id, segments: ftp.segments }
+      : { kind: "local" as const, directory: local!.path };
+    void api.measureFolders(id, source, names, output).catch((error: unknown) => {
       if (scans.current[active] === id) setStatus({ text: describeError(error), error: true });
     }).finally(() => {
       output.onmessage = () => {};
@@ -617,7 +658,7 @@ export default function App() {
         else focus(opposite(active));
         break;
       case "swap": {
-        if (panes.left.loading || panes.right.loading || busy) break;
+        if (listingPending.current.left || listingPending.current.right || busy) break;
         cancelScan("left");
         cancelScan("right");
         setPanes((current) => ({ left: current.right, right: current.left }));
@@ -633,7 +674,7 @@ export default function App() {
         input?.select();
         break;
       }
-      case "open": if (current) open(active, current); break;
+      case "open": if (currentRow) open(active, currentRow); break;
       case "parent": parent(active); break;
       case "back": history(active, -1); break;
       case "forward": history(active, 1); break;
@@ -693,18 +734,27 @@ export default function App() {
         break;
       case "rename":
       case "newFile":
-      case "mkdir":
-        if (local && !pane.search && !busy && !pane.loading && (command !== "rename" || current)) {
-          setModal({ kind: command, path: local.path, name: command === "rename" ? current.name : "" });
+      case "mkdir": {
+        const writable = local ?? (command === "rename" ? ftp : undefined);
+        if (writable && !pane.search && !busy && !pane.loading && (command !== "rename" || current)) {
+          setModal({ kind: command, path: placePath(writable), name: command === "rename" ? current?.name ?? "" : "", ftp });
         }
         break;
+      }
       case "delete":
-      case "recycle":
-        if (local && !pane.search && current && !busy && !pane.loading) {
-          const names = entries[active].filter(({ name }) => pane.marked.includes(name)).map(({ name }) => name);
-          setModal({ kind: command, path: local.path, names: names.length ? names : [current.name] });
+      case "recycle": {
+        const writable = local ?? ftp;
+        if (writable && !pane.search && current && !busy && !pane.loading) {
+          const marked = entries[active].filter(({ name }) => pane.marked.includes(name));
+          const selected = marked.length ? marked : [current];
+          setModal({
+            kind: ftp ? "delete" : command, path: placePath(writable), ftp,
+            names: selected.map(({ name }) => name),
+            directories: ftp ? selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name) : undefined,
+          });
         }
         break;
+      }
       case "cancelMeasure":
         if (commandLine) { setCommandLine(""); historyIndex.current = -1; }
         else if (pane.search && !panelsHidden) closeResults(active);
@@ -717,7 +767,7 @@ export default function App() {
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || file.place.kind === "local")) openDocument(file, command === "edit");
+        if (file && (command === "view" || file.place.kind !== "server")) openDocument(file, command === "edit");
         break;
       }
       case "compare": {
@@ -784,7 +834,17 @@ export default function App() {
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} pane={panes[side]} entries={entries[side]} locations={locations}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
-            onOpen={(entry) => open(side, entry)} onPath={(path) => { showProcesses(side, false); void load(side, localPath(path)); }}
+            onOpen={(entry) => open(side, entry)} onPath={(path) => {
+              const place = panes[side].place;
+              showProcesses(side, false);
+              if (place?.kind === "ftp") {
+                if (!path.startsWith("/")) {
+                  setStatus({ text: "Enter an absolute FTP path starting with /.", error: true });
+                  return;
+                }
+                void load(side, { ...place, segments: path.split("/").filter(Boolean) });
+              } else void load(side, localPath(path));
+            }}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
             onCloseResults={() => closeResults(side)}
             onStartDrag={(entry, data) => startDrag(side, entry, data)} onEndDrag={() => { drag.current = null; }}
@@ -796,7 +856,8 @@ export default function App() {
               if (item) revealResult(side, item.place, item.entry.name);
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
-            onRemote={() => setModal({ kind: "connect", side })} />
+            onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
+            ftpShortcut={preferences.shortcuts.ftpSources} />
         ))}
         <div className="pane-divider" role="separator" aria-label="Pane divider" aria-orientation="vertical"
           aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
@@ -845,17 +906,17 @@ export default function App() {
       <nav className="actionbar" aria-label="File actions">
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>Back to files</Button> : ([
           { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
-            disabled: !fileFor(active) && (!local || !measureEntries.length) },
-          { command: "edit", label: "Edit", Icon: Pencil, disabled: !local || !current || current.directory },
-          { command: "copy", label: local ? "Copy" : "Download", Icon: local ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
-          { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: !local || !!pane.search || !canTransfer || busy },
+            disabled: !fileFor(active) && !measureEntries.length },
+          { command: "edit", label: "Edit", Icon: Pencil, disabled: !fileFor(active) || fileFor(active)?.place.kind === "server" },
+          { command: "copy", label: local || ftp ? "Copy" : "Download", Icon: local || ftp ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
+          { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
           { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
           { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
           { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
-          { command: "recycle", label: "Trash", Icon: Trash2, disabled: !local || !!pane.search || !current || busy },
+          { command: "recycle", label: ftp ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp) || !!pane.search || !current || busy },
           { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
           { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
-        ] as const).map(({ command, label, Icon, disabled }) => (
+        ] as const).filter(({ command }) => !ftp || command !== "rename").map(({ command, label, Icon, disabled }) => (
           <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}>
             <Icon /><span>{label}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}
           </Button>
@@ -941,19 +1002,41 @@ export default function App() {
           onConnect={(place, listing) => { routeRemote(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}
+      {modal?.kind === "ftp" && (
+        <FtpDialog shortcuts={preferences.shortcuts} onClose={() => setModal(null)}
+          onConnect={(place, listing) => {
+            routeRemote(modal.side, place, listing);
+            setModal(null);
+            requestAnimationFrame(() => focus(modal.side));
+          }} />
+      )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange} onClose={() => setModal(null)} />}
       {(modal?.kind === "mkdir" || modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
-        <FileDialog modal={modal} onClose={() => setModal(null)} onSubmit={async (operation) => {
+        <FileDialog modal={modal} onClose={() => setModal(null)}
+          hasNonemptyFolders={modal.ftp && "names" in modal ? async () => {
+            const ftp = modal.ftp!;
+            for (const name of modal.directories ?? []) {
+              const listing = await api.listFtp(ftp.id, [...ftp.segments, name]);
+              if (listing.entries.length || listing.omitted) return true;
+            }
+            return false;
+          } : undefined}
+          onSubmit={async (operation, recursive) => {
+          const ftp = modal.ftp;
           if ("names" in modal) {
             try {
-              await batch(modal.names, (name) => api.operate(modal.path, { kind: modal.kind, name }));
+              await batch(modal.names, (name) => ftp
+                ? api.deleteFtp(ftp.id, [...ftp.segments, name], recursive && (modal.directories?.includes(name) ?? false))
+                : api.operate(modal.path, { kind: modal.kind, name }));
             } finally {
               refresh("left");
               refresh("right");
             }
           } else if (operation) {
-            await api.operate(modal.path, operation);
+            if (ftp && operation.kind === "rename") {
+              await api.renameFtp(ftp.id, [...ftp.segments, operation.name], operation.new_name);
+            } else await api.operate(modal.path, operation);
             refresh("left");
             refresh("right");
             if (modal.kind === "newFile") {
@@ -987,15 +1070,17 @@ function CommandHistory({ commands, onChoose, onClose }: {
   );
 }
 
-function FileDialog({ modal, onClose, onSubmit }: {
+function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   modal: ActionModal;
   onClose: () => void;
-  onSubmit: (operation?: Operation) => Promise<void>;
+  onSubmit: (operation: Operation | undefined, recursive: boolean) => Promise<void>;
+  hasNonemptyFolders?: () => Promise<boolean>;
 }) {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
+  const [recursive, setRecursive] = useState(false);
   const titles = { mkdir: "New folder", newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const title = titles[modal.kind];
   const removing = "names" in modal;
@@ -1006,9 +1091,13 @@ function FileDialog({ modal, onClose, onSubmit }: {
     setWaiting(true);
     setError("");
     try {
+      if (hasNonemptyFolders && !recursive && await hasNonemptyFolders()) {
+        setRecursive(true);
+        return;
+      }
       await onSubmit(modal.kind === "mkdir" ? { kind: "create_folder", name } :
         modal.kind === "newFile" ? { kind: "create_file", name } :
-        modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined);
+        modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
     } catch (error) {
       setError(describeError(error));
     } finally {
@@ -1018,10 +1107,10 @@ function FileDialog({ modal, onClose, onSubmit }: {
 
   return (
     <>
-    <Dialog title={title} onClose={() => { if (!waiting) onClose(); }}>
+    <Dialog key={String(recursive)} title={recursive ? "Delete FTP folder contents" : title} onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
-          {removing
+          {recursive ? <p className="delete-warning">Permanently delete the selected FTP folders and all their contents?</p> : removing
             ? <p className={modal.kind === "delete" ? "delete-warning" : undefined}>{modal.kind === "delete" ? "Permanently delete " : "Move "}
               {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : `${modal.names.length} items`}
               {modal.kind === "delete" ? "?" : " to Trash?"}</p>
@@ -1030,16 +1119,16 @@ function FileDialog({ modal, onClose, onSubmit }: {
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
             </label>}
           {error && <p className="dialog-error" role="alert">{error}</p>}
-          {windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
+          {!modal.ftp && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
         </div>
         <div className="dialog-footer">
-          {windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
+          {!modal.ftp && windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>Find locking processes</Button>}
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</Button>
           <Button type="submit" className={removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
-            {waiting ? "Working…" : modal.kind === "mkdir" || modal.kind === "newFile" ? "Create" : title}
+            {waiting ? "Working…" : recursive ? "Delete contents" : modal.kind === "mkdir" || modal.kind === "newFile" ? "Create" : title}
           </Button>
         </div>
       </form>

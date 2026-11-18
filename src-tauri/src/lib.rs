@@ -3,6 +3,10 @@ mod desktop;
 #[cfg(feature = "desktop")]
 mod file_clipboard;
 #[cfg(feature = "desktop")]
+mod ftp;
+#[cfg(feature = "desktop")]
+mod ftp_transfer;
+#[cfg(feature = "desktop")]
 mod kswitcher;
 mod local;
 #[cfg(feature = "desktop")]

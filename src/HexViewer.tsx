@@ -1,5 +1,5 @@
 import { Button } from "./Button";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { describeError, readPlaceBytes, type BytePage, type NamedFile } from "./api";
 
 const bytesPerRow = 16;
@@ -12,6 +12,7 @@ export function HexViewer({ file }: { file: NamedFile }) {
   const [address, setAddress] = useState("");
   const [page, setPage] = useState<BytePage | null>(null);
   const [error, setError] = useState("");
+  const controls = useRef<HTMLDivElement>(null);
   const addressValue = /^(?:0x[\da-f]+|\d+)$/i.test(address.trim()) ? Number(address.trim()) : NaN;
 
   useEffect(() => {
@@ -24,6 +25,12 @@ export function HexViewer({ file }: { file: NamedFile }) {
     );
     return () => { canceled = true; };
   }, [file, offset]);
+
+  useLayoutEffect(() => {
+    if (document.activeElement === document.body && !controls.current?.closest("[hidden]")) {
+      controls.current?.focus({ preventScroll: true });
+    }
+  }, [page]);
 
   function goTo(event: FormEvent) {
     event.preventDefault();
@@ -39,7 +46,7 @@ export function HexViewer({ file }: { file: NamedFile }) {
   }) : [];
   return (
     <>
-      <div className="text-toolbar hex-toolbar">
+      <div ref={controls} tabIndex={-1} className="text-toolbar hex-toolbar">
         <Button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>Previous page</Button>
         <Button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>Next page</Button>
         <form onSubmit={goTo}>

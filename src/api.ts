@@ -27,10 +27,21 @@ export interface QuickLocation {
 export type Place =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "server"; id: number; address: string; segments: string[] }
+  | { kind: "ftp"; id: number; address: string; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
 export type RemotePlace = Exclude<Place, { kind: "local" }>;
-export type TextPlace = Extract<Place, { kind: "local" | "server" }>;
+export type FtpPlace = Extract<Place, { kind: "ftp" }>;
+export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" }>;
+
+export interface FtpProfile {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  username: string;
+  codePage: number | null;
+}
 
 export interface NamedFile {
   place: TextPlace;
@@ -56,6 +67,7 @@ export type Operation =
 export type TransferSource =
   | { kind: "local"; directory: string; name: string }
   | { kind: "server"; connection: number; segments: string[]; folder: boolean }
+  | { kind: "ftp"; connection: number; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string };
 
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
@@ -77,6 +89,7 @@ interface Connection {
 export interface TextDocument {
   text: string;
   encoding: "utf8" | "utf8_bom" | "utf16_le" | "utf16_be";
+  revision?: string;
 }
 
 export interface BytePage {
@@ -113,6 +126,22 @@ export const api = {
     invoke<void>("operate", { directory, operation }),
   connect: (invitation: string) => invoke<Connection>("connect_server", { invitation }),
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
+  ftpProfiles: () => invoke<FtpProfile[]>("ftp_profiles"),
+  ftpWindowsCodePage: () => invoke<number | null>("ftp_windows_code_page"),
+  saveFtpProfile: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
+    invoke<string>("save_ftp_profile", { input }),
+  removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
+  connectFtp: (id: string) => invoke<Connection & { segments: string[] }>("connect_ftp", { id }),
+  disconnectFtp: (id: number) => invoke<void>("disconnect_ftp", { id }),
+  listFtp: (id: number, segments: string[]) => invoke<Listing>("list_ftp", { id, segments }),
+  renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
+  deleteFtp: (id: number, segments: string[], recursive: boolean) =>
+    invoke<void>("delete_ftp", { id, segments, recursive }),
+  readFtpText: (id: number, segments: string[]) => invoke<TextDocument>("read_ftp_text", { id, segments }),
+  readFtpBytes: (id: number, segments: string[], offset: number) =>
+    invoke<BytePage>("read_ftp_bytes", { id, segments, offset }),
+  saveFtpText: (id: number, segments: string[], revision: string, text: string) =>
+    invoke<TextDocument>("save_ftp_text", { id, segments, revision, text }),
   listServer: (id: number, segments: string[]) =>
     invoke<Listing>("list_server", { id, segments }),
   readText: (directory: string, name: string) =>
@@ -139,8 +168,9 @@ export const api = {
   watchDirectory: (id: number, path: string, changes: Channel<null>) =>
     invoke<void>("watch_directory", { id, path, changes }),
   unwatchDirectory: (id: number) => invoke<void>("unwatch_directory", { id }),
-  measureFolders: (id: number, directory: string, names: string[], output: Channel<SizeResult>) =>
-    invoke<void>("measure_folders", { id, directory, names, output }),
+  measureFolders: (id: number, source: { kind: "local"; directory: string } |
+    { kind: "ftp"; connection: number; segments: string[] }, names: string[], output: Channel<SizeResult>) =>
+    invoke<void>("measure_folders", { id, source, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
   beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
   cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
@@ -148,24 +178,27 @@ export const api = {
   resolveTransfer: (id: number, decision: "overwrite" | "skip", remember: boolean) =>
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
-    source: TransferSource; destination: string; multiple: boolean; moving: boolean;
+    source: TransferSource; destination: string; ftpDestination?: number; multiple: boolean; moving: boolean;
     policy: ConflictPolicy; askReadOnly: boolean;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
 
 export function placePath(place: Place) {
-  if (place.kind === "server") return "/" + place.segments.join("/");
+  if (place.kind === "server" || place.kind === "ftp") return "/" + place.segments.join("/");
   return place.path;
 }
 
 export function readPlaceText(file: NamedFile) {
   const { place, name } = file;
-  return place.kind === "local" ? api.readText(place.path, name) : api.readServerText(place.id, [...place.segments, name]);
+  if (place.kind === "local") return api.readText(place.path, name);
+  const segments = [...place.segments, name];
+  return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
 }
 
 export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
-  return place.kind === "local" ? api.readBytes(place.path, name, offset)
-    : api.readServerBytes(place.id, [...place.segments, name], offset);
+  if (place.kind === "local") return api.readBytes(place.path, name, offset);
+  const segments = [...place.segments, name];
+  return place.kind === "ftp" ? api.readFtpBytes(place.id, segments, offset) : api.readServerBytes(place.id, segments, offset);
 }
 
 export function isPermissionError(error: string) {
@@ -177,7 +210,7 @@ export function isLockError(error: string) {
 }
 
 export function folderLabel(place: Place) {
-  if (place.kind === "server") return place.segments.at(-1) ?? place.address;
+  if (place.kind === "server" || place.kind === "ftp") return place.segments.at(-1) ?? place.address;
   if (place.kind === "kswitcher" && !place.path) return place.address;
   return place.path.split(windowsClient ? /[\\/]/ : "/").filter(Boolean).at(-1) ?? place.path;
 }

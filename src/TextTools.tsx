@@ -76,14 +76,20 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }, [file]);
 
   async function save() {
-    if (!document || !dirty || saving || file.place.kind !== "local") return;
+    if (!document || !dirty || saving || file.place.kind === "server") return;
     setSaving(true);
     setError("");
     const eol = document.text.includes("\r\n") ? "\r\n" : document.text.includes("\r") ? "\r" : "\n";
     const updated = text.replaceAll("\n", eol);
     try {
-      await api.saveText(file.place.path, file.name, document.text, updated);
-      setDocument({ ...document, text: updated });
+      if (file.place.kind === "ftp") {
+        if (!document.revision) throw new Error("Reopen the FTP file before saving again.");
+        const saved = await api.saveFtpText(file.place.id, [...file.place.segments, file.name], document.revision, updated);
+        setDocument(saved);
+      } else {
+        await api.saveText(file.place.path, file.name, document.text, updated);
+        setDocument({ ...document, text: updated });
+      }
       onSaved();
     } catch (error) {
       setError(describeError(error));

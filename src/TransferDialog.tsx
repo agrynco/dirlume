@@ -11,6 +11,7 @@ export interface Transfer {
   source: Place;
   items: { place: Place; entry: Entry }[];
   target: string;
+  ftpDestination?: number;
   chooseOperation?: boolean;
 }
 
@@ -20,6 +21,7 @@ const integer = new Intl.NumberFormat();
 
 function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
+  if (place.kind === "ftp") return { kind: "ftp", connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "server") {
     return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
   }
@@ -52,7 +54,9 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
   const cancelled = useRef(false);
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
-  const verb = moving ? "Move" : transfer.source.kind === "local" ? "Copy" : "Download";
+  const localTarget = transfer.ftpDestination === undefined;
+  const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp";
+  const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
 
   useEffect(() => {
@@ -121,8 +125,13 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         const { place, entry } = item;
         setProgress({ file: entry.name, bytes: 0, total: null });
         previousBytes = 0;
+        const ftpCopy = !localTarget || transfer.source.kind === "ftp";
+        const separator = localTarget && windowsClient ? "\\" : "/";
+        const target = ftpCopy && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
+          ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
+          : destination;
         const request = {
-          source: itemSource(place, entry), destination, moving,
+          source: itemSource(place, entry), destination: target, ftpDestination: transfer.ftpDestination, moving,
           multiple: itemCount > 1, policy, askReadOnly,
         };
         const result = await api.transfer(id, request, output);
@@ -167,14 +176,14 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
             <label className="setting"><span>Existing files</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">Ask</option><option value="skip">Skip</option>
-                {transfer.source.kind === "local" && <>
-                  <option value="overwrite">Overwrite</option>
+                {replaceable && <option value="overwrite">Overwrite</option>}
+                {replaceable && localTarget && <>
                   <option value="rename">Rename incoming item</option>
                   <option value="newer">Overwrite older files only</option>
                 </>}
               </select>
             </label>
-            {transfer.source.kind === "local" && <label className="transfer-checkbox">
+            {replaceable && localTarget && <label className="transfer-checkbox">
               <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} /> Also ask about read-only files
             </label>}
             {transfer.chooseOperation && <label className="transfer-checkbox">
@@ -202,7 +211,7 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
                 <progress aria-label="Overall transfer progress" max={itemCount} value={processed} />
                 {phase === "done" && <p role="status">{completed} completed{skipped ? `, ${skipped} skipped` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{error}</p>}
-                {windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
+                {localTarget && windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
                   <ElevationButton directory={blocked.place.path} />}
           </div>
           <footer className="dialog-footer">

@@ -57,9 +57,15 @@ cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default
 node scripts/server-smoke.mjs
 ```
 
-On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature.
+On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature. To include the FTP smoke test locally, install `pyftpdlib==2.2.0` in Python and set `DIRLUME_FTP_PYTHON` to that Python executable. Use a UI automation build so the fixture keeps its FTP profiles separate.
 
 ## Remote sources
+
+**FTP.** Open the left or right pane's sources with **Alt+F1** or **Alt+F2**, then choose **FTP** or press **1**. Use **Shift+F4** to add a profile, **F4** to edit it, and **Enter** to connect. The port defaults to 21. Leave the username empty for anonymous login. Dirlume stores passwords in the system credential store and filenames use UTF-8 by default. Set a filename code page for legacy servers. Plain FTP sends passwords and files without encryption.
+
+The pane opens at the server's initial directory. Use **F5** to copy files or folders between a local pane and an FTP pane in either direction. The transfer dialog shows progress and asks about conflicts. An upload completes under a temporary name before Dirlume renames it to the destination. Replacing an existing file requires a server that allows rename over the destination.
+
+Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also measures folders. **F4** opens a text file for editing and **F2** saves it back to the server if the original revision still matches. **F6** renames an item and **F8** prompts before permanently deleting selected items, with an additional confirmation for nonempty folders. FTP files can be included in a text comparison.
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder with read access over TLS. Browse and download files and directories, or open and compare text in Dirlume. [Server setup and autostart](docs/server.md).
 
