@@ -1,5 +1,6 @@
 import { Button } from "./Button";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { AddressField } from "./AddressField";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
@@ -14,6 +15,7 @@ import { eventShortcut, showShortcut } from "./preferences";
 interface PaneProps {
   side: Side;
   active: boolean;
+  showHidden: boolean;
   pane: PaneState;
   entries: Entry[];
   locations: QuickLocation[];
@@ -43,11 +45,10 @@ interface PaneProps {
 
 const columns = [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "modified", label: "Modified" }] as const;
 
-export function Pane({ side, active, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
+export function Pane({ side, active, showHidden, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const path = pane.place ? placePath(pane.place) : "";
-  const [address, setAddress] = useState(path);
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useState<string | null>(null);
   const quickSearchInput = useRef<HTMLInputElement>(null);
@@ -88,7 +89,6 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   }
   const icons = useWindowsIcons(fileIcons, api.fileIcons);
 
-  useEffect(() => setAddress(path), [path]);
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
   const quickSearchOpen = quickSearch !== null;
   useLayoutEffect(() => {
@@ -156,13 +156,6 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
     };
   }, [side]);
 
-  function submitAddress(event: FormEvent) {
-    event.preventDefault();
-    if ((pane.place && pane.place.kind !== "local" && pane.place.kind !== "ftp") || address === path) return;
-    onPath(address);
-    list.current?.focus();
-  }
-
   const title = processView ? "Processes" : search ? "Search results" : pane.place ? folderLabel(pane.place) : side === "left" ? "Left pane" : "Right pane";
   const isRemote = pane.place && pane.place.kind !== "local";
   const folderItems = entries.filter(({ name }) => name !== "..");
@@ -225,16 +218,8 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
         <Button className="icon-button" aria-label="Back" disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label="Forward" disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
         <Button className="icon-button" aria-label="Parent folder" disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        <form className="address" onSubmit={submitAddress}>
-          <input id={`${side}-address`} aria-label={`${side} path`} value={address} readOnly={Boolean(isRemote && pane.place?.kind !== "ftp")} type="text"
-            spellCheck={false} autoComplete="off" onChange={(event) => setAddress(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setAddress(path);
-                list.current?.focus();
-              }
-            }} />
-        </form>
+        <AddressField side={side} place={pane.place} showHidden={showHidden}
+          onNavigate={onPath} focusFiles={() => list.current?.focus()} />
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
           if (!locationsOpen) return;
           if (ftpShortcut && eventShortcut(event) === ftpShortcut) {

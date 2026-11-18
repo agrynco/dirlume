@@ -113,7 +113,7 @@ try {
     document.getElementById(`${side}-address`)?.value &&
     document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
   async function navigate(side, path) {
-    const input = page.getByRole("textbox", { name: `${side} path`, exact: true });
+    const input = page.getByLabel(`${side} path`, { exact: true });
     await input.fill(path);
     await input.press("Enter");
     try {
@@ -126,6 +126,26 @@ try {
   }
   await navigate("left", src);
   await navigate("right", dst);
+  const leftAddress = page.getByLabel("left path", { exact: true });
+  const leftSuggestions = page.getByRole("listbox", { name: "left path suggestions", exact: true });
+  await leftAddress.fill(join(src, "me"));
+  await leftSuggestions.getByRole("option", { name: "measured", exact: true }).waitFor();
+  if (process.env.DIRLUME_ADDRESS_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_ADDRESS_SCREENSHOT, scale: "css" });
+  await leftAddress.press("Tab");
+  assert.equal(await leftAddress.inputValue(), join(src, "measured") + "\\");
+  await leftAddress.press("Enter");
+  const filePane = page.getByRole("region", { name: "left pane", exact: true });
+  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await leftAddress.fill(join(src, "ov"));
+  await leftSuggestions.getByRole("option", { name: "overlap", exact: true }).click();
+  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor();
+  await leftAddress.fill(join(src, "me"));
+  await leftSuggestions.getByRole("option", { name: "measured", exact: true }).waitFor();
+  await leftAddress.press("ArrowDown");
+  await leftSuggestions.getByRole("option", { name: "measured", selected: true }).waitFor();
+  await leftAddress.press("Enter");
+  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await navigate("left", src);
   await page.getByRole("listbox", { name: "left files", exact: true }).focus();
   await page.keyboard.press("Alt+F7");
   const search = page.getByRole("dialog", { name: "Find files", exact: true });
@@ -249,7 +269,6 @@ try {
   assert.match(await guideRow.getAttribute("class"), /marked/);
   await secondRow.click();
 
-  const leftAddress = page.getByRole("textbox", { name: "left path", exact: true });
   await leftAddress.press("Alt+Control+S");
   const optionsDialog = page.getByRole("dialog", { name: "Options", exact: true });
   const sizeBefore = await optionsDialog.boundingBox();
@@ -669,8 +688,8 @@ try {
   await diagram.waitFor();
   assert.equal(await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "View guide.md" }).getAttribute("aria-pressed"), "true");
   await page.keyboard.press("Control+Tab");
-  assert.equal(await page.getByRole("textbox", { name: "left path" }).inputValue(), src);
-  assert.equal(await page.getByRole("textbox", { name: "right path" }).inputValue(), dst);
+  assert.equal(await page.getByLabel("left path").inputValue(), src);
+  assert.equal(await page.getByLabel("right path").inputValue(), dst);
   await left.getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
   await page.getByRole("button", { name: "Options", exact: true }).click();
   await page.getByRole("button", { name: "Appearance", exact: true }).click();

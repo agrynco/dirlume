@@ -60,7 +60,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   const connections = page.getByRole("dialog", { name: "FTP connections", exact: true });
   const remoteRow = (text) => right.getByRole("option", { name: new RegExp("^" + text) });
   const button = (scope, name) => scope.getByRole("button", { name, exact: true });
-  const remotePath = page.getByRole("textbox", { name: "right path" });
+  const remotePath = page.getByLabel("right path", { exact: true });
   const copy = page.getByRole("dialog", { name: "Copy", exact: true });
   const complete = page.getByRole("dialog", { name: "Transfer complete" });
 
@@ -196,7 +196,9 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await assert.rejects(readFile(join(remoteCopy, "файл.txt")), { code: "ENOENT" });
     console.log("Verified saved FTP credentials, navigation, viewing, editing, conflicts, bidirectional copy, rename, and recursive deletion.");
 
-    await remoteRow("saved-folder").dblclick();
+    await remotePath.fill("/start/sav");
+    await rightPane.getByRole("listbox", { name: "right path suggestions", exact: true })
+      .getByRole("option", { name: "saved-folder", exact: true }).click();
     await remoteRow("restored.txt").waitFor();
     await page.keyboard.press("Control+U");
     const savedLocation = { profileId: JSON.parse(stored)[0].id, segments: ["start", "saved-folder"] };
@@ -207,8 +209,8 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     const expectRestoredFolder = async () => {
       const panel = page.getByRole("region", { name: "left pane", exact: true });
       await panel.getByRole("option", { name: /^restored.txt/ }).waitFor();
-      assert.equal(await panel.getByRole("textbox", { name: "left path" }).inputValue(), "/start/saved-folder");
-      assert.equal(await page.getByRole("textbox", { name: "right path" }).inputValue(), source);
+      assert.equal(await panel.getByLabel("left path").inputValue(), "/start/saved-folder");
+      assert.equal(await page.getByLabel("right path").inputValue(), source);
       await waitForSavedLocation();
     };
     await waitForSavedLocation();
@@ -220,7 +222,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     page = await restartDesktop();
     await page.getByRole("region", { name: "left pane", exact: true })
       .getByRole("alert").filter({ hasText: "Could not restore the FTP folder." }).waitFor();
-    assert.equal(await page.getByRole("textbox", { name: "left path" }).inputValue(), destination);
+    assert.equal(await page.getByLabel("left path").inputValue(), destination);
     await waitForSavedLocation();
     await renamePath(unavailable, lastFolder);
     page = await restartDesktop();

@@ -884,7 +884,8 @@ export default function App() {
       <main className="workspace" hidden={panelsHidden}
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
-          <Pane key={side} side={side} active={active === side} pane={panes[side]} entries={entries[side]} locations={locations}
+          <Pane key={side} side={side} active={active === side} showHidden={preferences.hidden}
+            pane={panes[side]} entries={entries[side]} locations={locations}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
