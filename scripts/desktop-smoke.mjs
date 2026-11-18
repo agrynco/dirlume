@@ -15,12 +15,14 @@ await mkdir(src);
 await mkdir(dst);
 await writeFile(join(src, "notes.txt"), "Dirlume\n");
 await writeFile(join(src, "guide.md"), "# Getting started\n\n**Dirlume** on Windows.\n");
+await mkdir(join(src, "measured"));
+await writeFile(join(src, "measured", "data.bin"), Buffer.alloc(12));
 const debuggingPort = await port();
 const child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
   windowsHide: true,
   env: {
     ...process.env,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${debuggingPort}`,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}`,
     WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
   },
 });
@@ -37,6 +39,8 @@ try {
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? await context.waitForEvent("page");
   page.setDefaultTimeout(8000);
+  const pageErrors = [];
+  page.on("pageerror", (error) => { pageErrors.push(error.message); });
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
   await page.waitForFunction(() => ["left", "right"].every((side) =>
     document.getElementById(`${side}-address`)?.value &&
@@ -54,10 +58,15 @@ try {
   }
   await navigate("left", src);
   await navigate("right", dst);
+  await page.getByRole("option", { name: /^measured/ }).click();
+  await page.keyboard.press("F3");
+  await page.getByRole("option", { name: /^measured/ }).getByText("12 B", { exact: true }).waitFor();
   await page.getByRole("option", { name: /^notes.txt/ }).click();
   await page.keyboard.press("F5");
   await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^notes.txt/ }).waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
+  await writeFile(join(src, "outside-change.txt"), "watch me");
+  await page.getByRole("option", { name: /^outside-change.txt/ }).waitFor();
 
   await page.getByRole("button", { name: "Options", exact: true }).click();
   await page.getByLabel("Color scheme").selectOption("light");
@@ -80,6 +89,20 @@ try {
   await page.getByRole("button", { name: "Close", exact: true }).click();
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT });
 
+  await page.getByRole("button", { name: "Terminal", exact: true }).click();
+  const input = page.locator(".xterm-helper-textarea");
+  await input.focus();
+  const terminalText = () => page.locator(".terminal-card").innerText();
+  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("PS "));
+  await input.pressSequentially("if ((Get-Location).Path.EndsWith('from')) { Write-Output ('dirlume-' + 'terminal-ok') }");
+  await input.press("Enter");
+  try {
+    await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("dirlume-terminal-ok"));
+  } catch (error) {
+    throw new Error(`No terminal result. ${await terminalText()} ${pageErrors.join(", ")}`, { cause: error });
+  }
+  await page.getByRole("button", { name: "Close terminal" }).click();
+
   await withServer(async ({ invitation, bytes }) => {
     await page.getByRole("button", { name: "Connect", exact: true }).click();
     await page.getByLabel("Server invitation").fill(invitation);
@@ -90,7 +113,7 @@ try {
     await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^файл.bin/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "файл.bin")), bytes);
   });
-  console.log("Verified the native desktop, local copy, keyboard settings, theme, Markdown and remote download.");
+  console.log("Verified the native desktop, local copy, keyboard settings, theme, Markdown, directory watching, terminal and remote download.");
 } finally {
   await browser?.close();
   await close(child);

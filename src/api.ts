@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface Entry {
   name: string;
@@ -34,6 +34,13 @@ export type RemotePlace = Exclude<Place, { kind: "local" }>;
 export interface KSwitcherPeer {
   id: string;
   name: string;
+}
+
+export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
+export interface SizeResult {
+  name: string;
+  bytes: number;
+  incomplete: boolean;
 }
 
 export type Operation =
@@ -74,6 +81,17 @@ export const api = {
     invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
   downloadKSwitcher: (directory: string, peer: string, path: string, name: string, target: string) =>
     invoke<void>("download_kswitcher", { directory, peer, path, name, target }),
+  openTerminal: (id: number, directory: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
+    invoke<void>("open_terminal", { id, directory, rows, cols, output }),
+  writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
+  resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
+  closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),
+  watchDirectory: (id: number, path: string, changes: Channel<null>) =>
+    invoke<void>("watch_directory", { id, path, changes }),
+  unwatchDirectory: (id: number) => invoke<void>("unwatch_directory", { id }),
+  measureFolders: (id: number, directory: string, names: string[], output: Channel<SizeResult>) =>
+    invoke<void>("measure_folders", { id, directory, names, output }),
+  cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
 };
 
 export function placePath(place: Place) {

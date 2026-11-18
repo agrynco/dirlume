@@ -106,6 +106,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .app { display: grid; grid-template-rows: 52px minmax(0, 1fr) 44px 28px; height: 100%; }
+.app.has-terminal { grid-template-rows: 52px minmax(0, 1fr) min(30vh, 250px) 44px 28px; }
 .topbar, .top-actions, .brand, .pane-title, .pane-tools, .statusbar { display: flex; align-items: center; }
 .topbar { justify-content: space-between; border-bottom: 1px solid var(--line); padding: 0 16px; background: var(--surface); }
 .brand { gap: 9px; }
@@ -207,6 +208,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-name .link-icon { width: 12px; margin-left: -3px; }
 .file-size, .file-date { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
 .file-size { text-align: right; padding-right: 5px; }
+.file-size svg { width: 13px; height: 13px; vertical-align: text-bottom; }
 .file-date { padding-left: 11px; }
 .pane-empty { padding: 22px 10px; color: var(--muted); text-align: center; }
 .pane-error { margin: 0; padding: 6px 10px; background: var(--danger-bg); color: var(--danger); overflow-wrap: anywhere; }
@@ -231,6 +233,11 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .statusbar span:last-child { flex: none; }
 .statusbar.danger span:first-child { color: var(--danger); }
 .statusbar svg { display: inline-block; vertical-align: text-bottom; }
+.terminal-card { display: flex; flex-direction: column; min-height: 0; margin: 0 12px 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--canvas); overflow: hidden; }
+.terminal-card header { display: flex; align-items: center; gap: 12px; min-height: 33px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); background: var(--raised); }
+.terminal-card h2 { margin: 0; font-size: 13px; font-weight: 650; }
+.terminal-card header span { flex: 1; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.terminal-surface { flex: 1; min-height: 0; margin: 6px 8px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(1turn); } }
 

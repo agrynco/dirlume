@@ -1,4 +1,4 @@
-import { api, windowsClient, type Entry, type Listing, type Place } from "./api";
+import { api, windowsClient, type Entry, type Listing, type Place, type SizeResult } from "./api";
 
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified";
@@ -8,6 +8,8 @@ export interface PaneState {
   entries: Entry[];
   selected: string | null;
   marked: string[];
+  sizes: ReadonlyMap<string, SizeResult>;
+  measuring: string[];
   history: Place[];
   position: number;
   filter: string;
@@ -18,7 +20,7 @@ export interface PaneState {
 }
 
 export const emptyPane: PaneState = {
-  place: null, entries: [], selected: null, marked: [], history: [], position: -1,
+  place: null, entries: [], selected: null, marked: [], sizes: new Map(), measuring: [], history: [], position: -1,
   filter: "", loading: false, omitted: 0, error: "", sort: { column: "name", asc: true },
 };
 
@@ -32,7 +34,8 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
     .sort((a, b) => {
       if (a.directory !== b.directory) return a.directory ? -1 : 1;
       const byName = collator.compare(a.name, b.name);
-      const order = column === "name" ? byName : (a[column] ?? -1) - (b[column] ?? -1) || byName;
+      const metric = (entry: Entry) => column === "size" ? (pane.sizes.get(entry.name)?.bytes ?? entry.size) : entry.modified;
+      const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
       return asc ? order : -order;
     });
 }
@@ -84,6 +87,8 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     omitted: listing.omitted,
     selected: samePlace && pane.selected && retained.has(pane.selected) ? pane.selected : null,
     marked: samePlace ? pane.marked.filter((name) => retained.has(name)) : [],
+    sizes: samePlace ? new Map([...pane.sizes].filter(([name]) => retained.has(name))) : new Map(),
+    measuring: samePlace ? pane.measuring : [],
     filter: samePlace ? pane.filter : "",
     history,
     position: typeof action === "number" ? action : history === pane.history ? pane.position : history.length - 1,

@@ -69,6 +69,10 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   const title = pane.place ? folderLabel(pane.place) : side === "left" ? "Left pane" : "Right pane";
   const isRemote = pane.place && pane.place.kind !== "local";
   const folders = entries.reduce((count, entry) => count + Number(entry.directory), 0);
+  const markedSet = new Set(pane.marked);
+  const marked = entries.filter(({ name }) => markedSet.has(name));
+  const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
+  const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
   return (
     <section id={`${side}-pane`} className={`pane${active ? " active" : ""}`} aria-label={`${side} pane`}
       onPointerDown={activate} onFocus={activate}>
@@ -150,17 +154,20 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
       </div>
       <div id={`${side}-files`} ref={list} className="file-list" role="listbox" aria-label={`${side} files`}
         aria-busy={pane.loading} aria-activedescendant={selected < 0 ? undefined : `${side}-file-${selected}`} tabIndex={0}>
-        {entries.map((entry, index) => (
-          <div id={`${side}-file-${index}`} className={`file-row${pane.marked.includes(entry.name) ? " marked" : ""}`}
+        {entries.map((entry, index) => {
+          const size = pane.sizes.get(entry.name);
+          const measuring = pane.measuring.includes(entry.name);
+          return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
             key={entry.name} role="option" aria-selected={index === selected} title={entry.name}
             onClick={() => { onRow(entry); list.current?.focus({ preventScroll: true }); }}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> : <File />}
               <span>{entry.name}</span>{entry.link && <Link2 className="link-icon" aria-label="Link" />}</span>
-            <span className="file-size">{entry.directory ? "–" : formatSize(entry.size)}</span>
+            <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label="Measuring folder" /> :
+              size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
             <span className="file-date">{formatDate(entry.modified)}</span>
-          </div>
-        ))}
+          </div>;
+        })}
         {!entries.length && (
           <div className="pane-empty">
             {pane.loading ? "Loading…" : pane.error ? "Open another location to continue." :
@@ -171,7 +178,8 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
       {pane.error && <p className="pane-error" role="alert">{pane.error}</p>}
       <footer className="pane-footer">
         <span>{folders} {folders === 1 ? "folder" : "folders"}<span className="dot" />{entries.length - folders} {entries.length - folders === 1 ? "file" : "files"}</span>
-        <span>{pane.marked.length ? `${pane.marked.length} marked` : pane.omitted ? `${pane.omitted} unavailable` : ""}</span>
+        <span>{marked.length ? `${marked.length} marked · ${complete ? "" : "≥ "}${formatSize(markedBytes)}` :
+          pane.omitted ? `${pane.omitted} unavailable` : ""}</span>
       </footer>
     </section>
   );

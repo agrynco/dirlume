@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
-  ArrowDownToLine, ArrowLeftRight, Copy, Eye, EyeOff, FileDiff, FolderPlus, FolderTree,
-  LoaderCircle, Pencil, Server, Settings2, Trash2,
+  ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FolderPlus, FolderTree,
+  Calculator, LoaderCircle, Pencil, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
 } from "lucide-react";
-import { isTauri } from "@tauri-apps/api/core";
+import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, type Entry, type KSwitcherPeer, type Listing, type Operation, type Place, type QuickLocation, type RemotePlace } from "./api";
+import { api, describeError, type Entry, type KSwitcherPeer, type Listing, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { Pane } from "./Pane";
 import { Settings } from "./Settings";
@@ -15,6 +15,8 @@ import {
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, eventShortcut, persistPreferences, readPreferences, showShortcut, type Command } from "./preferences";
+
+const TerminalPanel = lazy(() => import("./TerminalPanel"));
 
 type ActionModal =
   | { kind: "mkdir" | "rename"; path: string; name: string }
@@ -43,9 +45,14 @@ export default function App() {
   const [preferences, setPreferences] = useState(readPreferences);
   const [modal, setModal] = useState<Modal | null>(null);
   const [busy, setBusy] = useState(false);
+  const [terminal, setTerminal] = useState<{ id: number; path: string } | null>(null);
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
   const request = useRef({ left: 0, right: 0 });
   const running = useRef(false);
+  const nextSession = useRef(0);
+  const watchId = useRef(0);
+  const measureId = useRef(0);
+  const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
   const latest = useRef(panes);
   latest.current = panes;
   const connected = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
@@ -63,7 +70,16 @@ export default function App() {
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
   }, []);
 
+  const cancelScan = useCallback((side: Side) => {
+    const previous = scans.current[side];
+    if (previous === null) return;
+    scans.current[side] = null;
+    void api.cancelMeasurement(previous).catch(() => {});
+    updatePane(side, (pane) => ({ ...pane, measuring: [] }));
+  }, [updatePane]);
+
   const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | number = "push") => {
+    if (action !== "refresh") cancelScan(side);
     const ticket = ++request.current[side];
     updatePane(side, (pane) => ({ ...pane, loading: true, error: "" }));
     try {
@@ -74,7 +90,7 @@ export default function App() {
         updatePane(side, (pane) => ({ ...pane, loading: false, error: describeError(error) }));
       }
     }
-  }, [updatePane]);
+  }, [cancelScan, updatePane]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +108,38 @@ export default function App() {
     });
     return () => { cancelled = true; };
   }, [load]);
+
+  const leftPath = panes.left.place?.kind === "local" ? panes.left.place.path : null;
+  const rightPath = panes.right.place?.kind === "local" ? panes.right.place.path : null;
+  useEffect(() => {
+    const locations = [["left", leftPath], ["right", rightPath]] as const;
+    const stopWatching = locations.map(([side, path]) => {
+      if (!path) return () => {};
+      const id = ++watchId.current;
+      let stopped = false;
+      let timer: number | undefined;
+      const changes = new Channel<null>();
+      const refreshWatchedFolder = () => {
+        const current = latest.current[side];
+        if (stopped || current.place?.kind !== "local" || current.place.path !== path) return;
+        if (current.loading) timer = window.setTimeout(refreshWatchedFolder, 150);
+        else void load(side, current.place, "refresh");
+      };
+      changes.onmessage = () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(refreshWatchedFolder, 150);
+      };
+      const started = api.watchDirectory(id, path, changes);
+      void started.catch(() => {});
+      return () => {
+        stopped = true;
+        changes.onmessage = () => {};
+        window.clearTimeout(timer);
+        void started.then(() => api.unwatchDirectory(id)).catch(() => {});
+      };
+    });
+    return () => stopWatching.forEach((stop) => stop());
+  }, [leftPath, rightPath, load]);
 
   useEffect(() => {
     persistPreferences(preferences);
@@ -118,6 +166,7 @@ export default function App() {
   }
 
   function routeRemote(side: Side, place: RemotePlace, listing: Listing) {
+    cancelScan(side);
     ++request.current[side];
     const previous = connected.current[side];
     if (previous !== null) void api.disconnect(previous).catch(() => {});
@@ -221,6 +270,35 @@ export default function App() {
     return place?.kind === "local" && entry && !entry.directory ? { path: place.path, name: entry.name } : null;
   }
 
+  const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && pane.marked.includes(entry.name));
+  const measureEntries = markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
+
+  function measure() {
+    if (!local || pane.loading || !measureEntries.length) return;
+    cancelScan(active);
+    const id = ++measureId.current;
+    scans.current[active] = id;
+    const names = measureEntries.map(({ name }) => name);
+    updatePane(active, (pane) => ({ ...pane, measuring: names }));
+    const output = new Channel<SizeResult>();
+    output.onmessage = (result) => {
+      if (scans.current[active] !== id) return;
+      updatePane(active, (pane) => ({
+        ...pane, sizes: new Map(pane.sizes).set(result.name, result),
+        measuring: pane.measuring.filter((name) => name !== result.name),
+      }));
+    };
+    void api.measureFolders(id, local.path, names, output).catch((error: unknown) => {
+      if (scans.current[active] === id) setStatus({ text: describeError(error), error: true });
+    }).finally(() => {
+      output.onmessage = () => {};
+      if (scans.current[active] === id) {
+        scans.current[active] = null;
+        updatePane(active, (pane) => ({ ...pane, measuring: [] }));
+      }
+    });
+  }
+
   function perform(command: Command) {
     if (command in rowCommands) {
       const items = entries[active];
@@ -235,7 +313,9 @@ export default function App() {
       case "switchPane": focus(opposite(active)); break;
       case "swap": {
         if (panes.left.loading || panes.right.loading || busy) break;
-        setPanes({ left: panes.right, right: panes.left });
+        cancelScan("left");
+        cancelScan("right");
+        setPanes((current) => ({ left: current.right, right: current.left }));
         connected.current = { left: connected.current.right, right: connected.current.left };
         focus(opposite(active));
         break;
@@ -254,6 +334,11 @@ export default function App() {
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": setModal({ kind: "settings" }); break;
+      case "terminal":
+        if (terminal) { setTerminal(null); focus(active); }
+        else if (local) setTerminal({ id: ++nextSession.current, path: local.path });
+        else setStatus({ text: "Choose a local folder to open a terminal.", error: true });
+        break;
       case "connect": setModal({ kind: "connect", side: active }); break;
       case "mark": {
         if (current) updatePane(active, (pane) => ({
@@ -276,8 +361,13 @@ export default function App() {
           setModal({ kind: "recycle", path: local.path, names: names.length ? names : [current.name] });
         }
         break;
+      case "cancelMeasure": cancelScan(active); break;
       case "view":
       case "edit": {
+        if (command === "view" && measureEntries.length) {
+          measure();
+          break;
+        }
         const file = fileFor(active);
         if (file) setModal({ kind: command, ...file });
         break;
@@ -296,10 +386,10 @@ export default function App() {
   function keyDown(event: KeyboardEvent) {
     if (modal || event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
-    if (target.closest("input, select, textarea, [contenteditable]")) return;
     const shortcut = eventShortcut(event);
     const command = shortcut && commandNames.find((command) => preferences.shortcuts[command] === shortcut);
     if (!command || command === "saveText") return;
+    if (target.closest("input, select, textarea, [contenteditable], .terminal-card") && command !== "terminal") return;
     if ((command in rowCommands || command === "switchPane" || command === "mark" || command === "open") &&
         !target.closest(".file-list")) return;
     event.preventDefault();
@@ -311,7 +401,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" onKeyDown={keyDown}>
+    <div className={`app${terminal ? " has-terminal" : ""}`} onKeyDown={keyDown}>
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
@@ -320,6 +410,8 @@ export default function App() {
           <button className="icon-button" aria-label="Swap panes" title={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></button>
           <button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
             title={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</button>
+          <button className="icon-button" aria-label="Terminal" aria-pressed={terminal !== null}
+            title={keyLabel("terminal")} onClick={() => perform("terminal")}><TerminalIcon /></button>
           <button className="icon-button" aria-label="Options" title={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></button>
         </div>
       </header>
@@ -333,15 +425,24 @@ export default function App() {
             onRemote={() => setModal({ kind: "connect", side })} />
         ))}
       </main>
+      {terminal && (
+        <Suspense fallback={<div className="terminal-card pane-empty">Opening terminal…</div>}>
+          <TerminalPanel key={terminal.id} session={terminal} theme={preferences.theme} shortcut={preferences.shortcuts.terminal}
+            onClose={() => { setTerminal(null); focus(active); }} />
+        </Suspense>
+      )}
       <nav className="actionbar" aria-label="File actions">
         {([
-          { command: "view", label: "View", Icon: Eye, disabled: !local || !current || current.directory },
+          { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
+            disabled: !local || !current || (current.directory && !measureEntries.length) },
           { command: "edit", label: "Edit", Icon: Pencil, disabled: !local || !current || current.directory },
           { command: "copy", label: local ? "Copy" : "Download", Icon: local ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
           { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: !local || !canTransfer || busy },
+          { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !current || busy },
           { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || busy },
           { command: "recycle", label: "Trash", Icon: Trash2, disabled: !local || !current || busy },
           { command: "compare", label: "Compare", Icon: FileDiff, disabled: !local },
+          { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
         ] as const).map(({ command, label, Icon, disabled }) => (
           <button key={command} disabled={disabled} onClick={() => perform(command)} title={keyLabel(command)}>
             <Icon /><span>{label}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}

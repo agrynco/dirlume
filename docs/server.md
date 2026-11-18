@@ -1,25 +1,25 @@
-# Окремий сервер Dirlume
+# Standalone Dirlume server
 
-На машині з файлами розпакуйте `dirlume-server` (`dirlume-server.exe` у Windows). Виберіть папку для спільного доступу та окремий приватний каталог для стану сервера. Стан містить приватний ключ і токен. Використовуйте окремий каталог для кожної адреси сервера та дозволяйте доступ до нього тільки обліковому запису служби.
+Extract `dirlume-server` (`dirlume-server.exe` on Windows) on the computer that hosts the files. Choose one directory to share and a separate private state directory. The state contains a private key and an access token. Give only the service account access to the state directory, and use a separate state directory for each server address.
 
-Для локальної перевірки залиште типову адресу `localhost:45179`. Приклад запуску в локальній мережі
+The default endpoint is `localhost:45179` for local use. To listen on the local network, replace the IP address and paths in this example with your own.
 
 ```sh
 dirlume-server serve --root /srv/shared --state-dir /var/lib/dirlume --bind 0.0.0.0:45179 --host 192.168.1.10
 ```
 
-`--host` — IP або DNS-ім’я машини, яке використовуватимуть клієнти. Підставте власну адресу. У Windows використовуйте абсолютні шляхи Windows і запускайте `dirlume-server.exe`. Для підключення з іншої машини необхідно дозволити вхідний TCP для порту, заданого в `--bind`, на потрібному мережевому інтерфейсі.
+`--host` is the IP or DNS name clients use to connect. On Windows, provide absolute Windows paths and run `dirlume-server.exe`. Allow incoming TCP on the port and network interface selected by `--bind` for clients on other computers.
 
-Після запуску виконайте локально
+Issue an invitation on the host after starting the server.
 
 ```sh
 dirlume-server invite --state-dir /var/lib/dirlume
 ```
 
-Передайте отримане запрошення через приватний канал. Воно містить адресу, TLS-сертифікат і токен доступу до папки. У Dirlume відкрийте **Connect**, вставте запрошення й натисніть **Connect**. Файли завантажуються через **Download** в локальну папку другої панелі. Запрошення зберігається в пам’яті до закриття застосунку. Для зміни адреси або відкликання запрошення зупиніть сервер і запустіть його з новим окремим каталогом стану.
+Share the invitation privately. It includes the address, TLS certificate, and token for reading the shared folder. In Dirlume, open **Connect**, paste the invitation, and choose **Connect**. **Download** copies files to the local folder in the other pane. The desktop app keeps the invitation in memory for the session. To change the address or revoke an invitation, stop the server and restart it with a new state directory.
 
-## Постійна робота
+## Run continuously
 
-- **Ubuntu.** Використовуйте службу systemd з окремим непривілейованим обліковим записом, абсолютною командою `ExecStart` і `Restart=on-failure`. Дайте їй права читання спільної папки й запису в каталог стану. Служба системного рівня може запускатися до входу користувача.
-- **macOS.** Використовуйте LaunchDaemon для запуску під час завантаження або LaunchAgent для запуску разом із сесією користувача. Вкажіть абсолютний шлях до бінарного файла й кожен аргумент окремим елементом `ProgramArguments`, додайте `RunAtLoad` і за потреби `KeepAlive`.
-- **Windows.** У Планувальнику завдань задайте запуск програми з аргументами `serve …` під час старту або входу й увімкніть повторний запуск після помилки. Для роботи без входу використовуйте завдання з відповідним обліковим записом і правами до обох каталогів.
+- **Ubuntu.** Use a systemd service under an unprivileged account. Set an absolute `ExecStart` and `Restart=on-failure`. Give the account read access to the shared folder and write access to its state directory. A system service can start before login.
+- **macOS.** Use a LaunchDaemon to start at boot or a LaunchAgent to start at login. In `ProgramArguments`, put the absolute executable path and each argument in its own entry. Enable `RunAtLoad` and use `KeepAlive` to restart the process.
+- **Windows.** In Task Scheduler, create a task to run the executable with the `serve` arguments at startup or login. Set the task to restart after failure. To run before login, use a service account with access to both directories and configure the task to run while the account is signed out.

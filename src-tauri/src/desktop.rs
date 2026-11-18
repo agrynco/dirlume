@@ -22,15 +22,16 @@ use tauri::State;
 use crate::{
     kswitcher, local,
     protocol::{Invitation, RemoteListing, RemotePath},
+    terminal, watch,
 };
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
-fn message(error: impl std::fmt::Display) -> String {
+pub(crate) fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     task: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     tauri::async_runtime::spawn_blocking(task)
@@ -435,6 +436,9 @@ async fn download_kswitcher(
 pub fn run() {
     tauri::Builder::default()
         .manage(Connections::default())
+        .manage(terminal::Terminals::default())
+        .manage(watch::Watches::default())
+        .manage(watch::Measurements::default())
         .invoke_handler(tauri::generate_handler![
             locations,
             list_directory,
@@ -449,7 +453,15 @@ pub fn run() {
             has_kswitcher_bridge,
             kswitcher_peers,
             list_kswitcher,
-            download_kswitcher
+            download_kswitcher,
+            terminal::open_terminal,
+            terminal::write_terminal,
+            terminal::resize_terminal,
+            terminal::close_terminal,
+            watch::watch_directory,
+            watch::unwatch_directory,
+            watch::measure_folders,
+            watch::cancel_measurement
         ])
         .run(tauri::generate_context!())
         .expect("cannot start Dirlume");

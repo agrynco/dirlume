@@ -66,6 +66,10 @@ jobs:
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default-features --features server --bin dirlume-server
       - name: Test two-process TLS access
         run: node scripts/server-smoke.mjs
+      - name: Prepare Windows WebView2 runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/ensure-webview.ps1
       - name: Test Windows desktop application
         if: runner.os == 'Windows'
         run: node scripts/desktop-smoke.mjs

@@ -328,6 +328,46 @@ pub fn move_item(source: &Path, target: PathBuf) -> io::Result<()> {
     })
 }
 
+#[cfg(feature = "desktop")]
+pub fn folder_size(path: &Path, cancelled: &std::sync::atomic::AtomicBool) -> Option<(u64, bool)> {
+    use std::sync::atomic::Ordering;
+
+    let mut bytes = 0u64;
+    let mut incomplete = false;
+    let mut stack = vec![path.to_owned()];
+    while let Some(path) = stack.pop() {
+        if cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            incomplete = true;
+            continue;
+        };
+        if is_link(&metadata) {
+            continue;
+        }
+        if metadata.is_file() {
+            bytes = bytes.saturating_add(metadata.len());
+        } else if metadata.is_dir() {
+            match fs::read_dir(&path) {
+                Ok(entries) => {
+                    for entry in entries {
+                        if cancelled.load(Ordering::Relaxed) {
+                            return None;
+                        }
+                        match entry {
+                            Ok(entry) => stack.push(entry.path()),
+                            Err(_) => incomplete = true,
+                        }
+                    }
+                }
+                Err(_) => incomplete = true,
+            }
+        }
+    }
+    Some((bytes, incomplete))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,5 +411,21 @@ mod tests {
             assert!(name_component(name).is_err(), "{name:?}");
         }
         assert!(name_component("файл.txt").is_ok());
+    }
+
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn measures_nested_files_and_honors_cancellation() {
+        use std::sync::atomic::AtomicBool;
+
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("nested")).unwrap();
+        fs::write(temp.path().join("first.txt"), b"123").unwrap();
+        fs::write(temp.path().join("nested/second.txt"), b"4567").unwrap();
+        assert_eq!(
+            folder_size(temp.path(), &AtomicBool::new(false)),
+            Some((7, false))
+        );
+        assert_eq!(folder_size(temp.path(), &AtomicBool::new(true)), None);
     }
 }
