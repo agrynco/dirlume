@@ -1,18 +1,17 @@
-import { useEffect, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { wheelShortcut } from "./preferences";
+import { viewFonts, type ViewFont, type ZoomViewFont } from "./viewFonts";
 
 const pixelsPerStep = 60;
 
-export function useFontZoom(ref: RefObject<HTMLElement | null>, binding: string) {
-  const [level, setLevel] = useState(0);
-
+export function useFontZoom(ref: RefObject<HTMLElement | null>, binding: string, view: ViewFont, onZoom: ZoomViewFont) {
   useEffect(() => {
     const element = ref.current;
     if (!element || !binding) return;
     let pending = 0;
     let lastWheel = 0;
 
-    function zoom(event: WheelEvent) {
+    const zoom = (event: WheelEvent) => {
       if (!event.deltaY || wheelShortcut(event) !== binding ||
         (event.target instanceof Element && event.target.closest("dialog"))) return;
       event.preventDefault();
@@ -24,13 +23,11 @@ export function useFontZoom(ref: RefObject<HTMLElement | null>, binding: string)
       pending += event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? event.deltaY : direction * pixelsPerStep;
       if (Math.abs(pending) < pixelsPerStep) return;
       pending = 0;
-      setLevel((current) => Math.min(12, Math.max(-3, current - direction)));
-    }
+      const base = parseFloat(getComputedStyle(element).getPropertyValue(viewFonts[view].size));
+      if (Number.isFinite(base)) onZoom(view, -direction, base);
+    };
 
     element.addEventListener("wheel", zoom, { passive: false });
     return () => element.removeEventListener("wheel", zoom);
-  }, [ref, binding]);
-
-  const scale = 1 + level / 12;
-  return { scale, style: { "--font-scale": scale } as CSSProperties };
+  }, [ref, binding, view, onZoom]);
 }

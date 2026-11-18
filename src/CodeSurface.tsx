@@ -17,12 +17,12 @@ const palette = syntaxHighlighting(HighlightStyle.define([
 ]));
 const languageChoices = [...languages].sort((a, b) => a.name.localeCompare(b.name));
 
-export default function CodeSurface({ fileName, editing, locked, active, fontScale, value, onChange }: {
+export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, onChange }: {
   fileName: string;
   editing: boolean;
   locked: boolean;
   active: boolean;
-  fontScale: number;
+  fontSize?: number;
   value: string;
   onChange: (text: string) => void;
 }) {
@@ -70,7 +70,7 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSca
 
   useEffect(() => {
     if (active) editor.current?.requestMeasure();
-  }, [active, fontScale]);
+  }, [active, fontSize]);
 
   useEffect(() => {
     if (active && editing) editor.current?.focus();

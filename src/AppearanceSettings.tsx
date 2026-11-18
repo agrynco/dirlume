@@ -10,9 +10,29 @@ import type { Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { Dialog } from "./Dialog";
 import { ColorPicker } from "./ColorPicker";
+import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts } from "./viewFonts";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const baseThemes = ["dark", "light", "slate"] as const;
+
+export function ViewFontSettings({ preferences, onChange }: {
+  preferences: Preferences;
+  onChange: (value: Preferences) => void;
+}) {
+  return <div className="dialog-body appearance-settings">
+    <p className="appearance-hint">Font sizes are in pixels. Clear a size to use the scheme default.</p>
+    <div className="font-settings">
+      {viewFontKeys.map((view) => (
+        <label className="view-font-setting" key={view}>
+          <span>{viewFonts[view].label}</span>
+          <FontSizeInput label={viewFonts[view].label} size={preferences.viewFontSizes[view]}
+            min={minViewFontSize} max={maxViewFontSize}
+            onChange={(size) => onChange({ ...preferences, viewFontSizes: { ...preferences.viewFontSizes, [view]: size } })} />
+        </label>
+      ))}
+    </div>
+  </div>;
+}
 
 export function AppearanceSettings({ section, preferences, onChange }: {
   section: AppearanceSection;
@@ -168,9 +188,7 @@ function FontFields({ group, font, disabled, onChange }: {
   onChange: (value?: Font) => void;
 }) {
   const label = fontGroups[group].label;
-  const [sizeText, setSizeText] = useState(String(font?.size ?? ""));
   const [choosing, setChoosing] = useState(false);
-  useEffect(() => setSizeText(String(font?.size ?? "")), [font?.size]);
 
   return (
     <fieldset className="font-setting">
@@ -185,16 +203,8 @@ function FontFields({ group, font, disabled, onChange }: {
           title="Browse installed fonts" onClick={() => setChoosing(true)}><ChevronDown /></Button>
       </div>
       <label className="field">Size (px)
-        <input aria-label={`${label} font size`} type="number" min={minFontSize} max={maxFontSize}
-          value={sizeText} placeholder="Default" disabled={disabled} onBlur={() => setSizeText(String(font?.size ?? ""))}
-          onChange={(event) => {
-            const { value, valueAsNumber } = event.target;
-            setSizeText(value);
-            if (!value) onChange({ ...font, size: undefined });
-            else if (Number.isInteger(valueAsNumber) && valueAsNumber >= minFontSize && valueAsNumber <= maxFontSize) {
-              onChange({ ...font, size: valueAsNumber });
-            }
-          }} />
+        <FontSizeInput label={label} size={font?.size} min={minFontSize} max={maxFontSize} disabled={disabled}
+          onChange={(size) => onChange({ ...font, size })} />
       </label>
       <Button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()} font`}
         title="Reset font" disabled={disabled || (!font?.family && !font?.size)}
@@ -203,6 +213,28 @@ function FontFields({ group, font, disabled, onChange }: {
         onChoose={(family) => { onChange({ ...font, family }); setChoosing(false); }} />}
     </fieldset>
   );
+}
+
+function FontSizeInput({ label, size, min, max, disabled, onChange }: {
+  label: string;
+  size?: number;
+  min: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (size?: number) => void;
+}) {
+  const [text, setText] = useState(String(size ?? ""));
+  useEffect(() => setText(String(size ?? "")), [size]);
+
+  return <input aria-label={`${label} font size`} type="number" min={min} max={max}
+    value={text} placeholder="Default" disabled={disabled} onBlur={() => setText(String(size ?? ""))}
+    onChange={(event) => {
+      const { value, valueAsNumber, validity } = event.target;
+      setText(value);
+      if (validity.badInput) return;
+      if (!value) onChange();
+      else if (Number.isInteger(valueAsNumber) && valueAsNumber >= min && valueAsNumber <= max) onChange(valueAsNumber);
+    }} />;
 }
 
 function FontPicker({ current, onClose, onChoose }: {

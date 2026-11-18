@@ -23,6 +23,7 @@ import {
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, readPreferences, showShortcut, type Command } from "./preferences";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
+import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
@@ -265,6 +266,15 @@ export default function App() {
     persistPreferences(preferences);
   }, [preferences]);
 
+  const zoomViewFont: ZoomViewFont = useCallback((view, change, base) => {
+    setPreferences((current) => {
+      const previous = current.viewFontSizes[view] ?? base;
+      const size = Math.max(minViewFontSize, Math.min(maxViewFontSize, previous + change));
+      if (size === previous) return current;
+      return { ...current, viewFontSizes: { ...current.viewFontSizes, [view]: size } };
+    });
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("dirlume.command-history", JSON.stringify(historyItems));
   }, [historyItems]);
@@ -308,13 +318,16 @@ export default function App() {
     });
   }
 
-  function openDocument(file: NamedFile, editing: boolean, anchor?: MarkdownAnchor) {
-    const existing = documents.find((item) => item.editing === editing && item.file.name === file.name &&
+  function openDocument(file: NamedFile, editing: boolean, anchor?: MarkdownAnchor, replaceId?: number) {
+    const existing = documents.find((item) => (replaceId === undefined || item.id === replaceId) &&
+      item.editing === editing && item.file.name === file.name &&
       item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
       (file.place.kind === "local" || sameConnection(item.file.place, file.place)));
-    const id = existing?.id ?? ++nextDocument.current;
+    const id = existing?.id ?? replaceId ?? ++nextDocument.current;
     if (!existing) {
-      setDocuments((current) => [...current, { id, file, editing }]);
+      const opened = { id, file, editing };
+      setDocuments((current) => replaceId === undefined ? [...current, opened] :
+        current.map((item) => item.id === replaceId ? opened : item));
     }
     setLinkedAnchor(anchor ? { id, anchor } : null);
     selectDocument(id);
@@ -912,7 +925,8 @@ export default function App() {
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
-            ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont} />
+            ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont}
+            fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
         <div className="pane-divider" role="separator" aria-label="Pane divider" aria-orientation="vertical"
           aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
@@ -932,12 +946,14 @@ export default function App() {
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
         {documents.map(({ id, file, editing }) => (
-          <TextWindow key={id} file={file} editing={editing} active={activeDocument === id} theme={theme}
+          <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
+            file={file} editing={editing} active={activeDocument === id} theme={theme}
             saveShortcut={preferences.shortcuts.saveText} alternateSaveShortcut={preferences.shortcuts.saveTextAlternate}
             closeShortcut={preferences.shortcuts.closeText} cancelShortcut={preferences.shortcuts.cancelText}
             hexShortcut={preferences.shortcuts.viewAsHex} zoomShortcut={preferences.shortcuts.zoomFont}
+            fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             anchor={linkedAnchor?.id === id ? linkedAnchor.anchor : null}
-            onOpenDocument={(target, anchor) => openDocument(target, false, anchor)}
+            onOpenDocument={(target, newTab, anchor) => openDocument(target, false, anchor, newTab || editing ? undefined : id)}
             onDirtyChange={(dirty) => {
               if (dirty) dirtyDocuments.current.add(id);
               else dirtyDocuments.current.delete(id);

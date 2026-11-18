@@ -2,7 +2,7 @@ import { Button } from "./Button";
 import { useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
 import { Dialog } from "./Dialog";
-import { AppearanceSettings, type AppearanceSection } from "./AppearanceSettings";
+import { AppearanceSettings, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
 import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { windowsClient } from "./api";
@@ -10,13 +10,15 @@ import {
   commandNames, commands, commandScope, defaultBindings, eventShortcut, showShortcut, wheelBindings,
   type Command, type Preferences, type Provider,
 } from "./preferences";
+import { viewFonts } from "./viewFonts";
 
-type Page = AppearanceSection | "general" | "shortcuts";
+type Page = AppearanceSection | "viewFonts" | "general" | "shortcuts";
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
     id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors).join(" "),
   })),
   { id: "fonts" as const, label: "Fonts", terms: Object.values(fontGroups).map(({ label }) => label).join(" ") + " family size installed" },
+  { id: "viewFonts" as const, label: "View font sizes", terms: Object.values(viewFonts).map(({ label }) => label).join(" ") + " zoom wheel" },
 ];
 
 export function Settings({ preferences: saved, onChange: applyPreferences, onClose }: {
@@ -131,6 +133,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             </label>
           )}
         </div>
+      ) : page === "viewFonts" ? (
+        <ViewFontSettings preferences={preferences} onChange={onChange} />
       ) : isAppearance ? (
         <AppearanceSettings section={page} preferences={preferences} onChange={onChange} />
       ) : (

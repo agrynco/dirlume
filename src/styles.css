@@ -196,7 +196,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   background: var(--panel-bg);
   color: var(--panel-ink);
   font-family: var(--panel-font);
-  font-size: calc(var(--panel-size) * var(--font-scale, 1));
+  font-size: var(--view-font-size, var(--panel-size));
   border: 1px solid var(--line);
   border-radius: 9px;
 }
@@ -517,6 +517,9 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .preview-file-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .preview-file-types .preview-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-fonts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.preview-view-fonts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; margin: 0; padding: 8px 10px; }
+.preview-view-fonts dt { color: var(--muted); }
+.preview-view-fonts dd { margin: 0; overflow-wrap: anywhere; }
 .preview-code { margin: 0; padding: 8px 10px; background: var(--text-bg); color: var(--text-ink); font: var(--mono-size)/1.4 var(--mono); overflow: auto; }
 .preview-dialog { padding: 8px 10px; background: var(--dialog-bg); color: var(--dialog-ink); font: var(--dialog-size)/1.35 var(--dialog-font); }
 .preview-field { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--dialog-input); margin-top: 5px; }
@@ -592,6 +595,8 @@ button.color-swatch {
 .font-picker { display: grid; gap: 10px; }
 .font-setting input { width: 100%; }
 .font-setting .icon-button { margin-bottom: 3px; }
+.view-font-setting { display: grid; grid-template-columns: minmax(0, 1fr) 94px; gap: 8px; align-items: center; }
+.view-font-setting input { width: 100%; }
 .shortcut-list { min-height: 0; overflow: auto; padding: 4px 14px; scrollbar-width: thin; }
 .shortcut-setting { display: grid; grid-template-columns: 1fr 138px 29px; gap: 8px; align-items: center; min-height: 40px; border-bottom: 1px solid var(--subtle); }
 .shortcut-setting:last-child { border-bottom: 0; }
@@ -600,7 +605,7 @@ button.color-swatch {
 .text-toolbar, .comparison-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); }
 .text-toolbar span { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
 .text-view, .code-surface, .markdown { flex: 1; margin: 0 14px 12px; min-height: 0; overflow: auto; padding: 11px; border: 1px solid var(--line); background: var(--text-bg); color: var(--text-ink); border-radius: var(--radius); }
-.text-view, .code-surface, .markdown code { font: calc(var(--mono-size) * var(--font-scale, 1))/1.65 var(--mono); tab-size: 4; }
+.text-view, .code-surface, .markdown code { font: var(--view-font-size, var(--mono-size))/1.65 var(--mono); tab-size: 4; }
 .text-view { white-space: pre-wrap; overflow-wrap: anywhere; }
 .source-surface { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .syntax-toolbar label, .hex-toolbar form { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -623,7 +628,7 @@ button.color-swatch {
 .mermaid-diagram { display: block; max-width: 100%; max-height: none; margin: 16px auto; }
 .diagram-error { white-space: pre-wrap; padding: 10px; background: var(--danger-bg); color: var(--danger); }
 .footer-message { margin-right: auto; color: var(--muted); }
-.markdown { padding-inline: 18px; font-size: calc(var(--ui-size) * var(--font-scale, 1)); }
+.markdown { padding-inline: 18px; font-size: var(--view-font-size, var(--ui-size)); }
 .markdown-link { color: var(--accent); text-decoration: underline; }
 .markdown .task-list-item { list-style: none; }
 .markdown .task-list-item input[type="checkbox"]:enabled { cursor: pointer; }

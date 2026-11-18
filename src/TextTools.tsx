@@ -5,10 +5,11 @@ import { diffLines } from "diff";
 import { describeError, placePath, readPlaceText, savePlaceText, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { HexViewer } from "./HexViewer";
-import { MarkdownPreview, type MarkdownAnchor, type TaskMarker } from "./MarkdownPreview";
+import { isMarkdownFile, MarkdownPreview, type MarkdownAnchor, type OpenMarkdownLink, type TaskMarker } from "./MarkdownPreview";
 import { eventShortcut, showShortcut } from "./preferences";
 import { systemTheme, type Theme } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
+import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
 
@@ -16,7 +17,7 @@ function normalized(text: string) {
   return text.replaceAll(/\r\n?/g, "\n");
 }
 
-export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, fontSizes, onZoom, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -27,15 +28,17 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   cancelShortcut: string;
   hexShortcut: string;
   zoomShortcut: string;
+  fontSizes: ViewFontSizes;
+  onZoom: ZoomViewFont;
   anchor: MarkdownAnchor | null;
-  onOpenDocument: (file: NamedFile, anchor?: MarkdownAnchor) => void;
+  onOpenDocument: OpenMarkdownLink;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
   onClose: () => void;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
-  const [preview, setPreview] = useState(!editing && /\.(md|markdown)$/i.test(file.name));
+  const [preview, setPreview] = useState(!editing && isMarkdownFile(file.name));
   const [hex, setHex] = useState(false);
   const [system, setSystem] = useState(systemTheme);
   const [readError, setReadError] = useState("");
@@ -45,10 +48,12 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const [confirm, setConfirm] = useState(false);
   const dirty = Boolean(document && normalized(document.text) !== text);
   const markdownSource = document && !dirty ? document.text : text;
-  const isMarkdown = /\.(md|markdown)$/i.test(file.name);
+  const isMarkdown = isMarkdownFile(file.name);
   const path = placePath(file.place);
   const section = useRef<HTMLElement>(null);
-  const { scale, style: zoomStyle } = useFontZoom(section, zoomShortcut);
+  const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
+  const fontSize = fontSizes[fontView];
+  useFontZoom(section, zoomShortcut, fontView, onZoom);
   const light = (theme === "system" ? system : theme) === "light";
 
   useLayoutEffect(() => {
@@ -125,7 +130,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }
 
   return (
-    <section ref={section} style={zoomStyle} hidden={!active} className="text-window" aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
+    <section ref={section} style={viewFontStyle(fontSize)} hidden={!active} className="text-window" aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
@@ -164,7 +169,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">Loading text tools…</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
-              fontScale={scale} value={text} onChange={setText} />
+              fontSize={fontSize} value={text} onChange={setText} />
           </Suspense>
         </div>
       </>}

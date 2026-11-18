@@ -113,7 +113,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.getByRole("checkbox", { name: "FTP task", exact: true }).click();
     await page.getByRole("checkbox", { name: "FTP task", exact: true, checked: true }).waitFor();
     assert.match(await readFile(join(remoteFolder, "guide.md"), "utf8"), /- \[x\] FTP task/);
-    await page.getByRole("link", { name: "Remote details", exact: true }).click();
+    await page.getByRole("link", { name: "Remote details", exact: true }).click({ modifiers: ["Control"] });
     await page.getByRole("heading", { name: "Remote details", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     await page.getByRole("heading", { name: "FTP Markdown", exact: true }).waitFor();

@@ -9,6 +9,7 @@ import { api, describeError, type NamedFile } from "./api";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 export type MarkdownAnchor = { fragment: string };
+export type OpenMarkdownLink = (file: NamedFile, newTab: boolean, anchor?: MarkdownAnchor) => void;
 export type TaskMarker = { start: number; end: number };
 type Task = TaskMarker & { label: string };
 const TaskContext = createContext<Task | null>(null);
@@ -17,7 +18,7 @@ const PreviewContext = createContext<{
   saving: boolean;
   light: boolean;
   onToggleTask: (marker: TaskMarker, checked: boolean) => void;
-  followLink: (href: string) => void;
+  followLink: (href: string, newTab: boolean) => void;
 } | null>(null);
 const documentOrigin = "https://markdown.dirlume.invalid";
 const scheme = /^[a-z][a-z\d+.-]*:/i;
@@ -67,11 +68,18 @@ function isWebLink(href: string) {
   return /^https?:\/\//i.test(href) || href.startsWith("//");
 }
 
+export function isMarkdownFile(name: string) {
+  return /\.(md|markdown)$/i.test(name);
+}
+
 function PreviewLink({ href, children, ...props }: ComponentProps<"a">) {
   const preview = useContext(PreviewContext);
   if (!href || (scheme.test(href) && !isWebLink(href))) return <span>{children}</span>;
   return <a {...props} className="markdown-link" href={href} onAuxClick={(event) => event.preventDefault()}
-    onClick={(event) => { event.preventDefault(); preview?.followLink(href); }}>{children}</a>;
+    onClick={(event) => {
+      event.preventDefault();
+      preview?.followLink(href, event.ctrlKey || event.metaKey);
+    }}>{children}</a>;
 }
 
 function PreviewCode({ children }: ComponentProps<"pre">) {
@@ -118,7 +126,7 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
   writable: boolean;
   saving: boolean;
   onToggleTask: (marker: TaskMarker, checked: boolean) => void;
-  onOpenDocument: (file: NamedFile, anchor?: MarkdownAnchor) => void;
+  onOpenDocument: OpenMarkdownLink;
   onError: (message: string) => void;
 }) {
   const preview = useRef<HTMLDivElement>(null);
@@ -142,7 +150,7 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
     }
   }, [active, anchor, prefix]);
 
-  async function followLink(href: string) {
+  async function followLink(href: string, newTab: boolean) {
     onError("");
     try {
       if (isWebLink(href)) {
@@ -157,7 +165,10 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
         return;
       }
       const linked = await resolveFileLink(file, destination);
-      onOpenDocument(linked, fragment === undefined ? undefined : { fragment });
+      if (!preview.current) return;
+      const markdown = isMarkdownFile(linked.name);
+      const target = markdown || fragment !== undefined ? { fragment: fragment ?? "" } : undefined;
+      onOpenDocument(linked, newTab || !markdown || saving, target);
     } catch (error) {
       onError(describeError(error));
     }

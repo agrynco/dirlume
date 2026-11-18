@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export async function testMarkdown(page, source) {
+export async function testMarkdown(page, source, wheelFont) {
   const catalogue = join(source, "catalogue.md");
   const docs = join(source, "notes folder");
   await mkdir(docs);
@@ -44,8 +44,24 @@ export async function testMarkdown(page, source) {
   await task("Main task", true).waitFor();
   await task("Nested task", false).waitFor();
 
+  const surface = ".text-window:not([hidden]) .markdown";
+  const fontSize = () => page.locator(surface).evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+  const initialSize = await fontSize();
+  await wheelFont(surface, -120);
+  const enlargedSize = await fontSize();
+  assert.ok(enlargedSize > initialSize);
+  const tabs = page.getByRole("navigation", { name: "Open documents" });
+  await catalogueViewer.getByRole("link", { name: "Linked notes", exact: true }).click({ modifiers: ["Control"] });
+  await childViewer.getByRole("heading", { name: "Target section", exact: true }).waitFor();
+  assert.equal(await fontSize(), enlargedSize);
+  assert.equal(await tabs.getByRole("button", { name: "View catalogue.md", exact: true }).count(), 1);
+  await childViewer.getByRole("button", { name: "Close document", exact: true }).click();
+  await catalogueViewer.waitFor();
+
   await catalogueViewer.getByRole("link", { name: "Linked notes", exact: true }).click();
   await childViewer.getByRole("heading", { name: "Target section", exact: true }).waitFor();
+  assert.equal(await fontSize(), enlargedSize);
+  assert.equal(await tabs.getByRole("button", { name: "View catalogue.md", exact: true }).count(), 0);
   await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .markdown")?.scrollTop > 100);
   await childViewer.getByRole("link", { name: "Same document", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .markdown")?.scrollTop < 100);
@@ -60,7 +76,6 @@ export async function testMarkdown(page, source) {
   await task("Main task", true).waitFor();
   assert.equal(await readFile(catalogue, "utf8"), external);
   await catalogueViewer.getByRole("button", { name: "Close document", exact: true }).click();
-  await page.getByRole("button", { name: "View child.md", exact: true }).click();
-  await childViewer.getByRole("button", { name: "Close document", exact: true }).click();
-  console.log("Verified Markdown document links, heading anchors, task persistence, and external edit protection.");
+  console.log("Verified Markdown link navigation and Ctrl-click tabs, shared preview zoom, heading anchors, task persistence, and external edit protection.");
+  return enlargedSize;
 }

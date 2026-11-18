@@ -17,6 +17,7 @@ Use **Search settings** above the Options tree to find a section or shortcut. Dr
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
 | Ctrl+Wheel | Change the font size of the file pane, viewer, or editor under the pointer. |
+| Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
 | Esc inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
 | Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |
@@ -37,7 +38,9 @@ Click **Terminal** beside the command line to open an interactive PowerShell or 
 
 Viewers and editors use the same syntax highlighting and let you change the detected language or choose plain text. Customize syntax colors in **Options → Appearance → Text tools**. Markdown preview renders fenced Mermaid diagrams. The **Open documents** bar switches between the files view and open documents. Dirlume restores local browsing history, selection, layout, and viewer/editor windows at startup. Unsaved changes require confirmation before closing the editor or exiting.
 
-In Markdown preview, relative file links open in viewer tabs, heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
+In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
+
+Mouse-wheel font changes are saved in **Options → Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview uses the saved size for all documents and keeps it when you follow links or restart Dirlume.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 

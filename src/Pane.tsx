@@ -12,6 +12,7 @@ import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { eventShortcut, showShortcut } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
+import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
 
 interface PaneProps {
   side: Side;
@@ -34,6 +35,8 @@ interface PaneProps {
   onFtp: () => void;
   ftpShortcut: string;
   zoomShortcut: string;
+  fontSize?: number;
+  onZoom: ZoomViewFont;
   onCloseResults: () => void;
   onRevealResult: (entry: Entry) => void;
   onStartDrag: (entry: Entry, data: DataTransfer) => boolean;
@@ -48,10 +51,10 @@ interface PaneProps {
 const columns = [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "modified", label: "Modified" }] as const;
 
 export function Pane({ side, active, showHidden, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
-  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, zoomShortcut, onCloseResults, onRevealResult,
+  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const section = useRef<HTMLElement>(null);
-  const { style: zoomStyle } = useFontZoom(section, zoomShortcut);
+  useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useState<string | null>(null);
@@ -169,7 +172,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
   const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
   return (
-    <section ref={section} id={`${side}-pane`} style={zoomStyle}
+    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)}
       className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={`${side} pane`}
       onPointerDown={activate} onFocus={activate} onContextMenu={(event) => {
         if (processView || !(event.target instanceof HTMLElement) || event.target.closest("input, select, textarea, dialog")) return;

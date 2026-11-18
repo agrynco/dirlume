@@ -341,10 +341,16 @@ try {
   await leftAddress.press("Alt+Control+S");
   await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   await zoomBinding.selectOption("Ctrl+Wheel");
+  await optionsDialog.getByRole("button", { name: "View font sizes", exact: true }).click();
+  for (const [side, size] of [["Left", leftFont], ["Right", rightFont]]) {
+    const field = optionsDialog.getByRole("spinbutton", { name: `${side} file pane font size` });
+    assert.equal(await field.inputValue(), String(size));
+    await field.fill("");
+  }
   await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
 
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   const panelsSection = optionsDialog.getByRole("button", { name: "Panels", exact: true });
+  await panelsSection.click();
   await panelsSection.press("Tab");
   await page.keyboard.press("Shift+Tab");
   if (process.env.DIRLUME_SETTINGS_FOCUS_SCREENSHOT) {
@@ -573,7 +579,7 @@ try {
     console.log("Verified F6 between Windows volumes, including cancellation and a folder merge.");
   }
 
-  await testMarkdown(page, src);
+  const linkedMarkdownFont = await testMarkdown(page, src, wheelFont);
   await page.getByRole("option", { name: /^guide.md/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("heading", { name: "Getting started" }).waitFor();
@@ -582,6 +588,7 @@ try {
   assert.ok(await diagram.evaluate((image) => image.complete && image.naturalWidth > 0));
   const markdownSurface = ".text-window:not([hidden]) .markdown";
   const markdownFont = await fontSize(markdownSurface);
+  assert.equal(markdownFont, linkedMarkdownFont, "Unrelated Markdown files should open with the same saved preview size.");
   await wheelFont(markdownSurface, -120);
   const enlargedMarkdown = await fontSize(markdownSurface);
   assert.ok(enlargedMarkdown > markdownFont, "Ctrl+Wheel should enlarge Markdown preview text.");
@@ -612,7 +619,7 @@ try {
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("Control+Shift+Tab");
   await diagram.waitFor();
-  assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Switching documents should preserve each document's font size.");
+  assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Editor zoom should leave the Markdown preview size alone.");
   await page.keyboard.press("Control+Tab");
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("F2");
@@ -631,8 +638,14 @@ try {
   const hexSurface = ".text-window:not([hidden]) .hex-view";
   const hexFont = await fontSize(hexSurface);
   await wheelFont(hexSurface, -120);
-  assert.ok(await fontSize(hexSurface) > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
+  const viewerFont = await fontSize(hexSurface);
+  assert.ok(viewerFont > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
   await page.getByRole("button", { name: "Close", exact: true }).click();
+  await left.getByRole("option", { name: /^sample.rs/ }).click();
+  await page.keyboard.press("F3");
+  await page.getByText("fn", { exact: true }).first().waitFor();
+  assert.equal(await fontSize(codeSurface), viewerFont, "Text and hex should share the viewer setting.");
+  await page.keyboard.press("Escape");
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 
   const commandLine = page.getByRole("textbox", { name: "Command line" });
@@ -744,11 +757,23 @@ try {
   await diagram.waitFor();
   assert.equal(await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "View guide.md" }).getAttribute("aria-pressed"), "true");
   await page.keyboard.press("Control+Tab");
+  await wheelFont("#right-files", -120);
+  const enlargedRight = await fontSize("#right-pane");
+  await exitDesktop(page);
+  page = await startDesktop();
+  await page.getByRole("button", { name: "View guide.md" }).click();
+  await page.getByRole("img", { name: "Mermaid diagram" }).waitFor();
+  assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");
+  await page.keyboard.press("Control+Tab");
+  assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
   assert.equal(await page.getByLabel("left path").inputValue(), src);
   assert.equal(await page.getByLabel("right path").inputValue(), dst);
-  await left.getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
+  await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
   await page.getByRole("button", { name: "Options", exact: true }).click();
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  await page.getByRole("button", { name: "View font sizes", exact: true }).click();
+  assert.equal(await page.getByRole("spinbutton", { name: "Markdown preview font size" }).inputValue(), String(enlargedMarkdown));
+  assert.equal(await page.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
+  await page.getByRole("button", { name: "Window", exact: true }).click();
   assert.equal(await page.getByLabel("Scheme name").inputValue(), "Blueprint");
   await page.getByRole("button", { name: "Done", exact: true }).click();
   if (process.env.DIRLUME_FTP_PYTHON) {

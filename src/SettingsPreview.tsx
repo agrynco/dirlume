@@ -3,8 +3,9 @@ import { File, Folder, FolderTree } from "lucide-react";
 import { applyAppearance, fileColor } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { showShortcut, type Preferences } from "./preferences";
+import { viewFontKeys, viewFonts } from "./viewFonts";
 
-type PreviewPage = AppearanceSection | "general" | "shortcuts";
+type PreviewPage = AppearanceSection | "viewFonts" | "general" | "shortcuts";
 
 const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "recording.mp4", "backup.zip", "config.json", "setup.exe"];
 
@@ -54,6 +55,16 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
             <div className="preview-field">Downloads</div>
             <div className="preview-dialog-actions"><span>Cancel</span><span className="preview-primary">Copy</span></div>
           </div>
+        ) : page === "viewFonts" ? (
+          <dl className="preview-view-fonts">
+            {viewFontKeys.map((view) => {
+              const { label, size, family, sample } = viewFonts[view];
+              return <div key={view}>
+                <dt>{label}</dt>
+                <dd style={{ fontSize: preferences.viewFontSizes[view] ?? `var(${size})`, fontFamily: `var(${family})` }}>{sample}</dd>
+              </div>;
+            })}
+          </dl>
         ) : page === "text" ? <CodeSample /> :
           page === "files" ? <Samples hidden={preferences.hidden} all /> :
           page === "shortcuts" ? (

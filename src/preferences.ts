@@ -1,4 +1,5 @@
 import { readSchemes, type Scheme, type Theme } from "./appearance";
+import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 
 export const commands = {
   switchPane: { label: "Switch pane", key: "Tab" },
@@ -84,6 +85,7 @@ export interface Preferences {
   provider: Provider;
   kswitcher: string;
   shortcuts: Bindings;
+  viewFontSizes: ViewFontSizes;
 }
 
 const preferenceKey = "dirlume.preferences.v1";
@@ -98,6 +100,7 @@ export const defaultBindings = Object.fromEntries(
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
     theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, kswitcher: "", shortcuts: defaultBindings,
+    viewFontSizes: {},
   };
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as (Partial<Preferences> & { bindingDefaults?: number }) | null;
@@ -125,6 +128,11 @@ export function readPreferences(): Preferences {
       else enabled.add(binding);
     }
     const schemes = readSchemes(saved.schemes);
+    const viewFontSizes: ViewFontSizes = {};
+    for (const view of viewFontKeys) {
+      const size = saved.viewFontSizes?.[view];
+      if (validViewFontSize(size)) viewFontSizes[view] = size;
+    }
     return {
       theme: saved.theme === "dark" || saved.theme === "light" || saved.theme === "slate" ? saved.theme : "system",
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
@@ -133,6 +141,7 @@ export function readPreferences(): Preferences {
       hidden: saved.hidden === true,
       kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
       shortcuts,
+      viewFontSizes,
     };
   } catch {
     return defaults;
