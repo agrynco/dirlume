@@ -18,7 +18,8 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownAnchor } from "./MarkdownPreview";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, localPath, opposite, paneItem, parentPlace, readPlace, showSearchResults, visibleEntries,
+  applyListing, childPlace, closeSearchResults, extendKeyboardRange, localPath, opposite, paneItem, parentPlace,
+  readPlace, selectableRange, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
@@ -49,7 +50,12 @@ type Modal =
 
 const rowCommands = {
   firstRow: 0, lastRow: Number.POSITIVE_INFINITY, upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
+  selectUpRow: -1, selectDownRow: 1,
 };
+
+function isRangeCommand(command: Command) {
+  return command === "selectUpRow" || command === "selectDownRow";
+}
 
 function sameConnection(left: Place | null, right: Place) {
   return (left?.kind === "server" || left?.kind === "ftp") && left.kind === right.kind && left.id === right.id;
@@ -148,7 +154,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       if (reveal !== undefined && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         const listing = applyListing(pane, result.place, result.listing, background ? "refresh" : action);
-        return found ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
+        return found ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
       });
       return true;
     } catch (error) {
@@ -451,7 +457,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   function sort(side: Side, column: SortColumn) {
     updatePane(side, (pane) => ({
-      ...pane, sort: { column, asc: column !== pane.sort.column || !pane.sort.asc },
+      ...pane, keyboardRange: undefined, sort: { column, asc: column !== pane.sort.column || !pane.sort.asc },
     }));
   }
 
@@ -571,14 +577,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
-    const names = entries[side].map(({ name }) => name);
-    const index = names.indexOf(entry.name);
-    const anchor = names.indexOf(selectionAnchor.current[side] ?? panes[side].selected ?? entry.name);
+    const items = entries[side];
+    const index = items.findIndex(({ name }) => name === entry.name);
+    const anchorName = selectionAnchor.current[side] ?? panes[side].selected ?? entry.name;
+    const anchor = items.findIndex(({ name }) => name === anchorName);
     if (!range) selectionAnchor.current[side] = entry.name;
-    const start = anchor < 0 ? index : anchor;
-    const group = range ? names.slice(Math.min(index, start), Math.max(index, start) + 1).filter((name) => name !== "..") : [];
+    const group = range && index >= 0 ? selectableRange(items, anchor < 0 ? index : anchor, index) : [];
     updatePane(side, (pane) => ({
-      ...pane, selected: entry.name,
+      ...pane, selected: entry.name, keyboardRange: undefined,
       marked: range ? [...new Set([...pane.marked, ...group])] : mark && entry.name !== ".."
         ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
         : pane.marked.includes(entry.name) ? pane.marked : [],
@@ -696,9 +702,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       const items = entries[active];
       if (!items.length) return;
       const offset = rowCommands[command as keyof typeof rowCommands];
-      const index = Math.max(0, items.findIndex(({ name }) => name === pane.selected));
-      const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
-      updatePane(active, (pane) => ({ ...pane, selected: items[next].name }));
+      updatePane(active, (pane) => {
+        const index = Math.max(0, items.findIndex(({ name }) => name === pane.selected));
+        const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
+        return isRangeCommand(command) ? extendKeyboardRange(pane, items, index, next) :
+          { ...pane, selected: items[next].name, keyboardRange: undefined };
+      });
       return;
     }
     switch (command) {
@@ -864,6 +873,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       return;
     }
     if (inField && (command === "copyClipboard" || command === "pasteClipboard")) return;
+    if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
     const fileNavigation = command in rowCommands || command === "open";
     const fileKey = /^F\d{1,2}$/.test(event.key);
     if (inField && !fileKey && command !== "terminal" &&
@@ -903,7 +913,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           <Pane key={side} side={side} active={active === side} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
-            onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
+            onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name, keyboardRange: undefined })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
               showProcesses(side, false);
@@ -925,7 +935,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               const item = paneItem(panes[side], entry);
               if (item) revealResult(side, item.place, item.entry.name);
             }}
-            onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
+            onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter, keyboardRange: undefined }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
             ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />

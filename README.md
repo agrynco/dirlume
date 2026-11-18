@@ -17,6 +17,7 @@ Use **Search settings** above the Options tree to find a section or shortcut. Dr
 | Default keys | Action |
 | --- | --- |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
+| Shift+↑ / Shift+↓ | Mark a range from the current row, or unmark it when the first row you move onto is already marked. Reverse direction to shrink the range. |
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |

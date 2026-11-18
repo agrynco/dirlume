@@ -103,7 +103,14 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await saved.press("Enter");
     await remoteRow("guide.md").waitFor();
     assert.equal(await remotePath.inputValue(), "/start");
-    await right.getByRole("option", { name: /^\.\./ }).dblclick();
+    const parentRow = right.getByRole("option", { name: /^\.\./ });
+    await parentRow.click();
+    await page.keyboard.press("Shift+ArrowDown");
+    assert.equal(await right.locator(".file-row.marked").count(), 1);
+    assert.equal(await parentRow.getAttribute("aria-selected"), "false");
+    await page.keyboard.press("Shift+ArrowUp");
+    assert.equal(await right.locator(".file-row.marked").count(), 0);
+    await parentRow.dblclick();
     await right.getByRole("option", { name: /^start/ }).waitFor();
     assert.equal(await remotePath.inputValue(), "/");
     await right.getByRole("option", { name: /^start/ }).dblclick();

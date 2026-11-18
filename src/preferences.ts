@@ -7,6 +7,8 @@ export const commands = {
   swap: { label: "Swap panes", key: "Ctrl+U" },
   upRow: { label: "Previous item", key: "ArrowUp" },
   downRow: { label: "Next item", key: "ArrowDown" },
+  selectUpRow: { label: "Extend selection up", key: "Shift+ArrowUp" },
+  selectDownRow: { label: "Extend selection down", key: "Shift+ArrowDown" },
   firstRow: { label: "First item", key: "ArrowLeft" },
   lastRow: { label: "Last item", key: "ArrowRight" },
   pageUp: { label: "Previous page", key: "PageUp" },
