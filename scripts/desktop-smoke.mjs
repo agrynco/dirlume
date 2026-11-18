@@ -92,7 +92,7 @@ try {
   async function startTransfer(action, destination = dst) {
     const setup = page.getByRole("dialog", { name: action === "Move" ? "Rename or move" : action, exact: true });
     await setup.waitFor();
-    assert.equal(await setup.getByLabel("Destination").inputValue(), destination);
+    assert.equal(await setup.getByLabel("Destination", { exact: true }).inputValue(), destination);
     await setup.getByRole("button", { name: action, exact: true }).click();
   }
   async function finishTransfer(action, expectedCount = 1, destination = dst) {
@@ -172,6 +172,28 @@ try {
   await leftAddress.press("Enter");
   await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
   await navigate("left", src);
+  const copySetup = page.getByRole("dialog", { name: "Copy", exact: true });
+  const destination = copySetup.getByRole("combobox", { name: "Destination", exact: true });
+  const destinationSuggestions = copySetup.getByRole("listbox", { name: "Destination suggestions", exact: true });
+  await filePane.getByRole("option", { name: /^notes\.txt/ }).click();
+  await page.keyboard.press("F5");
+  await copySetup.getByRole("button", { name: "Choose a file destination", exact: true }).waitFor();
+  await destination.fill(join(temp, "t"));
+  await destinationSuggestions.getByRole("option", { name: "to", exact: true }).waitFor();
+  await destination.press("Tab");
+  assert.equal(await destination.inputValue(), dst + "\\");
+  await destinationSuggestions.getByRole("option", { name: "overlap", exact: true }).waitFor();
+  await destination.press("Escape");
+  assert.equal(await destinationSuggestions.count(), 0);
+  assert.equal(await copySetup.isVisible(), true);
+  await destination.fill(join(src, "sec"));
+  await destinationSuggestions.getByRole("option", { name: "second.txt", exact: true }).click();
+  assert.equal(await destination.inputValue(), join(src, "second.txt"));
+  await copySetup.getByRole("button", { name: "Cancel", exact: true }).click();
+  await filePane.getByRole("option", { name: /^measured/ }).click();
+  await page.keyboard.press("F5");
+  await copySetup.getByRole("button", { name: "Browse for a folder", exact: true }).waitFor();
+  await copySetup.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("listbox", { name: "left files", exact: true }).focus();
   await page.keyboard.press("Alt+F7");
   const search = page.getByRole("dialog", { name: "Find files", exact: true });
@@ -338,6 +360,16 @@ try {
   const optionsDialog = page.getByRole("dialog", { name: "Options", exact: true });
   const optionsContent = optionsDialog.locator(".settings-page-body");
   const searchSettings = optionsDialog.getByRole("searchbox", { name: "Search settings", exact: true });
+  await optionsDialog.getByRole("button", { name: "General", exact: true }).click();
+  const provider = optionsDialog.getByLabel("Remote connection");
+  await provider.selectOption("kswitcher");
+  const bridgePath = optionsDialog.getByRole("combobox", { name: "KSwitcher installation folder", exact: true });
+  await optionsDialog.getByRole("button", { name: "Browse for a folder", exact: true }).waitFor();
+  await bridgePath.fill(join(src, "me"));
+  await optionsDialog.getByRole("listbox", { name: "KSwitcher installation folder suggestions", exact: true })
+    .getByRole("option", { name: "measured", exact: true }).click();
+  assert.equal(await bridgePath.inputValue(), join(src, "measured"));
+  await provider.selectOption("server");
   const sizeBefore = await optionsDialog.boundingBox();
   const grip = await optionsDialog.getByRole("button", { name: "Resize Options" }).boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);

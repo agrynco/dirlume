@@ -5,6 +5,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { childPlace, formatDate, formatSize, localPath } from "./panes";
+import { PathField } from "./PathField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 
 export interface Transfer {
@@ -29,8 +30,9 @@ function itemSource(place: Place, item: Entry): TransferSource {
   return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name };
 }
 
-export function TransferDialog({ transfer, onClose, onFinished }: {
+export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   transfer: Transfer;
+  showHidden: boolean;
   onClose: () => void;
   onFinished: () => void;
 }) {
@@ -58,6 +60,11 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
   const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
+  const singleFile = itemCount === 1 && !transfer.items[0].entry.directory;
+  const separator = localTarget && windowsClient ? "\\" : "/";
+  const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
+    ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
+    : destination;
 
   useEffect(() => {
     if (phase === "done") action.current?.focus();
@@ -126,7 +133,6 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         setProgress({ file: entry.name, bytes: 0, total: null });
         previousBytes = 0;
         const ftpCopy = !localTarget || transfer.source.kind === "ftp";
-        const separator = localTarget && windowsClient ? "\\" : "/";
         const target = ftpCopy && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
           : destination;
@@ -169,10 +175,12 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
                 {placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}
               </span>
             </div>
-            <label className="field">{t("Destination")}
-              <input data-initial-focus type="text" value={destination} required spellCheck={false}
-                onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDestination(event.target.value)} />
-            </label>
+            <div className="field">
+              <label htmlFor="transfer-destination">{t("Destination")}</label>
+              <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
+                required initialFocus selectOnFocus showHidden={showHidden} ftp={transfer.ftpDestination} includeFiles={singleFile}
+                browse={singleFile ? "save" : "folder"} browsePath={browsePath} />
+            </div>
             <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">{t("Ask")}</option><option value="skip">{t("Skip")}</option>

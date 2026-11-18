@@ -6,7 +6,7 @@ Choose English, Ukrainian, or Russian in **Options → General → Language**. A
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
-The address field suggests matching folders as you type on local and FTP panes. Press **Tab** to complete a folder name and continue the path. Use the arrow keys and **Enter**, or click a suggestion, to open the folder.
+Pane addresses, transfer destinations, and the KSwitcher installation folder suggest matching paths as you type. Use the arrow keys and **Enter** or click a suggestion to choose it. Press **Tab** to complete a folder and continue the path. The browse button opens the system folder picker for local folder paths or a Save As dialog for a single-file destination. FTP suggestions come from the connected server.
 
 Drag the right edge of a file column heading to resize it. Double-click the edge to restore its default width. Right-click the heading row to show or hide **Size** and **Modified**. **Name** is always visible. Each pane saves its widths and visible columns independently and scrolls horizontally when the columns exceed the available space.
 

@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { AppearanceSettings, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
+import { PathField } from "./PathField";
 import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { windowsClient } from "./api";
@@ -167,10 +168,11 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             </select>
           </label>
           {preferences.provider === "kswitcher" && (
-            <label className="field">{t("KSwitcher installation folder")}
-              <input type="text" spellCheck={false} autoComplete="off" value={preferences.kswitcher}
-                onChange={(event) => onChange({ ...preferences, kswitcher: event.target.value })} />
-            </label>
+            <div className="field">
+              <label htmlFor="kswitcher-folder">{t("KSwitcher installation folder")}</label>
+              <PathField id="kswitcher-folder" label={t("KSwitcher installation folder")} value={preferences.kswitcher}
+                browse="folder" showHidden={preferences.hidden} onChange={(path) => onChange({ ...preferences, kswitcher: path })} />
+            </div>
           )}
         </div>
       ) : page === "viewFonts" ? (

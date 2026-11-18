@@ -1045,7 +1045,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         </Dialog>
       )}
       {modal?.kind === "transfer" && (
-        <TransferDialog transfer={modal.transfer} onClose={() => setModal(null)}
+        <TransferDialog transfer={modal.transfer} showHidden={preferences.hidden} onClose={() => setModal(null)}
           onFinished={() => { refresh("left"); refresh("right"); }} />
       )}
       {modal?.kind === "search" && (
