@@ -794,6 +794,39 @@ try {
   } catch (error) {
     throw new Error(`No terminal result. ${await terminalText()} ${pageErrors.join(", ")}`, { cause: error });
   }
+  const waitForTerminalText = (text) => page.waitForFunction((text) =>
+    document.querySelector(".xterm-accessibility-tree")?.textContent?.includes(text), text);
+  const waitForDirectory = (path) => page.waitForFunction((path) =>
+    document.querySelector(".terminal-card header span")?.textContent?.toLowerCase() === path.toLowerCase(), path);
+  const subfolder = join(src, "terminal ' [folder]");
+  await mkdir(subfolder);
+  await navigate("left", subfolder);
+  await waitForDirectory(subfolder);
+  assert.ok(await input.count(), "Changing folders should keep the terminal open.");
+  await input.pressSequentially("$dirlumeTestSession = 42");
+  await input.press("Enter");
+  await input.pressSequentially("Write-Output ('dirlume-' + 'busy'); Start-Sleep -Seconds 2; Write-Output ('from:' + (Get-Location).Path)");
+  await input.press("Enter");
+  await waitForTerminalText("dirlume-busy");
+  await right.focus();
+  await waitForTerminalText("from:" + subfolder);
+  await waitForDirectory(dst);
+  await input.pressSequentially("Write-Output ('dirlume-session=' + $dirlumeTestSession)");
+  await input.press("Enter");
+  await waitForTerminalText("dirlume-session=42");
+  await input.pressSequentially("Write-Output ('dirlume-' + 'draft')");
+  await navigate("left", subfolder);
+  await waitForDirectory(dst);
+  await input.press("Enter");
+  await waitForTerminalText("dirlume-draft");
+  await waitForDirectory(subfolder);
+  await input.press("Alt+F8");
+  const commandHistory = page.getByRole("dialog", { name: "Command history", exact: true });
+  await commandHistory.getByRole("button", { name: /command-bar-ok/ }).click();
+  assert.match(await commandLine.inputValue(), /command-bar-ok/);
+  await commandLine.fill("");
+  await navigate("left", src);
+  await waitForDirectory(src);
   await input.pressSequentially('[Console]::WriteLine(("$([char]27)[93m" + "dirlume-" + "yellow-probe" + "$([char]27)[0m"))');
   await input.press("Enter");
   async function assertTerminalContrast(previousColor = "") {
@@ -979,6 +1012,7 @@ try {
   await ukrainianFind.getByRole("button", { name: "Закрити", exact: true }).click();
   await exitDesktop(page);
   page = await startDesktop();
+  await page.getByRole("button", { name: "Знайти файли", exact: true }).waitFor();
   assert.equal(await page.locator("html").getAttribute("lang"), "uk");
   assert.equal(await page.locator("#left-pane .col-name button").innerText(), "Назва");
   await rightHeader().getByRole("button", { name: "Назва", exact: true }).click({ button: "right" });

@@ -34,10 +34,10 @@ Use **Search settings** above the Options tree to find a section or shortcut. Dr
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
-| Ctrl+E / Alt+F8 | Recall earlier commands or open command history. |
+| Ctrl+E / Alt+F8 | Recall earlier commands or open command history. Alt+F8 also works from the terminal. |
 | Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
 
-Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The command line also sends commands to the shell from the active local folder. Terminal colors adapt to the background of the active color scheme.
+Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The open terminal follows the active local panel in PowerShell, Bash, Zsh, and compatible Bourne shells. If a command is running or being edited, the directory changes when the shell returns to its prompt. The command line also sends commands to the shell from the active local folder. **Alt+F8** opens the command line history from either control. Terminal colors adapt to the background of the active color scheme.
 
 **Find files** searches local folders and connected sources. Masks are case-insensitive. **Show in panel** displays all collected matches in the searching pane. Relative paths identify files from different folders. You can view, edit, mark, compare, or copy files from there. Use **Go to selected file** to open the containing folder for move, rename, or deletion.
 

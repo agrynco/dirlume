@@ -27,6 +27,7 @@ import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
+import { changeShellDirectory, shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
@@ -63,10 +64,6 @@ function sameConnection(left: Place | null, right: Place) {
 
 function disconnect(place: NetworkPlace) {
   void (place.kind === "ftp" ? api.disconnectFtp(place.id) : api.disconnect(place.id)).catch(() => {});
-}
-
-function shellArgument(value: string) {
-  return `'${value.replaceAll("'", windowsClient ? "''" : "'\\''")}'`;
 }
 
 export default function App({ initialPreferences }: { initialPreferences: Preferences }) {
@@ -624,8 +621,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       return;
     }
     if (!local || !openTerminal()) return;
-    const path = shellArgument(local.path);
-    const prefix = windowsClient ? `Set-Location -LiteralPath ${path} -ErrorAction Stop; ` : `cd -- ${path} && `;
+    const prefix = changeShellDirectory(local.path) + (windowsClient ? "; " : " && ");
     setPendingCommands((commands) => [...commands, `${prefix}${commandLine}\r`]);
     setHistoryItems((items) => [commandLine, ...items].slice(0, 1000));
     historyIndex.current = -1;
@@ -975,9 +971,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       </div>
       {terminal && (
         <Suspense fallback={<div className="terminal-card pane-empty">{t("Opening terminal…")}</div>}>
-          <TerminalPanel key={terminal.id} session={terminal} theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal}
+          <TerminalPanel key={terminal.id} session={terminal} directory={processPanels[active] ? null : local?.path ?? null}
+            theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal} historyShortcut={preferences.shortcuts.commandHistory}
             pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
-            onShortcut={() => perform("terminal")} onClose={closeTerminal} />
+            onShortcut={() => perform("terminal")} onHistory={() => setModal({ kind: "commandHistory" })} onClose={closeTerminal} />
         </Suspense>
       )}
       <form className="command-bar" onSubmit={submitCommand}>

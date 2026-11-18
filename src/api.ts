@@ -164,8 +164,8 @@ export const api = {
   listKSwitcher: (directory: string, peer: string, path: string) =>
     invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
-  openTerminal: (id: number, directory: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
-    invoke<void>("open_terminal", { id, directory, rows, cols, output }),
+  openTerminal: (id: number, directory: string, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
+    invoke<void>("open_terminal", { id, directory, promptToken, rows, cols, output }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),
