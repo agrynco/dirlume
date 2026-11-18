@@ -387,7 +387,7 @@ impl Entries {
                         file.name().to_owned(),
                         file.is_directory(),
                         file.is_symlink(),
-                        file.name().starts_with('.'),
+                        local::EntryAttributes::default(),
                         file.is_file().then_some(file.size() as u64),
                         Some(file.modified()),
                     )

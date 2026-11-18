@@ -157,7 +157,14 @@ export async function testFtp(page, temp, source, destination, config, restartDe
 
     await left.getByRole("option", { name: /^ftp-copy/ }).click();
     await page.keyboard.press("F5");
-    assert.equal(await copy.getByLabel("Destination").inputValue(), "/start");
+    const uploadPath = copy.getByRole("combobox", { name: "Destination", exact: true });
+    assert.equal(await uploadPath.inputValue(), "/start");
+    assert.equal(await button(copy, "Browse for a folder").count(), 0);
+    await uploadPath.fill("/start/sav");
+    const uploadMatches = copy.getByRole("listbox", { name: "Destination suggestions", exact: true });
+    await uploadMatches.getByRole("option", { name: "saved-folder", exact: true }).click();
+    assert.equal(await uploadPath.inputValue(), "/start/saved-folder");
+    await uploadPath.fill("/start");
     await button(copy, "Copy").click();
     await button(page.getByRole("dialog", { name: "Folder already exists" }), "Merge").click();
     await button(page.getByRole("dialog", { name: "File already exists" }), "Overwrite").click();
@@ -170,7 +177,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("F3");
     await remoteRow("ftp-copy").getByText("24 B", { exact: true }).waitFor();
     await page.keyboard.press("F5");
-    await copy.getByLabel("Destination").fill(destination);
+    await copy.getByLabel("Destination", { exact: true }).fill(destination);
     await button(copy, "Copy").click();
     await button(page.getByRole("dialog", { name: "Folder already exists" }), "Merge").click();
     await button(page.getByRole("dialog", { name: "File already exists" }), "Skip").click();
@@ -194,7 +201,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
 
     await remoteRow("renamed.md").click();
     await page.keyboard.press("F5");
-    await copy.getByLabel("Destination").fill("ftp-alias.md");
+    await copy.getByLabel("Destination", { exact: true }).fill("ftp-alias.md");
     await button(copy, "Copy").click();
     await complete.getByText("1 completed.", { exact: true }).waitFor();
     await button(complete, "Done").click();
