@@ -1,3 +1,5 @@
+import type { Entry } from "./api";
+
 export const builtInThemes = {
   system: "System",
   dark: "Dark",
@@ -39,6 +41,8 @@ export const colorGroups = {
   files: {
     label: "File types",
     colors: {
+      "file-hidden": "Hidden files and folders",
+      "file-system": "System files and folders",
       "file-source": "Source code",
       "file-text": "Text and Markdown",
       "file-document": "Office documents and PDF",
@@ -79,7 +83,8 @@ export const colorGroups = {
 } as const;
 
 type FileColor = keyof typeof colorGroups.files.colors;
-const extensions: Record<FileColor, string> = {
+type ExtensionColor = Exclude<FileColor, "file-hidden" | "file-system">;
+const extensions: Record<ExtensionColor, string> = {
   "file-source": "c cc cpp cs css go h hpp html htm java js jsx kt less lua php py rb rs sass scss sql swift ts tsx vue",
   "file-text": "log markdown md rst txt",
   "file-document": "doc docx epub odf odg odp ods odt pdf ppt pptx rtf xls xlsx",
@@ -90,9 +95,13 @@ const extensions: Record<FileColor, string> = {
   "file-executable": "appimage bat bin cmd com deb dll exe msi ps1 rpm sh so",
 };
 const fileColors = new Map(Object.entries(extensions).flatMap(([color, values]) =>
-  values.split(" ").map((extension): [string, FileColor] => [extension, color as FileColor])));
+  values.split(" ").map((extension): [string, ExtensionColor] => [extension, color as ExtensionColor])));
 
-export function fileColor(name: string): FileColor | undefined {
+export function fileColor({ name, directory, hidden, system }: Pick<Entry, "name" | "system"> &
+  Partial<Pick<Entry, "directory" | "hidden">>): FileColor | undefined {
+  if (system) return "file-system";
+  if (hidden) return "file-hidden";
+  if (directory) return undefined;
   const filename = name.slice(name.lastIndexOf("/") + 1).toLowerCase();
   if (filename === "makefile" || filename === "dockerfile") return "file-source";
   if (filename === ".env" || filename.startsWith(".env.")) return "file-config";

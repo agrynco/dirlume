@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -13,8 +13,18 @@ const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
 const dst = join(temp, "to");
+const attributes = join(temp, "attributes");
 await mkdir(src);
 await mkdir(dst);
+await mkdir(attributes);
+await mkdir(join(attributes, ".metadata"));
+await mkdir(join(attributes, "system-folder"));
+await writeFile(join(attributes, "hidden.rs"), "Hidden source file");
+await writeFile(join(attributes, "system-hidden.dll"), "System and hidden file");
+await writeFile(join(attributes, "ordinary.sys"), "File without the System attribute");
+for (const [name, flags] of [["hidden.rs", ["+H"]], ["system-folder", ["+S"]], ["system-hidden.dll", ["+S", "+H"]]]) {
+  execFileSync("attrib.exe", [...flags, join(attributes, name)], { windowsHide: true });
+}
 await writeFile(join(src, "notes.txt"), "Dirlume\n");
 await writeFile(join(src, "second.txt"), "Second file\n");
 await writeFile(join(src, "guide.md"), "# Getting started\n\n**Dirlume** on Windows.\n\n```mermaid\nflowchart LR\n  A[Files] --> B[Preview]\n```\n");
@@ -499,6 +509,12 @@ try {
   const exampleSource = page.getByRole("region", { name: "Settings preview" }).getByText("main.rs", { exact: true });
   assert.equal(await foreground(exampleSource), "rgb(124, 33, 68)");
   assert.notEqual(await foreground(sourceName), "rgb(124, 33, 68)");
+  const attributeColors = { hidden: "rgb(65, 83, 109)", system: "rgb(115, 18, 76)" };
+  const preview = optionsDialog.getByRole("region", { name: "Settings preview" });
+  await optionsDialog.getByLabel("Hidden files and folders hex", { exact: true }).fill("#41536d");
+  await optionsDialog.getByLabel("System files and folders hex", { exact: true }).fill("#73124c");
+  assert.equal(await foreground(preview.getByText(".env", { exact: true })), attributeColors.hidden);
+  assert.equal(await foreground(preview.getByText("System Volume Information", { exact: true })), attributeColors.system);
   await searchSettings.fill("");
   await page.getByRole("button", { name: "Fonts", exact: true }).click();
   const panelFont = optionsDialog.getByRole("combobox", { name: "File panels font family", exact: true });
@@ -550,6 +566,25 @@ try {
   await page.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
   await page.getByRole("textbox", { name: "New shortcut for New folder" }).press("F12");
   await page.getByRole("button", { name: "Done", exact: true }).click();
+  await navigate("left", attributes);
+  const attributeRow = (name) => left.locator(`.file-row[title="${name}"]`);
+  const attributeName = (name) => attributeRow(name).locator(".file-name");
+  assert.equal(await attributeRow("hidden.rs").count(), 0);
+  assert.equal(await attributeRow("system-hidden.dll").count(), 0);
+  assert.equal(await foreground(attributeName("system-folder")), attributeColors.system);
+  assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
+  await left.press("Control+h");
+  assert.equal(await foreground(attributeName(".metadata")), attributeColors.hidden);
+  assert.equal(await foreground(attributeName("hidden.rs")), attributeColors.hidden);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  await attributeRow("system-hidden.dll").click();
+  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  await attributeRow("system-hidden.dll").click({ modifiers: ["Control"] });
+  assert.match(await attributeRow("system-hidden.dll").getAttribute("class"), /marked/);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  if (process.env.DIRLUME_ATTRIBUTES_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_ATTRIBUTES_SCREENSHOT, scale: "css" });
+  await left.press("Control+h");
+  await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
   await page.keyboard.press("F12");
   await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name").fill("verified");
@@ -990,6 +1025,8 @@ try {
   assert.equal(await page.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
   await page.getByRole("button", { name: "Window", exact: true }).click();
   assert.equal(await page.getByLabel("Scheme name").inputValue(), "Blueprint");
+  assert.equal(await page.locator("html").evaluate((element) => element.style.getPropertyValue("--file-hidden")), "#41536d");
+  assert.equal(await page.locator("html").evaluate((element) => element.style.getPropertyValue("--file-system")), "#73124c");
   await page.getByRole("button", { name: "Done", exact: true }).click();
 
   await page.getByRole("button", { name: "Options", exact: true }).click();

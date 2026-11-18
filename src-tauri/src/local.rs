@@ -24,24 +24,46 @@ pub struct Entry {
     pub(crate) directory: bool,
     pub(crate) link: bool,
     hidden: bool,
+    #[serde(default)]
+    system: bool,
     size: Option<u64>,
     modified: Option<u64>,
 }
 
+#[derive(Default)]
+pub(crate) struct EntryAttributes {
+    hidden: bool,
+    system: bool,
+}
+
+impl EntryAttributes {
+    #[cfg(windows)]
+    pub(crate) fn from_windows(flags: u32) -> Self {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
+        };
+        Self {
+            hidden: flags & FILE_ATTRIBUTE_HIDDEN != 0,
+            system: flags & FILE_ATTRIBUTE_SYSTEM != 0,
+        }
+    }
+}
+
 impl Entry {
-    pub fn new(
+    pub(crate) fn new(
         name: String,
         directory: bool,
         link: bool,
-        hidden: bool,
+        attributes: EntryAttributes,
         size: Option<u64>,
         modified: Option<SystemTime>,
     ) -> Self {
         Self {
+            hidden: name.starts_with('.') || attributes.hidden,
+            system: attributes.system,
             name,
             directory,
             link,
-            hidden,
             size,
             modified: modified.and_then(|value| {
                 value
@@ -220,6 +242,9 @@ pub fn list(path: &Path) -> io::Result<Listing> {
 }
 
 pub fn describe_entry(path: &Path) -> io::Result<Entry> {
+    #[cfg(windows)]
+    use std::os::windows::fs::MetadataExt;
+
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -227,27 +252,18 @@ pub fn describe_entry(path: &Path) -> io::Result<Entry> {
     let metadata = fs::symlink_metadata(path)?;
     let link = is_link(&metadata);
     let directory = metadata.is_dir() || (link && path.is_dir());
-    let hidden = name.starts_with('.') || hidden_attribute(&metadata);
+    #[cfg(windows)]
+    let attributes = EntryAttributes::from_windows(metadata.file_attributes());
+    #[cfg(not(windows))]
+    let attributes = EntryAttributes::default();
     Ok(Entry::new(
         name.to_owned(),
         directory,
         link,
-        hidden,
+        attributes,
         metadata.is_file().then_some(metadata.len()),
         metadata.modified().ok(),
     ))
-}
-
-#[cfg(windows)]
-fn hidden_attribute(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
-    metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
-}
-
-#[cfg(not(windows))]
-fn hidden_attribute(_: &fs::Metadata) -> bool {
-    false
 }
 
 pub fn is_link(metadata: &fs::Metadata) -> bool {

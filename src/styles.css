@@ -30,6 +30,8 @@
   --file-archive: #edca89;
   --file-config: #86d3dd;
   --file-executable: #ffb0a2;
+  --file-hidden: #a5aec4;
+  --file-system: #ffa3b8;
   --panel-muted: var(--muted);
   --panel-selection: var(--active-row);
   --panel-selected-ink: var(--panel-ink);
@@ -86,6 +88,8 @@
   --file-archive: #785219;
   --file-config: #00636c;
   --file-executable: #963f34;
+  --file-hidden: #596477;
+  --file-system: #8a2642;
   --danger: #872738;
   --danger-bg: #f9e1e3;
   --syntax-keyword: #663ba2;
@@ -344,6 +348,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-row[data-file-color="file-archive"] { --entry-color: var(--file-archive); }
 .file-row[data-file-color="file-config"] { --entry-color: var(--file-config); }
 .file-row[data-file-color="file-executable"] { --entry-color: var(--file-executable); }
+.file-row[data-file-color="file-hidden"] { --entry-color: var(--file-hidden); }
+.file-row[data-file-color="file-system"] { --entry-color: var(--file-system); }
+.file-row:is([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name,
 .file-row[data-file-color]:not(.marked):not([data-current="true"]) .file-name { color: var(--entry-color); }
 .file-name, .file-size, .file-date { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .file-name { display: flex; align-items: center; gap: 8px; padding-left: 4px; }

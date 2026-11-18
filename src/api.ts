@@ -5,6 +5,7 @@ export interface Entry {
   directory: boolean;
   link: boolean;
   hidden: boolean;
+  system?: boolean;
   size: number | null;
   modified: number | null;
 }

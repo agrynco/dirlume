@@ -9,16 +9,22 @@ import { viewFontKeys, viewFonts } from "./viewFonts";
 type PreviewPage = AppearanceSection | "viewFonts" | "general" | "shortcuts";
 
 const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "recording.mp4", "backup.zip", "config.json", "setup.exe"];
+const hiddenSample = { name: ".env", hidden: true };
+const systemSample = { name: "System Volume Information", directory: true, hidden: true, system: true };
 
 function Samples({ hidden, all }: { hidden: boolean; all: boolean }) {
   const files = all ? fileSamples : ["main.rs", "notes.md", "photo.png"];
+  const samples: Parameters<typeof fileColor>[0][] = files.map((name) => ({ name }));
+  if (all || hidden) samples.push(hiddenSample);
+  if (all) samples.push(systemSample);
   return (
     <div className={`preview-files${all ? " preview-file-types" : ""}`}>
       {!all && <div className="preview-folder"><Folder /> {t("Project")}</div>}
-      {[...files, ...(hidden ? [".env"] : [])].map((filename, index) => {
-        const color = fileColor(filename);
-        return <div className={`preview-file${!all && index === 1 ? " preview-file-selected" : ""}`} key={filename}>
-          <File /><span style={color && (all || index !== 1) ? { color: `var(--${color})` } : undefined}>{filename}</span>
+      {samples.map((entry, index) => {
+        const color = fileColor(entry);
+        return <div className={`preview-file${!all && index === 1 ? " preview-file-selected" : ""}`} key={entry.name}>
+          {entry.directory ? <Folder /> : <File />}
+          <span style={color && (all || index !== 1) ? { color: `var(--${color})` } : undefined}>{entry.name}</span>
         </div>;
       })}
     </div>
