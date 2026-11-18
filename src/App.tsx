@@ -293,6 +293,21 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, [theme, scheme]);
 
   useEffect(() => {
+    function preventWorkspaceSelectAll(event: globalThis.KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || (!event.ctrlKey && !event.metaKey)) return;
+      const shortcut = eventShortcut(event, event.code === "KeyA" ? "a" : event.key);
+      if (shortcut !== "Ctrl+A" && shortcut !== "Meta+A") return;
+      const target = event.target;
+      if (target instanceof Element && (target.closest("input, textarea, dialog, .document-workspace, .terminal-card") ||
+          (target instanceof HTMLElement && target.isContentEditable))) return;
+      event.preventDefault();
+    }
+    // Handle the WebView default even when a click leaves focus on the body.
+    window.addEventListener("keydown", preventWorkspaceSelectAll);
+    return () => window.removeEventListener("keydown", preventWorkspaceSelectAll);
+  }, []);
+
+  useEffect(() => {
     if (isTauri()) {
       const nativeTheme = theme === "system" ? null : theme === "slate" ? "dark" : theme;
       void getCurrentWindow().setTheme(nativeTheme).catch(() => {});
