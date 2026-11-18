@@ -4,7 +4,7 @@ Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
-Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. In **Fonts**, browse the installed font families or enter a name and set the size for each area. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
+Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, browse the installed font families or enter a name and set the size for each area. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
 | Default keys | Action |
 | --- | --- |
@@ -12,9 +12,13 @@ Use **Options → Appearance → New scheme** to save your own colors for the wi
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
+| F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
+| Esc inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
+| Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |
 | F5 / F6 | Open the Copy or Rename or move dialog. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
 | F7 / F8 / Shift+Delete | Create a folder, send selected items to Trash, or permanently delete after confirmation. |
+| Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
 | Ctrl+E / Alt+F8 | Recall earlier commands or open command history. |
@@ -22,7 +26,13 @@ Use **Options → Appearance → New scheme** to save your own colors for the wi
 
 Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The command line also sends commands to the shell from the active local folder. Terminal colors adapt to the background of the active color scheme.
 
-**Find files** searches local folders and connected sources. Masks are case-insensitive. For example, `*.pdf` finds PDF files, and `report-?.txt` matches a single character after the hyphen. Select a result and choose **Go to file** to show it in the active pane.
+**Find files** searches local folders and connected sources. Masks are case-insensitive. **Show in panel** displays all collected matches in the searching pane. Relative paths identify files from different folders. You can view, edit, mark, compare, or copy files from there. Use **Go to selected file** to open the containing folder for move, rename, or deletion.
+
+Viewers and editors use the same syntax highlighting and let you change the detected language or choose plain text. Customize syntax colors in **Options → Appearance → Text tools**. Markdown preview renders fenced Mermaid diagrams. The **Open documents** bar switches between the files view and open documents. Dirlume restores local browsing history, selection, layout, and viewer/editor windows at startup. Unsaved changes require confirmation before closing the editor or exiting.
+
+Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
+
+Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
 
 ## Build
 

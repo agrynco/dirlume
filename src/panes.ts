@@ -3,6 +3,19 @@ import { api, windowsClient, type Entry, type Listing, type Place, type SizeResu
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified";
 
+export interface SearchMatch {
+  directory: Place;
+  entry: Entry;
+  relativePath: string;
+}
+
+interface SearchResults {
+  mask: string;
+  matches: ReadonlyMap<string, SearchMatch>;
+  incomplete: boolean;
+  previous: Pick<PaneState, "selected" | "marked" | "filter">;
+}
+
 export interface PaneState {
   place: Place | null;
   entries: Entry[];
@@ -16,12 +29,14 @@ export interface PaneState {
   loading: boolean;
   omitted: number;
   error: string;
+  elevationPath?: string;
+  search: SearchResults | null;
   sort: { column: SortColumn; asc: boolean };
 }
 
 export const emptyPane: PaneState = {
   place: null, entries: [], selected: null, marked: [], sizes: new Map(), measuring: [], history: [], position: -1,
-  filter: "", loading: false, omitted: 0, error: "", sort: { column: "name", asc: true },
+  filter: "", loading: false, omitted: 0, error: "", search: null, sort: { column: "name", asc: true },
 };
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -29,7 +44,10 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "bas
 export function visibleEntries(pane: PaneState, hidden: boolean) {
   const filter = pane.filter.toLocaleLowerCase();
   const { column, asc } = pane.sort;
-  return pane.entries
+  const entries = pane.search
+    ? Array.from(pane.search.matches.values(), ({ entry, relativePath }) => ({ ...entry, name: relativePath }))
+    : pane.entries;
+  return entries
     .filter((entry) => (hidden || !entry.hidden) && (!filter || entry.name.toLocaleLowerCase().includes(filter)))
     .sort((a, b) => {
       if (a.directory !== b.directory) return a.directory ? -1 : 1;
@@ -38,6 +56,27 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
       const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
       return asc ? order : -order;
     });
+}
+
+export function showSearchResults(pane: PaneState, mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {
+  const previous = pane.search?.previous ?? { selected: pane.selected, marked: pane.marked, filter: pane.filter };
+  return {
+    ...pane, selected, marked: [], filter: "", error: "",
+    search: { mask, matches: new Map(matches.map((match) => [match.relativePath, match])), incomplete, previous },
+  };
+}
+
+export function closeSearchResults(pane: PaneState): PaneState {
+  return pane.search ? { ...pane, ...pane.search.previous, search: null } : pane;
+}
+
+export function paneItem(pane: PaneState, entry?: Entry): { place: Place; entry: Entry } | null {
+  if (!entry || !pane.place) return null;
+  if (pane.search) {
+    const match = pane.search.matches.get(entry.name);
+    return match ? { place: match.directory, entry: match.entry } : null;
+  }
+  return { place: pane.place, entry };
 }
 
 export const opposite = (side: Side): Side => side === "left" ? "right" : "left";
@@ -75,6 +114,12 @@ export async function readPlace(place: Place): Promise<{ place: Place; listing: 
 }
 
 export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | number): PaneState {
+  if (action === "refresh" && pane.search) {
+    const updated = applyListing(closeSearchResults(pane), place, listing, action);
+    return { ...updated, selected: pane.selected, marked: pane.marked, filter: pane.filter,
+      search: { ...pane.search, previous: { selected: updated.selected, marked: updated.marked, filter: updated.filter } } };
+  }
+  pane = closeSearchResults(pane);
   const samePlace = JSON.stringify(pane.place) === JSON.stringify(place);
   const retained = new Set(listing.entries.map((entry) => entry.name));
   const history = action === "push" && !samePlace
@@ -94,6 +139,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     position: typeof action === "number" ? action : history === pane.history ? pane.position : history.length - 1,
     loading: false,
     error: "",
+    elevationPath: undefined,
   };
 }
 

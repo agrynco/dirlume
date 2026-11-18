@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, placePath, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
-import { childPlace, formatDate, formatSize } from "./panes";
+import { childPlace, formatDate, formatSize, localPath } from "./panes";
+import { ElevationButton, LockDialog } from "./ProcessTools";
 
 export interface Transfer {
   kind: "copy" | "move";
   source: Place;
-  items: Entry[];
+  items: { place: Place; entry: Entry }[];
   target: string;
+  chooseOperation?: boolean;
 }
 
 type Decision = "overwrite" | "skip";
@@ -39,6 +41,8 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
   const [completed, setCompleted] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [error, setError] = useState("");
+  const [blocked, setBlocked] = useState<Transfer["items"][number]>();
+  const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [conflict, setConflict] = useState<TransferConflict | null>(null);
   const [remember, setRemember] = useState(false);
   const [answering, setAnswering] = useState<TransferConflict | null>(null);
@@ -46,7 +50,7 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
   const running = useRef<number | null>(null);
   const cancelled = useRef(false);
   const action = useRef<HTMLButtonElement>(null);
-  const moving = transfer.kind === "move";
+  const [moving, setMoving] = useState(transfer.kind === "move");
   const verb = moving ? "Move" : transfer.source.kind === "local" ? "Copy" : "Download";
   const itemCount = transfer.items.length;
 
@@ -90,7 +94,10 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
     const id = ++nextSession;
     running.current = id;
     setPhase("working");
-    let totalBytes = 0;
+    setError("");
+    setBlocked(undefined);
+    let attempted: Transfer["items"][number] | undefined;
+    let totalBytes = bytes;
     let previousBytes = 0;
     const output = new Channel<TransferEvent>();
     output.onmessage = (event) => {
@@ -107,11 +114,14 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
     try {
       await api.beginTransfer(id);
       for (const [index, item] of transfer.items.entries()) {
+        if (index < processed) continue;
         if (cancelled.current) break;
-        setProgress({ file: item.name, bytes: 0, total: null });
+        attempted = item;
+        const { place, entry } = item;
+        setProgress({ file: entry.name, bytes: 0, total: null });
         previousBytes = 0;
         const request = {
-          source: itemSource(transfer.source, item), destination, moving,
+          source: itemSource(place, entry), destination, moving,
           multiple: itemCount > 1, policy, askReadOnly,
         };
         const result = await api.transfer(id, request, output);
@@ -120,7 +130,10 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         setProcessed(index + 1);
       }
     } catch (error) {
-      if (!cancelled.current) setError(describeError(error));
+      if (!cancelled.current) {
+        setError(describeError(error));
+        setBlocked(attempted);
+      }
     } finally {
       await api.finishTransfer(id).catch(() => {});
       running.current = null;
@@ -141,8 +154,10 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
           <div className="dialog-body transfer-body">
             <div className="transfer-source">
-              <strong>{itemCount === 1 ? transfer.items[0].name : `${itemCount} selected items`}</strong>
-              <span title={placePath(transfer.source)}>{placePath(transfer.source)}</span>
+              <strong>{itemCount === 1 ? transfer.items[0].entry.name : `${itemCount} selected items`}</strong>
+              <span title={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
+                {placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}
+              </span>
             </div>
             <label className="field">Destination
               <input data-initial-focus type="text" value={destination} required spellCheck={false}
@@ -160,6 +175,9 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
             </label>
             {transfer.source.kind === "local" && <label className="transfer-checkbox">
               <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} /> Also ask about read-only files
+            </label>}
+            {transfer.chooseOperation && <label className="transfer-checkbox">
+              <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} /> Move instead of copying
             </label>}
           </div>
           <footer className="dialog-footer">
@@ -183,10 +201,27 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
                 <progress aria-label="Overall transfer progress" max={itemCount} value={processed} />
                 {phase === "done" && <p role="status">{completed} completed{skipped ? `, ${skipped} skipped` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{error}</p>}
+                {windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
+                  <ElevationButton directory={blocked.place.path} />}
           </div>
           <footer className="dialog-footer">
             {phase === "done" ? (
-              <button ref={action} type="button" className="primary" onClick={onClose}>Done</button>
+              <>
+                {windowsClient && blocked?.place.kind === "local" && moving && isLockError(error) && (
+                  <>
+                    <button type="button" onClick={() => {
+                      if (!blocked || blocked.place.kind !== "local") return;
+                      const paths = [placePath(childPlace(blocked.place, blocked.entry.name))];
+                      if (/^(?:[a-z]:[\\/]|\\\\)/i.test(destination)) {
+                        paths.push(placePath(childPlace(localPath(destination), blocked.entry.name)));
+                      }
+                      setLockPaths(paths);
+                    }}>Find locking processes</button>
+                    <button type="button" onClick={() => setPhase("setup")}>Retry</button>
+                  </>
+                )}
+                <button ref={action} type="button" className="primary" onClick={onClose}>Done</button>
+              </>
             ) : (
               <button type="button" onClick={cancel} disabled={canceling}>{canceling ? "Canceling…" : "Cancel"}</button>
             )}
@@ -220,6 +255,7 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
         </footer>
       </Dialog>
     )}
+    {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
     </>
   );
 }

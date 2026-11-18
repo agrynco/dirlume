@@ -1,10 +1,14 @@
 #[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
+mod file_clipboard;
+#[cfg(feature = "desktop")]
 mod kswitcher;
 mod local;
 #[cfg(feature = "desktop")]
 mod local_transfer;
+#[cfg(feature = "desktop")]
+mod processes;
 mod protocol;
 #[cfg(feature = "server")]
 pub mod server;
@@ -12,6 +16,8 @@ pub mod server;
 mod terminal;
 #[cfg(feature = "desktop")]
 mod watch;
+#[cfg(all(feature = "desktop", windows))]
+mod windows_shell;
 
 #[cfg(feature = "desktop")]
 pub use desktop::run;

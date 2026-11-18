@@ -25,7 +25,7 @@ use url::Url;
 
 use crate::{
     local::{self, Entry},
-    protocol::{Invitation, RemoteListing, RemotePath},
+    protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -167,22 +167,9 @@ async fn download(
 ) -> std::result::Result<Response, StatusCode> {
     share.authorize(&headers)?;
     let (file, length) = spawn_blocking(move || {
-        let path = relative_path(path)?;
-        if !share.root.symlink_metadata(&path)?.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Choose a regular file",
-            ));
-        }
-        let file = share.root.open(path)?;
-        let metadata = file.metadata()?;
-        if !metadata.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Choose a regular file",
-            ));
-        }
-        Ok((file.into_std(), metadata.len()))
+        let file = open_regular_file(&share, path)?;
+        let length = file.metadata()?.len();
+        Ok((file, length))
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -194,6 +181,45 @@ async fn download(
         .header(header::CONTENT_LENGTH, length)
         .body(Body::from_stream(ReaderStream::new(file.take(length))))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+fn open_regular_file(share: &Share, path: RemotePath) -> io::Result<fs::File> {
+    let path = relative_path(path)?;
+    if !share.root.symlink_metadata(&path)?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Choose a regular file",
+        ));
+    }
+    let file = share.root.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Choose a regular file",
+        ));
+    }
+    Ok(file.into_std())
+}
+
+async fn read_bytes(
+    State(share): State<Arc<Share>>,
+    headers: HeaderMap,
+    Json(request): Json<ByteRequest>,
+) -> std::result::Result<Json<BytePage>, StatusCode> {
+    share.authorize(&headers)?;
+    let page = spawn_blocking(move || {
+        let file = open_regular_file(
+            &share,
+            RemotePath {
+                segments: request.segments,
+            },
+        )?;
+        local::read_byte_page(file, request.offset)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(response_error)?;
+    Ok(Json(page))
 }
 
 fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
@@ -269,6 +295,7 @@ fn router(share: Arc<Share>) -> Router {
     Router::new()
         .route("/v1/list", post(list_directory))
         .route("/v1/download", post(download))
+        .route("/v1/bytes", post(read_bytes))
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(share)
 }

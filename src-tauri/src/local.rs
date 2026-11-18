@@ -1,11 +1,21 @@
 use std::{
     fs,
-    io::{self, ErrorKind, Read, Write},
+    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(any(feature = "desktop", feature = "server"))]
+pub fn read_byte_page(mut file: fs::File, offset: u64) -> io::Result<crate::protocol::BytePage> {
+    let length = file.metadata()?.len();
+    file.seek(SeekFrom::Start(offset.min(length)))?;
+    let mut data = Vec::new();
+    file.take(crate::protocol::BYTE_PAGE_SIZE.min(length.saturating_sub(offset)))
+        .read_to_end(&mut data)?;
+    Ok(crate::protocol::BytePage { length, data })
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -196,25 +206,10 @@ pub fn list(path: &Path) -> io::Result<Listing> {
                 continue;
             }
         };
-        let Some(name) = item.file_name().into_string().ok() else {
-            omitted += 1;
-            continue;
-        };
-        let Ok(metadata) = fs::symlink_metadata(item.path()) else {
-            omitted += 1;
-            continue;
-        };
-        let link = is_link(&metadata);
-        let directory = metadata.is_dir() || (link && item.path().is_dir());
-        let hidden = name.starts_with('.') || hidden_attribute(&metadata);
-        entries.push(Entry::new(
-            name,
-            directory,
-            link,
-            hidden,
-            metadata.is_file().then_some(metadata.len()),
-            metadata.modified().ok(),
-        ));
+        match describe_entry(&item.path()) {
+            Ok(entry) => entries.push(entry),
+            Err(_) => omitted += 1,
+        }
     }
     Ok(Listing {
         path: display_path(&path)?,
@@ -222,6 +217,25 @@ pub fn list(path: &Path) -> io::Result<Listing> {
         entries,
         omitted,
     })
+}
+
+pub fn describe_entry(path: &Path) -> io::Result<Entry> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "The file name is not supported."))?;
+    let metadata = fs::symlink_metadata(path)?;
+    let link = is_link(&metadata);
+    let directory = metadata.is_dir() || (link && path.is_dir());
+    let hidden = name.starts_with('.') || hidden_attribute(&metadata);
+    Ok(Entry::new(
+        name.to_owned(),
+        directory,
+        link,
+        hidden,
+        metadata.is_file().then_some(metadata.len()),
+        metadata.modified().ok(),
+    ))
 }
 
 #[cfg(windows)]

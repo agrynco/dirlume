@@ -28,6 +28,8 @@ export const commands = {
   move: { label: "Move", key: "F6" },
   mkdir: { label: "New folder", key: "F7" },
   search: { label: "Find files", key: "Alt+F7" },
+  copyClipboard: { label: "Copy files to clipboard", key: "Ctrl+C" },
+  pasteClipboard: { label: "Paste files from clipboard", key: "Ctrl+V" },
   recycle: { label: "Move to Trash", key: "F8" },
   delete: { label: "Delete permanently", key: "Shift+Delete" },
   menu: { label: "Open commands menu", key: "F9" },
@@ -44,9 +46,13 @@ export const commands = {
   commandHistory: { label: "Command history", key: "Alt+F8" },
   connect: { label: "Connect to a remote machine", key: "Ctrl+Shift+K" },
   settings: { label: "Options", key: "Ctrl+," },
+  nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
+  previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
+  viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
   saveText: { label: "Save text", key: "Ctrl+S" },
   saveTextAlternate: { label: "Save text (alternate)", key: "F2" },
   closeText: { label: "Close the viewer or editor", key: "F10" },
+  cancelText: { label: "Exit the viewer or editor", key: "Escape" },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
 } as const;
@@ -56,7 +62,8 @@ export type Bindings = Record<Command, string>;
 export type Provider = "server" | "kswitcher";
 
 export function commandScope(command: Command) {
-  if (command === "saveText" || command === "saveTextAlternate" || command === "closeText") return "text";
+  if (command === "viewAsHex") return "viewer";
+  if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   return "main";
 }
@@ -75,7 +82,8 @@ const preferenceKey = "dirlume.preferences.v1";
 const mac = /Mac/i.test(navigator.userAgent);
 export const commandNames = Object.keys(commands) as Command[];
 export const defaultBindings = Object.fromEntries(
-  commandNames.map((command) => [command, mac ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
+  commandNames.map((command) => [command, mac && command !== "nextDocument" && command !== "previousDocument"
+    ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
 ) as Bindings;
 
 export function readPreferences(): Preferences {

@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, File, Folder,
-  HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
+  Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { folderLabel, placePath, type Entry, type QuickLocation } from "./api";
 import { formatDate, formatSize, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { ElevationButton, ProcessBrowser } from "./ProcessTools";
+import { fileColor } from "./appearance";
 
 interface PaneProps {
   side: Side;
@@ -22,26 +24,66 @@ interface PaneProps {
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
   onRemote: () => void;
+  onCloseResults: () => void;
+  onRevealResult: (entry: Entry) => void;
+  onStartDrag: (entry: Entry, data: DataTransfer) => boolean;
+  onEndDrag: () => void;
+  canDrop: (data: DataTransfer) => boolean;
+  onDrop: () => void;
+  processView: boolean;
+  onProcesses: (visible: boolean) => void;
+  onContext: (entry?: Entry) => void;
 }
 
 const columns = [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "modified", label: "Modified" }] as const;
 
 export function Pane({ side, active, pane, entries, locations, activate, onRow, onOpen, onPath,
-  onHistory, onParent, onRefresh, onFilter, onSort, onRemote }: PaneProps) {
+  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onCloseResults, onRevealResult,
+  onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const path = pane.place ? placePath(pane.place) : "";
   const [address, setAddress] = useState(path);
   const [filterOpen, setFilterOpen] = useState(false);
   const [locationsOpen, setLocationsOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const locationsBox = useRef<HTMLDivElement>(null);
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = entries.length ? Math.max(0, entries.findIndex((entry) => entry.name === pane.selected)) : -1;
+  const search = Boolean(pane.search);
+  const matches = pane.search?.matches;
+  const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
+  const start = search ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
+  const end = search ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
 
   useEffect(() => setAddress(path), [path]);
-  useEffect(() => {
-    if (active && selected >= 0) list.current?.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
-  }, [selected, path, active]);
+  useLayoutEffect(() => {
+    const element = list.current;
+    const probe = rowProbe.current;
+    if (!element || !probe) return;
+    const measure = () => setViewport({
+      top: element.scrollTop, height: element.clientHeight, rowHeight: probe.getBoundingClientRect().height || 29,
+    });
+    element.scrollTop = 0;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    observer.observe(probe);
+    return () => observer.disconnect();
+  }, [matches]);
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!active || selected < 0 || !element) return;
+    if (search) {
+      const top = selected * viewport.rowHeight;
+      const bottom = top + viewport.rowHeight + 8;
+      if (top < element.scrollTop) element.scrollTop = top;
+      else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
+    } else {
+      element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selected, path, active, search, matches, viewport.rowHeight]);
   useEffect(() => {
     if (!locationsOpen) return;
     locationsBox.current?.querySelector<HTMLButtonElement>(".location-popup button")?.focus();
@@ -76,7 +118,7 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
     list.current?.focus();
   }
 
-  const title = pane.place ? folderLabel(pane.place) : side === "left" ? "Left pane" : "Right pane";
+  const title = processView ? "Processes" : search ? "Search results" : pane.place ? folderLabel(pane.place) : side === "left" ? "Left pane" : "Right pane";
   const isRemote = pane.place && pane.place.kind !== "local";
   const folders = entries.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
@@ -84,16 +126,40 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
   const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
   return (
-    <section id={`${side}-pane`} className={`pane${active ? " active" : ""}`} aria-label={`${side} pane`}
-      onPointerDown={activate} onFocus={activate}>
+    <section id={`${side}-pane`} className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={`${side} pane`}
+      onPointerDown={activate} onFocus={activate} onContextMenu={(event) => {
+        if (processView || !(event.target instanceof HTMLElement) || event.target.closest("input, select, textarea, dialog")) return;
+        event.preventDefault();
+        onContext();
+      }} onDragOver={(event) => {
+        if (!canDrop(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDragOver(true);
+      }} onDragLeave={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragOver(false);
+      }} onDrop={(event) => {
+        setDragOver(false);
+        if (!canDrop(event.dataTransfer)) return;
+        event.preventDefault();
+        onDrop();
+      }}>
       <header className="pane-heading">
         <div className="pane-title">
-          {isRemote ? <Server /> : <Folder />}
-          <h2 title={title}>{title}</h2>
-          {pane.place && pane.place.kind !== "local" && <span className="remote-name" title={pane.place.address}>Remote</span>}
+          {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
+          <h2 title={pane.search?.mask ?? title}>{title}</h2>
+          {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name" title={pane.place.address}>Remote</span>}
         </div>
         <div className="pane-tools">
-          <button className="icon-button" aria-label="Filter folder" aria-pressed={filterOpen}
+          {processView && <button className="icon-button" aria-label="Close processes" title="Close processes"
+            onClick={() => onProcesses(false)}><X /></button>}
+          {search && !processView && <>
+            <button className="icon-button" aria-label="Go to selected file" title="Go to selected file" disabled={selected < 0}
+              onClick={() => onRevealResult(entries[selected])}><ArrowUpRight /></button>
+            <button className="icon-button" aria-label="Close search results" title="Close search results"
+              onClick={onCloseResults}><X /></button>
+          </>}
+          {!processView && <button className="icon-button" aria-label="Filter folder" aria-pressed={filterOpen}
             onClick={() => {
               if (filterOpen) {
                 setFilterOpen(false);
@@ -103,16 +169,16 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
                 setFilterOpen(true);
                 requestAnimationFrame(() => filterField.current?.focus());
               }
-            }}><Search /></button>
-          <button className="icon-button" aria-label="Refresh folder" disabled={!pane.place || pane.loading} onClick={onRefresh}>
+            }}><Search /></button>}
+          {!processView && <button className="icon-button" aria-label="Refresh folder" disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
             {pane.loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
-          </button>
+          </button>}
         </div>
       </header>
       <div className="navigation">
-        <button className="icon-button" aria-label="Back" disabled={pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></button>
+        <button className="icon-button" aria-label="Back" disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></button>
         <button className="icon-button" aria-label="Forward" disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></button>
-        <button className="icon-button" aria-label="Parent folder" disabled={!pane.place || !parentPlace(pane.place)} onClick={onParent}><ArrowUp /></button>
+        <button className="icon-button" aria-label="Parent folder" disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></button>
         <form className="address" onSubmit={submitAddress}>
           <input id={`${side}-address`} aria-label={`${side} path`} value={address} readOnly={Boolean(isRemote)} type="text"
             spellCheck={false} autoComplete="off" onChange={(event) => setAddress(event.target.value)}
@@ -149,11 +215,13 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
                   <Folder /> {location.label}
                 </button>
               ))}
+              <button onClick={() => { setLocationsOpen(false); onProcesses(true); }}><Activity /> Processes</button>
               <button onClick={() => { setLocationsOpen(false); onRemote(); }}><Server /> Remote machine</button>
             </div>
           )}
         </div>
       </div>
+      {processView ? <ProcessBrowser side={side} /> : <>
       {(filterOpen || pane.filter) && (
         <label className="pane-filter">
           <Search />
@@ -176,14 +244,29 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
           </button>
         ))}
       </div>
-      <div id={`${side}-files`} ref={list} className="file-list" role="listbox" aria-label={`${side} files`}
-        aria-multiselectable="true" aria-busy={pane.loading} aria-activedescendant={selected < 0 ? undefined : `${side}-file-${selected}`} tabIndex={0}>
-        {entries.map((entry, index) => {
+      <div id={`${side}-files`} ref={list} className={search ? "file-list result-list" : "file-list"} role="listbox" aria-label={`${side} files`}
+        onScroll={search ? (event) => {
+          const top = event.currentTarget.scrollTop;
+          setViewport((previous) => ({ ...previous, top }));
+        } : undefined}
+        aria-multiselectable="true" aria-busy={pane.loading}
+        aria-activedescendant={selected >= start && selected < end ? `${side}-file-${selected}` : undefined} tabIndex={0}>
+        {search && <>
+          <div ref={rowProbe} className="result-row-probe" aria-hidden="true" />
+          <div aria-hidden="true" style={{ height: start * viewport.rowHeight }} />
+        </>}
+        {entries.slice(start, end).map((entry, offset) => {
+          const index = start + offset;
           const size = pane.sizes.get(entry.name);
           const measuring = pane.measuring.includes(entry.name);
           return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
-            key={entry.name} role="option" aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
+            key={entry.name} role="option" aria-setsize={search ? entries.length : undefined} aria-posinset={search ? index + 1 : undefined}
+            data-file-color={entry.directory ? undefined : fileColor(entry.name)}
+            aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
+            onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onContext(entry); }}
+            draggable onDragStart={(event) => { if (!onStartDrag(entry, event.dataTransfer)) event.preventDefault(); }}
+            onDragEnd={onEndDrag}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> : <File />}
               <span>{entry.name}</span>{entry.link && <Link2 className="link-icon" aria-label="Link" />}</span>
@@ -192,19 +275,23 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
             <span className="file-date">{formatDate(entry.modified)}</span>
           </div>;
         })}
+        {search && <div aria-hidden="true" style={{ height: (entries.length - end) * viewport.rowHeight }} />}
         {!entries.length && (
           <div className="pane-empty">
             {pane.loading ? "Loading…" : pane.error ? "Open another location to continue." :
-              pane.filter ? "No items match the filter." : pane.place ? "This folder is empty." : "Choose a location."}
+              pane.filter ? "No items match the filter." : search ? "No visible matches." : pane.place ? "This folder is empty." : "Choose a location."}
           </div>
         )}
       </div>
       {pane.error && <p className="pane-error" role="alert">{pane.error}</p>}
+      {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
       <footer className="pane-footer">
-        <span>{folders} {folders === 1 ? "folder" : "folders"}<span className="dot" />{entries.length - folders} {entries.length - folders === 1 ? "file" : "files"}</span>
+        <span>{search ? `${entries.length} ${entries.length === 1 ? "match" : "matches"}` :
+          <>{folders} {folders === 1 ? "folder" : "folders"}<span className="dot" />{entries.length - folders} {entries.length - folders === 1 ? "file" : "files"}</>}</span>
         <span>{marked.length ? `${marked.length} marked · ${complete ? "" : "≥ "}${formatSize(markedBytes)}` :
-          pane.omitted ? `${pane.omitted} unavailable` : ""}</span>
+          search ? pane.search?.incomplete ? "Partial results" : "" : pane.omitted ? `${pane.omitted} unavailable` : ""}</span>
       </footer>
+      </>}
     </section>
   );
 }

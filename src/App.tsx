@@ -5,21 +5,24 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, placePath, windowsClient, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { Pane } from "./Pane";
 import { SearchDialog } from "./SearchDialog";
+import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
 import { applyAppearance } from "./appearance";
-import { TextDialog, CompareDialog } from "./TextTools";
+import { TextWindow, CompareDialog } from "./TextTools";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, emptyPane, localPath, opposite, parentPlace, readPlace, visibleEntries,
+  applyListing, childPlace, closeSearchResults, localPath, opposite, paneItem, parentPlace, readPlace, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, persistPreferences, readPreferences, showShortcut, type Command } from "./preferences";
+import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow } from "./workspace";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
+const fileDrag = "application/x-dirlume-files";
 
 type ActionModal =
   | { kind: "mkdir" | "rename" | "newFile"; path: string; name: string }
@@ -28,11 +31,11 @@ type ActionModal =
 type Modal =
   | { kind: "settings" }
   | { kind: "connect"; side: Side }
-  | ({ kind: "view" | "edit" } & NamedFile)
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
-  | { kind: "menu" | "commandHistory" }
+  | { kind: "fileActions"; side: Side; entry?: Entry }
+  | { kind: "menu" | "commandHistory" | "exit" }
   | ActionModal;
 
 const rowCommands = {
@@ -44,17 +47,25 @@ function shellArgument(value: string) {
 }
 
 export default function App() {
-  const [panes, setPanes] = useState({ left: emptyPane, right: emptyPane });
+  const [startup] = useState(readWorkspace);
+  const [ready, setReady] = useState(false);
+  const [panes, setPanes] = useState(() => ({ left: restorePane(startup?.panels.left), right: restorePane(startup?.panels.right) }));
   const [locations, setLocations] = useState<QuickLocation[]>([]);
-  const [active, setActive] = useState<Side>("left");
+  const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
+  const [processPanels, setProcessPanels] = useState({ left: false, right: false });
   const [preferences, setPreferences] = useState(readPreferences);
   const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
   const theme = scheme?.base ?? preferences.theme;
   const [modal, setModal] = useState<Modal | null>(null);
+  const [documents, setDocuments] = useState<DocumentWindow[]>(startup?.documents ?? []);
+  const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
+  const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
+  const dirtyDocuments = useRef(new Set<number>());
+  const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminal, setTerminal] = useState<{ id: number; path: string } | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
-  const [split, setSplit] = useState(50);
+  const [split, setSplit] = useState(Number.isFinite(startup?.split) ? Math.max(20, Math.min(80, startup!.split)) : 50);
   const [commandLine, setCommandLine] = useState("");
   const [pendingCommands, setPendingCommands] = useState<string[]>([]);
   const commandInput = useRef<HTMLInputElement>(null);
@@ -72,6 +83,7 @@ export default function App() {
   const watchId = useRef(0);
   const measureId = useRef(0);
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
+  const drag = useRef<{ side: Side; source: Place; items: Transfer["items"] } | null>(null);
   const latest = useRef(panes);
   latest.current = panes;
   const connected = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
@@ -82,6 +94,7 @@ export default function App() {
     right: visibleEntries(panes.right, preferences.hidden),
   }), [panes, preferences.hidden]);
   const current = entries[active].find((entry) => entry.name === pane.selected) ?? entries[active][0];
+  const currentItem = paneItem(pane, current);
   const local = pane.place?.kind === "local" ? pane.place : null;
   const canTransfer = Boolean(current && pane.place);
 
@@ -100,39 +113,51 @@ export default function App() {
   const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | number = "push", reveal?: string) => {
     if (action !== "refresh") cancelScan(side);
     const ticket = ++request.current[side];
-    updatePane(side, (pane) => ({ ...pane, loading: true, error: "" }));
+    updatePane(side, (pane) => ({ ...pane, loading: true, error: "", elevationPath: undefined }));
     try {
       const result = await readPlace(place);
-      if (ticket !== request.current[side]) return;
+      if (ticket !== request.current[side]) return false;
       const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
       if (reveal !== undefined && !found) setStatus({ text: `File no longer found: ${reveal}`, error: true });
       updatePane(side, (pane) => {
         const listing = applyListing(pane, result.place, result.listing, action);
         return found ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
       });
+      return true;
     } catch (error) {
       if (ticket === request.current[side]) {
-        updatePane(side, (pane) => ({ ...pane, loading: false, error: describeError(error) }));
+        const text = describeError(error);
+        updatePane(side, (pane) => ({ ...pane, loading: false, error: text,
+          elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined }));
       }
+      return false;
     }
   }, [cancelScan, updatePane]);
 
   useEffect(() => {
     let cancelled = false;
-    api.locations().then((locations) => {
+    Promise.all([api.locations(), api.requestedLocation()]).then(async ([locations, requested]) => {
       if (cancelled) return;
       setLocations(locations);
       const home = locations[0];
       const alternate = locations.find(({ label }) => label === "Downloads") ?? home;
       if (home && alternate) {
-        void load("left", localPath(home.path));
-        void load("right", localPath(alternate.path));
+        await Promise.all(([["left", home.path], ["right", alternate.path]] as const).map(async ([side, fallback]) => {
+          const requestedFolder = side === "left" && requested ? localPath(requested) : null;
+          const saved = requestedFolder ?? startup?.panels[side].place;
+          if (saved && await load(side, saved, requestedFolder ? "push" : "refresh")) return;
+          if (!cancelled) await load(side, localPath(fallback));
+        }));
       }
     }).catch((error: unknown) => {
       if (!cancelled) setStatus({ text: describeError(error), error: true });
-    });
+    }).finally(() => { if (!cancelled) setReady(true); });
     return () => { cancelled = true; };
-  }, [load]);
+  }, [load, startup]);
+
+  useEffect(() => {
+    if (ready) saveWorkspace(panes, active, split, documents, activeDocument);
+  }, [ready, panes, active, split, documents, activeDocument]);
 
   const leftPath = panes.left.place?.kind === "local" ? panes.left.place.path : null;
   const rightPath = panes.right.place?.kind === "local" ? panes.right.place.path : null;
@@ -166,6 +191,19 @@ export default function App() {
     return () => stopWatching.forEach((stop) => stop());
   }, [leftPath, rightPath, load]);
 
+  const leftRemote = panes.left.place?.kind !== "local" ? panes.left.place : null;
+  const rightRemote = panes.right.place?.kind !== "local" ? panes.right.place : null;
+  useEffect(() => {
+    if (!leftRemote && !rightRemote) return;
+    const timer = window.setInterval(() => {
+      for (const side of ["left", "right"] as const) {
+        const { loading, place } = latest.current[side];
+        if (place && place.kind !== "local" && !loading) void load(side, place, "refresh");
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [leftRemote, rightRemote, load]);
+
   useEffect(() => {
     persistPreferences(preferences);
   }, [preferences]);
@@ -189,16 +227,79 @@ export default function App() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    if (!isTauri()) return;
+    const listener = getCurrentWindow().onCloseRequested((event) => {
+      if (!exitConfirmed.current && dirtyDocuments.current.size) {
+        event.preventDefault();
+        setModal({ kind: "exit" });
+      }
+    });
+    return () => { void listener.then((unlisten) => unlisten()).catch(() => {}); };
+  }, []);
+
   function focus(side: Side) {
     setActive(side);
     document.getElementById(`${side}-files`)?.focus();
   }
 
+  function selectDocument(id: number | null) {
+    setActiveDocument(id);
+    if (id === null) requestAnimationFrame(() => {
+      if (panelsHidden) commandInput.current?.focus();
+      else focus(active);
+    });
+  }
+
+  function openDocument(file: NamedFile, editing: boolean) {
+    const existing = documents.find((item) => item.editing === editing && item.file.name === file.name &&
+      item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
+      (file.place.kind === "local" || item.file.place.kind === "server" && item.file.place.id === file.place.id));
+    if (existing) {
+      selectDocument(existing.id);
+    } else {
+      const id = ++nextDocument.current;
+      setDocuments((current) => [...current, { id, file, editing }]);
+      selectDocument(id);
+    }
+  }
+
+  function closeDocument(id: number) {
+    const index = documents.findIndex((document) => document.id === id);
+    if (index < 0) return;
+    const remaining = documents.filter((document) => document.id !== id);
+    const { place } = documents[index].file;
+    if (place.kind === "server" && !Object.values(connected.current).includes(place.id) &&
+        !remaining.some(({ file }) => file.place.kind === "server" && file.place.id === place.id)) {
+      void api.disconnect(place.id).catch(() => {});
+    }
+    setDocuments(remaining);
+    dirtyDocuments.current.delete(id);
+    if (activeDocument === id) selectDocument(documents[index - 1]?.id ?? null);
+  }
+
+  function documentKeys(event: KeyboardEvent) {
+    if (modal || !documents.length || event.nativeEvent.isComposing) return;
+    if ((event.target as HTMLElement).closest("dialog[open]")) return;
+    const shortcut = eventShortcut(event);
+    if (!shortcut) return;
+    const direction = shortcut === preferences.shortcuts.nextDocument ? 1 : shortcut === preferences.shortcuts.previousDocument ? -1 : 0;
+    if (!direction) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const ids = [null, ...documents.map(({ id }) => id)];
+    const index = ids.indexOf(activeDocument);
+    selectDocument(ids[(index + direction + ids.length) % ids.length]);
+  }
+
   function routeRemote(side: Side, place: RemotePlace, listing: Listing) {
+    showProcesses(side, false);
     cancelScan(side);
     ++request.current[side];
     const previous = connected.current[side];
-    if (previous !== null) void api.disconnect(previous).catch(() => {});
+    if (previous !== null && !documents.some(({ file }) => file.place.kind === "server" && file.place.id === previous)) {
+      void api.disconnect(previous).catch(() => {});
+    }
     connected.current[side] = place.kind === "server" ? place.id : null;
     setActive(side);
     updatePane(side, (pane) => {
@@ -208,12 +309,13 @@ export default function App() {
   }
 
   function open(side: Side, entry: Entry) {
-    const place = panes[side].place;
-    if (!place || panes[side].loading) return;
-    if (entry.directory) {
-      void load(side, childPlace(place, entry.name));
+    const item = paneItem(panes[side], entry);
+    if (!item || panes[side].loading) return;
+    const { place, entry: file } = item;
+    if (file.directory) {
+      void load(side, childPlace(place, file.name));
     } else if (place.kind === "local") {
-      void api.operate(place.path, { kind: "open", name: entry.name }).catch((error: unknown) =>
+      void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
         setStatus({ text: describeError(error), error: true }));
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
@@ -221,16 +323,51 @@ export default function App() {
   }
 
   function parent(side: Side) {
+    if (processPanels[side]) {
+      showProcesses(side, false);
+      return;
+    }
+    if (panes[side].search) {
+      closeResults(side);
+      return;
+    }
     const place = panes[side].place;
     const target = place && parentPlace(place);
     if (target) void load(side, target);
   }
 
   function history(side: Side, offset: number) {
+    if (processPanels[side]) {
+      showProcesses(side, false);
+      return;
+    }
     const pane = panes[side];
+    if (pane.search && offset < 0) {
+      closeResults(side);
+      return;
+    }
     const position = pane.position + offset;
     const place = pane.history[position];
     if (place) void load(side, place, position);
+  }
+
+  function showProcesses(side: Side, visible: boolean) {
+    setProcessPanels((panels) => ({ ...panels, [side]: visible }));
+    requestAnimationFrame(() => focus(side));
+  }
+
+  function closeResults(side: Side) {
+    selectionAnchor.current[side] = null;
+    updatePane(side, closeSearchResults);
+    requestAnimationFrame(() => focus(side));
+  }
+
+  function revealResult(side: Side, directory: Place, name: string) {
+    setModal(null);
+    setPanelsHidden(false);
+    setActive(side);
+    void load(side, directory, "push", name);
+    requestAnimationFrame(() => focus(side));
   }
 
   function refresh(side: Side) {
@@ -254,21 +391,96 @@ export default function App() {
     }
   }
 
+  function transferItems(side: Side, selected: Entry, useMarks = true) {
+    const state = panes[side];
+    const marks = useMarks ? entries[side].filter(({ name }) => state.marked.includes(name)) : [];
+    return (marks.length ? marks : [selected]).flatMap((entry) => {
+      const item = paneItem(state, entry);
+      return item ? [item] : [];
+    });
+  }
+
+  function openTransfer(kind: Transfer["kind"], source: Place, items: Transfer["items"], target: Place | null, chooseOperation = false) {
+    if (!items.length) return;
+    if (source.kind !== "local" && items.some(({ entry }) => entry.link || (source.kind === "kswitcher" && entry.directory))) {
+      setStatus({ text: source.kind === "kswitcher" ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
+      return;
+    }
+    setModal({ kind: "transfer", transfer: { kind, source, items, target: target?.kind === "local" ? target.path : "", chooseOperation } });
+  }
+
   function transfer(kind: "copy" | "move") {
     const source = pane.place;
-    const target = other.place;
     if (!source || !current || pane.loading) {
       setStatus({ text: "Select a file or folder in the active pane." });
       return;
     }
-    const marks = entries[active].filter(({ name }) => pane.marked.includes(name));
-    const items = marks.length ? marks : [current];
-    if (source.kind !== "local" && kind === "move") return;
-    if (source.kind !== "local" && items.some((entry) => entry.link || (source.kind === "kswitcher" && entry.directory))) {
-      setStatus({ text: source.kind === "kswitcher" ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
-      return;
-    }
-    setModal({ kind: "transfer", transfer: { kind, source, items, target: target?.kind === "local" ? target.path : "" } });
+    if (kind === "move" && (source.kind !== "local" || pane.search)) return;
+    openTransfer(kind, source, transferItems(active, current), other.search ? null : other.place);
+  }
+
+  function startDrag(side: Side, entry: Entry, data: DataTransfer) {
+    const state = panes[side];
+    if (!state.place || state.loading || modal) return false;
+    const items = transferItems(side, entry, state.marked.includes(entry.name));
+    if (!items.length) return false;
+    drag.current = { side, source: state.place, items };
+    data.setData(fileDrag, "files");
+    data.effectAllowed = "copyMove";
+    return true;
+  }
+
+  function canDrop(side: Side, data: DataTransfer) {
+    const target = panes[side];
+    return Boolean(!modal && drag.current && drag.current.side !== side && target.place?.kind === "local" &&
+      !target.search && !processPanels[side] && !target.loading && data.types.includes(fileDrag));
+  }
+
+  async function copyClipboard(side: Side, entry?: Entry) {
+    if (!entry) return;
+    const items = transferItems(side, entry, panes[side].marked.includes(entry.name) || entry === current);
+    try {
+      await api.copyFileReferences(items.map(({ place, entry }) => {
+        if (place.kind !== "local") throw new Error("Choose local files to copy to the system clipboard.");
+        return { directory: place.path, name: entry.name };
+      }));
+      setStatus({ text: `${items.length} ${items.length === 1 ? "item" : "items"} copied to the clipboard.` });
+    } catch (failure) { setStatus({ text: describeError(failure), error: true }); }
+  }
+
+  async function pasteClipboard(side: Side) {
+    const pane = panes[side];
+    if (pane.place?.kind !== "local" || pane.search || processPanels[side] || pane.loading) return;
+    try {
+      const files = await api.clipboardFiles();
+      if (!files.length) {
+        setStatus({ text: "The clipboard contains no files." });
+        return;
+      }
+      const items = files.map(({ directory, entry }) => ({ place: localPath(directory), entry }));
+      openTransfer("copy", items[0].place, items, pane.place);
+    } catch (failure) { setStatus({ text: describeError(failure), error: true }); }
+  }
+
+  function contextActions(side: Side, entry?: Entry) {
+    setActive(side);
+    if (entry && !panes[side].marked.includes(entry.name)) selectRow(side, entry, false, false);
+    const item = paneItem(panes[side], entry);
+    if (windowsClient && item?.place.kind === "local") {
+      const { place, entry: file } = item;
+      void api.windowsItemMenu(place.path, file.name).catch((failure: unknown) => {
+        setStatus({ text: describeError(failure), error: true });
+        setModal({ kind: "fileActions", side, entry });
+      });
+    } else setModal({ kind: "fileActions", side, entry });
+  }
+
+  function drop(side: Side) {
+    const payload = drag.current;
+    drag.current = null;
+    if (!payload) return;
+    openTransfer("copy", payload.source, payload.items, panes[side].place,
+      payload.source.kind === "local" && !panes[payload.side].search);
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
@@ -282,7 +494,7 @@ export default function App() {
       ...pane, selected: entry.name,
       marked: range ? [...new Set([...pane.marked, ...group])] : mark
         ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
-        : pane.marked,
+        : pane.marked.includes(entry.name) ? pane.marked : [],
     }));
   }
 
@@ -340,11 +552,10 @@ export default function App() {
     });
   }
 
-  function fileFor(side: Side): NamedFile | null {
-    const place = panes[side].place;
-    const entry = entries[side].find((entry) => entry.name === panes[side].selected) ?? entries[side][0];
-    return place && place.kind !== "kswitcher" && entry && !entry.directory && !entry.link
-      ? { place, name: entry.name } : null;
+  function fileFor(side: Side, entry = entries[side].find((entry) => entry.name === panes[side].selected) ?? entries[side][0]): NamedFile | null {
+    const item = paneItem(panes[side], entry);
+    return item && item.place.kind !== "kswitcher" && !item.entry.directory && !item.entry.link
+      ? { place: item.place, name: item.entry.name } : null;
   }
 
   const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && pane.marked.includes(entry.name));
@@ -377,6 +588,18 @@ export default function App() {
   }
 
   function perform(command: Command) {
+    if (processPanels[active]) {
+      if (command === "recycle") {
+        document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-end-processes"));
+        return;
+      }
+      if (command === "cancelMeasure") {
+        showProcesses(active, false);
+        return;
+      }
+      if (!["switchPane", "swap", "back", "forward", "parent", "leftLocations", "rightLocations",
+        "shrinkLeft", "growLeft", "settings", "menu", "close", "terminal", "connect"].includes(command)) return;
+    }
     if (command in rowCommands) {
       const items = entries[active];
       if (!items.length) return;
@@ -397,6 +620,7 @@ export default function App() {
         cancelScan("left");
         cancelScan("right");
         setPanes((current) => ({ left: current.right, right: current.left }));
+        setProcessPanels((current) => ({ left: current.right, right: current.left }));
         connected.current = { left: connected.current.right, right: connected.current.left };
         selectionAnchor.current = { left: selectionAnchor.current.right, right: selectionAnchor.current.left };
         focus(opposite(active));
@@ -436,7 +660,8 @@ export default function App() {
         break;
       case "commandPath":
       case "commandName":
-        if (local && current) insertCommand(command === "commandPath" ? placePath(childPlace(local, current.name)) : current.name);
+        if (currentItem?.place.kind === "local") insertCommand(command === "commandPath"
+          ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name);
         break;
       case "previousCommand": {
         const previous = historyItems[historyIndex.current + 1];
@@ -460,25 +685,28 @@ export default function App() {
       }
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
+      case "copyClipboard": if (current) void copyClipboard(active, current); break;
+      case "pasteClipboard": void pasteClipboard(active); break;
       case "search":
         if (pane.place && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
         break;
       case "rename":
       case "newFile":
       case "mkdir":
-        if (local && !busy && !pane.loading && (command !== "rename" || current)) {
+        if (local && !pane.search && !busy && !pane.loading && (command !== "rename" || current)) {
           setModal({ kind: command, path: local.path, name: command === "rename" ? current.name : "" });
         }
         break;
       case "delete":
       case "recycle":
-        if (local && current && !busy && !pane.loading) {
+        if (local && !pane.search && current && !busy && !pane.loading) {
           const names = entries[active].filter(({ name }) => pane.marked.includes(name)).map(({ name }) => name);
           setModal({ kind: command, path: local.path, names: names.length ? names : [current.name] });
         }
         break;
       case "cancelMeasure":
         if (commandLine) { setCommandLine(""); historyIndex.current = -1; }
+        else if (pane.search && !panelsHidden) closeResults(active);
         else cancelScan(active);
         break;
       case "view":
@@ -488,14 +716,16 @@ export default function App() {
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || file.place.kind === "local")) setModal({ kind: command, ...file });
+        if (file && (command === "view" || file.place.kind === "local")) openDocument(file, command === "edit");
         break;
       }
       case "compare": {
-        const place = pane.place?.kind !== "kswitcher" ? pane.place : null;
-        const marked = place ? entries[active].filter((entry) => !entry.directory && !entry.link && pane.marked.includes(entry.name)) : [];
-        const left = place && marked.length === 2 ? { place, name: marked[0].name } : fileFor("left");
-        const right = place && marked.length === 2 ? { place, name: marked[1].name } : fileFor("right");
+        const marked = entries[active].filter((entry) => pane.marked.includes(entry.name)).flatMap((entry) => {
+          const file = fileFor(active, entry);
+          return file ? [file] : [];
+        });
+        const left = marked.length === 2 ? marked[0] : fileFor("left");
+        const right = marked.length === 2 ? marked[1] : fileFor("right");
         if (left && right) setModal({ kind: "compare", left, right });
         else setStatus({ text: "Choose a text file in each pane to compare.", error: true });
         break;
@@ -504,8 +734,9 @@ export default function App() {
   }
 
   function keyDown(event: KeyboardEvent) {
-    if (modal || event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (modal || activeDocument !== null || event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
+    if (target.closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
     const command = shortcut && commandNames.find((command) => commandScope(command) === "main" && preferences.shortcuts[command] === shortcut);
     if (!command) return;
@@ -513,6 +744,7 @@ export default function App() {
     const inCommandLine = target === commandInput.current;
     const onFiles = target.closest(".file-list");
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (inField && (command === "copyClipboard" || command === "pasteClipboard")) return;
     const fileNavigation = command in rowCommands || command === "open";
     const fileKey = /^F\d{1,2}$/.test(event.key);
     if (inField && !fileKey && command !== "terminal" &&
@@ -528,12 +760,13 @@ export default function App() {
   }
 
   return (
-    <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}`} onKeyDown={keyDown}>
+    <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
+      onKeyDown={keyDown} onKeyDownCapture={documentKeys}>
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
           <button className="toolbar-button" title={keyLabel("connect")} onClick={() => perform("connect")}><Server /> Connect</button>
-          <button className="icon-button" aria-label="Find files" title={keyLabel("search")} disabled={!pane.place || pane.loading}
+          <button className="icon-button" aria-label="Find files" title={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
             onClick={() => perform("search")}><Search /></button>
           <span className="separator" />
           <button className="icon-button" aria-label="Swap panes" title={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></button>
@@ -550,8 +783,17 @@ export default function App() {
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} pane={panes[side]} entries={entries[side]} locations={locations}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
-            onOpen={(entry) => open(side, entry)} onPath={(path) => { void load(side, localPath(path)); }}
+            onOpen={(entry) => open(side, entry)} onPath={(path) => { showProcesses(side, false); void load(side, localPath(path)); }}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
+            onCloseResults={() => closeResults(side)}
+            onStartDrag={(entry, data) => startDrag(side, entry, data)} onEndDrag={() => { drag.current = null; }}
+            canDrop={(data) => canDrop(side, data)} onDrop={() => drop(side)}
+            processView={processPanels[side]} onProcesses={(visible) => showProcesses(side, visible)}
+            onContext={(entry) => contextActions(side, entry)}
+            onRevealResult={(entry) => {
+              const item = paneItem(panes[side], entry);
+              if (item) revealResult(side, item.place, item.entry.name);
+            }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} />
         ))}
@@ -571,6 +813,19 @@ export default function App() {
             }
           }} />
       </main>
+      <div className="document-workspace" hidden={activeDocument === null}>
+        {documents.map(({ id, file, editing }) => (
+          <TextWindow key={id} file={file} editing={editing} active={activeDocument === id} theme={theme}
+            saveShortcut={preferences.shortcuts.saveText} alternateSaveShortcut={preferences.shortcuts.saveTextAlternate}
+            closeShortcut={preferences.shortcuts.closeText} cancelShortcut={preferences.shortcuts.cancelText}
+            hexShortcut={preferences.shortcuts.viewAsHex}
+            onDirtyChange={(dirty) => {
+              if (dirty) dirtyDocuments.current.add(id);
+              else dirtyDocuments.current.delete(id);
+            }}
+            onSaved={() => { refresh("left"); refresh("right"); }} onClose={() => closeDocument(id)} />
+        ))}
+      </div>
       {terminal && (
         <Suspense fallback={<div className="terminal-card pane-empty">Opening terminal…</div>}>
           <TerminalPanel key={terminal.id} session={terminal} theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal}
@@ -587,16 +842,16 @@ export default function App() {
           spellCheck={false} placeholder="Enter a command" onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
       </form>
       <nav className="actionbar" aria-label="File actions">
-        {([
+        {processPanels[active] ? <button type="button" onClick={() => showProcesses(active, false)}>Back to files</button> : ([
           { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
             disabled: !fileFor(active) && (!local || !measureEntries.length) },
           { command: "edit", label: "Edit", Icon: Pencil, disabled: !local || !current || current.directory },
           { command: "copy", label: local ? "Copy" : "Download", Icon: local ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
-          { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: !local || !canTransfer || busy },
-          { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !current || busy },
-          { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || busy },
-          { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || busy },
-          { command: "recycle", label: "Trash", Icon: Trash2, disabled: !local || !current || busy },
+          { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: !local || !!pane.search || !canTransfer || busy },
+          { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
+          { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
+          { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
+          { command: "recycle", label: "Trash", Icon: Trash2, disabled: !local || !!pane.search || !current || busy },
           { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
           { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
         ] as const).map(({ command, label, Icon, disabled }) => (
@@ -605,6 +860,17 @@ export default function App() {
           </button>
         ))}
       </nav>
+      <nav className="document-bar" aria-label="Open documents" aria-hidden={!documents.length}>
+        {documents.length > 0 && <>
+          <button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> Files</button>
+          {documents.map(({ id, file, editing }) => (
+            <button key={id} type="button" aria-label={`${editing ? "Edit" : "View"} ${file.name}`}
+              title={placePath(file.place)} aria-pressed={activeDocument === id} onClick={() => selectDocument(id)}>
+              {editing ? <Pencil /> : <Eye />}<span>{file.name}</span>
+            </button>
+          ))}
+        </>}
+      </nav>
       <footer className={`statusbar${status.error ? " danger" : ""}`}>
         <span role={status.error ? "alert" : "status"} title={status.text}>
           {status.text}
@@ -612,25 +878,44 @@ export default function App() {
         <span>{pane.place && pane.place.kind !== "local" ? pane.place.address : "Local file system"}</span>
       </footer>
       {modal?.kind === "settings" && <Settings preferences={preferences} onChange={setPreferences} onClose={() => setModal(null)} />}
+      {modal?.kind === "exit" && (
+        <Dialog title="Unsaved changes" onClose={() => setModal(null)}>
+          <div className="dialog-body"><p>Some editors have unsaved changes. Discard them and exit Dirlume?</p></div>
+          <footer className="dialog-footer">
+            <button type="button" data-initial-focus onClick={() => setModal(null)}>Keep working</button>
+            <button type="button" className="negative" onClick={() => {
+              exitConfirmed.current = true;
+              void getCurrentWindow().close().catch((error: unknown) => {
+                exitConfirmed.current = false;
+                setModal(null);
+                setStatus({ text: describeError(error), error: true });
+              });
+            }}>Discard changes and exit</button>
+          </footer>
+        </Dialog>
+      )}
       {modal?.kind === "transfer" && (
         <TransferDialog transfer={modal.transfer} onClose={() => setModal(null)}
           onFinished={() => { refresh("left"); refresh("right"); }} />
       )}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
-          onReveal={(directory, name) => {
+          onReveal={(directory, name) => revealResult(modal.side, directory, name)}
+          onShowResults={(mask, matches, incomplete, selected) => {
             const { side } = modal;
+            cancelScan(side);
+            selectionAnchor.current[side] = null;
+            updatePane(side, (pane) => showSearchResults(pane, mask, matches, incomplete, selected));
             setModal(null);
             setPanelsHidden(false);
             setActive(side);
-            void load(side, directory, "push", name);
-            requestAnimationFrame(() => document.getElementById(`${side}-files`)?.focus());
+            requestAnimationFrame(() => focus(side));
           }} />
       )}
       {modal?.kind === "menu" && (
         <Dialog title="Commands" onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
-            {(["view", "edit", "newFile", "copy", "move", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
+            {(["view", "edit", "newFile", "copy", "move", "copyClipboard", "pasteClipboard", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
               .map((command) => <button key={command} type="button" onClick={() => { setModal(null); perform(command); }}>
                 {commands[command].label}<kbd>{keyLabel(command)}</kbd>
               </button>)}
@@ -639,15 +924,21 @@ export default function App() {
       )}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
+      {modal?.kind === "fileActions" && (
+        <Dialog title="File actions" onClose={() => setModal(null)}>
+          <div className="dialog-body command-menu">
+            {modal.entry && <button type="button" disabled={paneItem(panes[modal.side], modal.entry)?.place.kind !== "local"}
+              onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>Copy files to clipboard</button>}
+            <button type="button" disabled={panes[modal.side].place?.kind !== "local" || Boolean(panes[modal.side].search)}
+              onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>Paste files</button>
+          </div>
+          <footer className="dialog-footer"><button type="button" onClick={() => setModal(null)}>Close</button></footer>
+        </Dialog>
+      )}
       {modal?.kind === "connect" && (
         <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => setModal({ kind: "settings" })}
           onConnect={(place, listing) => { routeRemote(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
-      )}
-      {(modal?.kind === "view" || modal?.kind === "edit") && (
-        <TextDialog file={modal} editing={modal.kind === "edit"} saveShortcut={preferences.shortcuts.saveText}
-          alternateSaveShortcut={preferences.shortcuts.saveTextAlternate} closeShortcut={preferences.shortcuts.closeText}
-          onSaved={() => { refresh("left"); refresh("right"); }} onClose={() => setModal(null)} />
       )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange} onClose={() => setModal(null)} />}
@@ -665,8 +956,7 @@ export default function App() {
             refresh("left");
             refresh("right");
             if (modal.kind === "newFile") {
-              setModal({ kind: "edit", place: { kind: "local", path: modal.path, parent: null }, name: operation.name });
-              return;
+              openDocument({ place: { kind: "local", path: modal.path, parent: null }, name: operation.name }, true);
             }
           }
           setModal(null);
@@ -704,6 +994,7 @@ function FileDialog({ modal, onClose, onSubmit }: {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState(false);
+  const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const titles = { mkdir: "New folder", newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const title = titles[modal.kind];
   const removing = "names" in modal;
@@ -725,6 +1016,7 @@ function FileDialog({ modal, onClose, onSubmit }: {
   }
 
   return (
+    <>
     <Dialog title={title} onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
@@ -737,8 +1029,12 @@ function FileDialog({ modal, onClose, onSubmit }: {
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
             </label>}
           {error && <p className="dialog-error" role="alert">{error}</p>}
+          {windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
         </div>
         <div className="dialog-footer">
+          {windowsClient && isLockError(error) && <button type="button" onClick={() => setLockPaths(
+            ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
+          )}>Find locking processes</button>}
           <button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</button>
           <button type="submit" className={removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
@@ -747,6 +1043,8 @@ function FileDialog({ modal, onClose, onSubmit }: {
         </div>
       </form>
     </Dialog>
+    {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
+    </>
   );
 }
 

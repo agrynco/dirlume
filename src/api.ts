@@ -79,8 +79,33 @@ export interface TextDocument {
   encoding: "utf8" | "utf8_bom" | "utf16_le" | "utf16_be";
 }
 
+export interface BytePage {
+  length: number;
+  data: number[];
+}
+
+export interface ProcessId {
+  pid: number;
+  started: number;
+}
+
+export interface ProcessInfo extends ProcessId {
+  name: string;
+  cpu: number;
+  memory: number;
+  canTerminate: boolean;
+}
+
 export const api = {
   locations: () => invoke<QuickLocation[]>("locations"),
+  requestedLocation: () => invoke<string | null>("requested_location"),
+  listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
+  terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
+  lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),
+  windowsItemMenu: (directory: string, name: string) => invoke<void>("windows_item_menu", { directory, name }),
+  openElevated: (directory: string) => invoke<void>("open_elevated", { directory }),
+  copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
+  clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
   operate: (directory: string, operation: Operation) =>
     invoke<void>("operate", { directory, operation }),
@@ -92,6 +117,10 @@ export const api = {
     invoke<TextDocument>("read_text", { directory, name }),
   readServerText: (id: number, segments: string[]) =>
     invoke<TextDocument>("read_server_text", { id, segments }),
+  readBytes: (directory: string, name: string, offset: number) =>
+    invoke<BytePage>("read_bytes", { directory, name, offset }),
+  readServerBytes: (id: number, segments: string[], offset: number) =>
+    invoke<BytePage>("read_server_bytes", { id, segments, offset }),
   saveText: (directory: string, name: string, original: string, text: string) =>
     invoke<void>("save_text", { directory, name, original, text }),
   openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
@@ -130,6 +159,19 @@ export function placePath(place: Place) {
 export function readPlaceText(file: NamedFile) {
   const { place, name } = file;
   return place.kind === "local" ? api.readText(place.path, name) : api.readServerText(place.id, [...place.segments, name]);
+}
+
+export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
+  return place.kind === "local" ? api.readBytes(place.path, name, offset)
+    : api.readServerBytes(place.id, [...place.segments, name], offset);
+}
+
+export function isPermissionError(error: string) {
+  return /\bos error (?:5|13)\b|access (?:is )?denied|permission denied/i.test(error);
+}
+
+export function isLockError(error: string) {
+  return /\bos error (?:32|33)\b|sharing violation|being used by another process/i.test(error);
 }
 
 export function folderLabel(place: Place) {

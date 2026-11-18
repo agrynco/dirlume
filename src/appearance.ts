@@ -36,6 +36,19 @@ export const colorGroups = {
       "panel-inactive-selection": "Inactive selection background",
     },
   },
+  files: {
+    label: "File types",
+    colors: {
+      "file-source": "Source code",
+      "file-text": "Text and Markdown",
+      "file-document": "Office documents and PDF",
+      "file-image": "Images",
+      "file-media": "Audio and video",
+      "file-archive": "Archives and disk images",
+      "file-config": "Configuration and data",
+      "file-executable": "Executables and scripts",
+    },
+  },
   dialogs: {
     label: "Dialogs",
     colors: {
@@ -53,11 +66,39 @@ export const colorGroups = {
     colors: {
       "text-bg": "Editor, viewer, and terminal background",
       "text-ink": "Editor, viewer, and terminal text",
+      "syntax-keyword": "Syntax keywords",
+      "syntax-string": "Syntax strings",
+      "syntax-number": "Syntax numbers and constants",
+      "syntax-comment": "Syntax comments",
+      "syntax-type": "Syntax types and tags",
+      "syntax-property": "Syntax properties and functions",
       added: "Added lines",
       removed: "Removed lines",
     },
   },
 } as const;
+
+type FileColor = keyof typeof colorGroups.files.colors;
+const extensions: Record<FileColor, string> = {
+  "file-source": "c cc cpp cs css go h hpp html htm java js jsx kt less lua php py rb rs sass scss sql swift ts tsx vue",
+  "file-text": "log markdown md rst txt",
+  "file-document": "doc docx epub odf odg odp ods odt pdf ppt pptx rtf xls xlsx",
+  "file-image": "avif bmp gif heic ico jpeg jpg png raw svg tif tiff webp",
+  "file-media": "aac avi flac m4a m4v mkv mov mp3 mp4 mpeg ogg opus wav webm wma",
+  "file-archive": "7z bz2 cab dmg gz img iso rar tar tgz xz zip zst",
+  "file-config": "cfg conf csv db env ini json jsonl lock sqlite toml tsv xml yaml yml",
+  "file-executable": "appimage bat bin cmd com deb dll exe msi ps1 rpm sh so",
+};
+const fileColors = new Map(Object.entries(extensions).flatMap(([color, values]) =>
+  values.split(" ").map((extension): [string, FileColor] => [extension, color as FileColor])));
+
+export function fileColor(name: string): FileColor | undefined {
+  const filename = name.slice(name.lastIndexOf("/") + 1).toLowerCase();
+  if (filename === "makefile" || filename === "dockerfile") return "file-source";
+  if (filename === ".env" || filename.startsWith(".env.")) return "file-config";
+  const dot = filename.lastIndexOf(".");
+  return dot > 0 ? fileColors.get(filename.slice(dot + 1)) : undefined;
+}
 
 export type Color = {
   [Group in keyof typeof colorGroups]: keyof (typeof colorGroups)[Group]["colors"];

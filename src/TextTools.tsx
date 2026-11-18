@@ -1,34 +1,64 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Save } from "lucide-react";
+import { isValidElement, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
 import { diffLines } from "diff";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, describeError, placePath, readPlaceText, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
+import { HexViewer } from "./HexViewer";
+import { MermaidDiagram } from "./MermaidDiagram";
 import { eventShortcut, showShortcut } from "./preferences";
+import { systemTheme, type Theme } from "./appearance";
+
+const CodeSurface = lazy(() => import("./CodeSurface"));
 
 function normalized(text: string) {
   return text.replaceAll(/\r\n?/g, "\n");
 }
 
-export function TextDialog({ file, editing, saveShortcut, alternateSaveShortcut, closeShortcut, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
+  active: boolean;
+  theme: Theme;
   saveShortcut: string;
   alternateSaveShortcut: string;
   closeShortcut: string;
+  cancelShortcut: string;
+  hexShortcut: string;
+  onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
   onClose: () => void;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
   const [preview, setPreview] = useState(!editing && /\.(md|markdown)$/i.test(file.name));
+  const [hex, setHex] = useState(false);
+  const [system, setSystem] = useState(systemTheme);
+  const [readError, setReadError] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const dirty = Boolean(document && normalized(document.text) !== text);
   const isMarkdown = /\.(md|markdown)$/i.test(file.name);
   const path = placePath(file.place);
+  const section = useRef<HTMLElement>(null);
+  const light = (theme === "system" ? system : theme) === "light";
+
+  useLayoutEffect(() => {
+    if (active) section.current?.focus({ preventScroll: true });
+  }, [active]);
+
+  const reportDirty = useRef(onDirtyChange);
+  reportDirty.current = onDirtyChange;
+  useEffect(() => { reportDirty.current(dirty); }, [dirty]);
+
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    function update() { setSystem(systemTheme()); }
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +68,8 @@ export function TextDialog({ file, editing, saveShortcut, alternateSaveShortcut,
         setText(normalized(value.text));
       }
     }, (error: unknown) => {
-      if (!cancelled) setError(describeError(error));
+      if (cancelled) return;
+      setReadError(describeError(error));
     });
     return () => { cancelled = true; };
   }, [file]);
@@ -67,55 +98,75 @@ export function TextDialog({ file, editing, saveShortcut, alternateSaveShortcut,
   }
 
   return (
-    <Dialog title={file.name} wide onClose={close} onKeyDown={(event) => {
+    <section ref={section} hidden={!active} className="text-window" aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
+      if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
       if (editing && (shortcut === saveShortcut || shortcut === alternateSaveShortcut)) {
         event.preventDefault();
+        event.stopPropagation();
         void save();
-      } else if (shortcut === closeShortcut) {
+      } else if (shortcut === closeShortcut || shortcut === cancelShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         close();
+      } else if (!editing && shortcut === hexShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        setHex((visible) => !visible);
       }
     }}>
+      <header className="document-heading">
+        <h2>{file.name}</h2>
+        <button className="icon-button" type="button" aria-label="Close document" onClick={close} disabled={saving}><X /></button>
+      </header>
       <div className="text-toolbar">
         <span title={path}>{path}</span>
-        {isMarkdown && <button onClick={() => setPreview(!preview)}>{preview ? "Source" : "Preview"}</button>}
+        {isMarkdown && document && !hex && <button onClick={() => setPreview(!preview)}>{preview ? "Source" : "Preview"}</button>}
+        {!editing && <button title={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>Hex</button>}
       </div>
       {error && <p className="dialog-error" role="alert">{error}</p>}
-      {!document && !error && <div className="dialog-body">Loading…</div>}
-      {document && (
-        preview ? (
+      {hex ? <HexViewer file={file} /> : readError ? <p className="dialog-error" role="alert">{readError}</p> :
+        !document && <div className="dialog-body">Loading…</div>}
+      {document && <>
+        {preview && !hex && (
           <div className="markdown">
             <Markdown remarkPlugins={[remarkGfm]} skipHtml
               components={{
                 a: ({ children }) => <span className="markdown-link">{children}</span>,
                 img: ({ alt }) => <span>{alt}</span>,
+                pre: ({ children }) => {
+                  if (isValidElement<{ className?: string; children?: ReactNode }>(children) &&
+                      children.props.className === "language-mermaid" && typeof children.props.children === "string") {
+                    return <MermaidDiagram source={children.props.children} light={light} />;
+                  }
+                  return <pre>{children}</pre>;
+                },
               }}>{text}</Markdown>
           </div>
-        ) : editing ? (
-          <textarea className="text-editor" aria-label={`Edit ${file.name}`} value={text} spellCheck={false}
-            readOnly={saving} onChange={(event) => setText(event.target.value)} />
-        ) : <pre className="text-view">{text}</pre>
-      )}
-      <footer className="dialog-footer">
-        {confirm ? (
-          <>
-            <span className="footer-message">Discard unsaved changes?</span>
-            <button onClick={() => setConfirm(false)}>Keep editing</button>
-            <button className="negative" onClick={onClose}>Discard changes</button>
-          </>
-        ) : (
-          <>
-            {document && <span className="footer-message">{document.encoding.replaceAll("_", " ").toUpperCase()}{dirty ? " · Modified" : ""}</span>}
-            {editing && <button className="primary" disabled={!dirty || saving} title={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
-              <Save /> {saving ? "Saving…" : "Save"}
-            </button>}
-            <button onClick={close} disabled={saving}>Close</button>
-          </>
         )}
+        <div className="source-surface" hidden={preview || hex}>
+          <Suspense fallback={<p className="text-view" role="status">Loading text tools…</p>}>
+            <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
+              value={text} onChange={setText} />
+          </Suspense>
+        </div>
+      </>}
+      <footer className="dialog-footer">
+        {document && <span className="footer-message">{document.encoding.replaceAll("_", " ").toUpperCase()}{dirty ? " · Modified" : ""}</span>}
+        {editing && <button className="primary" disabled={!dirty || saving} title={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
+          <Save /> {saving ? "Saving…" : "Save"}
+        </button>}
+        <button onClick={close} disabled={saving}>Close</button>
       </footer>
-    </Dialog>
+      {confirm && <Dialog title="Unsaved changes" onClose={() => setConfirm(false)}>
+        <div className="dialog-body"><p>Discard the unsaved changes to <strong>{file.name}</strong>?</p></div>
+        <footer className="dialog-footer">
+          <button type="button" data-initial-focus onClick={() => setConfirm(false)}>Keep editing</button>
+          <button type="button" className="negative" onClick={onClose}>Discard changes</button>
+        </footer>
+      </Dialog>}
+    </section>
   );
 }
 

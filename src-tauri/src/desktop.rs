@@ -21,7 +21,7 @@ use tauri::{ipc::Channel, State};
 
 use crate::{
     kswitcher, local, local_transfer,
-    protocol::{Invitation, RemoteListing, RemotePath},
+    protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
     terminal, watch,
 };
 
@@ -42,6 +42,15 @@ pub(crate) async fn blocking<T: Send + 'static>(
 #[tauri::command]
 async fn locations() -> Result<Vec<local::Location>> {
     blocking(|| Ok(local::locations())).await
+}
+
+#[tauri::command]
+fn requested_location() -> Option<String> {
+    let encoded = std::env::args()
+        .find_map(|argument| argument.strip_prefix("--open-folder=").map(str::to_owned))?;
+    let path = String::from_utf8(URL_SAFE_NO_PAD.decode(encoded).ok()?).ok()?;
+    local::absolute(&path).ok()?;
+    Some(path)
 }
 
 #[tauri::command]
@@ -129,14 +138,19 @@ impl Connection {
         Ok(Self { client, invitation })
     }
 
-    fn request(&self, action: &str, segments: Vec<String>, timeout: Duration) -> Result<Response> {
+    fn request(
+        &self,
+        action: &str,
+        payload: impl Serialize,
+        timeout: Duration,
+    ) -> Result<Response> {
         let url = self.invitation.address.join(action).map_err(message)?;
         let response = self
             .client
             .post(url)
             .bearer_auth(&self.invitation.token)
             .timeout(timeout)
-            .json(&RemotePath { segments })
+            .json(&payload)
             .send()
             .map_err(message)?;
         if !response.status().is_success() {
@@ -149,7 +163,7 @@ impl Connection {
     }
 
     fn list(&self, segments: Vec<String>) -> Result<RemoteListing> {
-        let response = self.request("v1/list", segments, Duration::from_secs(20))?;
+        let response = self.request("v1/list", RemotePath { segments }, Duration::from_secs(20))?;
         let mut bytes = Vec::new();
         const MAX_LISTING: u64 = 32 * 1024 * 1024;
         response
@@ -169,7 +183,11 @@ impl Connection {
         mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ) -> Result<()> {
         let name = PathBuf::from(segments.last().cloned().unwrap_or_default());
-        let response = self.request("v1/download", segments, Duration::from_secs(60 * 60))?;
+        let response = self.request(
+            "v1/download",
+            RemotePath { segments },
+            Duration::from_secs(60 * 60),
+        )?;
         let length = response.content_length();
         local::copy_stream(response, file, length, |bytes, total| {
             progress(&name, bytes, total)
@@ -669,12 +687,16 @@ struct TextDocument {
     encoding: Encoding,
 }
 
-fn load_text(path: &Path) -> Result<TextDocument> {
+fn open_regular_file(path: &Path) -> Result<fs::File> {
     let metadata = fs::symlink_metadata(path).map_err(message)?;
     if !metadata.is_file() || local::is_link(&metadata) {
-        return Err("Choose a regular text file.".to_owned());
+        return Err("Choose a regular file.".to_owned());
     }
-    decode_text(fs::File::open(path).map_err(message)?)
+    fs::File::open(path).map_err(message)
+}
+
+fn load_text(path: &Path) -> Result<TextDocument> {
+    decode_text(open_regular_file(path)?)
 }
 
 fn decode_text(reader: impl Read) -> Result<TextDocument> {
@@ -742,7 +764,40 @@ async fn read_server_text(
 ) -> Result<TextDocument> {
     let connection = state.get(id)?;
     blocking(move || {
-        decode_text(connection.request("v1/download", segments, Duration::from_secs(45))?)
+        decode_text(connection.request(
+            "v1/download",
+            RemotePath { segments },
+            Duration::from_secs(45),
+        )?)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_bytes(directory: String, name: String, offset: u64) -> Result<BytePage> {
+    blocking(move || {
+        let path = selected(&directory, &name).map_err(message)?;
+        local::read_byte_page(open_regular_file(&path)?, offset).map_err(message)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_server_bytes(
+    id: u32,
+    segments: Vec<String>,
+    offset: u64,
+    state: State<'_, Connections>,
+) -> Result<BytePage> {
+    let connection = state.get(id)?;
+    blocking(move || {
+        let response = connection.request(
+            "v1/bytes",
+            ByteRequest { segments, offset },
+            Duration::from_secs(20),
+        )?;
+        let max_response = crate::protocol::BYTE_PAGE_SIZE * 4 + 128;
+        serde_json::from_reader(response.take(max_response)).map_err(message)
     })
     .await
 }
@@ -818,6 +873,16 @@ async fn list_kswitcher(
 }
 
 pub fn run() {
+    #[cfg(windows)]
+    if requested_location().is_some() {
+        if let Some(base) = dirs::data_local_dir() {
+            std::env::set_var(
+                "WEBVIEW2_USER_DATA_FOLDER",
+                base.join("io.github.agrynco.dirlume")
+                    .join("AdministratorWebView"),
+            );
+        }
+    }
     let context = tauri::generate_context!();
     #[cfg(all(windows, feature = "ui-automation"))]
     let context = {
@@ -848,8 +913,21 @@ pub fn run() {
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
         .manage(watch::Measurements::default())
+        .manage(crate::processes::ProcessMonitor::default())
+        .manage(crate::file_clipboard::FileClipboard::default())
         .invoke_handler(tauri::generate_handler![
             locations,
+            requested_location,
+            crate::processes::list_processes,
+            crate::processes::terminate_processes,
+            crate::file_clipboard::copy_file_references,
+            crate::file_clipboard::clipboard_files,
+            #[cfg(windows)]
+            crate::windows_shell::windows_item_menu,
+            #[cfg(windows)]
+            crate::windows_shell::open_elevated,
+            #[cfg(windows)]
+            crate::windows_shell::locking_processes,
             installed_fonts,
             list_directory,
             operate,
@@ -858,6 +936,8 @@ pub fn run() {
             disconnect_server,
             read_text,
             read_server_text,
+            read_bytes,
+            read_server_bytes,
             save_text,
             open_kswitcher,
             has_kswitcher_bridge,

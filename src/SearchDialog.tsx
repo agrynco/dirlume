@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { describeError, placePath, type Place } from "./api";
 import { Dialog } from "./Dialog";
-import { childPlace, readPlace } from "./panes";
+import { childPlace, readPlace, type SearchMatch } from "./panes";
 
-interface Match {
-  directory: Place;
-  name: string;
-  relativePath: string;
-}
-
-const resultLimit = 1000;
+const previewLimit = 1000;
 
 function fileMask(mask: string) {
   const pattern = [...mask.toLowerCase()];
@@ -39,19 +33,21 @@ function fileMask(mask: string) {
   };
 }
 
-export function SearchDialog({ root, showHidden, onClose, onReveal }: {
+export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResults }: {
   root: Place;
   showHidden: boolean;
   onClose: () => void;
   onReveal: (directory: Place, name: string) => void;
+  onShowResults: (mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) => void;
 }) {
   const [mask, setMask] = useState("*");
-  const [results, setResults] = useState<Match[]>([]);
+  const [results, setResults] = useState<SearchMatch[]>([]);
   const [selected, setSelected] = useState("");
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const active = useRef<AbortController | null>(null);
+  const snapshot = useRef({ mask: "", matches: [] as SearchMatch[], incomplete: false });
   const maskField = useRef<HTMLInputElement>(null);
   const current = results.find((result) => result.relativePath === selected) ?? results[0];
 
@@ -61,6 +57,7 @@ export function SearchDialog({ root, showHidden, onClose, onReveal }: {
     active.current?.abort();
     active.current = null;
     setRunning(false);
+    snapshot.current.incomplete = true;
     setStatus("Search stopped.");
     requestAnimationFrame(() => maskField.current?.focus());
   }
@@ -77,11 +74,11 @@ export function SearchDialog({ root, showHidden, onClose, onReveal }: {
     setRunning(true);
     const includes = fileMask(mask);
     const pending = [{ place: root, prefix: "" }];
-    const found: Match[] = [];
+    const found: SearchMatch[] = [];
+    snapshot.current = { mask, matches: found, incomplete: false };
     let skipped = 0;
-    let truncated = false;
     try {
-      while (pending.length && !truncated && !controller.signal.aborted) {
+      while (pending.length && !controller.signal.aborted) {
         const folder = pending.pop()!;
         const result = await readPlace(folder.place).catch((failure: unknown) => {
           if (folder.prefix === "") throw failure;
@@ -97,17 +94,14 @@ export function SearchDialog({ root, showHidden, onClose, onReveal }: {
           if (entry.directory) {
             if (!entry.link) pending.push({ place: childPlace(result.place, entry.name), prefix: relativePath + "/" });
           } else if (includes(entry.name)) {
-            if (found.length === resultLimit) {
-              truncated = true;
-              break;
-            }
-            found.push({ directory: result.place, name: entry.name, relativePath });
+            found.push({ directory: result.place, entry, relativePath });
           }
         }
-        if (found.length > count) setResults([...found]);
+        if (count < previewLimit && found.length > count) setResults(found.slice(0, previewLimit));
       }
       if (controller.signal.aborted) return;
-      const summary = truncated ? `Showing the first ${resultLimit} matches. Narrow the mask for fewer results.` :
+      snapshot.current.incomplete = skipped > 0;
+      const summary = found.length > previewLimit ? `${found.length} matches. Open the results panel to see all matches.` :
         found.length === 0 ? "No matching files." : `${found.length} ${found.length === 1 ? "match" : "matches"}.`;
       setStatus(skipped ? `${summary} Some items could not be searched.` : summary);
     } catch (failure) {
@@ -123,8 +117,8 @@ export function SearchDialog({ root, showHidden, onClose, onReveal }: {
     }
   }
 
-  function reveal(result: Match | undefined) {
-    if (result) onReveal(result.directory, result.name);
+  function reveal(result: SearchMatch | undefined) {
+    if (result) onReveal(result.directory, result.entry.name);
   }
 
   return (
@@ -157,6 +151,10 @@ export function SearchDialog({ root, showHidden, onClose, onReveal }: {
         <footer className="dialog-footer">
           <button type="button" onClick={onClose}>Close</button>
           {current && <button type="button" onClick={() => reveal(current)}>Go to file</button>}
+          {current && !running && <button type="button" onClick={() => {
+            const { mask, matches, incomplete } = snapshot.current;
+            onShowResults(mask, matches, incomplete, current.relativePath);
+          }}>Show in panel</button>}
           {running ? <button type="button" onClick={stop}>Stop</button> :
             <button type="submit" className="primary" disabled={!mask.trim()}>Search</button>}
         </footer>

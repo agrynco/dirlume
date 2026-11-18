@@ -62,3 +62,16 @@ pub struct RemoteListing {
     pub entries: Vec<crate::local::Entry>,
     pub omitted: usize,
 }
+pub const BYTE_PAGE_SIZE: u64 = 1024;
+
+#[derive(Deserialize, Serialize)]
+pub struct ByteRequest {
+    pub segments: Vec<String>,
+    pub offset: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct BytePage {
+    pub length: u64,
+    pub data: Vec<u8>,
+}

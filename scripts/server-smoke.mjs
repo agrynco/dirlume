@@ -104,6 +104,13 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename
     const download = await post(config, "/v1/download", { segments: ["folder", "файл.bin"] });
     assert.equal(download.status, 200);
     assert.deepEqual(download.body, bytes);
+    const page = await post(config, "/v1/bytes", { segments: ["folder", "файл.bin"], offset: 1024 });
+    assert.equal(page.status, 200);
+    const contents = JSON.parse(page.body);
+    assert.equal(contents.length, bytes.length);
+    assert.deepEqual(Buffer.from(contents.data), bytes.subarray(1024, 2048));
+    const unauthorizedPage = await post(config, "/v1/bytes", { segments: ["folder", "файл.bin"], offset: 0 }, false);
+    assert.equal(unauthorizedPage.status, 401);
   });
   console.log("Verified authenticated TLS listing, binary download and traversal rejection.");
 }
