@@ -454,6 +454,7 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .settings-search input { width: 100%; min-width: 0; }
 .settings-tree { display: grid; align-content: start; min-height: 0; overflow: auto; padding: 2px 1px; gap: 2px; }
 .settings-tree button { justify-content: flex-start; width: 100%; min-width: 0; white-space: normal; text-align: left; }
+.settings-tree button:focus-visible { outline-offset: -2px; }
 .settings-tree button svg { width: 13px; height: 13px; }
 .settings-tree p { color: var(--dialog-muted); padding-inline: 8px; }
 .settings-tree-branch { display: grid; gap: 2px; margin-left: 13px; padding-left: 7px; border-left: 1px solid var(--line); }

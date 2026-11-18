@@ -250,6 +250,27 @@ try {
   assert.ok((await optionsDialog.boundingBox()).width >= sizeAfter.width + 15);
 
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  const panelsSection = optionsDialog.getByRole("button", { name: "Panels", exact: true });
+  await panelsSection.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  if (process.env.DIRLUME_SETTINGS_FOCUS_SCREENSHOT) {
+    await page.screenshot({ path: process.env.DIRLUME_SETTINGS_FOCUS_SCREENSHOT, scale: "css" });
+  }
+  const settingsFocus = await panelsSection.evaluate((button) => {
+    const tree = button.closest(".settings-tree");
+    const bounds = button.getBoundingClientRect();
+    const clip = tree.getBoundingClientRect();
+    const style = getComputedStyle(button);
+    const outside = Math.max(0, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset));
+    const left = clip.left + tree.clientLeft;
+    const top = clip.top + tree.clientTop;
+    return {
+      visible: button.matches(":focus-visible") && style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0,
+      fits: bounds.left - outside >= left && bounds.right + outside <= left + tree.clientWidth &&
+        bounds.top - outside >= top && bounds.bottom + outside <= top + tree.clientHeight,
+    };
+  });
+  assert.deepEqual(settingsFocus, { visible: true, fits: true }, "The Options tree should show the full keyboard focus outline.");
   await page.getByLabel("Color scheme").selectOption("light");
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await page.getByRole("dialog", { name: "Options", exact: true }).waitFor();
