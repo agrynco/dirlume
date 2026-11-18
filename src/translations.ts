@@ -261,6 +261,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Active selection text": ["Текст активного виділення", "Текст активного выделения"],
   "Inactive selection background": ["Тло неактивного виділення", "Фон неактивного выделения"],
   "File types": ["Типи файлів", "Типы файлов"],
+  "Hidden files and folders": ["Приховані файли й папки", "Скрытые файлы и папки"],
+  "System files and folders": ["Системні файли й папки", "Системные файлы и папки"],
   "Source code": ["Вихідний код", "Исходный код"],
   "Text and Markdown": ["Текст і Markdown", "Текст и Markdown"],
   "Office documents and PDF": ["Офісні документи й PDF", "Офисные документы и PDF"],

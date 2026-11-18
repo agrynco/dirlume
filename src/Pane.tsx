@@ -317,7 +317,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           const measuring = pane.measuring.includes(entry.name);
           return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
             key={entry.name} role="option" aria-setsize={search ? entries.length : undefined} aria-posinset={search ? index + 1 : undefined}
-            data-file-color={entry.directory ? undefined : fileColor(entry.name)}
+            data-file-color={fileColor(entry)}
             aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
             onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (entry.name !== "..") onContext(entry); }}

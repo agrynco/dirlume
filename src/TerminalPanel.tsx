@@ -1,6 +1,6 @@
 import { t } from "./i18n";
 import { Button } from "./Button";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -8,7 +8,11 @@ import { X } from "lucide-react";
 import { api, describeError, type TerminalOutput } from "./api";
 import { eventShortcut } from "./preferences";
 import type { Scheme, Theme } from "./appearance";
+import { changeShellDirectory } from "./shell";
 import "@xterm/xterm/css/xterm.css";
+
+// Focus and device reports are forwarded to the PTY without changing input state.
+const terminalReport = /^\x1b(?:\[(?:[IO]|\??[\d;]+[Rcnt])|\][\s\S]*(?:\x07|\x1b\\))$/;
 
 const lightAnsi: ITheme = {
   red: "#a12033", green: "#245d26", yellow: "#765000", blue: "#164ea5", magenta: "#783179", cyan: "#005e67",
@@ -46,21 +50,27 @@ function terminalAppearance(): ITerminalOptions {
   };
 }
 
-export default function TerminalPanel({ session, theme, scheme, shortcut, pendingCommands, onCommandsQueued, onShortcut, onClose }: {
+export default function TerminalPanel({ session, directory, theme, scheme, shortcut, historyShortcut, pendingCommands,
+  onCommandsQueued, onShortcut, onHistory, onClose }: {
   session: { id: number; path: string };
+  directory: string | null;
   theme: Theme;
   scheme: Scheme | null;
   shortcut: string;
+  historyShortcut: string;
   pendingCommands: string[];
   onCommandsQueued: (count: number) => void;
   onShortcut: () => void;
+  onHistory: () => void;
   onClose: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const instance = useRef<{ term: Terminal; fit: FitAddon } | null>(null);
-  const toggle = useRef({ onShortcut, shortcut });
-  toggle.current = { onShortcut, shortcut };
+  const shortcuts = useRef({ onShortcut, shortcut, onHistory, historyShortcut });
+  shortcuts.current = { onShortcut, shortcut, onHistory, historyShortcut };
+  const [shellDirectory, setShellDirectory] = useState(session.path);
   const enqueue = useRef<((data: string) => void) | null>(null);
+  const moveTo = useRef<((path: string | null) => void) | null>(null);
   const acknowledge = useRef(onCommandsQueued);
   acknowledge.current = onCommandsQueued;
 
@@ -73,12 +83,13 @@ export default function TerminalPanel({ session, theme, scheme, shortcut, pendin
     term.loadAddon(fit);
     term.open(container.current);
     term.attachCustomKeyEventHandler((event) => {
-      const { onShortcut, shortcut } = toggle.current;
-      if (shortcut && eventShortcut(event) === shortcut) {
-        if (event.type === "keydown") onShortcut();
-        return false;
-      }
-      return true;
+      const { onShortcut, shortcut, onHistory, historyShortcut } = shortcuts.current;
+      const key = eventShortcut(event);
+      const action = key && key === shortcut ? onShortcut : key && key === historyShortcut ? onHistory : null;
+      if (!action) return true;
+      event.preventDefault();
+      if (event.type === "keydown" && !event.repeat) action();
+      return false;
     });
     instance.current = { term, fit };
     fit.fit();
@@ -87,7 +98,35 @@ export default function TerminalPanel({ session, theme, scheme, shortcut, pendin
     let stopped = false;
     let closed = false;
     let ready = false;
+    let atPrompt = false;
+    let draft = false;
+    let currentDirectory: string | null = session.path;
+    let nextDirectory: string | null = null;
     let queued = Promise.resolve();
+    const promptToken = `Dirlume-${crypto.getRandomValues(new Uint32Array(4)).join("-")}`;
+    const promptPrefix = promptToken + ":";
+    const decoder = new TextDecoder();
+    function synchronize() {
+      if (!atPrompt || draft || closed || stopped || nextDirectory === null) return;
+      const next = nextDirectory;
+      nextDirectory = null;
+      if (currentDirectory !== next) send(changeShellDirectory(next) + "\r");
+    }
+    function prompt(title: string) {
+      if (!title.startsWith(promptPrefix)) return false;
+      const separator = title.indexOf(":", promptPrefix.length);
+      if (separator < 0) return false;
+      const path = title.slice(separator + 1);
+      try {
+        currentDirectory = path ? decoder.decode(Uint8Array.from(atob(path), (byte) => byte.charCodeAt(0))) : null;
+      } catch { return true; }
+      setShellDirectory(currentDirectory ?? "");
+      atPrompt = true;
+      synchronize();
+      return true;
+    }
+    const titles = [0, 2].map((code) => term.parser.registerOscHandler(code, prompt));
+    moveTo.current = (path) => { nextDirectory = path; synchronize(); };
     output.onmessage = (message) => {
       if (stopped) return;
       if (message.event === "closed") {
@@ -97,11 +136,15 @@ export default function TerminalPanel({ session, theme, scheme, shortcut, pendin
         term.write(Uint8Array.from(atob(message.data), (byte) => byte.charCodeAt(0)));
       }
     };
-    const opening = api.openTerminal(session.id, session.path, term.rows, term.cols, output);
+    const opening = api.openTerminal(session.id, session.path, promptToken, term.rows, term.cols, output);
     void opening.then(() => { ready = true; }, (error: unknown) => {
       if (!stopped) term.writeln(describeError(error));
     });
     function send(data: string) {
+      if (data.endsWith("\r") || data.endsWith("\n") || data === "\x03") {
+        atPrompt = false;
+        draft = false;
+      } else if (!terminalReport.test(data)) draft = true;
       queued = queued.then(async () => {
         await opening;
         if (!closed && !stopped) await api.writeTerminal(session.id, data);
@@ -118,14 +161,18 @@ export default function TerminalPanel({ session, theme, scheme, shortcut, pendin
       stopped = true;
       instance.current = null;
       enqueue.current = null;
+      moveTo.current = null;
       data.dispose();
       resized.dispose();
+      titles.forEach((title) => title.dispose());
       resize.disconnect();
       output.onmessage = () => {};
       term.dispose();
       void opening.then(() => api.closeTerminal(session.id)).catch(() => {});
     };
   }, [session.id, session.path]);
+
+  useEffect(() => { moveTo.current?.(directory); }, [directory]);
 
   useEffect(() => {
     if (!enqueue.current || !pendingCommands.length) return;
@@ -150,7 +197,7 @@ export default function TerminalPanel({ session, theme, scheme, shortcut, pendin
 
   return (
     <section className="terminal-card" aria-label={t("Terminal")}>
-      <header><h2>{t("Terminal")}</h2><span title={session.path}>{session.path}</span>
+      <header><h2>{t("Terminal")}</h2><span title={shellDirectory}>{shellDirectory}</span>
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
       <div className="terminal-surface" ref={container} />

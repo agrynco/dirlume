@@ -14,6 +14,35 @@ use crate::{
     local,
 };
 
+#[cfg(windows)]
+const POWERSHELL_PROMPT: &str = r#"
+$global:DirlumeOriginalPrompt = (Get-Item Function:prompt).ScriptBlock
+$global:DirlumePromptCount = 0
+function global:prompt {
+    $text = & $global:DirlumeOriginalPrompt
+    $location = Get-Location
+    $path = if ($location.Provider.Name -eq 'FileSystem') {
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($location.ProviderPath))
+    }
+    $global:DirlumePromptCount++
+    [Console]::Title = '{0}:{1}:{2}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path
+    $text
+}
+"#;
+
+#[cfg(not(windows))]
+fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<()> {
+    let marker = r#"printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')""#;
+    let init = match std::path::Path::new(shell).file_name().and_then(std::ffi::OsStr::to_str) {
+        Some("bash") => format!("__dirlume_prompt() {{ local status=$?; {marker}; return \"$status\"; }}; PROMPT_COMMAND+=(__dirlume_prompt)"),
+        Some("zsh") => format!("__dirlume_prompt() {{ {marker}; }}; precmd_functions+=(__dirlume_prompt)"),
+        Some("sh" | "dash" | "ksh") => format!("PS1='$(__dirlume_prompt)'\"$PS1\"; __dirlume_prompt() {{ {marker}; }}"),
+        _ => return Ok(()),
+    };
+    writeln!(writer, "{init}")?;
+    writer.flush()
+}
+
 struct Terminal {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -60,6 +89,7 @@ fn size(rows: u16, cols: u16) -> PtySize {
 
 fn create(
     directory: String,
+    prompt_token: String,
     rows: u16,
     cols: u16,
     output: Channel<Output>,
@@ -69,14 +99,18 @@ fn create(
         .openpty(size(rows, cols))
         .map_err(message)?;
     #[cfg(windows)]
-    let mut command = CommandBuilder::new("powershell.exe");
-    #[cfg(windows)]
-    command.arg("-NoLogo");
+    let mut command = {
+        let mut command = CommandBuilder::new("powershell.exe");
+        command.args(["-NoLogo", "-NoExit", "-Command", POWERSHELL_PROMPT]);
+        command
+    };
     #[cfg(not(windows))]
-    let mut command =
-        CommandBuilder::new(std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into()));
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+    #[cfg(not(windows))]
+    let mut command = CommandBuilder::new(&shell);
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
+    command.env("DIRLUME_PROMPT_TOKEN", prompt_token);
     let mut reader = pair.master.try_clone_reader().map_err(message)?;
     let writer = pair.master.take_writer().map_err(message)?;
     let mut child = pair.slave.spawn_command(command).map_err(message)?;
@@ -105,6 +139,8 @@ fn create(
             let _ = child.wait();
         })
         .map_err(message)?;
+    #[cfg(not(windows))]
+    install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer).map_err(message)?;
     Ok(terminal)
 }
 
@@ -112,12 +148,13 @@ fn create(
 pub async fn open_terminal(
     id: u32,
     directory: String,
+    prompt_token: String,
     rows: u16,
     cols: u16,
     output: Channel<Output>,
     state: State<'_, Terminals>,
 ) -> Result<()> {
-    let terminal = blocking(move || create(directory, rows, cols, output)).await?;
+    let terminal = blocking(move || create(directory, prompt_token, rows, cols, output)).await?;
     state.0.lock().map_err(message)?.insert(id, terminal);
     Ok(())
 }
