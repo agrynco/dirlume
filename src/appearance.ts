@@ -119,6 +119,9 @@ export const fontGroups = {
   panel: { label: "File panels", fallback: "system-ui" },
   dialog: { label: "Dialogs", fallback: "system-ui" },
   mono: { label: "Editor, viewer, and terminal", fallback: "monospace" },
+  viewer: { label: "Viewer", fallback: "var(--mono)" },
+  editor: { label: "Editor", fallback: "var(--mono)" },
+  terminal: { label: "Terminal", fallback: "var(--mono)" },
 } as const;
 
 export type FontGroup = keyof typeof fontGroups;
@@ -188,7 +191,9 @@ export function applyAppearance(theme: Theme, scheme: Scheme | null, root = docu
     if (font?.size) root.style.setProperty(`--${group}-size`, `${font.size}px`);
     else root.style.removeProperty(`--${group}-size`);
   }
-  if (scheme?.fonts.mono?.family?.trim()) root.style.setProperty("--markdown-font", "var(--mono)");
+  if (scheme?.fonts.viewer?.family?.trim() || scheme?.fonts.mono?.family?.trim()) {
+    root.style.setProperty("--markdown-font", "var(--viewer-font)");
+  }
   else root.style.removeProperty("--markdown-font");
 }
 

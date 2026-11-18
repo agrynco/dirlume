@@ -132,7 +132,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }
 
   return (
-    <section ref={section} style={viewFontStyle(fontSize)} hidden={!active} className="text-window" aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
+    <section ref={section} style={viewFontStyle(fontSize)} hidden={!active} className="text-window" data-editing={editing} aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;

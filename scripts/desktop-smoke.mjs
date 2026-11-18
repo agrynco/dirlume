@@ -165,6 +165,7 @@ try {
   await hiddenFolder.waitFor();
   assert.equal(await hiddenToggle.getAttribute("aria-pressed"), "true");
   await optionsButton.click();
+  await options.getByRole("button", { name: "Main File Panels", exact: true }).click();
   assert.equal(await options.getByRole("checkbox", { name: "Show hidden files" }).isChecked(), true);
   await options.getByRole("button", { name: "Done" }).click();
   await rightList.focus();
@@ -1136,6 +1137,44 @@ try {
       return page;
     });
   }
+  await page.getByRole("button", { name: "Options", exact: true }).click();
+  const featureDialog = page.getByRole("dialog", { name: "Options", exact: true });
+  const featureSearch = featureDialog.getByRole("searchbox", { name: "Search settings" });
+  await featureSearch.fill("show hidden files");
+  await featureSearch.press("Enter");
+  await featureDialog.getByRole("heading", { name: "Main File Panels", exact: true }).waitFor();
+  await featureDialog.getByRole("checkbox", { name: "Show hidden files" }).waitFor();
+  await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
+  await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
+  const featureFonts = [["Viewer", "Consolas", "21"], ["Editor", "Courier New", "19"], ["Terminal", "Arial", "17"]];
+  for (const [name, family, size] of featureFonts) {
+    await featureSearch.fill(`${name} font size`);
+    await featureSearch.press("Enter");
+    await featureDialog.getByRole("heading", { name, exact: true }).waitFor();
+    await featureDialog.getByRole("combobox", { name: `${name} font family`, exact: true }).fill(family);
+    await featureDialog.getByRole("spinbutton", { name: `${name} font size`, exact: true }).fill(size);
+  }
+  await featureSearch.fill("");
+  await featureDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await exitDesktop(page);
+  page = await startDesktop();
+  await page.getByRole("button", { name: "Options", exact: true }).waitFor();
+  const featureValues = await page.locator("html").evaluate((root) => {
+    const style = getComputedStyle(root);
+    return ["viewer", "editor", "terminal"].map((view) => [style.getPropertyValue(`--${view}-font`), style.getPropertyValue(`--${view}-size`)]);
+  });
+  assert.deepEqual(featureValues.map(([, size]) => size), featureFonts.map(([, , size]) => `${size}px`));
+  featureFonts.forEach(([, family], index) => assert.ok(featureValues[index][0].replaceAll("\\", "").startsWith(family)));
+  const sampleForFonts = page.getByRole("option", { name: /^sample\.rs/ }).first();
+  const sampleSurface = page.getByRole("region", { name: "sample.rs", exact: true }).locator(".code-surface");
+  for (const [shortcut, expected] of [["F3", "21px"], ["F4", "19px"]]) {
+    await sampleForFonts.click();
+    await page.keyboard.press(shortcut);
+    assert.equal(await sampleSurface.evaluate((surface) => getComputedStyle(surface).fontSize), expected);
+    await page.keyboard.press("Escape");
+  }
+  assert.equal(await page.getByRole("textbox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
+  console.log("Verified feature settings search, independent font overrides, and persistence after restart.");
   await exitDesktop(page);
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {

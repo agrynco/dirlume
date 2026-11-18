@@ -3,9 +3,9 @@ import type { CSSProperties } from "react";
 export const viewFonts = {
   left: { label: "Left file pane", group: "panel", family: "--panel-font", sample: "Documents" },
   right: { label: "Right file pane", group: "panel", family: "--panel-font", sample: "report.pdf" },
-  viewer: { label: "Text and hex viewer", group: "mono", family: "--mono", sample: "README.txt" },
-  editor: { label: "Text editor", group: "mono", family: "--mono", sample: "let count = 42;" },
-  markdown: { label: "Markdown preview", group: "mono", family: "--markdown-font", sample: "Getting started" },
+  viewer: { label: "Text and hex viewer", group: "viewer", family: "--viewer-font", sample: "README.txt" },
+  editor: { label: "Text editor", group: "editor", family: "--editor-font", sample: "let count = 42;" },
+  markdown: { label: "Markdown preview", group: "viewer", family: "--markdown-font", sample: "Getting started" },
 } as const;
 
 export type ViewFont = keyof typeof viewFonts;

@@ -12,11 +12,13 @@ import {
   type Command, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
+import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
 import { languages, readLanguage, t } from "./i18n";
 
-type Page = AppearanceSection | "viewFonts" | "general" | "shortcuts";
+type Page = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
 const optionsLocationKey = "dirlume.options-location";
+const featurePages = Object.keys(featureOptions) as FeaturePage[];
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
     id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors),
@@ -30,7 +32,8 @@ function readOptionsLocation(): OptionsLocation {
   try {
     const saved = JSON.parse(localStorage.getItem(optionsLocationKey) ?? "null") as Partial<OptionsLocation> | null;
     const page = saved?.page;
-    if (!page || (page !== "general" && page !== "shortcuts" && !appearancePages.some(({ id }) => id === page))) return defaults;
+    if (!page || (page !== "general" && page !== "shortcuts" && !isFeaturePage(page) &&
+        !appearancePages.some(({ id }) => id === page))) return defaults;
     const scrollTop = saved.scrollTop;
     return {
       page,
@@ -61,21 +64,28 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     const text = [...labels, ...labels.map((label) => t(label))].join(" ").toLocaleLowerCase();
     return terms.every((term) => text.includes(term));
   };
-  const showGeneral = matches("General", "Language", ...Object.values(languages), "Show hidden files", "Remote connection", "Dirlume server", "KSwitcher installation folder");
+  const showGeneral = matches("General", "Language", ...Object.values(languages), "Remote connection", "Dirlume server", "KSwitcher installation folder");
+  const featureMatches = featurePages.filter((feature) => {
+    const { label, font, views } = featureOptions[feature];
+    const panelTerms = feature === "filePanels" ? ["Show hidden files", ...Object.values(colorGroups.panels.colors)] : [];
+    return matches(label, fontGroups[font].label, "Font family", "Size (px)", "font size", ...views.map((view) => viewFonts[view].label), ...panelTerms);
+  });
   const appearanceMatches = appearancePages.filter(({ label, terms }) => matches("Appearance", "Color scheme", label, ...terms));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings");
   const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
     matches(commands[command].label, preferences.shortcuts[command], showShortcut(preferences.shortcuts[command])));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
-  const isAppearance = page !== "general" && page !== "shortcuts";
-  const title = isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : "Keyboard shortcuts";
+  const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
+  const isAppearance = !feature && page !== "general" && page !== "shortcuts";
+  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : "Keyboard shortcuts");
 
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
   }, [initialLocation]);
 
-  function select(page: Page) {
-    setPage(page);
+  function select(next: Page) {
+    if (next !== page && pageBody.current) pageBody.current.scrollTop = 0;
+    setPage(next);
     setCapture(null);
     setConflict("");
   }
@@ -118,12 +128,16 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 if (event.key !== "Enter" || !searching) return;
                 event.preventDefault();
                 if (showGeneral) select("general");
+                else if (featureMatches.length) select(featureMatches[0]);
                 else if (appearanceMatches.length) select(appearanceMatches[0].id);
                 else if (showShortcuts) select("shortcuts");
               }} />
           </label>
           <nav className="settings-tree" aria-label={t("Options sections")}>
             {showGeneral && <Button type="button" aria-pressed={page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
+            {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={page === id} onClick={() => select(id)}>
+              {t(featureOptions[id].label)}
+            </Button>)}
             {appearanceMatches.length > 0 && (
               <>
                 <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
@@ -141,7 +155,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               </>
             )}
             {showShortcuts && <Button type="button" aria-pressed={page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
-            {!showGeneral && !appearanceMatches.length && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
+            {!showGeneral && !featureMatches.length && !appearanceMatches.length && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
@@ -158,9 +172,6 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               {Object.entries(languages).map(([code, label]) => <option key={code} value={code} lang={code}>{label}</option>)}
             </select>
           </label>
-          <label className="setting"><span>{t("Show hidden files")}</span>
-            <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
-          </label>
           <label className="setting"><span>{t("Remote connection")}</span>
             <select value={preferences.provider} onChange={(event) => onChange({ ...preferences, provider: event.target.value as Provider })}>
               <option value="server">{t("Dirlume server")}</option>
@@ -175,8 +186,18 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             </div>
           )}
         </div>
+      ) : isFeaturePage(page) ? (
+        <>
+          {page === "filePanels" && <div className="dialog-body settings-general">
+            <label className="setting"><span>{t("Show hidden files")}</span>
+              <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
+            </label>
+          </div>}
+          <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}
+            views={featureOptions[page].views} preferences={preferences} onChange={onChange} />
+        </>
       ) : page === "viewFonts" ? (
-        <ViewFontSettings preferences={preferences} onChange={onChange} />
+        <div className="dialog-body appearance-settings"><ViewFontSettings preferences={preferences} onChange={onChange} /></div>
       ) : isAppearance ? (
         <AppearanceSettings section={page} preferences={preferences} onChange={onChange} />
       ) : (
