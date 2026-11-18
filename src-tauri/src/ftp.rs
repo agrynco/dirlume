@@ -321,6 +321,7 @@ pub struct Connected {
 #[tauri::command]
 pub async fn connect_ftp(
     id: Uuid,
+    segments: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, FtpState>,
 ) -> Result<Connected> {
@@ -337,8 +338,10 @@ pub async fn connect_ftp(
         };
         let connection = Arc::new(Connection { profile, password });
         let mut session = connection.open()?;
-        let cwd = session.stream.pwd().map_err(message)?;
-        let segments = parse_path(&cwd)?;
+        let segments = match segments {
+            Some(segments) => segments,
+            None => parse_path(&session.stream.pwd().map_err(message)?)?,
+        };
         let listing = session.list(&segments)?.into_listing();
         Ok((connection, segments, listing))
     }).await?;

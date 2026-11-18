@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, describeError, type FtpPlace, type FtpProfile, type Listing } from "./api";
+import { api, connectFtpLocation, describeError, type FtpPlace, type FtpProfile, type Listing } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { eventShortcut, showShortcut, type Bindings } from "./preferences";
@@ -37,8 +37,8 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
     setWorking(true);
     setError("");
     try {
-      const { listing, ...location } = await api.connectFtp(profile.id);
-      onConnect({ kind: "ftp", ...location }, listing);
+      const { place, listing } = await connectFtpLocation(profile.id);
+      onConnect(place, listing);
     } catch (failure) {
       setError(describeError(failure));
     } finally {

@@ -27,7 +27,7 @@ export interface QuickLocation {
 export type Place =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "server"; id: number; address: string; segments: string[] }
-  | { kind: "ftp"; id: number; address: string; segments: string[] }
+  | { kind: "ftp"; id: number; profileId: string; address: string; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
 export type RemotePlace = Exclude<Place, { kind: "local" }>;
@@ -131,7 +131,8 @@ export const api = {
   saveFtpProfile: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
     invoke<string>("save_ftp_profile", { input }),
   removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
-  connectFtp: (id: string) => invoke<Connection & { segments: string[] }>("connect_ftp", { id }),
+  connectFtp: (id: string, segments?: string[]) =>
+    invoke<Connection & { segments: string[] }>("connect_ftp", { id, segments }),
   disconnectFtp: (id: number) => invoke<void>("disconnect_ftp", { id }),
   listFtp: (id: number, segments: string[]) => invoke<Listing>("list_ftp", { id, segments }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
@@ -186,6 +187,12 @@ export const api = {
 export function placePath(place: Place) {
   if (place.kind === "server" || place.kind === "ftp") return "/" + place.segments.join("/");
   return place.path;
+}
+
+export async function connectFtpLocation(profileId: string, segments?: string[]) {
+  const { listing, ...location } = await api.connectFtp(profileId, segments);
+  const place: FtpPlace = { kind: "ftp", profileId, ...location };
+  return { place, listing };
 }
 
 export function readPlaceText(file: NamedFile) {

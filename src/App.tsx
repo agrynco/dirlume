@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { FtpDialog } from "./FtpDialog";
 import { Pane } from "./Pane";
@@ -21,7 +21,7 @@ import {
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, readPreferences, showShortcut, type Command } from "./preferences";
-import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow } from "./workspace";
+import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
@@ -101,6 +101,7 @@ export default function App() {
   const latest = useRef(panes);
   latest.current = panes;
   const connected = useRef<Record<Side, NetworkPlace | null>>({ left: null, right: null });
+  const failedFtp = useRef<Partial<Record<Side, SavedFtpLocation>>>({});
   const pane = panes[active];
   const other = panes[opposite(active)];
   const entries = useMemo(() => ({
@@ -137,6 +138,7 @@ export default function App() {
     try {
       const result = await readPlace(place);
       if (ticket !== request.current[side]) return false;
+      if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
       if (reveal !== undefined && !found) setStatus({ text: `File no longer found: ${reveal}`, error: true });
       updatePane(side, (pane) => {
@@ -166,19 +168,50 @@ export default function App() {
       if (home && alternate) {
         await Promise.all(([["left", home.path], ["right", alternate.path]] as const).map(async ([side, fallback]) => {
           const requestedFolder = side === "left" && requested ? localPath(requested) : null;
-          const saved = requestedFolder ?? startup?.panels[side].place;
-          if (saved && await load(side, saved, requestedFolder ? "push" : "refresh")) return;
-          if (!cancelled) await load(side, localPath(fallback));
+          const saved = startup?.panels[side];
+          const savedFtp = !requestedFolder ? saved?.ftp : undefined;
+          let failure: string | undefined;
+          if (savedFtp) {
+            const ticket = ++request.current[side];
+            listingPending.current[side] = true;
+            updatePane(side, (pane) => ({ ...pane, loading: true }));
+            try {
+              const { place, listing } = await connectFtpLocation(savedFtp.profileId, savedFtp.segments);
+              if (cancelled || request.current[side] !== ticket) {
+                disconnect(place);
+                return;
+              }
+              connected.current[side] = place;
+              updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
+              return;
+            } catch (error) {
+              if (cancelled || request.current[side] !== ticket) return;
+              failure = "Could not restore the FTP folder. " + describeError(error);
+            } finally {
+              if (request.current[side] === ticket) listingPending.current[side] = false;
+            }
+          }
+          const local = requestedFolder ?? saved?.place;
+          let ticket = request.current[side] + 1;
+          if (!local || !await load(side, local, requestedFolder ? "push" : "refresh")) {
+            if (cancelled || (local && request.current[side] !== ticket)) return;
+            ticket = request.current[side] + 1;
+            await load(side, localPath(fallback));
+          }
+          if (savedFtp && failure && !cancelled && request.current[side] === ticket) {
+            failedFtp.current[side] = savedFtp;
+            updatePane(side, (pane) => ({ ...pane, error: failure }));
+          }
         }));
       }
     }).catch((error: unknown) => {
       if (!cancelled) setStatus({ text: describeError(error), error: true });
     }).finally(() => { if (!cancelled) setReady(true); });
     return () => { cancelled = true; };
-  }, [load, startup]);
+  }, [load, startup, updatePane]);
 
   useEffect(() => {
-    if (ready) saveWorkspace(panes, active, split, documents, activeDocument);
+    if (ready) saveWorkspace(panes, active, split, documents, activeDocument, failedFtp.current);
   }, [ready, panes, active, split, documents, activeDocument]);
 
   const leftPath = panes.left.place?.kind === "local" ? panes.left.place.path : null;
@@ -319,6 +352,7 @@ export default function App() {
     cancelScan(side);
     ++request.current[side];
     listingPending.current[side] = false;
+    delete failedFtp.current[side];
     const previous = connected.current[side];
     if (previous && !documents.some(({ file }) => sameConnection(file.place, previous))) disconnect(previous);
     connected.current[side] = place.kind === "kswitcher" ? null : place;
@@ -664,6 +698,7 @@ export default function App() {
         setPanes((current) => ({ left: current.right, right: current.left }));
         setProcessPanels((current) => ({ left: current.right, right: current.left }));
         connected.current = { left: connected.current.right, right: connected.current.left };
+        failedFtp.current = { left: failedFtp.current.right, right: failedFtp.current.left };
         selectionAnchor.current = { left: selectionAnchor.current.right, right: selectionAnchor.current.left };
         focus(opposite(active));
         break;

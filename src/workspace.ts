@@ -1,11 +1,13 @@
-import type { NamedFile, Place } from "./api";
+import type { FtpPlace, NamedFile, Place } from "./api";
 import { closeSearchResults, emptyPane, type PaneState, type Side } from "./panes";
 
 export type DocumentWindow = { id: number; file: NamedFile; editing: boolean };
 type LocalPlace = Extract<Place, { kind: "local" }>;
+export type SavedFtpLocation = Pick<FtpPlace, "profileId" | "segments">;
 type SavedPane = Pick<PaneState, "selected" | "marked" | "filter" | "sort" | "position"> & {
   place: LocalPlace | null;
   history: LocalPlace[];
+  ftp?: SavedFtpLocation;
 };
 
 interface Workspace {
@@ -26,6 +28,11 @@ export function readWorkspace(): Workspace | null {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? "null") as Workspace | null;
     if (!value || !value.panels?.left || !value.panels.right || !Array.isArray(value.documents)) return null;
+    for (const pane of Object.values(value.panels)) {
+      const ftp = pane.ftp;
+      if (typeof ftp?.profileId !== "string" || !Array.isArray(ftp.segments) ||
+          ftp.segments.some((segment) => typeof segment !== "string")) delete pane.ftp;
+    }
     value.documents = value.documents.filter((document) => typeof document?.id === "number" &&
       typeof document.file?.name === "string" && isLocal(document.file.place));
     if (!value.documents.some(({ id }) => id === value.activeDocument)) value.activeDocument = null;
@@ -49,7 +56,7 @@ export function restorePane(saved?: SavedPane): PaneState {
   };
 }
 
-function savePane(pane: PaneState): SavedPane {
+function savePane(pane: PaneState, failedFtp?: SavedFtpLocation): SavedPane {
   const { place, history, position, selected, marked, filter, sort } = closeSearchResults(pane);
   const localHistory = history.filter(isLocal);
   const local = isLocal(place);
@@ -58,12 +65,14 @@ function savePane(pane: PaneState): SavedPane {
     place: local ? place : localHistory[localPosition] ?? null,
     history: localHistory, position: localPosition, selected: local ? selected : null,
     marked: local ? marked : [], filter: local ? filter : "", sort,
+    ftp: place?.kind === "ftp" ? { profileId: place.profileId, segments: place.segments } : failedFtp,
   };
 }
 
-export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, split: number, documents: DocumentWindow[], activeDocument: number | null) {
+export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, split: number,
+  documents: DocumentWindow[], activeDocument: number | null, failedFtp: Partial<Record<Side, SavedFtpLocation>>) {
   const workspace: Workspace = {
-    panels: { left: savePane(panes.left), right: savePane(panes.right) }, active, split,
+    panels: { left: savePane(panes.left, failedFtp.left), right: savePane(panes.right, failedFtp.right) }, active, split,
     documents: documents.filter(({ file }) => isLocal(file.place)), activeDocument,
   };
   try { localStorage.setItem(storageKey, JSON.stringify(workspace)); } catch { /* The workspace can still run without storage. */ }

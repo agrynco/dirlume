@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename as renamePath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { close, port } from "./server-smoke.mjs";
 
@@ -30,22 +30,25 @@ const server = [
   "ftp.serve_forever()",
 ].join("\n");
 
-export async function testFtp(page, temp, source, destination, config) {
+export async function testFtp(page, temp, source, destination, config, restartDesktop) {
   const root = join(temp, "ftp");
   const remoteFolder = join(root, "start");
   const localFolder = join(source, "ftp-copy");
   const remoteCopy = join(remoteFolder, "ftp-copy");
   const downloadedFolder = join(destination, "ftp-copy");
+  const lastFolder = join(remoteFolder, "saved-folder");
   const password = randomUUID();
   await mkdir(localFolder);
   await mkdir(remoteCopy, { recursive: true });
   await mkdir(downloadedFolder);
+  await mkdir(lastFolder);
   await writeFile(join(localFolder, "existing.txt"), "local upload");
   await writeFile(join(localFolder, "файл.txt"), "Unicode name");
   await writeFile(join(remoteCopy, "existing.txt"), "remote original");
   await writeFile(join(downloadedFolder, "existing.txt"), "local original");
   await writeFile(join(remoteFolder, "guide.md"), "# FTP Markdown\n");
   await writeFile(join(remoteFolder, "bytes.bin"), Buffer.alloc(2050, 0x42));
+  await writeFile(join(lastFolder, "restored.txt"), "Restored FTP folder");
   const ftpPort = await port();
   const child = spawn(process.env.DIRLUME_FTP_PYTHON, ["-u", "-c", server, root, String(ftpPort)], {
     windowsHide: true, env: { ...process.env, DIRLUME_FIXTURE_PASSWORD: password },
@@ -192,6 +195,37 @@ export async function testFtp(page, temp, source, destination, config) {
     await remoteRow("ftp-copy").waitFor({ state: "detached" });
     await assert.rejects(readFile(join(remoteCopy, "файл.txt")), { code: "ENOENT" });
     console.log("Verified saved FTP credentials, navigation, viewing, editing, conflicts, bidirectional copy, rename, and recursive deletion.");
+
+    await remoteRow("saved-folder").dblclick();
+    await remoteRow("restored.txt").waitFor();
+    await page.keyboard.press("Control+U");
+    const savedLocation = { profileId: JSON.parse(stored)[0].id, segments: ["start", "saved-folder"] };
+    const waitForSavedLocation = () => page.waitForFunction((expected) => {
+      const workspace = JSON.parse(localStorage.getItem("dirlume.workspace.v1") ?? "{}");
+      return JSON.stringify(workspace.panels?.left?.ftp) === JSON.stringify(expected) && !workspace.panels?.right?.ftp;
+    }, savedLocation);
+    const expectRestoredFolder = async () => {
+      const panel = page.getByRole("region", { name: "left pane", exact: true });
+      await panel.getByRole("option", { name: /^restored.txt/ }).waitFor();
+      assert.equal(await panel.getByRole("textbox", { name: "left path" }).inputValue(), "/start/saved-folder");
+      assert.equal(await page.getByRole("textbox", { name: "right path" }).inputValue(), source);
+      await waitForSavedLocation();
+    };
+    await waitForSavedLocation();
+    page = await restartDesktop();
+    await expectRestoredFolder();
+
+    const unavailable = lastFolder + "-unavailable";
+    await renamePath(lastFolder, unavailable);
+    page = await restartDesktop();
+    await page.getByRole("region", { name: "left pane", exact: true })
+      .getByRole("alert").filter({ hasText: "Could not restore the FTP folder." }).waitFor();
+    assert.equal(await page.getByRole("textbox", { name: "left path" }).inputValue(), destination);
+    await waitForSavedLocation();
+    await renamePath(unavailable, lastFolder);
+    page = await restartDesktop();
+    await expectRestoredFolder();
+    console.log("Verified FTP recovery after restarting, including fallback when the saved folder is unavailable.");
   } finally {
     try {
       const records = await readFile(profiles, "utf8").then(JSON.parse, () => []);

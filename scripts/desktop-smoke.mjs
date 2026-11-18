@@ -36,26 +36,28 @@ if (process.env.DIRLUME_CROSS_VOLUME_TEST_ROOT) {
   await mkdir(join(src, "merge"));
   await writeFile(join(src, "merge", "update.txt"), "New contents");
 }
-const debuggingPort = await port();
-const child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
-  windowsHide: true,
-  env: {
-    ...process.env,
-    ...(process.env.DIRLUME_INTERNAL_CDP === "1"
-      ? { DIRLUME_CDP_PORT: String(debuggingPort) }
-      : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
-    WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
-    DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
-  },
-});
+let child;
 let browser;
 let otherVolume;
 let lockedBy;
-let startupError = "";
-let startupOutput = "";
-child.on("error", (error) => { startupError = error.message; });
-child.stderr.on("data", (chunk) => { startupOutput = (startupOutput + chunk).slice(-2500); });
-try {
+
+async function startDesktop() {
+  const debuggingPort = await port();
+  child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
+    windowsHide: true,
+    env: {
+      ...process.env,
+      ...(process.env.DIRLUME_INTERNAL_CDP === "1"
+        ? { DIRLUME_CDP_PORT: String(debuggingPort) }
+        : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
+      WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
+      DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
+    },
+  });
+  let startupError = "";
+  let startupOutput = "";
+  child.on("error", (error) => { startupError = error.message; });
+  child.stderr.on("data", (chunk) => { startupOutput = (startupOutput + chunk).slice(-2500); });
   for (let attempt = 0; !browser; attempt++) {
     if (attempt === 100 || startupError || child.exitCode !== null) {
       throw new Error(`The Windows WebView did not start. PID ${child.pid}, exit code ${child.exitCode}. ${startupError} ${startupOutput}`);
@@ -66,6 +68,26 @@ try {
       await setTimeout(250);
     }
   }
+  const context = browser.contexts()[0];
+  const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
+  page.setDefaultTimeout(8000);
+  return page;
+}
+
+async function exitDesktop(page) {
+  const exit = new Promise((complete) => child.once("exit", complete));
+  const closeKey = page.keyboard.press("F10").catch((error) => {
+    if (!page.isClosed()) throw error;
+  });
+  const status = await Promise.race([exit, setTimeout(8000, "timeout", { ref: false })]);
+  await closeKey;
+  assert.equal(status, 0, "Dirlume should exit after closing a workspace with no unsaved changes.");
+  await browser?.close().catch(() => {});
+  browser = undefined;
+}
+
+try {
+  let page = await startDesktop();
   async function startTransfer(action, destination = dst) {
     const setup = page.getByRole("dialog", { name: action === "Move" ? "Rename or move" : action, exact: true });
     await setup.waitFor();
@@ -80,9 +102,6 @@ try {
     assert.equal(await progress.getAttribute("value"), String(expectedCount));
     await result.getByRole("button", { name: "Done" }).click();
   }
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] ?? await context.waitForEvent("page");
-  page.setDefaultTimeout(8000);
   const pageErrors = [];
   page.on("pageerror", (error) => { pageErrors.push(error.message); });
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
@@ -660,20 +679,18 @@ try {
   if (process.env.DIRLUME_FTP_PYTHON) {
     await page.getByRole("button", { name: "View guide.md" }).click();
     await page.keyboard.press("Escape");
-    await testFtp(page, temp, src, dst, join(temp, "ftp-config"));
+    await testFtp(page, temp, src, dst, join(temp, "ftp-config"), async () => {
+      await exitDesktop(page);
+      page = await startDesktop();
+      return page;
+    });
   }
-  const exit = new Promise((complete) => child.once("exit", complete));
-  const closeKey = page.keyboard.press("F10").catch((error) => {
-    if (!page.isClosed()) throw error;
-  });
-  const status = await Promise.race([exit, setTimeout(8000, "timeout", { ref: false })]);
-  await closeKey;
-  assert.equal(status, 0, "Dirlume should exit after closing a workspace with no unsaved changes.");
+  await exitDesktop(page);
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {
   if (lockedBy) await close(lockedBy);
   await browser?.close().catch(() => {});
-  await close(child);
+  if (child) await close(child);
   if (otherVolume) await rm(otherVolume, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
   for (let attempt = 0; ; attempt++) {
     try {
