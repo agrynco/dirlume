@@ -6,7 +6,7 @@ The two panes have independent folder navigation, sorting, filtering, and file s
 
 Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, browse the installed font families or enter a name and set the size for each area. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
-Use **Search settings** above the Options tree to find a section or shortcut. Drag the bottom-right corner of Options to resize it. Its last size is restored when it reopens. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
+Use **Search settings** above the Options tree to find a section or shortcut. Drag any edge or corner of Options to resize it. Its last size is restored when it reopens. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 
 | Default keys | Action |
 | --- | --- |

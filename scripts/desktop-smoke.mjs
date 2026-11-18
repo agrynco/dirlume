@@ -230,7 +230,8 @@ try {
   assert.match(await guideRow.getAttribute("class"), /marked/);
   await secondRow.click();
 
-  await page.keyboard.press("Control+Alt+S");
+  const leftAddress = page.getByRole("textbox", { name: "left path", exact: true });
+  await leftAddress.press("Alt+Control+S");
   const optionsDialog = page.getByRole("dialog", { name: "Options", exact: true });
   const sizeBefore = await optionsDialog.boundingBox();
   const grip = await optionsDialog.getByRole("button", { name: "Resize Options" }).boundingBox();
@@ -238,12 +239,26 @@ try {
   await page.mouse.down();
   await page.mouse.move(grip.x + grip.width / 2 - 55, grip.y + grip.height / 2 - 40, { steps: 5 });
   await page.mouse.up();
+  const shrunkSize = await optionsDialog.boundingBox();
+  assert.ok(shrunkSize.width < sizeBefore.width - 40);
+  assert.ok(shrunkSize.height < sizeBefore.height - 30);
+  for (const [edge, dx, dy] of [["e", 28, 0], ["n", 0, -20]]) {
+    const handle = await optionsDialog.locator('[data-resize-edge="' + edge + '"]').boundingBox();
+    const x = handle.x + handle.width / 2;
+    const y = handle.y + handle.height / 2;
+    assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.getAttribute("data-resize-edge"), { x, y }), edge);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 5 });
+    await page.mouse.up();
+  }
   const sizeAfter = await optionsDialog.boundingBox();
-  assert.ok(sizeAfter.width < sizeBefore.width - 40);
-  assert.ok(sizeAfter.height < sizeBefore.height - 30);
+  assert.ok(sizeAfter.width > shrunkSize.width + 40, "Dragging the right edge should increase the Options width.");
+  assert.ok(sizeAfter.height > shrunkSize.height + 30, "Dragging the top edge should increase the Options height from " +
+    shrunkSize.height + " to " + sizeAfter.height + ".");
   await page.keyboard.press("Escape");
   await optionsDialog.waitFor({ state: "hidden" });
-  await page.keyboard.press("Control+Alt+S");
+  await leftAddress.dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true });
   assert.deepEqual(await optionsDialog.boundingBox(), sizeAfter);
   const resizeGrip = optionsDialog.getByRole("button", { name: "Resize Options" });
   await resizeGrip.press("ArrowRight");
@@ -296,8 +311,13 @@ try {
   await optionsDialog.waitFor();
   assert.equal(await page.getByLabel("Color scheme").inputValue(), "light");
   await swatch.click();
-  await hex.fill("#eef3fe");
+  const initialColor = await hex.inputValue();
+  await spectrum.click({ position: { x: 120, y: 45 } });
+  const chosenColor = await hex.inputValue();
+  assert.notEqual(chosenColor, initialColor);
   await picker.getByRole("button", { name: "Use color", exact: true }).click();
+  assert.equal(await page.getByLabel("Window background hex").inputValue(), chosenColor);
+  await page.getByLabel("Window background hex").fill("#eef3fe");
   await page.getByLabel("Scheme name").fill("Blueprint");
   assert.equal(await page.getByLabel("Window background hex").inputValue(), "#eef3fe");
   await page.getByRole("button", { name: "Panels", exact: true }).click();
@@ -487,6 +507,11 @@ try {
   const sourceEditor = page.getByRole("textbox", { name: "Edit sample.rs" });
   await sourceEditor.locator(".syntax-keyword").first().waitFor();
   await sourceEditor.fill("fn main() { let retained = true; }");
+  await sourceEditor.press("Control+Alt+S");
+  await optionsDialog.waitFor();
+  await page.keyboard.press("Escape");
+  await optionsDialog.waitFor({ state: "hidden" });
+  assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("Escape");
   const unsaved = page.getByRole("dialog", { name: "Unsaved changes" });
   await unsaved.getByText(/Discard the unsaved changes/).waitFor();

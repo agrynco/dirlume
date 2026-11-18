@@ -785,12 +785,22 @@ export default function App() {
   }
 
   function keyDown(event: KeyboardEvent) {
-    if (modal || activeDocument !== null || event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (modal || event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
     if (target.closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
-    const command = shortcut && commandNames.find((command) => commandScope(command) === "main" && preferences.shortcuts[command] === shortcut);
+    const defaultOptionsKey = preferences.shortcuts.settings === commands.settings.key &&
+      event.code === "KeyS" && event.ctrlKey && event.altKey && !event.metaKey && !event.shiftKey &&
+      !event.getModifierState("AltGraph");
+    const command = commandNames.find((command) => shortcut && commandScope(command) === "main" &&
+      preferences.shortcuts[command] === shortcut) ?? (defaultOptionsKey ? "settings" : undefined);
     if (target.closest(".terminal-card")) return;
+    if (command === "settings") {
+      event.preventDefault();
+      if (!event.repeat) perform(command);
+      return;
+    }
+    if (activeDocument !== null) return;
     const inCommandLine = target === commandInput.current;
     const onFiles = target.closest(".file-list");
     const inField = target.closest("input, select, textarea, [contenteditable]");

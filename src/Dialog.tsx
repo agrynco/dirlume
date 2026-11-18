@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
+const resizeEdges = ["n", "ne", "e", "s", "sw", "w", "nw"] as const;
 
 function readSize(key: string | undefined): Dimensions | undefined {
   if (!key) return;
@@ -24,7 +25,7 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
   const [size, setSize] = useState(() => readSize(resizeKey));
-  const drag = useRef<(Dimensions & { x: number; y: number }) | null>(null);
+  const drag = useRef<(Dimensions & { x: number; y: number; horizontal: number; vertical: number }) | null>(null);
   useLayoutEffect(() => {
     const dialog = ref.current;
     const focused = document.activeElement;
@@ -59,27 +60,40 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
       style={size} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
+      onPointerDown={(event) => {
+        if (!resizeKey || event.button !== 0 || !(event.target instanceof HTMLElement)) return;
+        const handle = event.target.closest<HTMLElement>("[data-resize-edge]");
+        if (handle?.closest("dialog") !== event.currentTarget) return;
+        event.preventDefault();
+        if (handle instanceof HTMLButtonElement) handle.focus({ preventScroll: true });
+        const edge = handle.dataset.resizeEdge ?? "";
+        const { width, height } = event.currentTarget.getBoundingClientRect();
+        drag.current = {
+          width, height, x: event.clientX, y: event.clientY,
+          horizontal: Number(edge.includes("e")) - Number(edge.includes("w")),
+          vertical: Number(edge.includes("s")) - Number(edge.includes("n")),
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const start = drag.current;
+        if (!start || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        // The dialog stays centered, so each edge moves by half of its size change.
+        resize(start.width + 2 * start.horizontal * (event.clientX - start.x),
+          start.height + 2 * start.vertical * (event.clientY - start.y));
+      }}
+      onLostPointerCapture={finishResize}
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>
         <Button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X /></Button>
       </header>
       {children}
+      {resizeKey && resizeEdges.map((edge) =>
+        <div key={edge} className="dialog-resize-edge" data-resize-edge={edge} aria-hidden="true" />)}
       {resizeKey && <Button type="button" className="dialog-resize-grip" aria-label={"Resize " + title}
         title={"Resize " + title + " (drag or use arrow keys)"}
-        onPointerDown={(event) => {
-          if (event.button !== 0 || !ref.current) return;
-          const { width, height } = ref.current.getBoundingClientRect();
-          drag.current = { width, height, x: event.clientX, y: event.clientY };
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const start = drag.current;
-          if (!start || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-          // The dialog stays centered, so its corner moves by half of each size change.
-          resize(start.width + 2 * (event.clientX - start.x), start.height + 2 * (event.clientY - start.y));
-        }}
-        onLostPointerCapture={finishResize}
+        data-resize-edge="se"
         onKeyDown={(event) => {
           const bounds = ref.current?.getBoundingClientRect();
           if (!bounds || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;

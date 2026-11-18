@@ -387,6 +387,23 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   min-height: min(350px, calc(100vh - 42px)); max-height: calc(100vh - 42px);
 }
 .dialog-resizable > .dialog-footer { flex: none; padding-right: 30px; }
+.dialog-resize-edge { position: absolute; touch-action: none; user-select: none; }
+.dialog-resize-edge:is([data-resize-edge="n"], [data-resize-edge="s"]) {
+  left: 10px; right: 26px; height: 5px; cursor: ns-resize;
+}
+.dialog-resize-edge[data-resize-edge="n"] { top: 0; right: 10px; }
+.dialog-resize-edge[data-resize-edge="s"] { bottom: 0; }
+.dialog-resize-edge:is([data-resize-edge="w"], [data-resize-edge="e"]) {
+  top: 10px; bottom: 26px; width: 5px; cursor: ew-resize;
+}
+.dialog-resize-edge[data-resize-edge="w"] { left: 0; bottom: 10px; }
+.dialog-resize-edge[data-resize-edge="e"] { right: 0; }
+.dialog-resize-edge:is([data-resize-edge="nw"], [data-resize-edge="ne"], [data-resize-edge="sw"]) {
+  width: 10px; height: 10px;
+}
+.dialog-resize-edge[data-resize-edge="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+.dialog-resize-edge[data-resize-edge="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+.dialog-resize-edge[data-resize-edge="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
 button.dialog-resize-grip {
   position: absolute; right: 1px; bottom: 1px; cursor: nwse-resize; touch-action: none;
   width: 24px; height: 24px; min-height: 0; display: grid; padding: 0; place-items: center; color: var(--muted);
