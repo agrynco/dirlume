@@ -2,7 +2,7 @@ import { Button } from "./Button";
 import { AddressField } from "./AddressField";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
@@ -13,6 +13,7 @@ import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { eventShortcut, showShortcut } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
+import { columnWidthsStyle, FileColumns, readColumnWidths, saveColumnWidths } from "./FileColumns";
 
 interface PaneProps {
   side: Side;
@@ -48,8 +49,6 @@ interface PaneProps {
   onContext: (entry?: Entry) => void;
 }
 
-const columns = [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "modified", label: "Modified" }] as const;
-
 export function Pane({ side, active, showHidden, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
@@ -64,6 +63,8 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const locationsBox = useRef<HTMLDivElement>(null);
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const columnHeader = useRef<HTMLDivElement>(null);
+  const [columnWidths, setColumnWidths] = useState(() => readColumnWidths(side));
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = entries.length ? Math.max(0, entries.findIndex((entry) => entry.name === pane.selected)) : -1;
@@ -172,7 +173,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
   const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
   return (
-    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)}
+    <section ref={section} id={`${side}-pane`} style={{ ...viewFontStyle(fontSize), ...columnWidthsStyle(columnWidths) }}
       className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={`${side} pane`}
       onPointerDown={activate} onFocus={activate} onContextMenu={(event) => {
         if (processView || !(event.target instanceof HTMLElement) || event.target.closest("input, select, textarea, dialog")) return;
@@ -284,18 +285,18 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           <Button className="icon-button" aria-label="Close filter" onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
-      <div className="file-columns">
-        {columns.map(({ key, label }) => (
-          <Button key={key} type="button" className={`col-${key}`} onClick={() => onSort(key)} title={`Sort by ${label.toLowerCase()}`}>
-            {label}{pane.sort.column === key && (pane.sort.asc ? <ArrowUp /> : <ArrowDown />)}
-          </Button>
-        ))}
-      </div>
+      <FileColumns container={columnHeader} widths={columnWidths} sort={pane.sort} onSort={onSort}
+        onResize={(widths, persist) => {
+          setColumnWidths(widths);
+          if (persist) saveColumnWidths(side, widths);
+        }} />
       <div id={`${side}-files`} ref={list} className={search ? "file-list result-list" : "file-list"} role="listbox" aria-label={`${side} files`}
-        onScroll={search ? (event) => {
+        onScroll={(event) => {
+          if (columnHeader.current) columnHeader.current.scrollLeft = event.currentTarget.scrollLeft;
+          if (!search) return;
           const top = event.currentTarget.scrollTop;
           setViewport((previous) => ({ ...previous, top }));
-        } : undefined}
+        }}
         aria-multiselectable="true" aria-busy={pane.loading}
         aria-activedescendant={selected >= start && selected < end ? `${side}-file-${selected}` : undefined} tabIndex={0}>
         {search && <>

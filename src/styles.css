@@ -57,7 +57,9 @@
   --mono: "Cascadia Mono", "SFMono-Regular", "Liberation Mono", monospace;
   --mono-size: 13px;
   --markdown-font: var(--ui-font);
-  --file-grid: minmax(95px, 1fr) 76px 133px;
+  --file-name-default: 95px;
+  --file-size-default: 76px;
+  --file-modified-default: 133px;
 }
 
 [data-theme="light"] {
@@ -278,18 +280,34 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .location-popup button { width: 100%; justify-content: flex-start; }
 .pane-filter { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line); padding: 4px 8px 4px 12px; color: var(--muted); }
 .pane-filter input { width: 100%; min-height: 28px; padding-block: 3px; }
-.file-columns, .file-row { display: grid; grid-template-columns: var(--file-grid); align-items: center; }
+.file-column-grid, .file-row {
+  --file-size-track: var(--file-size-width, var(--file-size-default));
+  --file-modified-track: var(--file-modified-width, var(--file-modified-default));
+  display: grid;
+  grid-template-columns: var(--file-name-width, minmax(var(--file-name-default), 1fr)) var(--file-size-track) var(--file-modified-track);
+  min-width: calc(var(--file-name-width, var(--file-name-default)) + var(--file-size-track) + var(--file-modified-track) + 10px);
+  align-items: center;
+}
 .file-columns {
   border-block: 1px solid var(--line);
   background: var(--raised);
-  padding-inline: 9px;
+  padding-inline: 5px;
   color: var(--muted);
+  overflow: hidden;
 }
-.file-columns button { justify-content: flex-start; padding: 3px 4px; border-radius: 3px; font-size: .88em; }
-.file-columns button.col-size { justify-content: flex-end; }
-.file-columns button.col-modified { padding-inline-start: 11px; }
+.file-column-grid { padding-inline: 5px; }
+.file-column { position: relative; min-width: 0; }
+.file-columns button { width: 100%; min-width: 0; justify-content: flex-start; padding: 3px 8px 3px 4px; border-radius: 3px; font-size: .88em; }
+.file-columns button span { overflow: hidden; text-overflow: ellipsis; }
+.file-columns .col-size button { justify-content: flex-end; }
+.file-columns .col-modified button { padding-inline-start: 11px; }
 .file-columns svg { width: 11px; height: 11px; }
-.file-list { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; padding: 4px 5px; }
+.file-column-resize { position: absolute; z-index: 1; inset: 0 -4px 0 auto; width: 8px; cursor: col-resize; touch-action: none; }
+.file-column:last-child .file-column-resize { right: 0; }
+.file-column-resize::after { content: ""; position: absolute; inset: 4px 3px; background: var(--line); }
+.file-column-resize:is(:hover, :active, :focus-visible)::after { background: var(--accent); }
+.file-columns, .file-list { scrollbar-width: thin; scrollbar-gutter: stable; }
+.file-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 5px; }
 .file-list:focus-visible { outline-offset: -2px; outline-width: 1px; }
 .result-list { position: relative; overflow-anchor: none; }
 .result-list .file-row, .result-row-probe { height: max(29px, calc(1.45em + 6px)); }
@@ -650,14 +668,14 @@ button.color-swatch {
 .diff-row.added span:last-child, .diff-row.changed span:last-child { background: var(--added); }
 .diff-row.current { outline: 1px solid var(--accent); outline-offset: -1px; }
 
-@media (max-width: 900px) { :root { --file-grid: minmax(88px, 1fr) 63px 106px; } .actionbar { gap: 4px; } .actionbar button { padding-inline: 6px; } }
-@media (max-width: 760px) { :root { --file-grid: minmax(75px, 1fr) 55px 87px; } .workspace { padding-inline: 8px; } .file-date { padding-left: 5px; } .file-columns button.col-modified { padding-inline-start: 5px; } }
+@media (max-width: 900px) { :root { --file-name-default: 88px; --file-size-default: 63px; --file-modified-default: 106px; } .actionbar { gap: 4px; } .actionbar button { padding-inline: 6px; } }
+@media (max-width: 760px) { :root { --file-name-default: 75px; --file-size-default: 55px; --file-modified-default: 87px; } .workspace { padding-inline: 8px; } .file-date { padding-left: 5px; } .file-columns .col-modified button { padding-inline-start: 5px; } }
 @container (max-width: 310px) {
-  .file-columns, .file-row { grid-template-columns: minmax(0, 1fr) 62px; }
+  .file-column-grid, .file-row { --file-size-default: 62px; --file-modified-track: 0px; }
   .file-date, .col-modified { display: none; }
 }
 @container (max-width: 200px) {
-  .file-columns, .file-row { grid-template-columns: minmax(0, 1fr); }
+  .file-column-grid, .file-row { --file-size-track: 0px; }
   .file-size, .col-size { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

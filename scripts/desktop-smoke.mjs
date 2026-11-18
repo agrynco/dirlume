@@ -804,6 +804,41 @@ try {
   await page.keyboard.press("Control+Tab");
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
+  const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
+  const columnHandle = (side, name) => page.getByRole("region", { name: `${side} pane`, exact: true })
+    .getByRole("separator", { name: `Resize ${name} column`, exact: true });
+  async function dragColumn(side, name, delta) {
+    const bounds = await columnHandle(side, name).boundingBox();
+    assert.ok(bounds);
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + delta, y, { steps: 5 });
+    await page.mouse.up();
+  }
+  const leftName = await columnWidth("left", "name");
+  const leftSize = await columnWidth("left", "size");
+  const rightSize = await columnWidth("right", "size");
+  const rightModified = await columnWidth("right", "modified");
+  await dragColumn("left", "Name", 56);
+  assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
+  await dragColumn("left", "Size", 32);
+  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  assert.equal(await columnWidth("right", "size"), rightSize);
+  await page.locator("#left-files").evaluate((list) => { list.scrollLeft = 60; });
+  await page.waitForFunction(() => {
+    const header = document.querySelector("#left-pane .file-columns");
+    const list = document.getElementById("left-files");
+    return list.scrollLeft > 0 && header.scrollLeft === list.scrollLeft &&
+      Math.abs(header.querySelector(".col-size").getBoundingClientRect().left -
+        list.querySelector(".file-size").getBoundingClientRect().left) <= 1;
+  });
+  await dragColumn("right", "Modified", -28);
+  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await columnHandle("right", "Modified").dblclick();
+  assert.equal(await columnWidth("right", "modified"), rightModified);
+  await dragColumn("right", "Modified", -28);
   await exitDesktop(page);
   page = await startDesktop();
   await page.getByRole("button", { name: "View guide.md" }).click();
@@ -811,6 +846,10 @@ try {
   assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
+  assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
+  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  assert.equal(await columnWidth("right", "size"), rightSize);
+  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
   assert.equal(await page.getByLabel("left path").inputValue(), src);
   assert.equal(await page.getByLabel("right path").inputValue(), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();

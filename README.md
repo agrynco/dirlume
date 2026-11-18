@@ -6,6 +6,8 @@ The two panes have independent folder navigation, sorting, filtering, and file s
 
 The address field suggests matching folders as you type on local and FTP panes. Press **Tab** to complete a folder name and continue the path. Use the arrow keys and **Enter**, or click a suggestion, to open the folder.
 
+Drag the right edge of a file column heading to resize it. Double-click the edge to restore its default width. Each pane saves its widths independently and scrolls horizontally when the columns exceed the available space.
+
 Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, type a name to filter installed fonts in the dropdown, or open the full list with the arrow button. Use the arrow keys and Enter to choose a font, or click a result. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
 Use **Search settings** above the Options tree to find a section or shortcut. Drag any edge or corner of Options to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
