@@ -8,7 +8,7 @@ The address field suggests matching folders as you type on local and FTP panes. 
 
 Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, browse the installed font families or enter a name and set the size for each area. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
-Use **Search settings** above the Options tree to find a section or shortcut. Drag any edge or corner of Options to resize it. Its last size is restored when it reopens. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
+Use **Search settings** above the Options tree to find a section or shortcut. Drag any edge or corner of Options to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 
 | Default keys | Action |
 | --- | --- |
@@ -40,7 +40,7 @@ Viewers and editors use the same syntax highlighting and let you change the dete
 
 In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
 
-Mouse-wheel font changes are saved in **Options → Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview uses the saved size for all documents and keeps it when you follow links or restart Dirlume.
+Mouse-wheel font changes are saved in **Options → Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview uses the saved size for all documents and keeps it when you follow links or restart Dirlume. In **Fonts**, changing a scheme’s size for file panels or text tools clears individual sizes for those views. Markdown uses the font family you choose for the editor, viewer, and terminal.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 

@@ -179,6 +179,8 @@ export function applyAppearance(theme: Theme, scheme: Scheme | null, root = docu
     if (font?.size) root.style.setProperty(`--${group}-size`, `${font.size}px`);
     else root.style.removeProperty(`--${group}-size`);
   }
+  if (scheme?.fonts.mono?.family?.trim()) root.style.setProperty("--markdown-font", "var(--mono)");
+  else root.style.removeProperty("--markdown-font");
 }
 
 export function basePalette(base: BaseTheme, overrides?: Palette): Palette {

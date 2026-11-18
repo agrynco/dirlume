@@ -58,10 +58,10 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
         ) : page === "viewFonts" ? (
           <dl className="preview-view-fonts">
             {viewFontKeys.map((view) => {
-              const { label, size, family, sample } = viewFonts[view];
+              const { label, group, family, sample } = viewFonts[view];
               return <div key={view}>
                 <dt>{label}</dt>
-                <dd style={{ fontSize: preferences.viewFontSizes[view] ?? `var(${size})`, fontFamily: `var(${family})` }}>{sample}</dd>
+                <dd style={{ fontSize: preferences.viewFontSizes[view] ?? `var(--${group}-size)`, fontFamily: `var(${family})` }}>{sample}</dd>
               </div>;
             })}
           </dl>

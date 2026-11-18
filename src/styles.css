@@ -56,6 +56,7 @@
   --dialog-size: var(--ui-size);
   --mono: "Cascadia Mono", "SFMono-Regular", "Liberation Mono", monospace;
   --mono-size: 13px;
+  --markdown-font: var(--ui-font);
   --file-grid: minmax(95px, 1fr) 76px 133px;
 }
 
@@ -628,7 +629,7 @@ button.color-swatch {
 .mermaid-diagram { display: block; max-width: 100%; max-height: none; margin: 16px auto; }
 .diagram-error { white-space: pre-wrap; padding: 10px; background: var(--danger-bg); color: var(--danger); }
 .footer-message { margin-right: auto; color: var(--muted); }
-.markdown { padding-inline: 18px; font-size: var(--view-font-size, var(--ui-size)); }
+.markdown { padding-inline: 18px; font-family: var(--markdown-font); font-size: var(--view-font-size, var(--mono-size)); }
 .markdown-link { color: var(--accent); text-decoration: underline; }
 .markdown .task-list-item { list-style: none; }
 .markdown .task-list-item input[type="checkbox"]:enabled { cursor: pointer; }

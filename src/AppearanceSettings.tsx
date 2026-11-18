@@ -73,8 +73,23 @@ export function AppearanceSettings({ section, preferences, onChange }: {
     onChange({ ...preferences, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
   }
 
-  function update(scheme: Scheme) {
-    onChange({ ...preferences, schemes: preferences.schemes.map((item) => item.id === scheme.id ? scheme : item) });
+  function update(scheme: Scheme, viewFontSizes = preferences.viewFontSizes) {
+    onChange({ ...preferences, viewFontSizes, schemes: preferences.schemes.map((item) => item.id === scheme.id ? scheme : item) });
+  }
+
+  function setFont(group: FontGroup, font?: Font) {
+    const fonts = { ...active?.fonts, [group]: font };
+    if (!active) {
+      create(fonts);
+      return;
+    }
+    const viewFontSizes = { ...preferences.viewFontSizes };
+    if (font?.size !== active.fonts[group]?.size) {
+      for (const view of viewFontKeys) {
+        if (viewFonts[view].group === group) delete viewFontSizes[view];
+      }
+    }
+    update({ ...active, fonts }, viewFontSizes);
   }
 
   function setColor(color: Color, value?: string) {
@@ -130,11 +145,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
         <div className="font-settings">
           {fontKeys.map((group) => <FontFields key={`${active?.id ?? preferences.theme}-${group}`} group={group}
             font={active?.fonts[group]} disabled={!active}
-            onChange={(font) => {
-              const fonts = { ...active?.fonts, [group]: font };
-              if (active) update({ ...active, fonts });
-              else create(fonts);
-            }} />)}
+            onChange={(font) => setFont(group, font)} />)}
         </div>
       ) : (
         <div className="color-settings">

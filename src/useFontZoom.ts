@@ -23,7 +23,7 @@ export function useFontZoom(ref: RefObject<HTMLElement | null>, binding: string,
       pending += event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? event.deltaY : direction * pixelsPerStep;
       if (Math.abs(pending) < pixelsPerStep) return;
       pending = 0;
-      const base = parseFloat(getComputedStyle(element).getPropertyValue(viewFonts[view].size));
+      const base = parseFloat(getComputedStyle(element).getPropertyValue(`--${viewFonts[view].group}-size`));
       if (Number.isFinite(base)) onZoom(view, -direction, base);
     };
 

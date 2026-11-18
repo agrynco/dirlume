@@ -1,5 +1,5 @@
 import { Button } from "./Button";
-import { useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { AppearanceSettings, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
@@ -13,6 +13,8 @@ import {
 import { viewFonts } from "./viewFonts";
 
 type Page = AppearanceSection | "viewFonts" | "general" | "shortcuts";
+type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
+const optionsLocationKey = "dirlume.options-location";
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
     id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors).join(" "),
@@ -21,14 +23,32 @@ const appearancePages = [
   { id: "viewFonts" as const, label: "View font sizes", terms: Object.values(viewFonts).map(({ label }) => label).join(" ") + " zoom wheel" },
 ];
 
+function readOptionsLocation(): OptionsLocation {
+  const defaults: OptionsLocation = { page: "general", query: "", expanded: true, scrollTop: 0 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(optionsLocationKey) ?? "null") as Partial<OptionsLocation> | null;
+    const page = saved?.page;
+    if (!page || (page !== "general" && page !== "shortcuts" && !appearancePages.some(({ id }) => id === page))) return defaults;
+    const scrollTop = saved.scrollTop;
+    return {
+      page,
+      query: typeof saved.query === "string" ? saved.query : defaults.query,
+      expanded: typeof saved.expanded === "boolean" ? saved.expanded : defaults.expanded,
+      scrollTop: typeof scrollTop === "number" && Number.isFinite(scrollTop) ? Math.max(0, scrollTop) : defaults.scrollTop,
+    };
+  } catch { return defaults; }
+}
+
 export function Settings({ preferences: saved, onChange: applyPreferences, onClose }: {
   preferences: Preferences;
   onChange: (value: Preferences) => void;
   onClose: () => void;
 }) {
-  const [page, setPage] = useState<Page>("general");
-  const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState(true);
+  const [initialLocation] = useState(readOptionsLocation);
+  const [page, setPage] = useState(initialLocation.page);
+  const [query, setQuery] = useState(initialLocation.query);
+  const [expanded, setExpanded] = useState(initialLocation.expanded);
+  const pageBody = useRef<HTMLDivElement>(null);
   const [preferences, onChange] = useState(saved);
   const [capture, setCapture] = useState<Command | null>(null);
   const [conflict, setConflict] = useState("");
@@ -45,6 +65,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const isAppearance = page !== "general" && page !== "shortcuts";
   const title = isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : "Keyboard shortcuts";
 
+  useLayoutEffect(() => {
+    if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
+  }, [initialLocation]);
+
   function select(page: Page) {
     setPage(page);
     setCapture(null);
@@ -53,6 +77,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
 
   function apply() {
     if (hasChanges) applyPreferences(preferences);
+  }
+
+  function close() {
+    const location: OptionsLocation = { page, query, expanded, scrollTop: pageBody.current?.scrollTop ?? 0 };
+    try { localStorage.setItem(optionsLocationKey, JSON.stringify(location)); } catch { /* Options can still close. */ }
+    onClose();
   }
 
   function assign(event: KeyboardEvent, command: Command) {
@@ -73,7 +103,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   return (
-    <Dialog title="Options" onClose={onClose} wide resizeKey="options">
+    <Dialog title="Options" onClose={close} wide resizeKey="options">
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <label className="settings-search"><Search aria-hidden="true" />
@@ -114,7 +144,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             {isAppearance && <><span>Appearance</span><ChevronRight aria-hidden="true" /></>}
             <h3>{title}</h3>
           </header>
-          <div className="settings-page-body">
+          <div className="settings-page-body" ref={pageBody}>
       {page === "general" ? (
         <div className="dialog-body settings-general">
           <label className="setting"><span>Show hidden files</span>
@@ -182,7 +212,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           </Button>
         )}
         <Button type="button" disabled={!hasChanges} onClick={apply}>Apply</Button>
-        <Button type="button" className="primary" onClick={() => { apply(); onClose(); }}>Done</Button>
+        <Button type="button" className="primary" onClick={() => { apply(); close(); }}>Done</Button>
       </footer>
     </Dialog>
   );

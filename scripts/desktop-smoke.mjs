@@ -297,6 +297,8 @@ try {
 
   await leftAddress.press("Alt+Control+S");
   const optionsDialog = page.getByRole("dialog", { name: "Options", exact: true });
+  const optionsContent = optionsDialog.locator(".settings-page-body");
+  const searchSettings = optionsDialog.getByRole("searchbox", { name: "Search settings", exact: true });
   const sizeBefore = await optionsDialog.boundingBox();
   const grip = await optionsDialog.getByRole("button", { name: "Resize Options" }).boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
@@ -332,6 +334,9 @@ try {
   const zoomBinding = optionsDialog.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true });
   assert.equal(await zoomBinding.inputValue(), "Ctrl+Wheel");
   await zoomBinding.selectOption("Alt+Wheel");
+  await searchSettings.fill("keyboard shortcuts");
+  const shortcutScroll = await optionsContent.evaluate((content) => { content.scrollTop = 180; return content.scrollTop; });
+  assert.ok(shortcutScroll > 0);
   await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
   await wheelFont("#left-files", -120);
   assert.equal(await fontSize("#left-pane"), leftFont);
@@ -339,7 +344,10 @@ try {
   assert.ok(await fontSize("#left-pane") > leftFont);
   await wheelFont("#left-files", 120, "Alt");
   await leftAddress.press("Alt+Control+S");
-  await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  assert.equal(await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.equal(await searchSettings.inputValue(), "keyboard shortcuts");
+  assert.equal(await optionsContent.evaluate((content) => content.scrollTop), shortcutScroll);
+  await searchSettings.fill("");
   await zoomBinding.selectOption("Ctrl+Wheel");
   await optionsDialog.getByRole("button", { name: "View font sizes", exact: true }).click();
   for (const [side, size] of [["Left", leftFont], ["Right", rightFont]]) {
@@ -413,7 +421,6 @@ try {
   const textName = left.getByRole("option", { name: /^guide\.md/ }).locator(".file-name");
   const foreground = (element) => element.evaluate((name) => getComputedStyle(name).color);
   assert.notEqual(await foreground(sourceName), await foreground(textName));
-  const searchSettings = page.getByRole("searchbox", { name: "Search settings", exact: true });
   await searchSettings.fill("office documents");
   await searchSettings.press("Enter");
   await page.getByRole("heading", { name: "File types", exact: true }).waitFor();
@@ -448,6 +455,19 @@ try {
   assert.equal(await foreground(sourceName), "rgb(124, 33, 68)");
   assert.notEqual(await foreground(textName), "rgb(124, 33, 68)");
   if (process.env.DIRLUME_APPEARANCE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_APPEARANCE_SCREENSHOT, scale: "css" });
+  const fontScroll = await optionsContent.evaluate((content) => { content.scrollTop = 120; return content.scrollTop; });
+  assert.ok(fontScroll > 0);
+  await page.getByLabel("File panels font size").fill("19");
+  await optionsContent.evaluate((content, position) => { content.scrollTop = position; }, fontScroll);
+  for (const closeWith of ["button", "Escape"]) {
+    if (closeWith === "button") await optionsDialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+    else await page.keyboard.press("Escape");
+    await optionsDialog.waitFor({ state: "hidden" });
+    await leftAddress.press("Alt+Control+S");
+    assert.equal(await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await optionsContent.evaluate((content) => content.scrollTop), fontScroll);
+    assert.equal(await page.getByLabel("File panels font size").inputValue(), "17");
+  }
   await page.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   await page.getByRole("button", { name: "Change shortcut for New folder" }).click();
   await page.getByRole("textbox", { name: "New shortcut for New folder" }).press("F5");
@@ -587,8 +607,26 @@ try {
   await diagram.waitFor();
   assert.ok(await diagram.evaluate((image) => image.complete && image.naturalWidth > 0));
   const markdownSurface = ".text-window:not([hidden]) .markdown";
+  assert.equal(await fontSize(markdownSurface), linkedMarkdownFont, "Unrelated Markdown files should open with the same saved preview size.");
+  await page.keyboard.press("Control+Alt+S");
+  await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).click();
+  const textFontFamily = optionsDialog.getByLabel("Editor, viewer, and terminal font family");
+  const textFontSize = optionsDialog.getByLabel("Editor, viewer, and terminal font size");
+  const markdownFamily = () => page.locator(markdownSurface).evaluate((surface) => getComputedStyle(surface).fontFamily);
+  await textFontFamily.fill("Arial");
+  await textFontSize.fill("18");
+  await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
+  assert.equal(await fontSize(markdownSurface), 18, "Apply should update an open Markdown preview with saved wheel zoom.");
+  assert.match(await markdownFamily(), /^Arial,/);
+  await textFontFamily.fill("Georgia");
+  await textFontSize.fill("16");
+  await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
+  assert.match(await markdownFamily(), /^Georgia,/);
+  assert.equal(await fontSize(markdownSurface), 16, "Done should update the open Markdown preview without reopening the file.");
+  await page.keyboard.press("Control+Alt+S");
+  await optionsDialog.getByRole("button", { name: "Reset editor, viewer, and terminal font", exact: true }).click();
+  await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
   const markdownFont = await fontSize(markdownSurface);
-  assert.equal(markdownFont, linkedMarkdownFont, "Unrelated Markdown files should open with the same saved preview size.");
   await wheelFont(markdownSurface, -120);
   const enlargedMarkdown = await fontSize(markdownSurface);
   assert.ok(enlargedMarkdown > markdownFont, "Ctrl+Wheel should enlarge Markdown preview text.");
@@ -705,7 +743,6 @@ try {
   const lightYellow = await assertTerminalContrast();
   if (process.env.DIRLUME_TERMINAL_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_TERMINAL_SCREENSHOT, scale: "css" });
   await page.getByRole("button", { name: "Options", exact: true }).click();
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("button", { name: "Text tools", exact: true }).click();
   const textBackground = page.getByLabel("Editor, viewer, and terminal background hex");
   await textBackground.fill("#101924");
@@ -770,6 +807,7 @@ try {
   assert.equal(await page.getByLabel("right path").inputValue(), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
   await page.getByRole("button", { name: "Options", exact: true }).click();
+  assert.equal(await page.getByRole("button", { name: "Text tools", exact: true }).getAttribute("aria-pressed"), "true");
   await page.getByRole("button", { name: "View font sizes", exact: true }).click();
   assert.equal(await page.getByRole("spinbutton", { name: "Markdown preview font size" }).inputValue(), String(enlargedMarkdown));
   assert.equal(await page.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
