@@ -1,3 +1,5 @@
+import { errorText, t } from "./i18n";
+import { Message } from "./Message";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, connectFtpLocation, describeError, type FtpPlace, type FtpProfile, type Listing } from "./api";
 import { Button } from "./Button";
@@ -64,7 +66,7 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
   }
 
   return <>
-    <Dialog title="FTP connections" onClose={() => { if (!working) onClose(); }} onKeyDown={(event) => {
+    <Dialog title={t("FTP connections")} onClose={() => { if (!working) onClose(); }} onKeyDown={(event) => {
       if (working || loading || editing !== undefined || removing) return;
       const key = eventShortcut(event);
       if (!key) return;
@@ -75,25 +77,25 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
       event.preventDefault();
     }}>
       <div className="dialog-body ftp-connections">
-        {loading ? <p role="status">Loading connections…</p> : profiles.length ? (
-          <label className="field">Saved connections
+        {loading ? <p role="status">{t("Loading connections…")}</p> : profiles.length ? (
+          <label className="field">{t("Saved connections")}
             <select size={6} value={selected} autoFocus onChange={(event) => setSelected(event.target.value)}
               onDoubleClick={() => { void connect(); }}>
               {profiles.map(({ id, label, host, port }) => <option key={id} value={id}>{label} · {host}:{port}</option>)}
             </select>
           </label>
-        ) : <p>No saved FTP connections.</p>}
-        {error && !removing && <p className="dialog-error" role="alert">{error}</p>}
+        ) : <p>{t("No saved FTP connections.")}</p>}
+        {error && !removing && <p className="dialog-error" role="alert">{errorText(error)}</p>}
       </div>
       <footer className="dialog-footer">
         <Button type="button" disabled={working || loading} shortcut={showShortcut(shortcuts.addFtpProfile)}
-          onClick={() => setEditing(null)}>Add</Button>
+          onClick={() => setEditing(null)}>{t("Add")}</Button>
         <Button type="button" disabled={!profile || working} shortcut={showShortcut(shortcuts.editFtpProfile)}
-          onClick={() => setEditing(profile)}>Edit</Button>
-        <Button type="button" disabled={!profile || working} onClick={() => { setError(""); setRemoving(true); }}>Remove</Button>
-        <Button type="button" disabled={working} onClick={onClose}>Cancel</Button>
+          onClick={() => setEditing(profile)}>{t("Edit")}</Button>
+        <Button type="button" disabled={!profile || working} onClick={() => { setError(""); setRemoving(true); }}>{t("Remove")}</Button>
+        <Button type="button" disabled={working} onClick={onClose}>{t("Cancel")}</Button>
         <Button type="button" className="primary" disabled={!profile || working} shortcut={showShortcut(shortcuts.open)}
-          onClick={() => { void connect(); }}>{working && !removing ? "Connecting…" : "Connect"}</Button>
+          onClick={() => { void connect(); }}>{working && !removing ? t("Connecting…") : t("Connect")}</Button>
       </footer>
     </Dialog>
     {editing !== undefined && <ProfileDialog profile={editing} windowsCodePage={codePage}
@@ -107,14 +109,14 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
         setEditing(undefined);
         requestAnimationFrame(() => document.querySelector<HTMLSelectElement>(".ftp-connections select")?.focus());
       }} />}
-    {removing && profile && <Dialog title="Remove FTP connection" onClose={() => { if (!working) setRemoving(false); }}>
+    {removing && profile && <Dialog title={t("Remove FTP connection")} onClose={() => { if (!working) setRemoving(false); }}>
       <div className="dialog-body">
-        <p>Remove the saved connection <strong>{profile.label}</strong>?</p>
-        {error && <p className="dialog-error" role="alert">{error}</p>}
+        <p><Message text="Remove the saved connection {0}?"><strong>{profile.label}</strong></Message></p>
+        {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
       </div>
       <footer className="dialog-footer">
-        <Button type="button" data-initial-focus disabled={working} onClick={() => setRemoving(false)}>Cancel</Button>
-        <Button type="button" className="negative" disabled={working} onClick={() => { void remove(); }}>Remove connection</Button>
+        <Button type="button" data-initial-focus disabled={working} onClick={() => setRemoving(false)}>{t("Cancel")}</Button>
+        <Button type="button" className="negative" disabled={working} onClick={() => { void remove(); }}>{t("Remove connection")}</Button>
       </footer>
     </Dialog>}
   </>;
@@ -155,45 +157,45 @@ function ProfileDialog({ profile, windowsCodePage, onSave, onClose }: {
   }
 
   return (
-    <Dialog title={profile ? "Edit FTP connection" : "Add FTP connection"} onClose={() => { if (!working) onClose(); }}>
+    <Dialog title={profile ? t("Edit FTP connection") : t("Add FTP connection")} onClose={() => { if (!working) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void save(event); }} autoComplete="off">
         <div className="dialog-body ftp-fields">
-          <label className="field">Connection name
+          <label className="field">{t("Connection name")}
             <input data-initial-focus required value={label} onChange={(event) => setLabel(event.target.value)} />
           </label>
           <div className="ftp-host-row">
-            <label className="field">Server
+            <label className="field">{t("Server")}
               <input required spellCheck={false} placeholder="ftp.example.com" value={host} onChange={(event) => setHost(event.target.value)} />
             </label>
-            <label className="field">Port
+            <label className="field">{t("Port")}
               <input required type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} />
             </label>
           </div>
-          <label className="field">Username
-            <input placeholder="Anonymous" value={username} onChange={(event) => setUsername(event.target.value)} spellCheck={false} />
+          <label className="field">{t("Username")}
+            <input placeholder={t("Anonymous")} value={username} onChange={(event) => setUsername(event.target.value)} spellCheck={false} />
           </label>
-          <label className="field">Password
-            <input type="password" autoComplete="new-password" placeholder={profile ? "Keep saved password" : undefined}
+          <label className="field">{t("Password")}
+            <input type="password" autoComplete="new-password" placeholder={profile ? t("Keep saved password") : undefined}
               value={password} disabled={clearPassword} onChange={(event) => setPassword(event.target.value)} />
           </label>
           {profile && <label className="transfer-checkbox">
-            <input type="checkbox" checked={clearPassword} onChange={(event) => setClearPassword(event.target.checked)} /> Clear saved password
+            <input type="checkbox" checked={clearPassword} onChange={(event) => setClearPassword(event.target.checked)} /> {t("Clear saved password")}
           </label>}
           <div className="ftp-encoding-row">
-            <label className="field">Filename code page
+            <label className="field">{t("Filename code page")}
               <input type="number" min={1} max={65535} placeholder="UTF-8" value={codePage}
                 onChange={(event) => setCodePage(event.target.value)} />
             </label>
             {windowsCodePage && windowsCodePage !== 65001 && <Button type="button" onClick={() => setCodePage(String(windowsCodePage))}>
-              Use Windows code page
+              {t("Use Windows code page")}
             </Button>}
           </div>
-          <p className="search-hint">Plain FTP sends credentials and files without encryption.</p>
-          {error && <p className="dialog-error" role="alert">{error}</p>}
+          <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>
+          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         </div>
         <footer className="dialog-footer">
-          <Button type="button" disabled={working} onClick={onClose}>Cancel</Button>
-          <Button type="submit" className="primary" disabled={working}>{working ? "Saving…" : "Save connection"}</Button>
+          <Button type="button" disabled={working} onClick={onClose}>{t("Cancel")}</Button>
+          <Button type="submit" className="primary" disabled={working}>{working ? t("Saving…") : t("Save connection")}</Button>
         </footer>
       </form>
     </Dialog>

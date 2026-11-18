@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useLayoutEffect, useRef } from "react";
 import { File, Folder, FolderTree } from "lucide-react";
 import { applyAppearance, fileColor } from "./appearance";
@@ -13,7 +14,7 @@ function Samples({ hidden, all }: { hidden: boolean; all: boolean }) {
   const files = all ? fileSamples : ["main.rs", "notes.md", "photo.png"];
   return (
     <div className={`preview-files${all ? " preview-file-types" : ""}`}>
-      {!all && <div className="preview-folder"><Folder /> Project</div>}
+      {!all && <div className="preview-folder"><Folder /> {t("Project")}</div>}
       {[...files, ...(hidden ? [".env"] : [])].map((filename, index) => {
         const color = fileColor(filename);
         return <div className={`preview-file${!all && index === 1 ? " preview-file-selected" : ""}`} key={filename}>
@@ -25,7 +26,7 @@ function Samples({ hidden, all }: { hidden: boolean; all: boolean }) {
 }
 
 function CodeSample() {
-  return <pre className="preview-code"><span className="syntax-comment">// Preview settings</span>{"\n"}
+  return <pre className="preview-code"><span className="syntax-comment">// {t("Preview settings")}</span>{"\n"}
     <span className="syntax-keyword">const</span> options = {"{"}{"\n  "}
     <span className="syntax-property">name</span>: <span className="syntax-string">"Dirlume"</span>,{"\n  "}
     <span className="syntax-property">zoom</span>: <span className="syntax-number">100</span>{"\n}"};</pre>;
@@ -46,22 +47,22 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
   }, [theme, scheme]);
 
   return (
-    <section className="settings-preview" aria-label="Settings preview">
-      <h3>Preview</h3>
+    <section className="settings-preview" aria-label={t("Settings preview")}>
+      <h3>{t("Preview")}</h3>
       <div className="preview-frame" ref={preview}>
         {page === "dialogs" ? (
           <div className="preview-dialog">
-            <strong>Copy report.pdf</strong>
-            <div className="preview-field">Downloads</div>
-            <div className="preview-dialog-actions"><span>Cancel</span><span className="preview-primary">Copy</span></div>
+            <strong>{t("Copy report.pdf")}</strong>
+            <div className="preview-field">{t("Downloads")}</div>
+            <div className="preview-dialog-actions"><span>{t("Cancel")}</span><span className="preview-primary">{t("Copy")}</span></div>
           </div>
         ) : page === "viewFonts" ? (
           <dl className="preview-view-fonts">
             {viewFontKeys.map((view) => {
               const { label, group, family, sample } = viewFonts[view];
               return <div key={view}>
-                <dt>{label}</dt>
-                <dd style={{ fontSize: preferences.viewFontSizes[view] ?? `var(--${group}-size)`, fontFamily: `var(${family})` }}>{sample}</dd>
+                <dt>{t(label)}</dt>
+                <dd style={{ fontSize: preferences.viewFontSizes[view] ?? `var(--${group}-size)`, fontFamily: `var(${family})` }}>{t(sample)}</dd>
               </div>;
             })}
           </dl>
@@ -70,12 +71,12 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
           page === "shortcuts" ? (
             <div className="preview-shortcuts">
               {([["View", "view"], ["Edit", "edit"], ["Find files", "search"], ["Copy", "copy"]] as const).map(([label, command]) => (
-                <span key={command}>{label}<kbd>{showShortcut(preferences.shortcuts[command]) || "Unassigned"}</kbd></span>
+                <span key={command}>{t(label)}<kbd>{showShortcut(preferences.shortcuts[command]) || t("Unassigned")}</kbd></span>
               ))}
             </div>
           ) : (
             <>
-              <div className="preview-toolbar"><FolderTree />Project<span className="preview-toolbar-action">Connect</span></div>
+              <div className="preview-toolbar"><FolderTree />{t("Project")}<span className="preview-toolbar-action">{t("Connect")}</span></div>
               <div className={page === "fonts" ? "preview-fonts" : undefined}>
                 <Samples hidden={preferences.hidden} all={false} />
                 {page === "fonts" && <CodeSample />}

@@ -1,3 +1,4 @@
+import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { describeError, placePath, type Place } from "./api";
@@ -102,9 +103,9 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
       }
       if (controller.signal.aborted) return;
       snapshot.current.incomplete = skipped > 0;
-      const summary = found.length > previewLimit ? `${found.length} matches. Open the results panel to see all matches.` :
-        found.length === 0 ? "No matching files." : `${found.length} ${found.length === 1 ? "match" : "matches"}.`;
-      setStatus(skipped ? `${summary} Some items could not be searched.` : summary);
+      const summary = found.length > previewLimit ? t("{0} matches. Open the results panel to see all matches.", found.length) :
+        found.length === 0 ? t("No matching files.") : `${countText(found.length, "match")}.`;
+      setStatus(skipped ? t("{0} Some items could not be searched.", summary) : summary);
     } catch (failure) {
       if (!controller.signal.aborted) {
         setStatus("");
@@ -123,20 +124,20 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
   }
 
   return (
-    <Dialog title="Find files" onClose={onClose}>
+    <Dialog title={t("Find files")} onClose={onClose}>
       <form className="dialog-form" onSubmit={(event) => { void search(event); }}>
         <div className="dialog-body search-body">
-          <label className="field">File mask
+          <label className="field">{t("File mask")}
             <input ref={maskField} data-initial-focus type="text" value={mask} required spellCheck={false} autoComplete="off"
               disabled={running} maxLength={512} onFocus={(event) => event.currentTarget.select()}
               onChange={(event) => setMask(event.target.value)} />
           </label>
-          <p className="search-hint">Use * for any number of characters and ? for one character.</p>
-          <p className="search-location"><strong>Folder and subfolders</strong><span>{placePath(root) || root.kind === "kswitcher" && root.address}</span></p>
-          {status && <p role="status">{status}</p>}
-          {error && <p role="alert" className="dialog-error">{error}</p>}
+          <p className="search-hint">{t("Use * for any number of characters and ? for one character.")}</p>
+          <p className="search-location"><strong>{t("Folder and subfolders")}</strong><span>{placePath(root) || root.kind === "kswitcher" && root.address}</span></p>
+          {status && <p role="status">{t(status)}</p>}
+          {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
           {current && (
-            <select aria-label="Search results" size={8} value={current.relativePath}
+            <select aria-label={t("Search results")} size={8} value={current.relativePath}
               onChange={(event) => setSelected(event.currentTarget.value)}
               onDoubleClick={(event) => reveal(results.find((result) => result.relativePath === event.currentTarget.value))}
               onKeyDown={(event) => {
@@ -150,14 +151,14 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
           )}
         </div>
         <footer className="dialog-footer">
-          <Button type="button" onClick={onClose}>Close</Button>
-          {current && <Button type="button" onClick={() => reveal(current)}>Go to file</Button>}
+          <Button type="button" onClick={onClose}>{t("Close")}</Button>
+          {current && <Button type="button" onClick={() => reveal(current)}>{t("Go to file")}</Button>}
           {current && !running && <Button type="button" onClick={() => {
             const { mask, matches, incomplete } = snapshot.current;
             onShowResults(mask, matches, incomplete, current.relativePath);
-          }}>Show in panel</Button>}
-          {running ? <Button type="button" onClick={stop}>Stop</Button> :
-            <Button type="submit" className="primary" disabled={!mask.trim()}>Search</Button>}
+          }}>{t("Show in panel")}</Button>}
+          {running ? <Button type="button" onClick={stop}>{t("Stop")}</Button> :
+            <Button type="submit" className="primary" disabled={!mask.trim()}>{t("Search")}</Button>}
         </footer>
       </form>
     </Dialog>

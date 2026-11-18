@@ -21,7 +21,9 @@ import {
   applyListing, childPlace, closeSearchResults, localPath, opposite, paneItem, parentPlace, readPlace, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, readPreferences, showShortcut, type Command } from "./preferences";
+import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
+import { countText, errorText, setLanguage, t } from "./i18n";
+import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
 
@@ -61,14 +63,14 @@ function shellArgument(value: string) {
   return `'${value.replaceAll("'", windowsClient ? "''" : "'\\''")}'`;
 }
 
-export default function App() {
+export default function App({ initialPreferences }: { initialPreferences: Preferences }) {
   const [startup] = useState(readWorkspace);
   const [ready, setReady] = useState(false);
   const [panes, setPanes] = useState(() => ({ left: restorePane(startup?.panels.left), right: restorePane(startup?.panels.right) }));
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
   const [processPanels, setProcessPanels] = useState({ left: false, right: false });
-  const [preferences, setPreferences] = useState(readPreferences);
+  const [preferences, setPreferences] = useState(initialPreferences);
   const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
   const theme = scheme?.base ?? preferences.theme;
   const [modal, setModal] = useState<Modal | null>(null);
@@ -143,7 +145,7 @@ export default function App() {
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
-      if (reveal !== undefined && !found) setStatus({ text: `File no longer found: ${reveal}`, error: true });
+      if (reveal !== undefined && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         const listing = applyListing(pane, result.place, result.listing, background ? "refresh" : action);
         return found ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
@@ -189,7 +191,7 @@ export default function App() {
               return;
             } catch (error) {
               if (cancelled || request.current[side] !== ticket) return;
-              failure = "Could not restore the FTP folder. " + describeError(error);
+              failure = t("Could not restore the FTP folder.") + " " + errorText(describeError(error));
             } finally {
               if (request.current[side] === ticket) listingPending.current[side] = false;
             }
@@ -458,7 +460,7 @@ export default function App() {
       try {
         await action(name);
       } catch (error) {
-        throw new Error(`${name} · ${describeError(error)}${index > 0 ? ` (${index} of ${items.length} completed)` : ""}`);
+        throw new Error(`${name} · ${errorText(describeError(error))}${index > 0 ? ` (${t("{0} of {1} completed", index, items.length)})` : ""}`);
       }
     }
   }
@@ -529,7 +531,7 @@ export default function App() {
         if (place.kind !== "local") throw new Error("Choose local files to copy to the system clipboard.");
         return { directory: place.path, name: entry.name };
       }));
-      setStatus({ text: `${items.length} ${items.length === 1 ? "item" : "items"} copied to the clipboard.` });
+      setStatus({ text: t(items.length === 1 ? "{0} item copied to the clipboard." : "{0} items copied to the clipboard.", items.length) });
     } catch (failure) { setStatus({ text: describeError(failure), error: true }); }
   }
 
@@ -882,17 +884,17 @@ export default function App() {
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
-          <Button className="toolbar-button" shortcut={keyLabel("connect")} onClick={() => perform("connect")}><Server /> Connect</Button>
-          <Button className="icon-button" aria-label="Find files" shortcut={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
+          <Button className="toolbar-button" shortcut={keyLabel("connect")} onClick={() => perform("connect")}><Server /> {t("Connect")}</Button>
+          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
             onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
-          <Button className="icon-button" aria-label="Swap panes" shortcut={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
-          <Button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
+          <Button className="icon-button" aria-label={t("Swap panes")} shortcut={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
+          <Button className="icon-button" aria-label={t("Show hidden files")} aria-pressed={preferences.hidden}
             shortcut={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
-          <Button className="icon-button" aria-label="Toggle terminal" aria-pressed={terminal !== null}
+          <Button className="icon-button" aria-label={t("Toggle terminal")} aria-pressed={terminal !== null}
             onClick={toggleTerminal}><TerminalIcon /></Button>
-          <Button className="icon-button" aria-label="Commands" shortcut={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></Button>
-          <Button className="icon-button" aria-label="Options" shortcut={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></Button>
+          <Button className="icon-button" aria-label={t("Commands")} shortcut={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></Button>
+          <Button className="icon-button" aria-label={t("Options")} shortcut={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></Button>
         </div>
       </header>
       <main className="workspace" hidden={panelsHidden}
@@ -928,7 +930,7 @@ export default function App() {
             ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
-        <div className="pane-divider" role="separator" aria-label="Pane divider" aria-orientation="vertical"
+        <div className="pane-divider" role="separator" aria-label={t("Pane divider")} aria-orientation="vertical"
           aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
           onDoubleClick={() => resizeSplit(50)}
           onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
@@ -962,7 +964,7 @@ export default function App() {
         ))}
       </div>
       {terminal && (
-        <Suspense fallback={<div className="terminal-card pane-empty">Opening terminal…</div>}>
+        <Suspense fallback={<div className="terminal-card pane-empty">{t("Opening terminal…")}</div>}>
           <TerminalPanel key={terminal.id} session={terminal} theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal}
             pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
             onShortcut={() => perform("terminal")} onClose={closeTerminal} />
@@ -970,14 +972,14 @@ export default function App() {
       )}
       <form className="command-bar" onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" aria-pressed={terminal !== null} onClick={toggleTerminal}>
-          <TerminalIcon /> Terminal
+          <TerminalIcon /> {t("Terminal")}
         </Button>
         <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
-        <input ref={commandInput} aria-label="Command line" type="text" value={commandLine} autoFocus autoComplete="off"
-          spellCheck={false} placeholder="Enter a command" onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
+        <input ref={commandInput} aria-label={t("Command line")} type="text" value={commandLine} autoFocus autoComplete="off"
+          spellCheck={false} placeholder={t("Enter a command")} onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
       </form>
-      <nav className="actionbar" aria-label="File actions">
-        {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>Back to files</Button> : ([
+      <nav className="actionbar" aria-label={t("File actions")}>
+        {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> : ([
           { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
             disabled: !fileFor(active) && !measureEntries.length },
           { command: "edit", label: "Edit", Icon: Pencil, disabled: !fileFor(active) || fileFor(active)?.place.kind === "server" },
@@ -991,15 +993,15 @@ export default function App() {
           { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
         ] as const).filter(({ command }) => !ftp || command !== "rename").map(({ command, label, Icon, disabled }) => (
           <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}>
-            <Icon /><span>{label}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}
+            <Icon /><span>{t(label)}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}
           </Button>
         ))}
       </nav>
-      <nav className="document-bar" aria-label="Open documents" aria-hidden={!documents.length}>
+      <nav className="document-bar" aria-label={t("Open documents")} aria-hidden={!documents.length}>
         {documents.length > 0 && <>
-          <Button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> Files</Button>
+          <Button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> {t("Files")}</Button>
           {documents.map(({ id, file, editing }) => (
-            <Button key={id} type="button" aria-label={`${editing ? "Edit" : "View"} ${file.name}`}
+            <Button key={id} type="button" aria-label={t(editing ? "Edit {0}" : "View {0}", file.name)}
               title={placePath(file.place)} aria-pressed={activeDocument === id} onClick={() => selectDocument(id)}>
               {editing ? <Pencil /> : <Eye />}<span>{file.name}</span>
             </Button>
@@ -1007,17 +1009,20 @@ export default function App() {
         </>}
       </nav>
       <footer className={`statusbar${status.error ? " danger" : ""}`}>
-        <span role={status.error ? "alert" : "status"} title={status.text}>
-          {status.text}
+        <span role={status.error ? "alert" : "status"} title={errorText(status.text)}>
+          {errorText(status.text)}
         </span>
-        <span>{pane.place && pane.place.kind !== "local" ? pane.place.address : "Local file system"}</span>
+        <span>{pane.place && pane.place.kind !== "local" ? pane.place.address : t("Local file system")}</span>
       </footer>
-      {modal?.kind === "settings" && <Settings preferences={preferences} onChange={setPreferences} onClose={() => setModal(null)} />}
+      {modal?.kind === "settings" && <Settings preferences={preferences} onChange={(next) => {
+        setLanguage(next.language);
+        setPreferences(next);
+      }} onClose={() => setModal(null)} />}
       {modal?.kind === "exit" && (
-        <Dialog title="Unsaved changes" onClose={() => setModal(null)}>
-          <div className="dialog-body"><p>Some editors have unsaved changes. Discard them and exit Dirlume?</p></div>
+        <Dialog title={t("Unsaved changes")} onClose={() => setModal(null)}>
+          <div className="dialog-body"><p>{t("Some editors have unsaved changes. Discard them and exit Dirlume?")}</p></div>
           <footer className="dialog-footer">
-            <Button type="button" data-initial-focus onClick={() => setModal(null)}>Keep working</Button>
+            <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Keep working")}</Button>
             <Button type="button" className="negative" onClick={() => {
               exitConfirmed.current = true;
               void getCurrentWindow().close().catch((error: unknown) => {
@@ -1025,7 +1030,7 @@ export default function App() {
                 setModal(null);
                 setStatus({ text: describeError(error), error: true });
               });
-            }}>Discard changes and exit</Button>
+            }}>{t("Discard changes and exit")}</Button>
           </footer>
         </Dialog>
       )}
@@ -1048,11 +1053,11 @@ export default function App() {
           }} />
       )}
       {modal?.kind === "menu" && (
-        <Dialog title="Commands" onClose={() => setModal(null)}>
+        <Dialog title={t("Commands")} onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
             {(["view", "edit", "newFile", "copy", "move", "copyClipboard", "pasteClipboard", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
               .map((command) => <Button key={command} type="button" shortcut={keyLabel(command)} onClick={() => { setModal(null); perform(command); }}>
-                {commands[command].label}<kbd>{keyLabel(command)}</kbd>
+                {t(commands[command].label)}<kbd>{keyLabel(command)}</kbd>
               </Button>)}
           </div>
         </Dialog>
@@ -1060,14 +1065,14 @@ export default function App() {
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
-        <Dialog title="File actions" onClose={() => setModal(null)}>
+        <Dialog title={t("File actions")} onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
             {modal.entry && <Button type="button" disabled={paneItem(panes[modal.side], modal.entry)?.place.kind !== "local"}
-              onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>Copy files to clipboard</Button>}
+              onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>{t("Copy files to clipboard")}</Button>}
             <Button type="button" disabled={panes[modal.side].place?.kind !== "local" || Boolean(panes[modal.side].search)}
-              onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>Paste files</Button>
+              onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>{t("Paste files")}</Button>
           </div>
-          <footer className="dialog-footer"><Button type="button" onClick={() => setModal(null)}>Close</Button></footer>
+          <footer className="dialog-footer"><Button type="button" onClick={() => setModal(null)}>{t("Close")}</Button></footer>
         </Dialog>
       )}
       {modal?.kind === "connect" && (
@@ -1131,13 +1136,13 @@ function CommandHistory({ commands, onChoose, onClose }: {
   const [query, setQuery] = useState("");
   const matches = [...new Set(commands)].filter((command) => command.toLowerCase().includes(query.toLowerCase()));
   return (
-    <Dialog title="Command history" onClose={onClose}>
+    <Dialog title={t("Command history")} onClose={onClose}>
       <div className="dialog-body command-menu">
-        <label className="field">Search commands
+        <label className="field">{t("Search commands")}
           <input data-initial-focus type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
         {matches.length ? matches.map((command) => <Button key={command} title={command} onClick={() => onChoose(command)}>{command}</Button>) :
-          <p>No commands found.</p>}
+          <p>{t("No commands found.")}</p>}
       </div>
     </Dialog>
   );
@@ -1155,7 +1160,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
   const titles = { mkdir: "New folder", newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
-  const title = titles[modal.kind];
+  const title = t(titles[modal.kind]);
   const removing = "names" in modal;
 
   async function submit(event: FormEvent) {
@@ -1180,28 +1185,29 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   return (
     <>
-    <Dialog key={String(recursive)} title={recursive ? "Delete FTP folder contents" : title} onClose={() => { if (!waiting) onClose(); }}>
+    <Dialog key={String(recursive)} title={recursive ? t("Delete FTP folder contents") : title} onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
-          {recursive ? <p className="delete-warning">Permanently delete the selected FTP folders and all their contents?</p> : removing
-            ? <p className={modal.kind === "delete" ? "delete-warning" : undefined}>{modal.kind === "delete" ? "Permanently delete " : "Move "}
-              {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : `${modal.names.length} items`}
-              {modal.kind === "delete" ? "?" : " to Trash?"}</p>
-            : <label className="field">Name
+          {recursive ? <p className="delete-warning">{t("Permanently delete the selected FTP folders and all their contents?")}</p> : removing
+            ? <p className={modal.kind === "delete" ? "delete-warning" : undefined}>
+              <Message text={modal.kind === "delete" ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
+                {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : countText(modal.names.length, "item")}
+              </Message></p>
+            : <label className="field">{t("Name")}
               <input data-initial-focus value={name} type="text" required onChange={(event) => setName(event.target.value)}
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
             </label>}
-          {error && <p className="dialog-error" role="alert">{error}</p>}
+          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {!modal.ftp && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
         </div>
         <div className="dialog-footer">
           {!modal.ftp && windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
-          )}>Find locking processes</Button>}
-          <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>Cancel</Button>
+          )}>{t("Find locking processes")}</Button>}
+          <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
           <Button type="submit" className={removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
-            {waiting ? "Working…" : recursive ? "Delete contents" : modal.kind === "mkdir" || modal.kind === "newFile" ? "Create" : title}
+            {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "mkdir" || modal.kind === "newFile" ? t("Create") : title}
           </Button>
         </div>
       </form>
@@ -1269,35 +1275,35 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
   }
 
   return (
-    <Dialog title={provider === "server" ? "Connect to Dirlume server" : "Connect through KSwitcher"}
+    <Dialog title={provider === "server" ? t("Connect to Dirlume server") : t("Connect through KSwitcher")}
       onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
           {provider === "server" ? (
-            <label className="field">Server invitation
+            <label className="field">{t("Server invitation")}
               <input data-initial-focus type="password" autoComplete="off" spellCheck={false} required
-                placeholder="Paste the invitation from the remote machine" value={value}
+                placeholder={t("Paste the invitation from the remote machine")} value={value}
                 onChange={(event) => setValue(event.target.value)} />
             </label>
           ) : bridge === true && peers.length ? (
-            <label className="field">Paired machine
+            <label className="field">{t("Paired machine")}
               <select data-initial-focus value={value} onChange={(event) => setValue(event.target.value)}>
                 {peers.map((peer) => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
               </select>
             </label>
           ) : bridge === true ? (
-            <p>Run KSwitcher on both computers and enable file browsing for the paired machine.</p>
+            <p>{t("Run KSwitcher on both computers and enable file browsing for the paired machine.")}</p>
           ) : bridge === false ? (
-            <p>Open KSwitcher Files and select a paired machine from its source menu.</p>
+            <p>{t("Open KSwitcher Files and select a paired machine from its source menu.")}</p>
           ) : (
-            <p>{directory ? "Looking for the KSwitcher bridge…" : "Choose the KSwitcher installation folder in Options."}</p>
+            <p>{directory ? t("Looking for the KSwitcher bridge…") : t("Choose the KSwitcher installation folder in Options.")}</p>
           )}
-          {error && <p className="dialog-error" role="alert">{error}</p>}
+          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         </div>
         <div className="dialog-footer">
-          <Button type="button" onClick={onOptions} disabled={waiting}>Connection options</Button>
+          <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
           <Button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" && bridge === null) || (bridge !== false && !value.trim())}>
-            {waiting ? "Connecting…" : bridge === false ? "Open KSwitcher Files" : "Connect"}
+            {waiting ? t("Connecting…") : bridge === false ? t("Open KSwitcher Files") : t("Connect")}
           </Button>
         </div>
       </form>

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { createContext, isValidElement, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -50,7 +51,7 @@ function taskFromProperties(properties: Record<string, unknown> | undefined): Ta
   const end = properties?.dataTaskEnd;
   const label = properties?.dataTaskLabel;
   if (typeof start !== "number" || typeof end !== "number" || typeof label !== "string") return null;
-  return { start, end, label: label || "Markdown task" };
+  return { start, end, label };
 }
 
 function TaskCheckbox({ type, checked }: ComponentProps<"input">) {
@@ -59,7 +60,7 @@ function TaskCheckbox({ type, checked }: ComponentProps<"input">) {
   if (type !== "checkbox") return null;
   return <input type="checkbox" checked={Boolean(checked)} disabled={!task || !preview?.writable}
     aria-disabled={preview?.saving || undefined} onClick={(event) => { if (preview?.saving) event.preventDefault(); }}
-    aria-label={task?.label ?? "Markdown task"} onChange={(event) => {
+    aria-label={task?.label || t("Markdown task")} onChange={(event) => {
       if (task && !preview?.saving) preview?.onToggleTask(task, event.target.checked);
     }} />;
 }

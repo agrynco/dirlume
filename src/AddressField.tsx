@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { api, placePath, windowsClient, type Entry, type Place } from "./api";
 import type { Side } from "./panes";
+import { t } from "./i18n";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -92,7 +93,7 @@ export function AddressField({ side, place, showHidden, onNavigate, focusFiles }
       event.preventDefault();
       if (editable) navigate(current && parts ? parts.parent + current.name : value);
     }}>
-      <input id={id} aria-label={side + " path"} value={value} readOnly={!editable} type="text"
+      <input id={id} aria-label={t(side === "left" ? "left path" : "right path")} value={value} readOnly={!editable} type="text"
         role={editable ? "combobox" : undefined} aria-autocomplete={editable ? "list" : undefined}
         aria-expanded={editable ? expanded : undefined} aria-controls={expanded ? popup : undefined}
         aria-activedescendant={current ? popup + "-" + selection : undefined}
@@ -125,7 +126,7 @@ export function AddressField({ side, place, showHidden, onNavigate, focusFiles }
           }
         }} />
       {parts && expanded && (
-        <div id={popup} className="address-suggestions" role="listbox" aria-label={side + " path suggestions"}>
+        <div id={popup} className="address-suggestions" role="listbox" aria-label={t(side === "left" ? "left path suggestions" : "right path suggestions")}>
           {suggestions.map(({ name }, index) => (
             <div key={name} id={popup + "-" + index} role="option" aria-selected={index === selection}
               title={parts.parent + name} onMouseDown={(event) => event.preventDefault()}

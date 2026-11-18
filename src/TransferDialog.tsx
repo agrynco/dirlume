@@ -1,3 +1,4 @@
+import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
@@ -17,7 +18,6 @@ export interface Transfer {
 
 type Decision = "overwrite" | "skip";
 let nextSession = 0;
-const integer = new Intl.NumberFormat();
 
 function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
@@ -157,60 +157,60 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
   const status = error ? "Transfer stopped" : cancelled.current ? "Transfer canceled" : "Transfer complete";
   return (
     <>
-    <Dialog title={phase === "done" ? status : phase === "working" ?
-      (moving ? "Moving…" : verb === "Download" ? "Downloading…" : "Copying…") : (moving ? "Rename or move" : verb)}
+    <Dialog title={phase === "done" ? t(status) : phase === "working" ?
+      (moving ? t("Moving…") : verb === "Download" ? t("Downloading…") : t("Copying…")) : (moving ? t("Rename or move") : t(verb))}
       onClose={cancel}>
       {phase === "setup" ? (
         <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
           <div className="dialog-body transfer-body">
             <div className="transfer-source">
-              <strong>{itemCount === 1 ? transfer.items[0].entry.name : `${itemCount} selected items`}</strong>
+              <strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>
               <span title={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}
               </span>
             </div>
-            <label className="field">Destination
+            <label className="field">{t("Destination")}
               <input data-initial-focus type="text" value={destination} required spellCheck={false}
                 onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDestination(event.target.value)} />
             </label>
-            <label className="setting"><span>Existing files</span>
+            <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
-                <option value="ask">Ask</option><option value="skip">Skip</option>
-                {replaceable && <option value="overwrite">Overwrite</option>}
+                <option value="ask">{t("Ask")}</option><option value="skip">{t("Skip")}</option>
+                {replaceable && <option value="overwrite">{t("Overwrite")}</option>}
                 {replaceable && localTarget && <>
-                  <option value="rename">Rename incoming item</option>
-                  <option value="newer">Overwrite older files only</option>
+                  <option value="rename">{t("Rename incoming item")}</option>
+                  <option value="newer">{t("Overwrite older files only")}</option>
                 </>}
               </select>
             </label>
             {replaceable && localTarget && <label className="transfer-checkbox">
-              <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} /> Also ask about read-only files
+              <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} /> {t("Also ask about read-only files")}
             </label>}
             {transfer.chooseOperation && <label className="transfer-checkbox">
-              <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} /> Move instead of copying
+              <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} /> {t("Move instead of copying")}
             </label>}
           </div>
           <footer className="dialog-footer">
-            <Button type="button" onClick={onClose}>Cancel</Button>
-            <Button type="submit" className="primary" disabled={!destination}>{verb}</Button>
+            <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
+            <Button type="submit" className="primary" disabled={!destination}>{t(verb)}</Button>
           </footer>
         </form>
       ) : (
         <>
           <div className="dialog-body transfer-body">
                 <div className="transfer-meter">
-                  <span title={progress?.file}>{progress?.file ?? "Preparing…"}</span>
+                  <span title={progress?.file}>{progress?.file ?? t("Preparing…")}</span>
                   <span>{progress?.total == null ? formatSize(progress?.bytes ?? null) : `${formatSize(progress.bytes)} / ${formatSize(progress.total)}`}</span>
                 </div>
-                <progress aria-label="Current file progress" max={Math.max(progress?.total ?? 1, 1)}
+                <progress aria-label={t("Current file progress")} max={Math.max(progress?.total ?? 1, 1)}
                   value={progress?.total == null ? (phase === "done" ? 0 : undefined) : progress.total === 0 ? 1 : progress.bytes} />
                 <div className="transfer-meter">
-                  <span>{processed} / {itemCount} items{skipped ? ` · ${skipped} skipped` : ""}</span>
-                  <span>{formatSize(bytes)} transferred</span>
+                  <span>{t("{0} / {1} items", processed, itemCount)}{skipped ? ` · ${t("{0} skipped", skipped)}` : ""}</span>
+                  <span>{t("{0} transferred", formatSize(bytes))}</span>
                 </div>
-                <progress aria-label="Overall transfer progress" max={itemCount} value={processed} />
-                {phase === "done" && <p role="status">{completed} completed{skipped ? `, ${skipped} skipped` : ""}.</p>}
-                {error && <p className="dialog-error" role="alert">{error}</p>}
+                <progress aria-label={t("Overall transfer progress")} max={itemCount} value={processed} />
+                {phase === "done" && <p role="status">{t("{0} completed", completed)}{skipped ? `, ${t("{0} skipped", skipped)}` : ""}.</p>}
+                {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
                 {localTarget && windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
                   <ElevationButton directory={blocked.place.path} />}
           </div>
@@ -226,42 +226,42 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
                         paths.push(placePath(childPlace(localPath(destination), blocked.entry.name)));
                       }
                       setLockPaths(paths);
-                    }}>Find locking processes</Button>
-                    <Button type="button" onClick={() => setPhase("setup")}>Retry</Button>
+                    }}>{t("Find locking processes")}</Button>
+                    <Button type="button" onClick={() => setPhase("setup")}>{t("Retry")}</Button>
                   </>
                 )}
-                <Button ref={action} type="button" className="primary" onClick={onClose}>Done</Button>
+                <Button ref={action} type="button" className="primary" onClick={onClose}>{t("Done")}</Button>
               </>
             ) : (
-              <Button type="button" onClick={cancel} disabled={canceling}>{canceling ? "Canceling…" : "Cancel"}</Button>
+              <Button type="button" onClick={cancel} disabled={canceling}>{canceling ? t("Canceling…") : t("Cancel")}</Button>
             )}
           </footer>
         </>
       )}
     </Dialog>
     {conflict && (
-      <Dialog key={conflict.path} title={conflict.directory ? "Folder already exists" : "File already exists"} onClose={cancel}>
+      <Dialog key={conflict.path} title={conflict.directory ? t("Folder already exists") : t("File already exists")} onClose={cancel}>
         <div className="dialog-body transfer-body">
-          <p><strong>{conflict.path}</strong>{conflict.readOnly ? " (read-only)" : ""}</p>
+          <p><strong>{conflict.path}</strong>{conflict.readOnly ? ` ${t("(read-only)")}` : ""}</p>
           <table className="conflict-details">
             <tbody>
-              {conflict.incoming && <ConflictDetails label="Incoming" details={conflict.incoming} />}
-              <ConflictDetails label="Existing" details={conflict.existing} />
+              {conflict.incoming && <ConflictDetails label={t("Incoming")} details={conflict.incoming} />}
+              <ConflictDetails label={t("Existing")} details={conflict.existing} />
             </tbody>
           </table>
-          {conflict.directory && conflict.replaceable && <p>Merge the folders and handle conflicting files individually.</p>}
-          {!conflict.replaceable && <p>Skip this item or choose another destination.</p>}
+          {conflict.directory && conflict.replaceable && <p>{t("Merge the folders and handle conflicting files individually.")}</p>}
+          {!conflict.replaceable && <p>{t("Skip this item or choose another destination.")}</p>}
           {conflict.allowRemember && <label className="transfer-checkbox">
-            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> Remember choice
+            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> {t("Remember choice")}
           </label>}
         </div>
         <footer className="dialog-footer">
           {conflict.replaceable && (
             <Button type="button" className={conflict.directory ? "primary" : "negative"} disabled={answering === conflict}
-              onClick={() => { void resolve("overwrite"); }}>{conflict.directory ? "Merge" : "Overwrite"}</Button>
+              onClick={() => { void resolve("overwrite"); }}>{conflict.directory ? t("Merge") : t("Overwrite")}</Button>
           )}
-          <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>Skip</Button>
-          <Button type="button" onClick={cancel}>Cancel</Button>
+          <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>{t("Skip")}</Button>
+          <Button type="button" onClick={cancel}>{t("Cancel")}</Button>
         </footer>
       </Dialog>
     )}
@@ -272,7 +272,7 @@ export function TransferDialog({ transfer, onClose, onFinished }: {
 
 function ConflictDetails({ label, details }: { label: string; details: TransferEntryDetails }) {
   return <tr><th scope="row">{label}</th>
-    <td>{details.directory ? "Folder" : `${integer.format(details.size)} B`}</td>
+    <td>{details.directory ? t("Folder") : `${details.size.toLocaleString(locale())} B`}</td>
     <td>{formatDate(details.modified)}</td>
   </tr>;
 }

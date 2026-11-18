@@ -1,4 +1,5 @@
 import { api, windowsClient, type Entry, type Listing, type Place, type SizeResult } from "./api";
+import { locale } from "./i18n";
 
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified";
@@ -149,8 +150,20 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   };
 }
 
-const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
+const formats = new Map<string, { number: Intl.NumberFormat; time: Intl.DateTimeFormat }>();
+
+function currentFormats() {
+  const language = locale();
+  let format = formats.get(language);
+  if (!format) {
+    format = {
+      number: new Intl.NumberFormat(language, { maximumFractionDigits: 1 }),
+      time: new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }),
+    };
+    formats.set(language, format);
+  }
+  return format;
+}
 
 export function formatSize(size: number | null) {
   if (size === null) return "–";
@@ -160,9 +173,9 @@ export function formatSize(size: number | null) {
     size /= 1024;
     unit++;
   }
-  return `${numberFormat.format(size)} ${units[unit]}`;
+  return `${currentFormats().number.format(size)} ${units[unit]}`;
 }
 
 export function formatDate(time: number | null) {
-  return time === null ? "–" : timeFormat.format(new Date(time * 1000));
+  return time === null ? "–" : currentFormats().time.format(new Date(time * 1000));
 }

@@ -1,3 +1,4 @@
+import { errorText, t } from "./i18n";
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronDown } from "lucide-react";
 import { maxFontFamilyLength } from "./appearance";
@@ -91,12 +92,12 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
     event.stopPropagation();
     close();
   }}>
-    <label className="field" htmlFor={`${id}-input`}>Font family</label>
+    <label className="field" htmlFor={`${id}-input`}>{t("Font family")}</label>
     <div className="font-family-field" ref={field}>
-      <input ref={input} id={`${id}-input`} aria-label={`${label} font family`} type="text" role="combobox"
+      <input ref={input} id={`${id}-input`} aria-label={t("{0} font family", t(label))} type="text" role="combobox"
         aria-autocomplete="list" aria-expanded={expanded} aria-controls={expanded ? id : undefined}
         aria-activedescendant={expanded && matches[index] ? optionId(index) : undefined}
-        value={builtIn ? query ?? value : value} placeholder="Default font" maxLength={maxFontFamilyLength}
+        value={builtIn ? query ?? value : value} placeholder={t("Default font")} maxLength={maxFontFamilyLength}
         autoComplete="off" spellCheck={false}
         onChange={(event) => {
           setQuery(event.target.value);
@@ -124,22 +125,22 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
             else close();
           }
         }} />
-      <Button type="button" className="icon-button" aria-label={`Browse installed fonts for ${label.toLowerCase()}`}
-        title="Browse installed fonts" aria-haspopup="listbox" aria-expanded={expanded} tabIndex={-1}
+      <Button type="button" className="icon-button" aria-label={t("Browse installed fonts for {0}", t(label).toLocaleLowerCase())}
+        title={t("Browse installed fonts")} aria-haspopup="listbox" aria-expanded={expanded} tabIndex={-1}
         onMouseDown={(event) => event.preventDefault()} onClick={() => {
           input.current?.focus({ preventScroll: true });
           if (open) close();
           else setOpen(true);
         }}><ChevronDown /></Button>
       {expanded && <div className="font-suggestions" style={position}>
-        <div role="listbox" id={id} aria-label={`${label} font suggestions`}>
+        <div role="listbox" id={id} aria-label={t("{0} font suggestions", t(label))}>
           {matches.map((family, indexOfFamily) => <div key={family} id={optionId(indexOfFamily)} role="option"
             aria-selected={indexOfFamily === index} title={family} onMouseDown={(event) => event.preventDefault()}
             onClick={() => choose(family)}>{family}</div>)}
         </div>
         {matches.length === 0 && <div role={installed?.error ? "alert" : "status"} className="font-suggestion-status">
-          {installed?.error ?? (installed === null ? "Loading system fonts…" :
-            installed.families.length === 0 ? "No system fonts available." : "No matching fonts.")}
+          {installed?.error ? errorText(installed.error) : (installed === null ? t("Loading system fonts…") :
+            installed.families.length === 0 ? t("No system fonts available.") : t("No matching fonts."))}
         </div>}
       </div>}
     </div>

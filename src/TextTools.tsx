@@ -1,3 +1,5 @@
+import { errorText, t } from "./i18n";
+import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
@@ -150,16 +152,16 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
     }}>
       <header className="document-heading">
         <h2>{file.name}</h2>
-        <Button className="icon-button" type="button" aria-label="Close document" onClick={close} disabled={saving}><X /></Button>
+        <Button className="icon-button" type="button" aria-label={t("Close document")} onClick={close} disabled={saving}><X /></Button>
       </header>
       <div className="text-toolbar">
         <span title={path}>{path}</span>
-        {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? "Source" : "Preview"}</Button>}
-        {!editing && <Button shortcut={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>Hex</Button>}
+        {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? t("Source") : t("Preview")}</Button>}
+        {!editing && <Button shortcut={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
       </div>
-      {error && <p className="dialog-error" role="alert">{error}</p>}
-      {hex ? <HexViewer file={file} /> : readError ? <p className="dialog-error" role="alert">{readError}</p> :
-        !document && <div className="dialog-body">Loading…</div>}
+      {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+      {hex ? <HexViewer file={file} /> : readError ? <p className="dialog-error" role="alert">{errorText(readError)}</p> :
+        !document && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
         {preview && !hex && (
           <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light}
@@ -167,24 +169,24 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
             onOpenDocument={onOpenDocument} onError={setError} />
         )}
         <div className="source-surface" hidden={preview || hex}>
-          <Suspense fallback={<p className="text-view" role="status">Loading text tools…</p>}>
+          <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
               fontSize={fontSize} value={text} onChange={setText} />
           </Suspense>
         </div>
       </>}
       <footer className="dialog-footer">
-        {document && <span className="footer-message">{document.encoding.replaceAll("_", " ").toUpperCase()}{dirty ? " · Modified" : ""}</span>}
+        {document && <span className="footer-message">{document.encoding.replaceAll("_", " ").toUpperCase()}{dirty ? ` · ${t("Modified")}` : ""}</span>}
         {editing && <Button className="primary" disabled={!dirty || saving} shortcut={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
-          <Save /> {saving ? "Saving…" : "Save"}
+          <Save /> {saving ? t("Saving…") : t("Save")}
         </Button>}
-        <Button onClick={close} disabled={saving}>Close</Button>
+        <Button onClick={close} disabled={saving}>{t("Close")}</Button>
       </footer>
-      {confirm && <Dialog title="Unsaved changes" onClose={() => setConfirm(false)}>
-        <div className="dialog-body"><p>Discard the unsaved changes to <strong>{file.name}</strong>?</p></div>
+      {confirm && <Dialog title={t("Unsaved changes")} onClose={() => setConfirm(false)}>
+        <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>
         <footer className="dialog-footer">
-          <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>Keep editing</Button>
-          <Button type="button" className="negative" onClick={onClose}>Discard changes</Button>
+          <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
+          <Button type="button" className="negative" onClick={onClose}>{t("Discard changes")}</Button>
         </footer>
       </Dialog>}
     </section>
@@ -275,7 +277,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
 
   const failure = error || (result && "error" in result ? result.error : "");
   return (
-    <Dialog title="Compare files" wide onClose={onClose} onKeyDown={(event) => {
+    <Dialog title={t("Compare files")} wide onClose={onClose} onKeyDown={(event) => {
       const shortcut = eventShortcut(event);
       if (shortcut && (shortcut === previousShortcut || shortcut === nextShortcut)) {
         event.preventDefault();
@@ -283,18 +285,18 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       }
     }}>
       <div className="comparison-toolbar">
-        <Button disabled={!groups} shortcut={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> Previous</Button>
-        <Button disabled={!groups} shortcut={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> Next</Button>
+        <Button disabled={!groups} shortcut={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
+        <Button disabled={!groups} shortcut={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
         <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
         <label><input type="checkbox" checked={whitespace} onChange={(event) => {
           setWhitespace(event.target.checked); setCurrent(0);
-        }} /> Show whitespace changes</label>
+        }} /> {t("Show whitespace changes")}</label>
       </div>
       <div className="comparison-head"><span title={left.name}>{left.name}</span><span title={right.name}>{right.name}</span></div>
-      {failure && <p className="dialog-error" role="alert">{failure}</p>}
-      {!documents && !failure && <div className="dialog-body">Loading…</div>}
+      {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}
+      {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
       {computed && (
-        <div className="comparison" ref={output} tabIndex={0} aria-label="File differences">
+        <div className="comparison" ref={output} tabIndex={0} aria-label={t("File differences")}>
           {computed.rows.map((row, index) => (
             <div key={index} className={`diff-row ${row.kind}${row.group !== null && row.group === current ? " current" : ""}`}
               data-change={row.group ?? undefined}>

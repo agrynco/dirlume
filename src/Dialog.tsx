@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
@@ -86,13 +87,13 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>
-        <Button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>
       </header>
       {children}
       {resizeKey && resizeEdges.map((edge) =>
         <div key={edge} className="dialog-resize-edge" data-resize-edge={edge} aria-hidden="true" />)}
-      {resizeKey && <Button type="button" className="dialog-resize-grip" aria-label={"Resize " + title}
-        title={"Resize " + title + " (drag or use arrow keys)"}
+      {resizeKey && <Button type="button" className="dialog-resize-grip" aria-label={t("Resize {0}", title)}
+        title={t("Resize {0} (drag or use arrow keys)", title)}
         data-resize-edge="se"
         onKeyDown={(event) => {
           const bounds = ref.current?.getBoundingClientRect();

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
@@ -20,12 +21,12 @@ export function ViewFontSettings({ preferences, onChange }: {
   onChange: (value: Preferences) => void;
 }) {
   return <div className="dialog-body appearance-settings">
-    <p className="appearance-hint">Font sizes are in pixels. Clear a size to use the scheme default.</p>
+    <p className="appearance-hint">{t("Font sizes are in pixels. Clear a size to use the scheme default.")}</p>
     <div className="font-settings">
       {viewFontKeys.map((view) => (
         <label className="view-font-setting" key={view}>
-          <span>{viewFonts[view].label}</span>
-          <FontSizeInput label={viewFonts[view].label} size={preferences.viewFontSizes[view]}
+          <span>{t(viewFonts[view].label)}</span>
+          <FontSizeInput label={t(viewFonts[view].label)} size={preferences.viewFontSizes[view]}
             min={minViewFontSize} max={maxViewFontSize}
             onChange={(size) => onChange({ ...preferences, viewFontSizes: { ...preferences.viewFontSizes, [view]: size } })} />
         </label>
@@ -77,7 +78,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
     let number = 1;
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
     const scheme: Scheme = {
-      id: `scheme-${number}`, name: number === 1 ? "Custom scheme" : `Custom scheme ${number}`,
+      id: `scheme-${number}`, name: number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number),
       base, colors, fonts,
     };
     setDeleting(false);
@@ -119,38 +120,38 @@ export function AppearanceSettings({ section, preferences, onChange }: {
   return (
     <div className="dialog-body appearance-settings">
       <div className="appearance-header">
-        <label className="field">Color scheme
+        <label className="field">{t("Color scheme")}
           <select value={active ? `custom:${active.id}` : preferences.theme} onChange={(event) => select(event.target.value)}>
-            <optgroup label="Built in">
-              {Object.entries(builtInThemes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            <optgroup label={t("Built in")}>
+              {Object.entries(builtInThemes).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </optgroup>
-            {preferences.schemes.length > 0 && <optgroup label="Custom">
-              {preferences.schemes.map(({ id, name }) => <option key={id} value={`custom:${id}`}>{name.trim() || "Custom scheme"}</option>)}
+            {preferences.schemes.length > 0 && <optgroup label={t("Custom")}>
+              {preferences.schemes.map(({ id, name }) => <option key={id} value={`custom:${id}`}>{name.trim() || t("Custom scheme")}</option>)}
             </optgroup>}
           </select>
         </label>
-        <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> New scheme</Button>
+        <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> {t("New scheme")}</Button>
       </div>
       {active ? (
         <div className="appearance-header scheme-identity">
-          <label className="field">Scheme name
+          <label className="field">{t("Scheme name")}
             <input type="text" value={active.name} maxLength={maxSchemeNameLength}
               onChange={(event) => update({ ...active, name: event.target.value })} />
           </label>
-          <label className="field">Base theme
+          <label className="field">{t("Base theme")}
             <select value={active.base} onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
-              {baseThemes.map((item) => <option key={item} value={item}>{builtInThemes[item]}</option>)}
+              {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
             </select>
           </label>
-          <Button type="button" className="icon-button appearance-button" aria-label="Delete scheme"
-            title="Delete scheme" onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
+          <Button type="button" className="icon-button appearance-button" aria-label={t("Delete scheme")}
+            title={t("Delete scheme")} onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
         </div>
-      ) : <p className="appearance-hint">{section === "fonts" ? "Changing a font family creates a custom scheme." :
-        "Editing a color creates a custom scheme."}</p>}
+      ) : <p className="appearance-hint">{section === "fonts" ? t("Changing a font family creates a custom scheme.") :
+        t("Editing a color creates a custom scheme.")}</p>}
       {active && deleting && <div className="scheme-confirm">
-        <span>Delete this color scheme?</span>
-        <Button type="button" onClick={() => setDeleting(false)}>Keep scheme</Button>
-        <Button type="button" className="negative" onClick={() => remove(active)}>Delete scheme</Button>
+        <span>{t("Delete this color scheme?")}</span>
+        <Button type="button" onClick={() => setDeleting(false)}>{t("Keep scheme")}</Button>
+        <Button type="button" className="negative" onClick={() => remove(active)}>{t("Delete scheme")}</Button>
       </div>}
       {section === "fonts" ? (
         <div className="font-settings">
@@ -187,17 +188,17 @@ function ColorField({ label, value, custom, onChange, onOpen }: {
 
   return (
     <div className="color-setting">
-      <span>{label}</span>
-      <Button type="button" className="color-swatch" aria-label={label + " color"} aria-haspopup="dialog"
+      <span>{t(label)}</span>
+      <Button type="button" className="color-swatch" aria-label={t("{0} color", t(label))} aria-haspopup="dialog"
         style={{ "--swatch": value } as CSSProperties} onClick={onOpen} />
-      <input type="text" aria-label={`${label} hex`} value={hex} maxLength={7} spellCheck={false}
+      <input type="text" aria-label={t("{0} hex", t(label))} value={hex} maxLength={7} spellCheck={false}
         onBlur={() => setHex(value)} onChange={(event) => {
           const change = event.target.value;
           setHex(change);
           if (isHexColor(change)) onChange(change.toLowerCase());
         }} />
-      <Button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()}`}
-        title="Reset color" disabled={!custom} onClick={() => onChange()}><RotateCcw /></Button>
+      <Button type="button" className="icon-button" aria-label={t("Reset {0}", t(label).toLocaleLowerCase())}
+        title={t("Reset color")} disabled={!custom} onClick={() => onChange()}><RotateCcw /></Button>
     </div>
   );
 }
@@ -213,15 +214,15 @@ function FontFields({ group, font, installed, disabled, onChange }: {
 
   return (
     <fieldset className="font-setting">
-      <legend>{label}</legend>
+      <legend>{t(label)}</legend>
       <FontFamilyField label={label} value={font?.family ?? ""} installed={installed} builtIn={disabled}
         onChange={(family) => onChange({ ...font, family: family || undefined })} />
-      <label className="field">Size (px)
+      <label className="field">{t("Size (px)")}
         <FontSizeInput label={label} size={font?.size} min={minFontSize} max={maxFontSize} disabled={disabled}
           onChange={(size) => onChange({ ...font, size })} />
       </label>
-      <Button type="button" className="icon-button" aria-label={`Reset ${label.toLowerCase()} font`}
-        title="Reset font" disabled={disabled || (!font?.family && !font?.size)}
+      <Button type="button" className="icon-button" aria-label={t("Reset {0} font", t(label).toLocaleLowerCase())}
+        title={t("Reset font")} disabled={disabled || (!font?.family && !font?.size)}
         onClick={() => onChange()}><RotateCcw /></Button>
     </fieldset>
   );
@@ -238,8 +239,8 @@ function FontSizeInput({ label, size, min, max, disabled, onChange }: {
   const [text, setText] = useState(String(size ?? ""));
   useEffect(() => setText(String(size ?? "")), [size]);
 
-  return <input aria-label={`${label} font size`} type="number" min={min} max={max}
-    value={text} placeholder="Default" disabled={disabled} onBlur={() => setText(String(size ?? ""))}
+  return <input aria-label={t("{0} font size", t(label))} type="number" min={min} max={max}
+    value={text} placeholder={t("Default")} disabled={disabled} onBlur={() => setText(String(size ?? ""))}
     onChange={(event) => {
       const { value, valueAsNumber, validity } = event.target;
       setText(value);

@@ -1,5 +1,6 @@
 import { readSchemes, type Scheme, type Theme } from "./appearance";
 import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
+import { readLanguage, type Language } from "./i18n";
 
 export const commands = {
   switchPane: { label: "Switch pane", key: "Tab" },
@@ -78,6 +79,7 @@ export function commandScope(command: Command) {
 }
 
 export interface Preferences {
+  language: Language;
   theme: Theme;
   activeScheme: string | null;
   schemes: Scheme[];
@@ -100,7 +102,7 @@ export const defaultBindings = Object.fromEntries(
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
     theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, kswitcher: "", shortcuts: defaultBindings,
-    viewFontSizes: {},
+    viewFontSizes: {}, language: "en",
   };
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as (Partial<Preferences> & { bindingDefaults?: number }) | null;
@@ -134,6 +136,7 @@ export function readPreferences(): Preferences {
       if (validViewFontSize(size)) viewFontSizes[view] = size;
     }
     return {
+      language: readLanguage(saved.language),
       theme: saved.theme === "dark" || saved.theme === "light" || saved.theme === "slate" ? saved.theme : "system",
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,

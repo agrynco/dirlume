@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useRef, type CSSProperties, type Ref } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "./Button";
@@ -68,13 +69,13 @@ export function FileColumns({ container, widths, sort, onSort, onResize }: {
     <div className="file-column-grid">
       {columns.map(({ key, label, min }) => (
         <div key={key} ref={key === "name" ? nameColumn : undefined} className={`file-column col-${key}`}>
-          <Button type="button" onClick={() => onSort(key)} title={`Sort by ${label.toLowerCase()}`}>
-            <span>{label}</span>{sort.column === key && (sort.asc ? <ArrowUp /> : <ArrowDown />)}
+          <Button type="button" onClick={() => onSort(key)} title={t("Sort by {0}", t(label).toLocaleLowerCase())}>
+            <span>{t(label)}</span>{sort.column === key && (sort.asc ? <ArrowUp /> : <ArrowDown />)}
           </Button>
           <div className="file-column-resize" role="separator" aria-orientation="vertical" tabIndex={0}
-            aria-label={`Resize ${label} column`} aria-valuemin={min} aria-valuemax={maxWidth} aria-valuenow={widths[key]}
-            aria-valuetext={widths[key] === undefined ? "Automatic width" : `${widths[key]} pixels`}
-            title={`Resize ${label} column (drag or use the arrow keys, double-click to reset)`}
+            aria-label={t("Resize {0} column", t(label))} aria-valuemin={min} aria-valuemax={maxWidth} aria-valuenow={widths[key]}
+            aria-valuetext={widths[key] === undefined ? t("Automatic width") : t("{0} pixels", widths[key])}
+            title={t("Resize {0} column (drag or use the arrow keys, double-click to reset)", t(label))}
             onPointerDown={(event) => {
               if (event.button !== 0 || drag.current || !event.currentTarget.parentElement) return;
               event.preventDefault();

@@ -1,3 +1,4 @@
+import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { describeError, readPlaceBytes, type BytePage, type NamedFile } from "./api";
@@ -47,18 +48,18 @@ export function HexViewer({ file }: { file: NamedFile }) {
   return (
     <>
       <div ref={controls} tabIndex={-1} className="text-toolbar hex-toolbar">
-        <Button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>Previous page</Button>
-        <Button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>Next page</Button>
+        <Button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>{t("Previous page")}</Button>
+        <Button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>{t("Next page")}</Button>
         <form onSubmit={goTo}>
-          <input aria-label="Byte offset" placeholder="0x0000" value={address} onChange={(event) => setAddress(event.target.value)} />
-          <Button type="submit" disabled={!Number.isSafeInteger(addressValue) || !page || addressValue >= page.length}>Go to offset</Button>
+          <input aria-label={t("Byte offset")} placeholder="0x0000" value={address} onChange={(event) => setAddress(event.target.value)} />
+          <Button type="submit" disabled={!Number.isSafeInteger(addressValue) || !page || addressValue >= page.length}>{t("Go to offset")}</Button>
         </form>
-        {page && <span>{page.length.toLocaleString()} bytes</span>}
+        {page && <span>{t("{0} bytes", page.length.toLocaleString(locale()))}</span>}
       </div>
-      {error ? <p role="alert" className="dialog-error">{error}</p> :
-        !page ? <p role="status" className="text-view">Reading bytes…</p> :
-        !page.data.length ? <p role="status" className="text-view">{page.length ? "End of file." : "This file is empty."}</p> :
-          <pre className="text-view hex-view" tabIndex={0} aria-label="Hexadecimal contents">{`${"Offset".padEnd(12)}  ${columns}  ASCII\n${rows.join("\n")}`}</pre>}
+      {error ? <p role="alert" className="dialog-error">{errorText(error)}</p> :
+        !page ? <p role="status" className="text-view">{t("Reading bytes…")}</p> :
+        !page.data.length ? <p role="status" className="text-view">{page.length ? t("End of file.") : t("This file is empty.")}</p> :
+          <pre className="text-view hex-view" tabIndex={0} aria-label={t("Hexadecimal contents")}>{`${t("Offset").padEnd(12)}  ${columns}  ASCII\n${rows.join("\n")}`}</pre>}
     </>
   );
 }

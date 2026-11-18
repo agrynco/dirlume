@@ -11,16 +11,17 @@ import {
   type Command, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
+import { languages, readLanguage, t } from "./i18n";
 
 type Page = AppearanceSection | "viewFonts" | "general" | "shortcuts";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
 const optionsLocationKey = "dirlume.options-location";
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
-    id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors).join(" "),
+    id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors),
   })),
-  { id: "fonts" as const, label: "Fonts", terms: Object.values(fontGroups).map(({ label }) => label).join(" ") + " family size installed" },
-  { id: "viewFonts" as const, label: "View font sizes", terms: Object.values(viewFonts).map(({ label }) => label).join(" ") + " zoom wheel" },
+  { id: "fonts" as const, label: "Fonts", terms: [...Object.values(fontGroups).map(({ label }) => label), "family size installed"] },
+  { id: "viewFonts" as const, label: "View font sizes", terms: [...Object.values(viewFonts).map(({ label }) => label), "zoom wheel"] },
 ];
 
 function readOptionsLocation(): OptionsLocation {
@@ -54,13 +55,16 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [conflict, setConflict] = useState("");
   const hasChanges = JSON.stringify(preferences) !== JSON.stringify(saved);
   const searching = Boolean(query.trim());
-  const terms = query.trim().toLowerCase().split(/\s+/);
-  const matches = (text: string) => terms.every((term) => text.toLowerCase().includes(term));
-  const showGeneral = matches("General Show hidden files Remote connection Dirlume server KSwitcher installation folder");
-  const appearanceMatches = appearancePages.filter(({ label, terms }) => matches(`Appearance Color scheme ${label} ${terms}`));
-  const allShortcuts = matches("Keyboard shortcuts keymap bindings");
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/);
+  const matches = (...labels: string[]) => {
+    const text = [...labels, ...labels.map((label) => t(label))].join(" ").toLocaleLowerCase();
+    return terms.every((term) => text.includes(term));
+  };
+  const showGeneral = matches("General", "Language", ...Object.values(languages), "Show hidden files", "Remote connection", "Dirlume server", "KSwitcher installation folder");
+  const appearanceMatches = appearancePages.filter(({ label, terms }) => matches("Appearance", "Color scheme", label, ...terms));
+  const allShortcuts = matches("Keyboard shortcuts", "keymap bindings");
   const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
-    matches(`${commands[command].label} ${preferences.shortcuts[command]} ${showShortcut(preferences.shortcuts[command])}`));
+    matches(commands[command].label, preferences.shortcuts[command], showShortcut(preferences.shortcuts[command])));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const isAppearance = page !== "general" && page !== "shortcuts";
   const title = isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : "Keyboard shortcuts";
@@ -94,7 +98,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     const existing = commandNames.find((item) => item !== command && commandScope(item) === commandScope(command) &&
       preferences.shortcuts[item] === shortcut);
     if (existing) {
-      setConflict(`${showShortcut(shortcut)} is assigned to ${commands[existing].label}.`);
+      setConflict(t("{0} is assigned to {1}.", showShortcut(shortcut), t(commands[existing].label)));
       return;
     }
     onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: shortcut } });
@@ -103,11 +107,11 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   return (
-    <Dialog title="Options" onClose={close} wide resizeKey="options">
+    <Dialog title={t("Options")} onClose={close} wide resizeKey="options">
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <label className="settings-search"><Search aria-hidden="true" />
-            <input type="search" aria-label="Search settings" placeholder="Search settings" value={query}
+            <input type="search" aria-label={t("Search settings")} placeholder={t("Search settings")} value={query}
               data-initial-focus onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || !searching) return;
@@ -117,8 +121,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 else if (showShortcuts) select("shortcuts");
               }} />
           </label>
-          <nav className="settings-tree" aria-label="Options sections">
-            {showGeneral && <Button type="button" aria-pressed={page === "general"} onClick={() => select("general")}>General</Button>}
+          <nav className="settings-tree" aria-label={t("Options sections")}>
+            {showGeneral && <Button type="button" aria-pressed={page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
             {appearanceMatches.length > 0 && (
               <>
                 <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
@@ -126,38 +130,44 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                     if (!isAppearance) { select("panels"); setExpanded(true); }
                     else setExpanded(!expanded);
                   }}>
-                  {expanded || searching ? <ChevronDown /> : <ChevronRight />} Appearance
+                  {expanded || searching ? <ChevronDown /> : <ChevronRight />} {t("Appearance")}
                 </Button>
                 <div id="options-appearance-pages" className="settings-tree-branch" hidden={!expanded && !searching}>
                   {appearanceMatches.map(({ id, label }) => (
-                    <Button key={id} type="button" aria-pressed={page === id} onClick={() => select(id)}>{label}</Button>
+                    <Button key={id} type="button" aria-pressed={page === id} onClick={() => select(id)}>{t(label)}</Button>
                   ))}
                 </div>
               </>
             )}
-            {showShortcuts && <Button type="button" aria-pressed={page === "shortcuts"} onClick={() => select("shortcuts")}>Keyboard shortcuts</Button>}
-            {!showGeneral && !appearanceMatches.length && !showShortcuts && <p role="status">No settings match.</p>}
+            {showShortcuts && <Button type="button" aria-pressed={page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
+            {!showGeneral && !appearanceMatches.length && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
           <header className="settings-page-heading">
-            {isAppearance && <><span>Appearance</span><ChevronRight aria-hidden="true" /></>}
-            <h3>{title}</h3>
+            {isAppearance && <><span>{t("Appearance")}</span><ChevronRight aria-hidden="true" /></>}
+            <h3>{t(title ?? "General")}</h3>
           </header>
           <div className="settings-page-body" ref={pageBody}>
       {page === "general" ? (
         <div className="dialog-body settings-general">
-          <label className="setting"><span>Show hidden files</span>
+          <label className="setting"><span>{t("Language")}</span>
+            <select aria-label={t("Language")} value={preferences.language}
+              onChange={(event) => onChange({ ...preferences, language: readLanguage(event.target.value) })}>
+              {Object.entries(languages).map(([code, label]) => <option key={code} value={code} lang={code}>{label}</option>)}
+            </select>
+          </label>
+          <label className="setting"><span>{t("Show hidden files")}</span>
             <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
           </label>
-          <label className="setting"><span>Remote connection</span>
+          <label className="setting"><span>{t("Remote connection")}</span>
             <select value={preferences.provider} onChange={(event) => onChange({ ...preferences, provider: event.target.value as Provider })}>
-              <option value="server">Dirlume server</option>
+              <option value="server">{t("Dirlume server")}</option>
               <option value="kswitcher" disabled={!windowsClient}>KSwitcher (Windows)</option>
             </select>
           </label>
           {preferences.provider === "kswitcher" && (
-            <label className="field">KSwitcher installation folder
+            <label className="field">{t("KSwitcher installation folder")}
               <input type="text" spellCheck={false} autoComplete="off" value={preferences.kswitcher}
                 onChange={(event) => onChange({ ...preferences, kswitcher: event.target.value })} />
             </label>
@@ -172,25 +182,25 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <div className="shortcut-list">
             {visibleCommands.map((command) => (
               <div key={command} className="shortcut-setting">
-                <span>{commands[command].label}</span>
+                <span>{t(commands[command].label)}</span>
                 {command === "zoomFont" ? (
-                  <select className="shortcut-key" aria-label={`Change shortcut for ${commands[command].label}`}
+                  <select className="shortcut-key" aria-label={t("Change shortcut for {0}", t(commands[command].label))}
                     value={preferences.shortcuts[command]}
                     onChange={(event) => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: event.target.value } })}>
-                    <option value="">Unassigned</option>
+                    <option value="">{t("Unassigned")}</option>
                     {wheelBindings.map((binding) => <option key={binding} value={binding}>{showShortcut(binding)}</option>)}
                   </select>
                 ) : capture === command ? (
-                  <input aria-label={`New shortcut for ${commands[command].label}`} readOnly autoFocus
-                    placeholder="Press a shortcut" onKeyDown={(event) => assign(event, command)}
+                  <input aria-label={t("New shortcut for {0}", t(commands[command].label))} readOnly autoFocus
+                    placeholder={t("Press a shortcut")} onKeyDown={(event) => assign(event, command)}
                     onBlur={() => { setCapture(null); setConflict(""); }} />
                 ) : (
-                  <Button type="button" className="shortcut-key" aria-label={`Change shortcut for ${commands[command].label}`}
+                  <Button type="button" className="shortcut-key" aria-label={t("Change shortcut for {0}", t(commands[command].label))}
                     onClick={() => { setCapture(command); setConflict(""); }}>
-                    {showShortcut(preferences.shortcuts[command]) || "Unassigned"}
+                    {showShortcut(preferences.shortcuts[command]) || t("Unassigned")}
                   </Button>
                 )}
-                <Button type="button" className="icon-button" aria-label={`Clear shortcut for ${commands[command].label}`}
+                <Button type="button" className="icon-button" aria-label={t("Clear shortcut for {0}", t(commands[command].label))}
                   disabled={!preferences.shortcuts[command]}
                   onClick={() => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: "" } })}>
                   <Delete />
@@ -208,11 +218,11 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       <footer className="dialog-footer">
         {page === "shortcuts" && (
           <Button type="button" onClick={() => { onChange({ ...preferences, shortcuts: defaultBindings }); setCapture(null); setConflict(""); }}>
-            <RotateCcw /> Restore defaults
+            <RotateCcw /> {t("Restore defaults")}
           </Button>
         )}
-        <Button type="button" disabled={!hasChanges} onClick={apply}>Apply</Button>
-        <Button type="button" className="primary" onClick={() => { apply(); close(); }}>Done</Button>
+        <Button type="button" disabled={!hasChanges} onClick={apply}>{t("Apply")}</Button>
+        <Button type="button" className="primary" onClick={() => { apply(); close(); }}>{t("Done")}</Button>
       </footer>
     </Dialog>
   );

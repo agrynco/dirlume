@@ -1,3 +1,4 @@
+import { errorText, t } from "./i18n";
 import { useEffect, useState } from "react";
 
 let nextDiagram = 0;
@@ -25,7 +26,7 @@ export function MermaidDiagram({ source, light }: { source: string; light: boole
     return () => { canceled = true; };
   }, [source, light]);
 
-  if (!result) return <p role="status">Rendering diagram…</p>;
-  if ("error" in result) return <pre className="diagram-error" role="alert">{result.error}</pre>;
-  return <img className="mermaid-diagram" alt="Mermaid diagram" src={result.image} />;
+  if (!result) return <p role="status">{t("Rendering diagram…")}</p>;
+  if ("error" in result) return <pre className="diagram-error" role="alert">{errorText(result.error)}</pre>;
+  return <img className="mermaid-diagram" alt={t("Mermaid diagram")} src={result.image} />;
 }

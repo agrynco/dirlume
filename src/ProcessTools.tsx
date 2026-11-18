@@ -1,3 +1,4 @@
+import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Cpu, Search } from "lucide-react";
@@ -13,8 +14,8 @@ export function ElevationButton({ directory }: { directory: string }) {
       <Button type="button" onClick={() => {
         setError("");
         void api.openElevated(directory).catch((failure: unknown) => setError(describeError(failure)));
-      }}>Open as administrator</Button>
-      {error && <p role="alert">{error}</p>}
+      }}>{t("Open as administrator")}</Button>
+      {error && <p role="alert">{errorText(error)}</p>}
     </div>
   );
 }
@@ -28,11 +29,11 @@ function Processes({ items, selected, onChange }: {
   onChange: (selected: string[]) => void;
 }) {
   return (
-    <select aria-label="Locking processes" multiple size={8} value={selected}
+    <select aria-label={t("Locking processes")} multiple size={8} value={selected}
       onChange={(event) => onChange(Array.from(event.currentTarget.selectedOptions, ({ value }) => value))}>
       {items.map((process) => (
         <option value={processKey(process)} key={processKey(process)} disabled={!process.canTerminate}>
-          {process.name || "Process"} (PID {process.pid})
+          {process.name || t("Process")} (PID {process.pid})
         </option>
       ))}
     </select>
@@ -63,15 +64,17 @@ function EndProcesses({ items, onClose, onFinished }: {
   }
 
   return (
-    <Dialog title="End processes" onClose={() => { if (!working) onClose(); }}>
+    <Dialog title={t("End processes")} onClose={() => { if (!working) onClose(); }}>
       <div className="dialog-body end-processes">
-        <p className="delete-warning">Ending processes may cause unsaved work to be lost.</p>
-        <ul>{items.map(({ pid, name }) => <li key={pid}>{name || "Process"} (PID {pid})</li>)}</ul>
-        {error && <p className="dialog-error process-error" role="alert">{error}</p>}
+        <p className="delete-warning">{t("Ending processes may cause unsaved work to be lost.")}</p>
+        <ul>{items.map(({ pid, name }) => <li key={pid}>{name || t("Process")} (PID {pid})</li>)}</ul>
+        {error && <p className="dialog-error process-error" role="alert">{errorText(error)}</p>}
       </div>
       <footer className="dialog-footer">
-        <Button type="button" data-initial-focus disabled={working} onClick={onClose}>Cancel</Button>
-        <Button type="button" className="negative" disabled={working} onClick={() => { void end(); }}>End {items.length === 1 ? "process" : `${items.length} processes`}</Button>
+        <Button type="button" data-initial-focus disabled={working} onClick={onClose}>{t("Cancel")}</Button>
+        <Button type="button" className="negative" disabled={working} onClick={() => { void end(); }}>
+          {items.length === 1 ? t("End process") : t("End {0}", countText(items.length, "process"))}
+        </Button>
       </footer>
     </Dialog>
   );
@@ -161,7 +164,7 @@ export function ProcessBrowser({ side }: { side: Side }) {
     <div className="process-browser">
       <label className="process-search">
         <Search aria-hidden="true" />
-        <input type="search" aria-label="Find process" placeholder="Find by name or PID" value={filter} onChange={(event) => {
+        <input type="search" aria-label={t("Find process")} placeholder={t("Find by name or PID")} value={filter} onChange={(event) => {
           setFilter(event.target.value);
           setFocused("");
           setSelected([]);
@@ -170,7 +173,7 @@ export function ProcessBrowser({ side }: { side: Side }) {
       </label>
       <div className="process-scroll">
         <table ref={table} id={`${side}-files`} className="process-table file-list" tabIndex={0}
-          role="grid" aria-label="Running processes" aria-multiselectable="true"
+          role="grid" aria-label={t("Running processes")} aria-multiselectable="true"
           aria-activedescendant={focused && visible.some((item) => processKey(item) === focused) ? `${side}-process-${focused}` : undefined}
           onKeyDown={(event) => {
             if (event.target !== event.currentTarget || !visible.length) return;
@@ -188,7 +191,7 @@ export function ProcessBrowser({ side }: { side: Side }) {
             <th key={key} scope="col" className={`process-col-${key}`}
               aria-sort={sort.column === key ? sort.asc ? "ascending" : "descending" : undefined}>
               <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : key === "name" || key === "pid" })}>
-                {label}{sort.column === key && (sort.asc ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
+                {t(label)}{sort.column === key && (sort.asc ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
               </Button>
             </th>
           ))}</tr></thead>
@@ -202,17 +205,17 @@ export function ProcessBrowser({ side }: { side: Side }) {
               }}>
               <td className="process-cell-name" title={process.name}><span>
                 {icon ? <img className="process-icon" src={`data:image/png;base64,${icon}`} alt="" /> : <Cpu aria-hidden="true" />}
-                <span>{process.name || "Process"}</span>
+                <span>{process.name || t("Process")}</span>
               </span></td>
-              <td>{process.pid}</td><td>{process.cpu.toFixed(1)}%</td><td>{formatSize(process.memory)}</td>
+              <td>{process.pid}</td><td>{process.cpu.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td><td>{formatSize(process.memory)}</td>
             </tr>;
           })}</tbody>
         </table>
-        {!visible.length && <p className="pane-empty">{filter ? "No processes match the search." : "Loading processes…"}</p>}
+        {!visible.length && <p className="pane-empty">{filter ? t("No processes match the search.") : t("Loading processes…")}</p>}
       </div>
-      {error && <p role="alert" className="pane-error">{error}</p>}
-      <div className="pane-footer"><span>{filter ? `${visible.length} of ${items.length}` : items.length} processes</span>
-        <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>End selected</Button></div>
+      {error && <p role="alert" className="pane-error">{errorText(error)}</p>}
+      <div className="pane-footer"><span>{filter ? t("{0} of {1}", visible.length, countText(items.length, "process")) : countText(items.length, "process")}</span>
+        <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>{t("End selected")}</Button></div>
       {ending.length > 0 && (
         <EndProcesses items={ending} onClose={() => setEnding([])} onFinished={() => {
           setEnding([]);
@@ -246,19 +249,19 @@ export function LockDialog({ paths, onClose }: { paths: string[]; onClose: () =>
 
   return (
     <>
-      <Dialog title="Processes using these files" onClose={onClose}>
+      <Dialog title={t("Processes using these files")} onClose={onClose}>
         <div className="dialog-body end-processes">
-          {error ? <p role="alert" className="dialog-error">{error}</p> :
-            items === null ? <p role="status">Checking files…</p> :
-            !items.length ? <p role="status">Windows found no processes using these files.</p> :
+          {error ? <p role="alert" className="dialog-error">{errorText(error)}</p> :
+            items === null ? <p role="status">{t("Checking files…")}</p> :
+            !items.length ? <p role="status">{t("Windows found no processes using these files.")}</p> :
             <Processes items={items} selected={selected} onChange={setSelected} />}
-          {partial && <p>Only some files could be checked.</p>}
+          {partial && <p>{t("Only some files could be checked.")}</p>}
         </div>
         <footer className="dialog-footer">
-          <Button type="button" onClick={onClose}>Close</Button>
+          <Button type="button" onClick={onClose}>{t("Close")}</Button>
           <Button type="button" disabled={!items?.some((process) => process.canTerminate)}
-            onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>Select all</Button>
-          <Button type="button" className="negative" disabled={!marked.length} onClick={() => setEnding(true)}>End selected</Button>
+            onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>{t("Select all")}</Button>
+          <Button type="button" className="negative" disabled={!marked.length} onClick={() => setEnding(true)}>{t("End selected")}</Button>
         </footer>
       </Dialog>
       {ending && <EndProcesses items={marked} onClose={() => setEnding(false)} onFinished={() => {

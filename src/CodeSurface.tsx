@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
@@ -32,6 +33,8 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   latest.current = { value, onChange };
   const languageSlot = useMemo(() => new Compartment(), []);
   const editSlot = useMemo(() => new Compartment(), []);
+  const labelSlot = useMemo(() => new Compartment(), []);
+  const label = t(editing ? "Edit {0}" : "View {0}", fileName);
   const [syntax, setSyntax] = useState("auto");
   const [unavailable, setUnavailable] = useState(false);
   const language = syntax === "auto" ? LanguageDescription.matchFilename(languages, fileName) :
@@ -45,11 +48,8 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
       state: EditorState.create({
         doc: latest.current.value,
         extensions: [
-          palette, languageSlot.of([]), editSlot.of([]), lineNumbers(),
+          palette, languageSlot.of([]), editSlot.of([]), labelSlot.of([]), lineNumbers(),
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of({
-            "aria-label": `${editing ? "Edit" : "View"} ${fileName}`, spellcheck: "false",
-          }),
           ...(editing ? [history(), keymap.of([...defaultKeymap, ...historyKeymap]),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) latest.current.onChange(update.state.doc.toString());
@@ -59,7 +59,11 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
     });
     editor.current = view;
     return () => { editor.current = null; view.destroy(); };
-  }, [editing, fileName, languageSlot, editSlot]);
+  }, [editing, fileName, languageSlot, editSlot, labelSlot]);
+
+  useEffect(() => {
+    editor.current?.dispatch({ effects: labelSlot.reconfigure(EditorView.contentAttributes.of({ "aria-label": label, spellcheck: "false" })) });
+  }, [label, labelSlot]);
 
   useEffect(() => {
     const readOnly = !editing || locked;
@@ -92,12 +96,12 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   return (
     <>
       <div className="text-toolbar syntax-toolbar">
-        <label>Syntax <select value={syntax} onChange={(event) => setSyntax(event.target.value)}>
-          <option value="auto">{`Automatic (${language?.name ?? "Plain text"})`}</option>
-          <option value="plain">Plain text</option>
+        <label>{t("Syntax")} <select value={syntax} onChange={(event) => setSyntax(event.target.value)}>
+          <option value="auto">{t("Automatic ({0})", language?.name ?? t("Plain text"))}</option>
+          <option value="plain">{t("Plain text")}</option>
           {languageChoices.map(({ name }) => <option key={name} value={name}>{name}</option>)}
         </select></label>
-        {unavailable && <span role="status">Syntax unavailable.</span>}
+        {unavailable && <span role="status">{t("Syntax unavailable.")}</span>}
       </div>
       <div className="code-surface" ref={container} />
     </>

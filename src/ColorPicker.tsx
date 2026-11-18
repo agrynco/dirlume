@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useState, type CSSProperties, type PointerEvent } from "react";
 import { isHexColor } from "./appearance";
 import { Button } from "./Button";
@@ -60,10 +61,10 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
   }
 
   return (
-    <Dialog title={label + " color"} onClose={onCancel}>
+    <Dialog title={t("{0} color", t(label))} onClose={onCancel}>
       <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); if (valid) onCommit(); }}>
         <div className="dialog-body color-picker">
-          <div className="color-plane" role="group" aria-label="Saturation and brightness. Use arrow keys to adjust."
+          <div className="color-plane" role="group" aria-label={t("Saturation and brightness. Use arrow keys to adjust.")}
             tabIndex={0} style={{ backgroundColor: "hsl(" + color.hue + " 100% 50%)" }}
             onPointerDown={(event) => {
               if (event.button !== 0) return;
@@ -85,7 +86,7 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
               style={{ left: color.saturation * 100 + "%", top: (1 - color.brightness) * 100 + "%" }} />
           </div>
           <label className="color-hue">
-            <span>Hue</span>
+            <span>{t("Hue")}</span>
             <input type="range" min={0} max={359} value={Math.floor(color.hue)}
               onChange={(event) => change({ ...color, hue: event.target.valueAsNumber })} />
           </label>
@@ -102,14 +103,14 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
                 }} />
             </label>
             <div className="color-picker-swatches">
-              <span title={"Original color " + initial} style={{ "--swatch": initial } as CSSProperties} />
-              <span title={"Selected color " + current} style={{ "--swatch": current } as CSSProperties} />
+              <span title={t("Original color {0}", initial)} style={{ "--swatch": initial } as CSSProperties} />
+              <span title={t("Selected color {0}", current)} style={{ "--swatch": current } as CSSProperties} />
             </div>
           </div>
         </div>
         <footer className="dialog-footer">
-          <Button type="button" onClick={onCancel}>Cancel</Button>
-          <Button type="submit" className="primary" disabled={!valid}>Use color</Button>
+          <Button type="button" onClick={onCancel}>{t("Cancel")}</Button>
+          <Button type="submit" className="primary" disabled={!valid}>{t("Use color")}</Button>
         </footer>
       </form>
     </Dialog>
