@@ -13,6 +13,7 @@ Use **Options → Appearance → New scheme** to save your own colors for the wi
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
 | F5 / F6 | Open the Copy or Rename or move dialog. |
+| Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
 | F7 / F8 / Shift+Delete | Create a folder, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
@@ -20,6 +21,8 @@ Use **Options → Appearance → New scheme** to save your own colors for the wi
 | Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
 
 Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The command line also sends commands to the shell from the active local folder. Terminal colors adapt to the background of the active color scheme.
+
+**Find files** searches local folders and connected sources. Masks are case-insensitive. For example, `*.pdf` finds PDF files, and `report-?.txt` matches a single character after the hyphen. Select a result and choose **Go to file** to show it in the active pane.
 
 ## Build
 

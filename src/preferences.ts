@@ -27,6 +27,7 @@ export const commands = {
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
   mkdir: { label: "New folder", key: "F7" },
+  search: { label: "Find files", key: "Alt+F7" },
   recycle: { label: "Move to Trash", key: "F8" },
   delete: { label: "Delete permanently", key: "Shift+Delete" },
   menu: { label: "Open commands menu", key: "F9" },

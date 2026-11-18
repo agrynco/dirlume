@@ -94,6 +94,24 @@ try {
   }
   await navigate("left", src);
   await navigate("right", dst);
+  await page.getByRole("listbox", { name: "left files", exact: true }).focus();
+  await page.keyboard.press("Alt+F7");
+  const search = page.getByRole("dialog", { name: "Find files", exact: true });
+  const mask = search.getByRole("textbox", { name: "File mask", exact: true });
+  await mask.fill("*.missing");
+  await mask.press("Enter");
+  await search.getByText("No matching files.", { exact: true }).waitFor();
+  await mask.fill("DATA.B?N");
+  await search.getByRole("button", { name: "Search", exact: true }).click();
+  await search.getByText("2 matches.", { exact: true }).waitFor();
+  const matches = search.getByRole("listbox", { name: "Search results", exact: true });
+  await matches.getByRole("option", { name: "overlap/data.bin", exact: true }).waitFor();
+  await matches.selectOption("measured/data.bin");
+  if (process.env.DIRLUME_SEARCH_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SEARCH_SCREENSHOT, scale: "css" });
+  await search.getByRole("button", { name: "Go to file", exact: true }).click();
+  await page.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await page.getByRole("option", { name: /^data.bin/, selected: true }).waitFor();
+  await navigate("left", src);
   await page.getByRole("option", { name: /^measured/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("option", { name: /^measured/ }).getByText("12 B", { exact: true }).waitFor();
@@ -331,7 +349,12 @@ try {
     await finishTransfer("Download");
     await local.getByRole("option", { name: /^folder/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "folder", "файл.bin")), bytes);
-    await remote.getByRole("option", { name: /^folder/ }).dblclick();
+    await remote.focus();
+    await page.getByRole("button", { name: "Find files", exact: true }).click();
+    await mask.fill("*.md");
+    await search.getByRole("button", { name: "Search", exact: true }).click();
+    await matches.getByRole("option", { name: "folder/remote.md", exact: true }).waitFor();
+    await search.getByRole("button", { name: "Go to file", exact: true }).click();
     await remote.getByRole("option", { name: /^remote.md/ }).click();
     await page.keyboard.press("F3");
     await page.getByRole("heading", { name: "Remote Markdown" }).waitFor();

@@ -1,13 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
-  Calculator, Menu, Pencil, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
+  Calculator, Menu, Pencil, Search, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, describeError, placePath, windowsClient, type Entry, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { Pane } from "./Pane";
+import { SearchDialog } from "./SearchDialog";
 import { Settings } from "./Settings";
 import { applyAppearance } from "./appearance";
 import { TextDialog, CompareDialog } from "./TextTools";
@@ -30,6 +31,7 @@ type Modal =
   | ({ kind: "view" | "edit" } & NamedFile)
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
+  | { kind: "search"; side: Side; place: Place }
   | { kind: "menu" | "commandHistory" }
   | ActionModal;
 
@@ -95,13 +97,19 @@ export default function App() {
     updatePane(side, (pane) => ({ ...pane, measuring: [] }));
   }, [updatePane]);
 
-  const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | number = "push") => {
+  const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | number = "push", reveal?: string) => {
     if (action !== "refresh") cancelScan(side);
     const ticket = ++request.current[side];
     updatePane(side, (pane) => ({ ...pane, loading: true, error: "" }));
     try {
       const result = await readPlace(place);
-      if (ticket === request.current[side]) updatePane(side, (pane) => applyListing(pane, result.place, result.listing, action));
+      if (ticket !== request.current[side]) return;
+      const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
+      if (reveal !== undefined && !found) setStatus({ text: `File no longer found: ${reveal}`, error: true });
+      updatePane(side, (pane) => {
+        const listing = applyListing(pane, result.place, result.listing, action);
+        return found ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
+      });
     } catch (error) {
       if (ticket === request.current[side]) {
         updatePane(side, (pane) => ({ ...pane, loading: false, error: describeError(error) }));
@@ -452,6 +460,9 @@ export default function App() {
       }
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
+      case "search":
+        if (pane.place && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
+        break;
       case "rename":
       case "newFile":
       case "mkdir":
@@ -522,6 +533,8 @@ export default function App() {
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
           <button className="toolbar-button" title={keyLabel("connect")} onClick={() => perform("connect")}><Server /> Connect</button>
+          <button className="icon-button" aria-label="Find files" title={keyLabel("search")} disabled={!pane.place || pane.loading}
+            onClick={() => perform("search")}><Search /></button>
           <span className="separator" />
           <button className="icon-button" aria-label="Swap panes" title={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></button>
           <button className="icon-button" aria-label="Show hidden files" aria-pressed={preferences.hidden}
@@ -603,10 +616,21 @@ export default function App() {
         <TransferDialog transfer={modal.transfer} onClose={() => setModal(null)}
           onFinished={() => { refresh("left"); refresh("right"); }} />
       )}
+      {modal?.kind === "search" && (
+        <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
+          onReveal={(directory, name) => {
+            const { side } = modal;
+            setModal(null);
+            setPanelsHidden(false);
+            setActive(side);
+            void load(side, directory, "push", name);
+            requestAnimationFrame(() => document.getElementById(`${side}-files`)?.focus());
+          }} />
+      )}
       {modal?.kind === "menu" && (
         <Dialog title="Commands" onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
-            {(["view", "edit", "newFile", "copy", "move", "mkdir", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
+            {(["view", "edit", "newFile", "copy", "move", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
               .map((command) => <button key={command} type="button" onClick={() => { setModal(null); perform(command); }}>
                 {commands[command].label}<kbd>{keyLabel(command)}</kbd>
               </button>)}
