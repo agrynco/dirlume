@@ -15,6 +15,7 @@ import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
 import { applyAppearance } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
+import type { MarkdownAnchor } from "./MarkdownPreview";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
   applyListing, childPlace, closeSearchResults, localPath, opposite, paneItem, parentPlace, readPlace, showSearchResults, visibleEntries,
@@ -72,6 +73,7 @@ export default function App() {
   const [modal, setModal] = useState<Modal | null>(null);
   const [documents, setDocuments] = useState<DocumentWindow[]>(startup?.documents ?? []);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
+  const [linkedAnchor, setLinkedAnchor] = useState<{ id: number; anchor: MarkdownAnchor } | null>(null);
   const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
   const dirtyDocuments = useRef(new Set<number>());
   const exitConfirmed = useRef(false);
@@ -306,17 +308,16 @@ export default function App() {
     });
   }
 
-  function openDocument(file: NamedFile, editing: boolean) {
+  function openDocument(file: NamedFile, editing: boolean, anchor?: MarkdownAnchor) {
     const existing = documents.find((item) => item.editing === editing && item.file.name === file.name &&
       item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
       (file.place.kind === "local" || sameConnection(item.file.place, file.place)));
-    if (existing) {
-      selectDocument(existing.id);
-    } else {
-      const id = ++nextDocument.current;
+    const id = existing?.id ?? ++nextDocument.current;
+    if (!existing) {
       setDocuments((current) => [...current, { id, file, editing }]);
-      selectDocument(id);
     }
+    setLinkedAnchor(anchor ? { id, anchor } : null);
+    selectDocument(id);
   }
 
   function closeDocument(id: number) {
@@ -935,6 +936,8 @@ export default function App() {
             saveShortcut={preferences.shortcuts.saveText} alternateSaveShortcut={preferences.shortcuts.saveTextAlternate}
             closeShortcut={preferences.shortcuts.closeText} cancelShortcut={preferences.shortcuts.cancelText}
             hexShortcut={preferences.shortcuts.viewAsHex}
+            anchor={linkedAnchor?.id === id ? linkedAnchor.anchor : null}
+            onOpenDocument={(target, anchor) => openDocument(target, false, anchor)}
             onDirtyChange={(dirty) => {
               if (dirty) dirtyDocuments.current.add(id);
               else dirtyDocuments.current.delete(id);

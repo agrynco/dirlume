@@ -147,6 +147,9 @@ export const api = {
     invoke<Listing>("list_server", { id, segments }),
   readText: (directory: string, name: string) =>
     invoke<TextDocument>("read_text", { directory, name }),
+  resolveTextLink: (directory: string, destination: string) =>
+    invoke<{ directory: string; name: string }>("resolve_text_link", { directory, destination }),
+  openWebLink: (href: string) => invoke<void>("open_web_link", { href }),
   readServerText: (id: number, segments: string[]) =>
     invoke<TextDocument>("read_server_text", { id, segments }),
   readBytes: (directory: string, name: string, offset: number) =>
@@ -200,6 +203,16 @@ export function readPlaceText(file: NamedFile) {
   if (place.kind === "local") return api.readText(place.path, name);
   const segments = [...place.segments, name];
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
+}
+
+export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string): Promise<TextDocument> {
+  if (place.kind === "ftp") {
+    if (!document.revision) throw new Error("Reopen the FTP file before saving again.");
+    return api.saveFtpText(place.id, [...place.segments, name], document.revision, text);
+  }
+  if (place.kind === "server") throw new Error("This source is read-only.");
+  await api.saveText(place.path, name, document.text, text);
+  return { ...document, text };
 }
 
 export function readPlaceBytes({ place, name }: NamedFile, offset: number) {

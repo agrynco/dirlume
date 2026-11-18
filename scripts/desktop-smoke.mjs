@@ -6,6 +6,7 @@ import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
+import { testMarkdown } from "./markdown-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -532,6 +533,7 @@ try {
     console.log("Verified F6 between Windows volumes, including cancellation and a folder merge.");
   }
 
+  await testMarkdown(page, src);
   await page.getByRole("option", { name: /^guide.md/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("heading", { name: "Getting started" }).waitFor();

@@ -823,6 +823,43 @@ async fn read_text(directory: String, name: String) -> Result<TextDocument> {
     blocking(move || load_text(&selected(&directory, &name).map_err(message)?)).await
 }
 
+#[derive(Serialize)]
+struct TextLink {
+    directory: String,
+    name: String,
+}
+
+#[tauri::command]
+async fn resolve_text_link(directory: String, destination: String) -> Result<TextLink> {
+    blocking(move || {
+        let path = local::absolute(&directory)
+            .map_err(message)?
+            .join(destination);
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("Link to a file.")?;
+        local::name_component(name).map_err(message)?;
+        let parent = path.parent().ok_or("Link to a file.")?;
+        let parent = fs::canonicalize(parent).map_err(message)?;
+        open_regular_file(&parent.join(name))?;
+        Ok(TextLink {
+            directory: local::display_path(&parent).map_err(message)?,
+            name: name.to_owned(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn open_web_link(href: String) -> Result<()> {
+    let url = url::Url::parse(&href).map_err(message)?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Only HTTP and HTTPS links can be opened in a browser.".to_owned());
+    }
+    blocking(move || open::that(url.as_str()).map_err(message)).await
+}
+
 #[tauri::command]
 async fn read_server_text(
     id: u32,
@@ -1118,6 +1155,8 @@ pub fn run() {
             read_ftp_bytes,
             save_ftp_text,
             read_text,
+            resolve_text_link,
+            open_web_link,
             read_server_text,
             read_bytes,
             read_server_bytes,

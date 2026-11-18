@@ -1,13 +1,11 @@
 import { Button } from "./Button";
-import { isValidElement, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
 import { diffLines } from "diff";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { api, describeError, placePath, readPlaceText, type NamedFile, type TextDocument } from "./api";
+import { describeError, placePath, readPlaceText, savePlaceText, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { HexViewer } from "./HexViewer";
-import { MermaidDiagram } from "./MermaidDiagram";
+import { MarkdownPreview, type MarkdownAnchor, type TaskMarker } from "./MarkdownPreview";
 import { eventShortcut, showShortcut } from "./preferences";
 import { systemTheme, type Theme } from "./appearance";
 
@@ -17,7 +15,7 @@ function normalized(text: string) {
   return text.replaceAll(/\r\n?/g, "\n");
 }
 
-export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, onDirtyChange, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -27,6 +25,8 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   closeShortcut: string;
   cancelShortcut: string;
   hexShortcut: string;
+  anchor: MarkdownAnchor | null;
+  onOpenDocument: (file: NamedFile, anchor?: MarkdownAnchor) => void;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
   onClose: () => void;
@@ -39,8 +39,10 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const [readError, setReadError] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const writing = useRef(false);
   const [confirm, setConfirm] = useState(false);
   const dirty = Boolean(document && normalized(document.text) !== text);
+  const markdownSource = document && !dirty ? document.text : text;
   const isMarkdown = /\.(md|markdown)$/i.test(file.name);
   const path = placePath(file.place);
   const section = useRef<HTMLElement>(null);
@@ -49,6 +51,13 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   useLayoutEffect(() => {
     if (active) section.current?.focus({ preventScroll: true });
   }, [active]);
+
+  useEffect(() => {
+    if (anchor && isMarkdown) {
+      setPreview(true);
+      setHex(false);
+    }
+  }, [anchor, isMarkdown]);
 
   const reportDirty = useRef(onDirtyChange);
   reportDirty.current = onDirtyChange;
@@ -75,27 +84,35 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
     return () => { cancelled = true; };
   }, [file]);
 
-  async function save() {
-    if (!document || !dirty || saving || file.place.kind === "server") return;
+  async function write(updated: string) {
+    if (!document || writing.current || file.place.kind === "server") return;
+    writing.current = true;
     setSaving(true);
     setError("");
-    const eol = document.text.includes("\r\n") ? "\r\n" : document.text.includes("\r") ? "\r" : "\n";
-    const updated = text.replaceAll("\n", eol);
     try {
-      if (file.place.kind === "ftp") {
-        if (!document.revision) throw new Error("Reopen the FTP file before saving again.");
-        const saved = await api.saveFtpText(file.place.id, [...file.place.segments, file.name], document.revision, updated);
-        setDocument(saved);
-      } else {
-        await api.saveText(file.place.path, file.name, document.text, updated);
-        setDocument({ ...document, text: updated });
-      }
+      const saved = await savePlaceText(file, document, updated);
+      setDocument(saved);
+      setText(normalized(saved.text));
       onSaved();
     } catch (error) {
       setError(describeError(error));
     } finally {
+      writing.current = false;
       setSaving(false);
     }
+  }
+
+  async function save() {
+    if (!document || !dirty) return;
+    const eol = document.text.includes("\r\n") ? "\r\n" : document.text.includes("\r") ? "\r" : "\n";
+    await write(text.replaceAll("\n", eol));
+  }
+
+  function toggleTask({ start, end }: TaskMarker, checked: boolean) {
+    if (writing.current || file.place.kind === "server") return;
+    const updated = markdownSource.slice(0, start) + (checked ? "x" : " ") + markdownSource.slice(end);
+    if (editing && dirty) setText(updated);
+    else void write(updated);
   }
 
   function close() {
@@ -137,20 +154,9 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
         !document && <div className="dialog-body">Loading…</div>}
       {document && <>
         {preview && !hex && (
-          <div className="markdown">
-            <Markdown remarkPlugins={[remarkGfm]} skipHtml
-              components={{
-                a: ({ children }) => <span className="markdown-link">{children}</span>,
-                img: ({ alt }) => <span>{alt}</span>,
-                pre: ({ children }) => {
-                  if (isValidElement<{ className?: string; children?: ReactNode }>(children) &&
-                      children.props.className === "language-mermaid" && typeof children.props.children === "string") {
-                    return <MermaidDiagram source={children.props.children} light={light} />;
-                  }
-                  return <pre>{children}</pre>;
-                },
-              }}>{text}</Markdown>
-          </div>
+          <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light}
+            writable={file.place.kind !== "server"} saving={saving} onToggleTask={toggleTask}
+            onOpenDocument={onOpenDocument} onError={setError} />
         )}
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">Loading text tools…</p>}>

@@ -625,6 +625,8 @@ button.color-swatch {
 .footer-message { margin-right: auto; color: var(--muted); }
 .markdown { padding-inline: 18px; }
 .markdown-link { color: var(--accent); text-decoration: underline; }
+.markdown .task-list-item { list-style: none; }
+.markdown .task-list-item input[type="checkbox"]:enabled { cursor: pointer; }
 .markdown blockquote { border-left: 3px solid var(--line); padding-left: 12px; color: var(--muted); margin-left: 2px; }
 .markdown table { border-collapse: collapse; }
 .markdown td, .markdown th { border: 1px solid var(--line); padding: 4px 8px; }

@@ -46,9 +46,10 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   await writeFile(join(localFolder, "файл.txt"), "Unicode name");
   await writeFile(join(remoteCopy, "existing.txt"), "remote original");
   await writeFile(join(downloadedFolder, "existing.txt"), "local original");
-  await writeFile(join(remoteFolder, "guide.md"), "# FTP Markdown\n");
+  await writeFile(join(remoteFolder, "guide.md"), "# FTP Markdown\n\n- [ ] FTP task\n\n[Remote details](saved-folder/details.md)\n");
   await writeFile(join(remoteFolder, "bytes.bin"), Buffer.alloc(2050, 0x42));
   await writeFile(join(lastFolder, "restored.txt"), "Restored FTP folder");
+  await writeFile(join(lastFolder, "details.md"), "# Remote details\n");
   const ftpPort = await port();
   const child = spawn(process.env.DIRLUME_FTP_PYTHON, ["-u", "-c", server, root, String(ftpPort)], {
     windowsHide: true, env: { ...process.env, DIRLUME_FIXTURE_PASSWORD: password },
@@ -108,6 +109,13 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await right.getByRole("option", { name: /^start/ }).dblclick();
 
     await remoteRow("guide.md").dblclick();
+    await page.getByRole("heading", { name: "FTP Markdown", exact: true }).waitFor();
+    await page.getByRole("checkbox", { name: "FTP task", exact: true }).click();
+    await page.getByRole("checkbox", { name: "FTP task", exact: true, checked: true }).waitFor();
+    assert.match(await readFile(join(remoteFolder, "guide.md"), "utf8"), /- \[x\] FTP task/);
+    await page.getByRole("link", { name: "Remote details", exact: true }).click();
+    await page.getByRole("heading", { name: "Remote details", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
     await page.getByRole("heading", { name: "FTP Markdown", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     await remoteRow("bytes.bin").click();
