@@ -193,9 +193,21 @@ export function basePalette(base: BaseTheme, overrides?: Palette): Palette {
   document.body.append(sample);
   const style = getComputedStyle(sample);
   const result: Palette = {};
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 1;
+  const pixel = canvas.getContext("2d", { willReadFrequently: true });
   for (const color of colors) {
     const value = style.getPropertyValue(`--${color}`).trim();
-    if (isHexColor(value)) result[color] = value;
+    if (isHexColor(value)) {
+      result[color] = value;
+    } else if (value && pixel) {
+      sample.style.color = "var(--" + color + ")";
+      pixel.clearRect(0, 0, 1, 1);
+      pixel.fillStyle = getComputedStyle(sample).color;
+      pixel.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = pixel.getImageData(0, 0, 1, 1).data;
+      result[color] = "#" + [red, green, blue].map((channel) => channel.toString(16).padStart(2, "0")).join("");
+    }
   }
   sample.remove();
   return result;

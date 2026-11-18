@@ -71,7 +71,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   return (
-    <Dialog title="Options" onClose={onClose} wide>
+    <Dialog title="Options" onClose={onClose} wide resizeKey="options">
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <label className="settings-search"><Search aria-hidden="true" />

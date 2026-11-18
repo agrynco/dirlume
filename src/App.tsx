@@ -20,7 +20,7 @@ import {
   applyListing, childPlace, closeSearchResults, localPath, opposite, paneItem, parentPlace, readPlace, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, eventShortcut, persistPreferences, readPreferences, showShortcut, type Command } from "./preferences";
+import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, readPreferences, showShortcut, type Command } from "./preferences";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow } from "./workspace";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
@@ -790,11 +790,18 @@ export default function App() {
     if (target.closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
     const command = shortcut && commandNames.find((command) => commandScope(command) === "main" && preferences.shortcuts[command] === shortcut);
-    if (!command) return;
     if (target.closest(".terminal-card")) return;
     const inCommandLine = target === commandInput.current;
     const onFiles = target.closest(".file-list");
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (!command || command === "quickSearch") {
+      if (panelsHidden || processPanels[active] || !pane.place || (inField && !inCommandLine)) return;
+      const seed = quickSearchSeed(event.nativeEvent, preferences.shortcuts.quickSearch);
+      if (seed === null) return;
+      event.preventDefault();
+      document.getElementById(active + "-pane")?.dispatchEvent(new CustomEvent("dirlume-quick-search", { detail: seed }));
+      return;
+    }
     if (inField && (command === "copyClipboard" || command === "pasteClipboard")) return;
     const fileNavigation = command in rowCommands || command === "open";
     const fileKey = /^F\d{1,2}$/.test(event.key);
@@ -834,6 +841,7 @@ export default function App() {
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} pane={panes[side]} entries={entries[side]} locations={locations}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
+            onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
               showProcesses(side, false);

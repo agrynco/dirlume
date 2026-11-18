@@ -18,6 +18,7 @@ export const commands = {
   refresh: { label: "Refresh", key: "Ctrl+R" },
   refreshAlternate: { label: "Refresh (alternate)", key: "F2" },
   filter: { label: "Filter folder", key: "" },
+  quickSearch: { label: "Quick search by name prefix", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
   rename: { label: "Rename", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
@@ -45,7 +46,7 @@ export const commands = {
   previousCommand: { label: "Previous command", key: "Ctrl+E" },
   commandHistory: { label: "Command history", key: "Alt+F8" },
   connect: { label: "Connect to a remote machine", key: "Ctrl+Shift+K" },
-  settings: { label: "Options", key: "Ctrl+," },
+  settings: { label: "Options", key: "Ctrl+Alt+S" },
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
@@ -87,7 +88,7 @@ const preferenceKey = "dirlume.preferences.v1";
 const mac = /Mac/i.test(navigator.userAgent);
 export const commandNames = Object.keys(commands) as Command[];
 export const defaultBindings = Object.fromEntries(
-  commandNames.map((command) => [command, mac && command !== "nextDocument" && command !== "previousDocument"
+  commandNames.map((command) => [command, mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
 ) as Bindings;
 
@@ -108,6 +109,7 @@ export function readPreferences(): Preferences {
     for (const command of commandNames) {
       const value = saved.shortcuts?.[command];
       if (typeof value !== "string" || (!saved.bindingDefaults && value === oldDefaults[command])) continue;
+      if (command === "settings" && (saved.bindingDefaults ?? 0) < 3 && value === (mac ? "Meta+," : "Ctrl+,")) continue;
       shortcuts[command] = value;
       configured.add(command);
     }
@@ -135,7 +137,7 @@ export function readPreferences(): Preferences {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 2 }));
+  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 3 }));
 }
 
 export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }) {
@@ -148,6 +150,16 @@ export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: b
     ...(shiftKey ? ["Shift"] : []),
     key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key,
   ].join("+");
+}
+
+export function quickSearchSeed(event: KeyboardEvent, binding: string): string | null {
+  if (!binding) return null;
+  if (binding !== "Alt+Letter") return eventShortcut(event) === binding ? "" : null;
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (Array.from(event.key).length === 1 && /\p{L}/u.test(event.key)) return event.key;
+  // Option on macOS can emit a symbol or dead key for a physical letter key.
+  if (mac && /^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase();
+  return null;
 }
 
 export function showShortcut(shortcut: string) {

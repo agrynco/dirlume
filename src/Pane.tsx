@@ -1,5 +1,5 @@
 import { Button } from "./Button";
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
@@ -19,6 +19,7 @@ interface PaneProps {
   locations: QuickLocation[];
   activate: () => void;
   onRow: (entry: Entry, range: boolean, mark: boolean) => void;
+  onQuickMatch: (name: string) => void;
   onOpen: (entry: Entry) => void;
   onPath: (path: string) => void;
   onHistory: (offset: number) => void;
@@ -42,12 +43,14 @@ interface PaneProps {
 
 const columns = [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "modified", label: "Modified" }] as const;
 
-export function Pane({ side, active, pane, entries, locations, activate, onRow, onOpen, onPath,
+export function Pane({ side, active, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const path = pane.place ? placePath(pane.place) : "";
   const [address, setAddress] = useState(path);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [quickSearch, setQuickSearch] = useState<string | null>(null);
+  const quickSearchInput = useRef<HTMLInputElement>(null);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const locationsBox = useRef<HTMLDivElement>(null);
@@ -58,6 +61,13 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   const selected = entries.length ? Math.max(0, entries.findIndex((entry) => entry.name === pane.selected)) : -1;
   const search = Boolean(pane.search);
   const matches = pane.search?.matches;
+  const quickMatches = useMemo(() => {
+    if (!quickSearch) return [];
+    const prefix = quickSearch.normalize("NFC").toLocaleLowerCase();
+    return entries.filter((entry) => entry.name !== ".." &&
+      (matches?.get(entry.name)?.entry.name ?? entry.name).normalize("NFC").toLocaleLowerCase().startsWith(prefix));
+  }, [entries, matches, quickSearch]);
+  const currentQuickMatch = quickMatches.find(({ name }) => name === pane.selected);
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
   const start = search ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
   const end = search ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
@@ -79,6 +89,17 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
   const icons = useWindowsIcons(fileIcons, api.fileIcons);
 
   useEffect(() => setAddress(path), [path]);
+  useEffect(() => setQuickSearch(null), [path, processView, matches]);
+  const quickSearchOpen = quickSearch !== null;
+  useLayoutEffect(() => {
+    if (!quickSearchOpen) return;
+    const input = quickSearchInput.current;
+    input?.focus();
+    if (input) input.setSelectionRange(input.value.length, input.value.length);
+  }, [quickSearchOpen]);
+  useEffect(() => {
+    if (!currentQuickMatch && quickMatches[0]) onQuickMatch(quickMatches[0].name);
+  }, [currentQuickMatch, onQuickMatch, quickMatches]);
   useLayoutEffect(() => {
     const element = list.current;
     const probe = rowProbe.current;
@@ -124,11 +145,14 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
       setLocationsOpen((open) => !open);
       locationsButton.current?.focus();
     };
+    const showQuickSearch = (event: Event) => setQuickSearch((event as CustomEvent<string>).detail);
     target?.addEventListener("dirlume-filter", show);
     target?.addEventListener("dirlume-locations", showLocations);
+    target?.addEventListener("dirlume-quick-search", showQuickSearch);
     return () => {
       target?.removeEventListener("dirlume-filter", show);
       target?.removeEventListener("dirlume-locations", showLocations);
+      target?.removeEventListener("dirlume-quick-search", showQuickSearch);
     };
   }, [side]);
 
@@ -315,6 +339,32 @@ export function Pane({ side, active, pane, entries, locations, activate, onRow, 
           </div>
         )}
       </div>
+      {quickSearch !== null && <div className="quick-search">
+        <label htmlFor={side + "-quick-search"}>Quick search</label>
+        <input id={side + "-quick-search"} ref={quickSearchInput} type="text" value={quickSearch} spellCheck={false}
+          autoComplete="off" onChange={(event) => setQuickSearch(event.target.value)} onBlur={() => setQuickSearch(null)}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === "Escape" || event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              const match = currentQuickMatch ?? quickMatches[0];
+              if (event.key === "Enter" && !match) return;
+              setQuickSearch(null);
+              list.current?.focus({ preventScroll: true });
+              if (event.key === "Enter" && match) onOpen(match);
+            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              event.stopPropagation();
+              if (!quickMatches.length) return;
+              const index = currentQuickMatch ? quickMatches.indexOf(currentQuickMatch) : 0;
+              const offset = event.key === "ArrowDown" ? 1 : -1;
+              const next = (index + offset + quickMatches.length) % quickMatches.length;
+              onQuickMatch(quickMatches[next].name);
+            }
+          }} />
+        <span role="status">{quickSearch ? (quickMatches.length ? quickMatches.length + (quickMatches.length === 1 ? " match" : " matches") : "No match") : ""}</span>
+      </div>}
       {pane.error && <p className="pane-error" role="alert">{pane.error}</p>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
       <footer className="pane-footer">

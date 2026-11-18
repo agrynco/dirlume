@@ -1,5 +1,5 @@
 import { Button } from "./Button";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 import { ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
   basePalette, builtInThemes, colorGroups, fontGroups, fontKeys, isHexColor,
@@ -9,6 +9,7 @@ import {
 import type { Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { Dialog } from "./Dialog";
+import { ColorPicker } from "./ColorPicker";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const baseThemes = ["dark", "light", "slate"] as const;
@@ -21,6 +22,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
   const [deleting, setDeleting] = useState(false);
   const [system, setSystem] = useState(systemTheme);
   const [palette, setPalette] = useState<Palette>({});
+  const [picker, setPicker] = useState<{ color: Color; label: string; initial: string; previous: Preferences } | null>(null);
   const active = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
   const base = active?.base ?? (preferences.theme === "system" ? system : preferences.theme);
   const overrides = active?.colors;
@@ -40,12 +42,12 @@ export function AppearanceSettings({ section, preferences, onChange }: {
     onChange({ ...preferences, activeScheme: custom?.id ?? null, theme: custom ? preferences.theme : value as Theme });
   }
 
-  function create(fonts = active?.fonts ?? {}) {
+  function create(fonts = active?.fonts ?? {}, colors = active?.colors ?? {}) {
     let number = 1;
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
     const scheme: Scheme = {
       id: `scheme-${number}`, name: number === 1 ? "Custom scheme" : `Custom scheme ${number}`,
-      base, colors: active?.colors ?? {}, fonts,
+      base, colors, fonts,
     };
     setDeleting(false);
     onChange({ ...preferences, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
@@ -53,6 +55,11 @@ export function AppearanceSettings({ section, preferences, onChange }: {
 
   function update(scheme: Scheme) {
     onChange({ ...preferences, schemes: preferences.schemes.map((item) => item.id === scheme.id ? scheme : item) });
+  }
+
+  function setColor(color: Color, value?: string) {
+    if (active) update({ ...active, colors: { ...active.colors, [color]: value } });
+    else if (value) create({}, { [color]: value });
   }
 
   function remove(scheme: Scheme) {
@@ -92,7 +99,8 @@ export function AppearanceSettings({ section, preferences, onChange }: {
           <Button type="button" className="icon-button appearance-button" aria-label="Delete scheme"
             title="Delete scheme" onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
         </div>
-      ) : <p className="appearance-hint">Create a custom scheme to change these colors and fonts.</p>}
+      ) : <p className="appearance-hint">{section === "fonts" ? "Choose an installed font to create a custom scheme." :
+        "Editing a color creates a custom scheme."}</p>}
       {active && deleting && <div className="scheme-confirm">
         <span>Delete this color scheme?</span>
         <Button type="button" onClick={() => setDeleting(false)}>Keep scheme</Button>
@@ -112,24 +120,26 @@ export function AppearanceSettings({ section, preferences, onChange }: {
         <div className="color-settings">
           {Object.entries(colorGroups[section].colors).map(([key, label]) => {
             const color = key as Color;
-            return <ColorField key={key} label={label} value={palette[color] ?? "#000000"}
-              disabled={!active} custom={Boolean(active?.colors[color])}
-              onChange={(value) => {
-                if (active) update({ ...active, colors: { ...active.colors, [color]: value } });
-              }} />;
+            const value = palette[color] ?? "#000000";
+            return <ColorField key={key} label={label} value={value}
+              custom={Boolean(active?.colors[color])} onChange={(value) => setColor(color, value)}
+              onOpen={() => setPicker({ color, label, initial: value, previous: preferences })} />;
           })}
         </div>
       )}
+      {picker && <ColorPicker label={picker.label} initial={picker.initial}
+        onChange={(value) => setColor(picker.color, value)} onCommit={() => setPicker(null)}
+        onCancel={() => { onChange(picker.previous); setPicker(null); }} />}
     </div>
   );
 }
 
-function ColorField({ label, value, disabled, custom, onChange }: {
+function ColorField({ label, value, custom, onChange, onOpen }: {
   label: string;
   value: string;
-  disabled: boolean;
   custom: boolean;
   onChange: (value?: string) => void;
+  onOpen: () => void;
 }) {
   const [hex, setHex] = useState(value);
   useEffect(() => setHex(value), [value]);
@@ -137,9 +147,9 @@ function ColorField({ label, value, disabled, custom, onChange }: {
   return (
     <div className="color-setting">
       <span>{label}</span>
-      <input type="color" aria-label={`${label} color`} value={value} disabled={disabled}
-        onChange={(event) => onChange(event.target.value)} />
-      <input type="text" aria-label={`${label} hex`} value={hex} disabled={disabled} maxLength={7} spellCheck={false}
+      <Button type="button" className="color-swatch" aria-label={label + " color"} aria-haspopup="dialog"
+        style={{ "--swatch": value } as CSSProperties} onClick={onOpen} />
+      <input type="text" aria-label={`${label} hex`} value={hex} maxLength={7} spellCheck={false}
         onBlur={() => setHex(value)} onChange={(event) => {
           const change = event.target.value;
           setHex(change);
