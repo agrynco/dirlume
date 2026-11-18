@@ -14,7 +14,7 @@ import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { eventShortcut, showShortcut } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
-import { columnWidthsStyle, FileColumns, readColumnWidths, saveColumnWidths } from "./FileColumns";
+import { columnWidthsStyle, FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
 
 interface PaneProps {
   side: Side;
@@ -65,7 +65,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const columnHeader = useRef<HTMLDivElement>(null);
-  const [columnWidths, setColumnWidths] = useState(() => readColumnWidths(side));
+  const [columnLayout, setColumnLayout] = useState(() => readColumnLayout(side));
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = entries.length ? Math.max(0, entries.findIndex((entry) => entry.name === pane.selected)) : -1;
@@ -174,7 +174,8 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
   const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
   return (
-    <section ref={section} id={`${side}-pane`} style={{ ...viewFontStyle(fontSize), ...columnWidthsStyle(columnWidths) }}
+    <section ref={section} id={`${side}-pane`} style={{ ...viewFontStyle(fontSize), ...columnWidthsStyle(columnLayout.widths) }}
+      data-size-column={columnLayout.visibility.size} data-modified-column={columnLayout.visibility.modified}
       className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate} onContextMenu={(event) => {
         if (processView || !(event.target instanceof HTMLElement) || event.target.closest("input, select, textarea, dialog")) return;
@@ -286,10 +287,15 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           <Button className="icon-button" aria-label={t("Close filter")} onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
-      <FileColumns container={columnHeader} widths={columnWidths} sort={pane.sort} onSort={onSort}
+      <FileColumns container={columnHeader} layout={columnLayout} sort={pane.sort} onSort={onSort}
         onResize={(widths, persist) => {
-          setColumnWidths(widths);
-          if (persist) saveColumnWidths(side, widths);
+          const next = { ...columnLayout, widths };
+          setColumnLayout(next);
+          if (persist) saveColumnLayout(side, next);
+        }} onVisibility={(column, visible) => {
+          const next = { ...columnLayout, visibility: { ...columnLayout.visibility, [column]: visible } };
+          setColumnLayout(next);
+          saveColumnLayout(side, next);
         }} />
       <div id={`${side}-files`} ref={list} className={search ? "file-list result-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
         onScroll={(event) => {

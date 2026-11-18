@@ -264,10 +264,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .location-menu { position: relative; }
 .location-trigger { width: 38px; gap: 2px; border-color: var(--line); }
 .location-trigger svg:last-child { width: 11px; }
-.location-popup {
-  z-index: 1;
-  position: absolute;
-  inset: calc(100% + 5px) 0 auto auto;
+.location-popup, .file-column-menu {
   min-width: 180px;
   max-height: 55vh;
   overflow: auto;
@@ -277,7 +274,11 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   padding: 4px;
   box-shadow: 0 7px 20px var(--overlay);
 }
-.location-popup button { width: 100%; justify-content: flex-start; }
+.location-popup { z-index: 1; position: absolute; inset: calc(100% + 5px) 0 auto auto; }
+.file-column-menu { z-index: 4; position: fixed; max-width: calc(100vw - 12px); }
+:is(.location-popup, .file-column-menu) button { width: 100%; justify-content: flex-start; }
+.file-column-check { display: grid; place-items: center; width: 15px; }
+.file-column-check svg { width: 14px; height: 14px; }
 .pane-filter { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line); padding: 4px 8px 4px 12px; color: var(--muted); }
 .pane-filter input { width: 100%; min-height: 28px; padding-block: 3px; }
 .file-column-grid, .file-row {
@@ -288,6 +289,12 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   min-width: calc(var(--file-name-width, var(--file-name-default)) + var(--file-size-track) + var(--file-modified-track) + 10px);
   align-items: center;
 }
+.pane[data-size-column="false"] :is(.file-column-grid, .file-row) { --file-size-track: 0px; }
+.pane[data-modified-column="false"] :is(.file-column-grid, .file-row) { --file-modified-track: 0px; }
+.pane[data-size-column="false"] :is(.col-size, .file-size),
+.pane[data-modified-column="false"] :is(.col-modified, .file-date) { display: none; }
+:is(.col-size, .file-size) { grid-column: 2; }
+:is(.col-modified, .file-date) { grid-column: 3; }
 .file-columns {
   border-block: 1px solid var(--line);
   background: var(--raised);
@@ -671,11 +678,12 @@ button.color-swatch {
 @media (max-width: 900px) { :root { --file-name-default: 88px; --file-size-default: 63px; --file-modified-default: 106px; } .actionbar { gap: 4px; } .actionbar button { padding-inline: 6px; } }
 @media (max-width: 760px) { :root { --file-name-default: 75px; --file-size-default: 55px; --file-modified-default: 87px; } .workspace { padding-inline: 8px; } .file-date { padding-left: 5px; } .file-columns .col-modified button { padding-inline-start: 5px; } }
 @container (max-width: 310px) {
-  .file-column-grid, .file-row { --file-size-default: 62px; --file-modified-track: 0px; }
-  .file-date, .col-modified { display: none; }
+  .file-column-grid, .file-row { --file-size-default: 62px; }
+  .pane:not([data-modified-column="true"]) :is(.file-column-grid, .file-row) { --file-modified-track: 0px; }
+  .pane:not([data-modified-column="true"]) :is(.file-date, .col-modified) { display: none; }
 }
 @container (max-width: 200px) {
-  .file-column-grid, .file-row { --file-size-track: 0px; }
-  .file-size, .col-size { display: none; }
+  .pane:not([data-size-column="true"]) :is(.file-column-grid, .file-row) { --file-size-track: 0px; }
+  .pane:not([data-size-column="true"]) :is(.file-size, .col-size) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
