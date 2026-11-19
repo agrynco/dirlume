@@ -918,6 +918,7 @@ button.color-swatch {
 .markdown .task-list-item input[type="checkbox"]:enabled { cursor: pointer; }
 .markdown blockquote { border-left: 3px solid var(--line); padding-left: 12px; color: var(--muted); margin-left: 2px; }
 .markdown table { border-collapse: collapse; }
+.markdown td .markdown-nowrap, .markdown th .markdown-nowrap { white-space: nowrap; }
 .markdown td, .markdown th { border: 1px solid var(--line); padding: 4px 8px; }
 .comparison-toolbar label { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .comparison-head, .diff-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

@@ -4,7 +4,7 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { toString } from "mdast-util-to-string";
-import type { Root } from "mdast";
+import type { Parent, PhrasingContent, Root } from "mdast";
 import { visit } from "unist-util-visit";
 import { api, describeError, type NamedFile } from "./api";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -23,6 +23,47 @@ const PreviewContext = createContext<{
 } | null>(null);
 const documentOrigin = "https://markdown.dirlume.invalid";
 const scheme = /^[a-z][a-z\d+.-]*:/i;
+
+interface TableNoWrap extends Parent {
+  type: "tableNoWrap";
+  children: PhrasingContent[];
+}
+
+declare module "mdast" {
+  interface RootContentMap {
+    tableNoWrap: TableNoWrap;
+  }
+  interface PhrasingContentMap {
+    tableNoWrap: TableNoWrap;
+  }
+}
+
+function remarkTableNoWrap() {
+  const openingSpan = /^<span(?:\s|>)/i;
+  const noWrapSpan = /^<span\s+style\s*=\s*(["'])\s*white-space\s*:\s*nowrap\s*;?\s*\1\s*>$/i;
+  const closingSpan = /^<\/span\s*>$/i;
+  return (tree: Root) => visit(tree, "tableCell", (cell) => {
+    let depth = 0;
+    let start: number | undefined;
+    const parsed: PhrasingContent[] = [];
+    for (const child of cell.children) {
+      if (child.type === "html") {
+        if (openingSpan.test(child.value)) {
+          if (depth === 0 && noWrapSpan.test(child.value)) start = parsed.length;
+          depth++;
+        } else if (closingSpan.test(child.value) && depth > 0 && --depth === 0 && start !== undefined) {
+          const [, ...children] = parsed.splice(start);
+          // Build a fixed HAST span. Original tags and attributes remain subject to skipHtml.
+          parsed.push({ type: "tableNoWrap", children, data: { hName: "span", hProperties: { className: ["markdown-nowrap"] } } });
+          start = undefined;
+          continue;
+        }
+      }
+      parsed.push(child);
+    }
+    cell.children = parsed;
+  });
+}
 
 function remarkTaskMarkers() {
   return (tree: Root, file: { toString(): string }) => {
@@ -178,7 +219,7 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
   return (
     <div ref={preview} className="markdown">
       <PreviewContext.Provider value={{ writable, saving, light, onToggleTask, followLink }}>
-        <Markdown remarkPlugins={[remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
+        <Markdown remarkPlugins={[remarkGfm, remarkTaskMarkers, remarkTableNoWrap]} rehypePlugins={[[rehypeSlug, { prefix }]]}
           skipHtml components={components}>{source}</Markdown>
       </PreviewContext.Provider>
     </div>
