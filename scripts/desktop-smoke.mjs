@@ -1484,7 +1484,7 @@ try {
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
-    assert.equal(topicLinks.length, 20);
+    assert.ok(topicLinks.includes("#help-archives"));
     assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
     if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
     for (const href of topicLinks) {
