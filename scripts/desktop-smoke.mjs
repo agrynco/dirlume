@@ -121,6 +121,21 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => { pageErrors.push(error.message); });
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+  const bundledFamily = "GoMono Nerd Font Mono";
+  const defaultFonts = await page.evaluate(async (family) => {
+    const styles = ["400", "700", "italic 400", "italic 700"];
+    const loaded = await Promise.all(styles.map((style) => document.fonts.load(`${style} 18px "${family}"`, "Dirlume Україна")));
+    const root = getComputedStyle(document.documentElement);
+    const groups = ["ui", "panel", "dialog", "viewer", "editor", "terminal"];
+    return {
+      faces: loaded.map((faces) => faces.length > 0 && faces.every((face) => face.status === "loaded")),
+      families: groups.map((group) => root.getPropertyValue(`--${group}-font`).startsWith(`"${family}"`)),
+      sizes: groups.map((group) => root.getPropertyValue(`--${group}-size`)),
+    };
+  }, bundledFamily);
+  assert.deepEqual(defaultFonts.faces, [true, true, true, true]);
+  assert.ok(defaultFonts.families.every(Boolean));
+  assert.deepEqual(defaultFonts.sizes, Array(6).fill("18px"));
   assert.equal(await page.getByRole("button", { name: "Find files" }).getAttribute("title"), "Find files (Alt+F7)");
   assert.equal(await page.getByRole("region", { name: "right pane" }).getByRole("button", { name: "Refresh folder" }).getAttribute("title"), "Refresh folder");
   assert.deepEqual(await page.locator("button:visible").evaluateAll((buttons) =>
@@ -184,6 +199,7 @@ try {
   }
   await navigate("left", src);
   await navigate("right", dst);
+  if (process.env.DIRLUME_BUNDLED_FONT_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_BUNDLED_FONT_SCREENSHOT, scale: "css" });
   const leftList = page.getByRole("listbox", { name: "left files", exact: true });
   const rightList = page.getByRole("listbox", { name: "right files", exact: true });
   const parentRow = '[role="option"][title=".."]';
@@ -651,6 +667,14 @@ try {
   await panelSuggestions.waitFor({ state: "hidden" });
   await optionsDialog.waitFor();
   assert.equal(await page.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
+  await panelFont.fill("GoMono Nerd");
+  await panelSuggestions.getByRole("option", { name: bundledFamily, exact: true }).click();
+  assert.equal(await panelFont.inputValue(), bundledFamily);
+  await optionsDialog.getByLabel("File panels font size").fill("20");
+  await optionsDialog.getByRole("button", { name: "Reset file panels font", exact: true }).click();
+  assert.equal(await panelFont.inputValue(), "");
+  assert.equal(await optionsDialog.locator(".preview-frame").evaluate((element) =>
+    getComputedStyle(element).getPropertyValue("--panel-size")), "18px");
   await panelFont.fill("aRiAl");
   const arial = panelSuggestions.getByRole("option", { name: "Arial", exact: true });
   await arial.waitFor();

@@ -12,6 +12,8 @@ Pane addresses, transfer destinations, and the KSwitcher installation folder sug
 
 Drag the right edge of a file column heading to resize it. Double-click the edge to restore its default width. Right-click the heading row to show or hide **Size** and **Modified**. **Name** is always visible. Each pane saves its widths and visible columns independently and scrolls horizontally when the columns exceed the available space.
 
+Dirlume bundles **GoMono Nerd Font Mono** from [Nerd Fonts v3.5.1](https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1) and uses it at **18 px** by default. Choose it by name in the font picker or clear an override to use the default. The bundled faces work offline. The [font notices](src/assets/fonts/GoMono-NOTICE.txt) and upstream licenses are included in the desktop packages.
+
 Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, type a name to filter installed fonts in the dropdown, or open the full list with the arrow button. Use the arrow keys and Enter to choose a font, or click a result. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
 **File types** also has separate colors for hidden and system files and folders. Hidden items include dot-prefixed names and items with the Windows Hidden attribute. Items with the Windows System attribute use the system color, including when they are also hidden. **Show hidden files** controls whether hidden items are listed.
