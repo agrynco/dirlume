@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, connectFtpLocation, describeError, folderLabel, isLockError, isPermissionError, placePath, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { textEncodingLabels, type AppUpdate, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
@@ -18,6 +18,7 @@ import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { Pane } from "./Pane";
 import { NewFolderDialog } from "./NewFolderDialog";
+import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
@@ -46,7 +47,7 @@ type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" }>;
 type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[] }
-) & { ftp?: FtpPlace };
+) & { ftp?: FtpPlace; archive?: ArchivePlace };
 
 type Modal =
   | { kind: "settings" }
@@ -55,6 +56,8 @@ type Modal =
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
+  | { kind: "createArchive"; side: Side; directory: string; names: string[] }
+  | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "fileActions"; side: Side; entry?: Entry }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
@@ -81,7 +84,7 @@ function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | nu
 }
 
 function sameConnection(left: Place | null, right: Place) {
-  return (left?.kind === "server" || left?.kind === "ftp") && left.kind === right.kind && left.id === right.id;
+  return (left?.kind === "server" || left?.kind === "ftp" || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
 }
 
 function disconnect(place: NetworkPlace) {
@@ -151,6 +154,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const currentItem = paneItem(pane, current);
   const local = pane.place?.kind === "local" ? pane.place : null;
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
+  const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const otherFtp = !other.search && other.place?.kind === "ftp";
   const canTransfer = Boolean(current && pane.place);
   const helpShortcut = preferences.shortcuts.help;
@@ -443,7 +447,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (index < 0) return;
     const remaining = documents.filter((document) => document.id !== id);
     const { place } = documents[index].file;
-    if (place.kind !== "local" && !Object.values(connected.current).some((connection) => sameConnection(connection, place)) &&
+    if ((place.kind === "server" || place.kind === "ftp") && !Object.values(connected.current).some((connection) => sameConnection(connection, place)) &&
         !remaining.some(({ file }) => sameConnection(file.place, place))) {
       disconnect(place);
     }
@@ -496,13 +500,41 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const { place, entry: file } = item;
     if (file.directory) {
       void load(side, childPlace(place, file.name));
-    } else if (place.kind === "ftp" && !file.link) {
+    } else if ((place.kind === "ftp" || place.kind === "archive") && !file.link) {
       openDocument({ place, name: file.name }, false);
     } else if (place.kind === "local") {
+      if (!file.link && isArchiveName(file.name)) {
+        const path = placePath(childPlace(place, file.name));
+        void openArchive(side, path).catch((error: unknown) => {
+          const text = describeError(error);
+          if (text === passwordError) setModal({ kind: "archivePassword", side, path });
+          else setStatus({ text, error: true });
+        });
+        return;
+      }
       void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
         setStatus({ text: describeError(error), error: true }));
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
+    }
+  }
+
+  async function openArchive(side: Side, path: string, password?: string) {
+    const ticket = ++request.current[side];
+    listingPending.current[side] = true;
+    updatePane(side, (pane) => ({ ...pane, loading: true }));
+    try {
+      const { listing, ...opened } = await api.openArchive(path, password);
+      if (ticket === request.current[side]) {
+        const place: ArchivePlace = { ...opened, kind: "archive", segments: [],
+          address: opened.writable ? "Archive" : "Read-only archive" };
+        updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
+      }
+    } finally {
+      if (ticket === request.current[side]) {
+        listingPending.current[side] = false;
+        updatePane(side, (pane) => ({ ...pane, loading: false }));
+      }
     }
   }
 
@@ -517,7 +549,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     const place = panes[side].place;
     const target = place && parentPlace(place);
-    if (target) void load(side, target);
+    if (target) void load(side, target, "push", place?.kind === "archive" && !place.segments.length ? folderLabel(place) : undefined);
   }
 
   function currentFolderShortcut(side: Side) {
@@ -962,6 +994,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "mkdir":
         if (local && !pane.search && !busy && !pane.loading) setModal({ kind: "mkdir", side: active, place: local });
         break;
+      case "createArchive":
+        if (local && current && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "createArchive", side: active, directory: local.path,
+            names: transferItems(active, current).map(({ entry }) => entry.name) });
+        }
+        break;
       case "rename":
       case "newFile": {
         const writable = local ?? (command === "rename" ? ftp : undefined);
@@ -972,12 +1010,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       }
       case "delete":
       case "recycle": {
-        const writable = local ?? ftp;
+        const writable = local ?? ftp ?? (archive?.writable ? archive : undefined);
         if (writable && !pane.search && current && !busy && !pane.loading) {
           const marked = entries[active].filter(({ name }) => pane.marked.includes(name));
           const selected = marked.length ? marked : [current];
           setModal({
-            kind: ftp ? "delete" : command, path: placePath(writable), ftp,
+            kind: ftp || archive ? "delete" : command, path: placePath(writable), ftp, archive,
             names: selected.map(({ name }) => name),
             directories: ftp ? selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name) : undefined,
           });
@@ -996,7 +1034,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || file.place.kind !== "server")) openDocument(file, command === "edit");
+        if (file && (command === "view" || writableTextPlace(file.place))) openDocument(file, command === "edit");
         break;
       }
       case "compare": {
@@ -1062,16 +1100,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return showShortcut(preferences.shortcuts[command]);
   }
 
+  const currentFile = fileFor(active);
   const fileActions = ([
     { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
-    { command: "edit", label: "Edit", Icon: Pencil, disabled: !fileFor(active) || fileFor(active)?.place.kind === "server" },
-    { command: "copy", label: local || ftp ? "Copy" : "Download", Icon: local || ftp ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
+    { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !writableTextPlace(currentFile.place) },
+    { command: "copy", label: local || ftp || archive ? "Copy" : "Download", Icon: local || ftp || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
-    { command: "recycle", label: ftp ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp) || !!pane.search || !current || busy },
+    { command: "recycle", label: ftp || archive ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp && !archive?.writable) || !!pane.search || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
@@ -1112,10 +1151,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     paneMenu("left"),
     { label: "Files", items: [
       ...fileActions.map(({ command, label, disabled }) => menuCommand(command, !filesAvailable || disabled, label)),
+      menuCommand("createArchive", !filesAvailable || !local || !current || !!pane.search, "Create archive"),
       menuCommand("attributes", !filesAvailable || !currentItem || busy),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
-      ...(ftp ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
+      ...(ftp || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
     ] },
     { label: "Commands", items: [
       menuCommand("search", !filesAvailable || !pane.place),
@@ -1257,7 +1297,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <span role={status.error ? "alert" : "status"} title={errorText(status.text)}>
           {errorText(status.text)}
         </span>
-        <span>{pane.place && pane.place.kind !== "local" ? pane.place.address : t("Local file system")}</span>
+        <span>{pane.place?.kind === "archive" ? t(pane.place.address) :
+          pane.place && pane.place.kind !== "local" ? pane.place.address : t("Local file system")}</span>
       </footer>
       {modal?.kind === "settings" && <Settings preferences={preferences} onChange={(next) => {
         setLanguage(next.language);
@@ -1374,6 +1415,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           await load(modal.side, modal.place, "refresh", name);
           refresh(opposite(modal.side));
         }} />}
+      {modal?.kind === "createArchive" && <ArchiveDialog directory={modal.directory} names={modal.names}
+        showHidden={preferences.hidden} onClose={() => setModal(null)} onCreated={() => { refresh("left"); refresh("right"); }} />}
+      {modal?.kind === "archivePassword" && <ArchivePasswordDialog onClose={() => setModal(null)}
+        onOpen={async (password) => { await openArchive(modal.side, modal.path, password); setModal(null); }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
           hasNonemptyFolders={modal.ftp && "names" in modal ? async () => {
@@ -1386,7 +1431,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           } : undefined}
           onSubmit={async (operation, recursive) => {
           const ftp = modal.ftp;
-          if ("names" in modal) {
+          if ("names" in modal && modal.archive) {
+            const archive = modal.archive;
+            await api.deleteArchiveEntries(archive.id, modal.names.map((name) => [...archive.segments, name]));
+            refresh("left");
+            refresh("right");
+          } else if ("names" in modal) {
             try {
               await batch(modal.names, (name) => ftp
                 ? api.deleteFtp(ftp.id, [...ftp.segments, name], recursive && (modal.directories?.includes(name) ?? false))

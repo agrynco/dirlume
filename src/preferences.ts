@@ -38,6 +38,7 @@ export const commands = {
   cancelMeasure: { label: "Clear command line or cancel folder size scan", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
+  createArchive: { label: "Create archive", key: "Shift+F1" },
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
   mkdir: { label: "New folder", key: "F7" },
