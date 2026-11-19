@@ -1605,7 +1605,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       onKeyDown={(event) => keyDown(event)} onKeyDownCapture={documentKeys}
       onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"}
-        data-menu-position={preferences.menuPosition} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
+        data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
         <div className="brand">
           <span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1>
         </div>
