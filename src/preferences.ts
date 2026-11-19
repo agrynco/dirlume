@@ -52,6 +52,7 @@ export const commands = {
   commandHistory: { label: "Command history", key: "Alt+F8" },
   connect: { label: "Connect to a remote machine", key: "Ctrl+Shift+K" },
   settings: { label: "Options", key: "Ctrl+Alt+S" },
+  help: { label: "Help", key: "F1" },
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
@@ -71,6 +72,7 @@ export type Bindings = Record<Command, string>;
 export type Provider = "server" | "kswitcher";
 
 export function commandScope(command: Command) {
+  if (command === "help") return "global";
   if (command === "zoomFont") return "wheel";
   if (command === "ftpSources") return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
@@ -78,6 +80,13 @@ export function commandScope(command: Command) {
   if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   return "main";
+}
+
+export function shortcutScopesOverlap(left: Command, right: Command) {
+  const leftScope = commandScope(left);
+  const rightScope = commandScope(right);
+  return leftScope === rightScope ||
+    (leftScope !== "wheel" && rightScope !== "wheel" && (leftScope === "global" || rightScope === "global"));
 }
 
 export interface Preferences {
@@ -123,13 +132,12 @@ export function readPreferences(): Preferences {
       shortcuts[command] = value;
       configured.add(command);
     }
-    const enabled = new Set<string>();
+    const enabled: Command[] = [];
     for (const command of [...configured, ...commandNames.filter((command) => !configured.has(command))]) {
       const value = shortcuts[command];
       if (!value) continue;
-      const binding = `${commandScope(command)}:${value}`;
-      if (enabled.has(binding)) shortcuts[command] = "";
-      else enabled.add(binding);
+      if (enabled.some((other) => shortcuts[other] === value && shortcutScopesOverlap(other, command))) shortcuts[command] = "";
+      else enabled.push(command);
     }
     const schemes = readSchemes(saved.schemes);
     const viewFontSizes: ViewFontSizes = {};

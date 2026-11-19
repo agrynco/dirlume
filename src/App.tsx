@@ -9,6 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { Dialog } from "./Dialog";
 import { FtpDialog } from "./FtpDialog";
+import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { Pane } from "./Pane";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
@@ -77,6 +78,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
   const theme = scheme?.base ?? preferences.theme;
   const [modal, setModal] = useState<Modal | null>(null);
+  const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [documents, setDocuments] = useState<DocumentWindow[]>(startup?.documents ?? []);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
   const [linkedAnchor, setLinkedAnchor] = useState<{ id: number; anchor: MarkdownAnchor } | null>(null);
@@ -123,6 +125,27 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const otherFtp = !other.search && other.place?.kind === "ftp";
   const canTransfer = Boolean(current && pane.place);
+  const helpShortcut = preferences.shortcuts.help;
+  const modalKind = modal?.kind;
+  const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
+
+  useLayoutEffect(() => {
+    if (!helpShortcut) return;
+    function openHelp(event: WindowEventMap["keydown"]) {
+      if (event.defaultPrevented || event.isComposing || eventShortcut(event) !== helpShortcut) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-shortcut-capture]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      const topic = modalKind === "settings" ? "general" : modalKind === "search" ? "search" :
+        target?.closest(".terminal-card, .command-bar") ? "terminal" :
+        editingDocument === undefined ? "files" : editingDocument ? "editor" : "viewer";
+      setHelpTopic((current) => current ?? topic);
+    }
+    document.addEventListener("keydown", openHelp, true);
+    return () => document.removeEventListener("keydown", openHelp, true);
+  }, [helpShortcut, modalKind, editingDocument]);
 
   const updatePane = useCallback((side: Side, updater: (pane: PaneState) => PaneState) => {
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
@@ -692,7 +715,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         return;
       }
       if (!["switchPane", "swap", "back", "forward", "parent", "leftLocations", "rightLocations",
-        "shrinkLeft", "growLeft", "settings", "menu", "close", "terminal", "connect"].includes(command)) return;
+        "shrinkLeft", "growLeft", "settings", "help", "menu", "close", "terminal", "connect"].includes(command)) return;
     }
     if (command in rowCommands) {
       const items = entries[active];
@@ -739,6 +762,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": setModal({ kind: "settings" }); break;
+      case "help": setHelpTopic("files"); break;
       case "menu": setModal({ kind: "menu" }); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
@@ -1063,7 +1087,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       {modal?.kind === "menu" && (
         <Dialog title={t("Commands")} onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
-            {(["view", "edit", "newFile", "copy", "move", "copyClipboard", "pasteClipboard", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory"] as const)
+            {(["view", "edit", "newFile", "copy", "move", "copyClipboard", "pasteClipboard", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory", "help"] as const)
               .map((command) => <Button key={command} type="button" shortcut={keyLabel(command)} onClick={() => { setModal(null); perform(command); }}>
                 {t(commands[command].label)}<kbd>{keyLabel(command)}</kbd>
               </Button>)}
@@ -1132,6 +1156,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           setModal(null);
         }} />
       )}
+      {helpTopic && <HelpDialog initialTopic={helpTopic} language={preferences.language} onClose={() => setHelpTopic(null)} />}
     </div>
   );
 }

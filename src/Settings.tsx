@@ -8,7 +8,7 @@ import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { api, windowsClient } from "./api";
 import {
-  commandNames, commands, commandScope, defaultBindings, eventShortcut, showShortcut, wheelBindings,
+  commandNames, commands, defaultBindings, eventShortcut, shortcutScopesOverlap, showShortcut, wheelBindings,
   type Command, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
@@ -114,7 +114,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     if (event.key === "Escape") return setCapture(null);
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
-    const existing = commandNames.find((item) => item !== command && commandScope(item) === commandScope(command) &&
+    const existing = commandNames.find((item) => item !== command && shortcutScopesOverlap(item, command) &&
       preferences.shortcuts[item] === shortcut);
     if (existing) {
       setConflict(t("{0} is assigned to {1}.", showShortcut(shortcut), t(commands[existing].label)));
@@ -223,7 +223,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                     {wheelBindings.map((binding) => <option key={binding} value={binding}>{showShortcut(binding)}</option>)}
                   </select>
                 ) : capture === command ? (
-                  <input aria-label={t("New shortcut for {0}", t(commands[command].label))} readOnly autoFocus
+                  <input aria-label={t("New shortcut for {0}", t(commands[command].label))} readOnly autoFocus data-shortcut-capture
                     placeholder={t("Press a shortcut")} onKeyDown={(event) => assign(event, command)}
                     onBlur={() => { setCapture(null); setConflict(""); }} />
                 ) : (
