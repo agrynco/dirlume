@@ -9,11 +9,12 @@ export function readCommandHistory(): CommandEntry[] {
     if (!Array.isArray(stored)) return [];
     return stored.flatMap((item: unknown): CommandEntry[] => {
       if (typeof item === "string") return item.trim() ? [{ text: item, date: null }] : [];
-      if (!item || typeof item !== "object" || !("text" in item) || typeof item.text !== "string" ||
-        !item.text.trim()) return [];
-      const date = "date" in item && typeof item.date === "number" && Number.isFinite(new Date(item.date).getTime())
-        ? item.date : null;
-      return [{ text: item.text, date }];
+      if (!item || typeof item !== "object") return [];
+      const text = "text" in item ? item.text : "command" in item ? item.command : undefined;
+      if (typeof text !== "string" || !text.trim()) return [];
+      const storedDate = "date" in item ? item.date : "time" in item ? item.time : null;
+      const date = typeof storedDate === "number" && Number.isFinite(new Date(storedDate).getTime()) ? storedDate : null;
+      return [{ text, date }];
     }).slice(0, historyLimit);
   } catch { return []; }
 }
@@ -29,7 +30,14 @@ function keywords(command: string) {
   switch (tool) {
     case "ipconfig":
       if (args.includes("/flushdns")) return "network dns flush clear cache мережа очистити кеш сеть очистить кэш";
+      if (args.includes("/release") || args.includes("/renew")) return "network DHCP address lease";
       return "network connectivity address мережа з’єднання адреса сеть подключение адрес";
+    case "clear-dnsclientcache": return "network dns flush clear cache";
+    case "resolvectl": return args.includes("flush-caches") ? "network dns flush clear cache" : "network dns";
+    case "dhclient": return "network DHCP address lease";
+    case "cd": case "chdir": case "set-location": case "pushd": case "popd":
+      return "change working directory folder navigation";
+    case "ls": case "dir": case "get-childitem": return "list files folders directory";
     case "nslookup": case "resolve-dnsname":
       return "network dns lookup query мережа запит сеть запрос";
     case "ping": case "tracert": case "traceroute": case "test-netconnection":
@@ -38,6 +46,7 @@ function keywords(command: string) {
     case "cls": case "clear": case "clear-host":
       return "terminal clear screen очистити екран консоль очистить экран";
     case "git":
+      if (["checkout", "switch", "branch"].includes(args[0])) return "repository branch version control";
       return ["pull", "fetch", "update"].includes(args[0])
         ? "git version control repository update sync fetch pull оновити репозиторій синхронізація обновить репозиторий синхронизация"
         : "git version control repository репозиторій контроль версій репозиторий контроль версий";
