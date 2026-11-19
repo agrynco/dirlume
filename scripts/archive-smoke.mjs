@@ -127,5 +127,10 @@ export async function testArchives(page, root) {
     .getByRole("button", { name: "Files", exact: true });
   if (await filesTab.isVisible()) await filesTab.click();
   await left.waitFor();
+  for (let depth = 0; depth < 2; depth++) {
+    await left.focus();
+    await page.keyboard.press("Backspace");
+    await row(depth ? "encrypted.7z" : "folder").waitFor();
+  }
   console.log("Verified ZIP creation, overwrite cancellation, copying, editing, removal, and encrypted 7z browsing with the Windows desktop app.");
 }

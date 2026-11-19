@@ -1646,10 +1646,10 @@ try {
   await testProcessColumns(page);
   await testProcessQuickSearch(page, temp);
   await testProcessExecutablePath(page, child.pid);
-  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await testLockingProcessPane(page, temp);
   await testOsTimestamps(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
+  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
