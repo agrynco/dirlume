@@ -1498,6 +1498,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const title = t(titles[modal.kind]);
   const removing = "names" in modal;
+  const permanent = modal.kind === "delete";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1523,11 +1524,17 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     <Dialog key={String(recursive)} title={recursive ? t("Delete FTP folder contents") : title} onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
-          {recursive ? <p className="delete-warning">{t("Permanently delete the selected FTP folders and all their contents?")}</p> : removing
-            ? <p className={modal.kind === "delete" ? "delete-warning" : undefined}>
-              <Message text={modal.kind === "delete" ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
-                {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : countText(modal.names.length, "item")}
-              </Message></p>
+          {removing
+            ? <div className={permanent ? "permanent-delete-message" : undefined}>
+              {permanent && <Trash2 aria-hidden="true" />}
+              <div>
+                <p>{recursive ? t("Permanently delete the selected FTP folders and all their contents?") :
+                  <Message text={permanent ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
+                    <strong>{modal.names.length === 1 ? modal.names[0] : countText(modal.names.length, "item")}</strong>
+                  </Message>}</p>
+                {permanent && <p className="permanent-delete-note">{t("This action cannot be undone.")}</p>}
+              </div>
+            </div>
             : <label className="field">{t("Name")}
               <input data-initial-focus value={name} type="text" required onChange={(event) => setName(event.target.value)}
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
@@ -1546,7 +1553,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button>}
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
-          <Button type="submit" className={removing ? "negative" : "primary"}
+          <Button type="submit" className={permanent ? "permanent-delete-button" : removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}
           </Button>
