@@ -42,6 +42,7 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
+| Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
@@ -97,6 +98,12 @@ node scripts/server-smoke.mjs
 ```
 
 On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature. To include the FTP smoke test locally, install `pyftpdlib==2.2.0` in Python and set `DIRLUME_FTP_PYTHON` to that Python executable. Use a UI automation build so the fixture keeps its FTP profiles separate.
+
+## Archives
+
+Install the [7-Zip command-line tools](https://www.7-zip.org/download.html) to create and browse local archives. Dirlume looks for `7zz`, `7z`, or `7za` on the executable search path and in common installation directories. Select local items and press **Shift+F1** to create a ZIP, 7z, TAR, or WIM archive when the installed tool supports the format. The dialog supports compression profiles, AES encryption, split volumes, and a self-extracting option when the Windows SFX module is installed. Profiles store compression options without passwords.
+
+Press **Enter** on an archive to open it in a pane. Use **F5** to extract selected members to a local folder with the normal copy conflict prompts, **F3** to view files, or **Backspace** to go up. A writable archive supports editing text files with **F4** and removing selected members with **F8**. Encrypted, split, and other formats without update support open read-only. Dirlume skips unsafe member paths and refuses to extract links.
 
 ## Remote sources
 

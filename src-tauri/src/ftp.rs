@@ -827,7 +827,7 @@ fn search_session(
     Ok(())
 }
 
-fn matches_mask(pattern: &[char], name: &str) -> bool {
+pub(crate) fn matches_mask(pattern: &[char], name: &str) -> bool {
     let name: Vec<_> = name.to_lowercase().chars().collect();
     let (mut index, mut next) = (0, 0);
     let mut wildcard = None;

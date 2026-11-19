@@ -23,6 +23,7 @@ let nextSession = 0;
 function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (place.kind === "ftp") return { kind: "ftp", connection: place.id, segments: [...place.segments, item.name] };
+  if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "server") {
     return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
   }
@@ -57,7 +58,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
   const localTarget = transfer.ftpDestination === undefined;
-  const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp";
+  const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp" || transfer.source.kind === "archive";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
   const singleFile = itemCount === 1 && !transfer.items[0].entry.directory;

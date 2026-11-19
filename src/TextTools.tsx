@@ -3,7 +3,7 @@ import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
-import { describeError, placePath, readPlaceText, savePlaceText, type NamedFile, type TextDocument } from "./api";
+import { describeError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { HexViewer } from "./HexViewer";
 import { isMarkdownFile, MarkdownPreview, type MarkdownAnchor, type OpenMarkdownLink, type TaskMarker } from "./MarkdownPreview";
@@ -48,6 +48,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const dirty = Boolean(document && normalized(document.text) !== text);
   const markdownSource = document && !dirty ? document.text : text;
   const isMarkdown = isMarkdownFile(file.name);
+  const writable = writableTextPlace(file.place);
   const path = placePath(file.place);
   const section = useRef<HTMLElement>(null);
   const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
@@ -92,7 +93,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }, [file]);
 
   async function write(updated: string) {
-    if (!document || writing.current || file.place.kind === "server") return;
+    if (!document || writing.current || !writable) return;
     writing.current = true;
     setSaving(true);
     setError("");
@@ -116,7 +117,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }
 
   function toggleTask({ start, end }: TaskMarker, checked: boolean) {
-    if (writing.current || file.place.kind === "server") return;
+    if (writing.current || !writable) return;
     const updated = markdownSource.slice(0, start) + (checked ? "x" : " ") + markdownSource.slice(end);
     if (editing && dirty) setText(updated);
     else void write(updated);
@@ -162,7 +163,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
       {document && <>
         {preview && !hex && (
           <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light}
-            writable={file.place.kind !== "server"} saving={saving} onToggleTask={toggleTask}
+            writable={writable} saving={saving} onToggleTask={toggleTask}
             onOpenDocument={onOpenDocument} onError={setError} />
         )}
         <div className="source-surface" hidden={preview || hex}>

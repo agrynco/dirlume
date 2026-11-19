@@ -1,4 +1,10 @@
 #[cfg(feature = "desktop")]
+mod archive_create;
+#[cfg(feature = "desktop")]
+mod archive_engine;
+#[cfg(feature = "desktop")]
+mod archives;
+#[cfg(feature = "desktop")]
 mod completion;
 #[cfg(feature = "desktop")]
 mod desktop;
