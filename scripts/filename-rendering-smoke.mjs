@@ -13,7 +13,7 @@ export async function testFilenameRendering(page, root) {
   await address.fill(folder);
   await address.press("Enter");
   const pane = page.getByRole("region", { name: "left pane", exact: true });
-  await pane.getByRole("heading", { name: "filename-rendering-fixture", exact: true }).waitFor();
+  await pane.getByRole("heading", { name: "filename-rendering-fixture", exact: true }).waitFor({ state: "attached" });
   const rows = pane.getByRole("option");
   const nameField = (name) => rows.and(pane.getByTitle(name, { exact: true })).locator(".file-name > span");
   const dimensions = (name, selected) => nameField(name).evaluate((field, selected) => {

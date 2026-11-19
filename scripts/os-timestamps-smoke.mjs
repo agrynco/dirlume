@@ -1,3 +1,4 @@
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, utimes, writeFile } from "node:fs/promises";
@@ -17,10 +18,6 @@ export async function testOsTimestamps(page, root) {
     $sample = Get-Date -Year 2026 -Month 11 -Day 19 -Hour 16 -Minute 19 -Second 0
     @($sample.ToShortDateString(), $sample.ToShortTimeString()) | ConvertTo-Json -Compress
   `], { windowsHide: true, encoding: "utf8" }));
-  const options = async () => {
-    await page.getByRole("button", { name: "Options", exact: true }).click();
-    return page.getByRole("dialog", { name: "Options", exact: true });
-  };
   const native = (style) => page.evaluate(({ seconds, style }) =>
     window.__TAURI_INTERNALS__.invoke("format_timestamps", { timestamps: [seconds], style }),
   { seconds: sample.valueOf() / 1000, style });
@@ -47,15 +44,16 @@ export async function testOsTimestamps(page, root) {
   await properties.getByText(expected.join(", "), { exact: true }).first().waitFor();
   await page.keyboard.press("Escape");
 
-  const general = await options();
+  const window = await openOptionsWindow(page);
+  const general = window.getByRole("dialog", { name: "Options", exact: true });
   await general.getByRole("button", { name: "General", exact: true }).click();
   await general.getByLabel("Language", { exact: true }).selectOption("uk");
-  await general.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(window, () => general.getByRole("button", { name: "Done", exact: true }).click());
   await pane.locator(".file-date").filter({ hasText: expected.join(", ") }).waitFor();
-  await page.keyboard.press("Control+Alt+s");
-  const localizedOptions = page.getByRole("dialog").last();
-  await localizedOptions.locator("select").filter({ has: page.locator('option[value="uk"]') }).selectOption("en");
-  await localizedOptions.locator(".dialog-footer button.primary").click();
+  const localized = await openOptionsWindow(page, () => page.keyboard.press("Control+Alt+s"), "Налаштування");
+  const localizedOptions = localized.getByRole("dialog", { name: "Налаштування", exact: true });
+  await localizedOptions.locator("select").filter({ has: localized.locator('option[value="uk"]') }).selectOption("en");
+  await closeToolWindow(localized, () => localizedOptions.locator(".dialog-footer button.primary").click());
   await page.getByRole("button", { name: "Options", exact: true }).waitFor();
   console.log("Verified system date and time formats in file panes and file attributes, chronological sort, and independence from the app language.");
 }

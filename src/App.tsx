@@ -10,9 +10,11 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
+import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isLockError, isPermissionError, placePath, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
-import { Dialog } from "./Dialog";
+import { Dialog, readDialogSize } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
@@ -31,12 +33,12 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownAnchor } from "./MarkdownPreview";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
-  compactShortcut, quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
+  compactShortcut, preferenceKey, quickSearchSeed, readPreferences, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -179,7 +181,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (checkingUpdates.current) return;
     checkingUpdates.current = true;
     try {
-      const update = await api.checkForUpdate(manual);
+      const update = await api.checkForUpdate();
       if (update) setAvailableUpdate(update);
       if (manualUpdateCheck.current) setStatus({ text: update ? "Ready" : "Dirlume is up to date." });
     } catch (error) {
@@ -216,6 +218,33 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return () => document.removeEventListener("keydown", openHelp, true);
   }, [helpShortcut, modalKind, editingDocument]);
 
+  useEffect(() => {
+    if (preferences.shortcuts.menuAlternate !== "Alt") return;
+    let singleAlt = false;
+    function down(event: globalThis.KeyboardEvent) {
+      if (event.repeat && event.key === "Alt") return;
+      singleAlt = event.key === "Alt" && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.isComposing && !modal && !helpTopic;
+      if (singleAlt) event.preventDefault();
+    }
+    function up(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Alt" || !singleAlt) return;
+      singleAlt = false;
+      event.preventDefault();
+      mainMenu.current?.open();
+    }
+    const reset = () => { singleAlt = false; };
+    window.addEventListener("keydown", down, true);
+    window.addEventListener("keyup", up, true);
+    window.addEventListener("blur", reset);
+    window.addEventListener("pointerdown", reset, true);
+    return () => {
+      window.removeEventListener("keydown", down, true);
+      window.removeEventListener("keyup", up, true);
+      window.removeEventListener("blur", reset);
+      window.removeEventListener("pointerdown", reset, true);
+    };
+  }, [preferences.shortcuts.menuAlternate, modal, helpTopic]);
+
   const updatePane = useCallback((side: Side, updater: (pane: PaneState) => PaneState) => {
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
   }, []);
@@ -239,11 +268,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       const result = await readPlace(place);
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
-      const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
-      if (reveal !== undefined && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
+      const found = reveal === ".." ? hasParentRow(result.place) :
+        reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
+      if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         const listing = applyListing(pane, result.place, result.listing, action);
-        return found ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
+        return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
       });
       return true;
     } catch (error) {
@@ -363,6 +393,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     persistPreferences(preferences);
   }, [preferences]);
 
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key !== preferenceKey) return;
+      const next = readPreferences();
+      setLanguage(next.language);
+      setPreferences(next);
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+
   const zoomViewFont: ZoomViewFont = useCallback((view, change, base) => {
     setPreferences((current) => {
       const previous = current.viewFontSizes[view] ?? base;
@@ -407,26 +448,48 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
   }, [theme, scheme?.base]);
 
+  const dirtyComparisons = useRef(new Set<string>());
+  const askToSaveComparison = useCallback(() => {
+    if (!dirtyComparisons.current.size) return false;
+    void getAllWebviewWindows().then((windows) => {
+      const labels = new Set(windows.map(({ label }) => label));
+      for (const label of dirtyComparisons.current) if (!labels.has(label)) dirtyComparisons.current.delete(label);
+      const comparison = windows.find(({ label }) => dirtyComparisons.current.has(label));
+      if (comparison) void comparison.setFocus().finally(() => comparison.close()).catch(() => {});
+    }).catch(() => {});
+    return true;
+  }, []);
+
   useEffect(() => {
     if (!isTauri()) return;
+    const dirtyListener = listen<{ label: string; dirty: boolean }>("dirlume:comparison-dirty", ({ payload }) => {
+      if (!payload.label.startsWith("compare-")) return;
+      if (payload.dirty) dirtyComparisons.current.add(payload.label);
+      else dirtyComparisons.current.delete(payload.label);
+    });
     const listener = getCurrentWindow().onCloseRequested((event) => {
       if (installingUpdate.current) {
         event.preventDefault();
         return;
       }
+      if (askToSaveComparison()) { event.preventDefault(); return; }
       if (!exitConfirmed.current && dirtyDocuments.current.size) {
         event.preventDefault();
         setModal({ kind: "exit" });
       }
     });
-    return () => { void listener.then((unlisten) => unlisten()).catch(() => {}); };
-  }, []);
+    return () => {
+      void listener.then((unlisten) => unlisten()).catch(() => {});
+      void dirtyListener.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, [askToSaveComparison]);
 
   function installUpdate(update: AppUpdate) {
-    if (update.kind === "debian") {
+    if (update.kind !== "install") {
       void api.openWebLink(update.url).catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
       return;
     }
+    if (askToSaveComparison()) return;
     installingUpdate.current = true;
     setUpdateProgress(null);
     setModal({ kind: "installUpdate", version: update.version });
@@ -615,7 +678,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     if (processPanels[side]) showProcesses(side, false);
     else focus(side);
-    await load(side, place);
+    await load(side, place, "push", "..");
   }
 
   function history(side: Side, offset: number) {
@@ -997,9 +1060,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "refresh": refresh(active); break;
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
-      case "settings": setModal({ kind: "settings" }); break;
+      case "settings": openSettings(); break;
       case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
-      case "menu": mainMenu.current?.open(); break;
+      case "menu":
+      case "menuAlternate": mainMenu.current?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
@@ -1107,11 +1171,28 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         });
         const left = marked.length === 2 ? marked[0] : fileFor("left");
         const right = marked.length === 2 ? marked[1] : fileFor("right");
-        if (left && right) setModal({ kind: "compare", left, right });
+        if (left && right) {
+          if (isTauri()) {
+            void api.openToolWindow(t("Compare files"), undefined, { left, right })
+              .catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
+          } else setModal({ kind: "compare", left, right });
+        }
         else setStatus({ text: "Choose a text file in each pane to compare.", error: true });
         break;
       }
     }
+  }
+
+  const openingOptions = useRef(false);
+  function openSettings() {
+    if (!isTauri()) { setModal({ kind: "settings" }); return; }
+    if (openingOptions.current) return;
+    openingOptions.current = true;
+    void api.openToolWindow(t("Options"), readDialogSize("options")).then(() => {
+      setModal((current) => current?.kind === "connect" ? null : current);
+    }).catch((error: unknown) => setStatus({ text: describeError(error), error: true })).finally(() => {
+      openingOptions.current = false;
+    });
   }
 
   function keyDown(event: KeyboardEvent) {
@@ -1241,7 +1322,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   return (
     <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} onKeyDown={keyDown} onKeyDownCapture={documentKeys}>
-      <header className="topbar">
+      <header className="topbar" data-menu-position={preferences.menuPosition}>
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
         <div className="top-actions">
@@ -1330,7 +1411,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           history={commandTexts} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
-      <nav className="actionbar" aria-label={t("File actions")}>
+      <nav className="actionbar" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
           fileActions.map(({ command, label, Icon, disabled }) => (
           <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
@@ -1360,6 +1441,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       {modal?.kind === "settings" && <Settings preferences={preferences} onChange={(next) => {
         setLanguage(next.language);
         setPreferences(next);
+        return next;
       }} onClose={() => setModal(null)} />}
       {modal?.kind === "exit" && (
         <Dialog title={t("Unsaved changes")} onClose={() => setModal(modal.update ? { kind: "update", update: modal.update } : null)}>
@@ -1393,7 +1475,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             <Button type="button" className="primary" onClick={() => {
               if (modal.update.kind === "install" && dirtyDocuments.current.size) setModal({ kind: "exit", update: modal.update });
               else installUpdate(modal.update);
-            }}>{t(modal.update.kind === "debian" ? "Download Debian package" : "Install and restart")}</Button>
+            }}>{t(modal.update.kind === "debian" ? "Download Debian package" : modal.update.kind === "release" ? "Open release page" : "Install and restart")}</Button>
           </footer>
         </Dialog>
       )}
@@ -1409,7 +1491,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       )}
       {modal?.kind === "transfer" && (
         <TransferDialog transfer={modal.transfer} showHidden={preferences.hidden} onClose={() => setModal(null)}
-          onFinished={() => { refresh("left"); refresh("right"); }} />
+          onFinished={(success) => { refresh("left"); refresh("right"); if (success) setStatus({ text: "Transfer complete" }); }} />
       )}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
@@ -1446,7 +1528,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         </Dialog>
       )}
       {modal?.kind === "connect" && (
-        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => setModal({ kind: "settings" })}
+        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={openSettings}
           onConnect={(place, listing) => { routeRemote(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}

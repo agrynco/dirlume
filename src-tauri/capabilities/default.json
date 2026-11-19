@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Dirlume's local main window",
-  "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-theme", "core:window:allow-close", "core:window:allow-destroy", "dialog:allow-open", "dialog:allow-save"]
+  "windows": ["main", "options", "compare-*"],
+  "permissions": ["core:default", "core:window:allow-set-theme", "core:window:allow-set-title", "core:window:allow-set-focus", "core:window:allow-close", "core:window:allow-destroy", "dialog:allow-open", "dialog:allow-save"]
 }

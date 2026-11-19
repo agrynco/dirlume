@@ -14,7 +14,7 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use reqwest::{redirect::Policy, Certificate, Client, Response};
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -27,6 +27,84 @@ pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+#[tauri::command]
+async fn open_tool_window(
+    main: WebviewWindow,
+    title: String,
+    width: Option<f64>,
+    height: Option<f64>,
+    comparison: Option<serde_json::Value>,
+) -> Result<()> {
+    if main.label() != "main" {
+        return Err("Open this window from the main Dirlume window.".into());
+    }
+    let app = main.app_handle();
+    static NEXT_COMPARISON: AtomicU32 = AtomicU32::new(1);
+    let label = match comparison {
+        Some(_) => format!(
+            "compare-{}",
+            NEXT_COMPARISON.fetch_add(1, Ordering::Relaxed)
+        ),
+        None => "options".to_owned(),
+    };
+    if let Some(window) = app.get_webview_window(&label) {
+        window.unminimize().map_err(message)?;
+        window.show().map_err(message)?;
+        return window.set_focus().map_err(message);
+    }
+
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .ok_or("The main window configuration is missing.")?;
+    config.label = label;
+    config.title = title;
+    config.min_width = Some(600.0);
+    config.min_height = Some(380.0);
+    let (max_width, max_height) = main
+        .current_monitor()
+        .map_err(message)?
+        .map(|monitor| {
+            let area = monitor
+                .work_area()
+                .size
+                .to_logical::<f64>(monitor.scale_factor());
+            (
+                (area.width - 32.0).max(600.0),
+                (area.height - 48.0).max(380.0),
+            )
+        })
+        .unwrap_or((1400.0, 960.0));
+    config.width = width
+        .filter(|value| value.is_finite())
+        .unwrap_or(1040.0)
+        .clamp(600.0, max_width);
+    config.height = height
+        .filter(|value| value.is_finite())
+        .unwrap_or(670.0)
+        .clamp(380.0, max_height);
+    config.center = true;
+    config.decorations = true;
+    config.resizable = true;
+    config.maximizable = true;
+    config.minimizable = true;
+    config.closable = true;
+    let mut builder = WebviewWindowBuilder::from_config(app, &config)
+        .map_err(message)?
+        .parent(&main)
+        .map_err(message)?;
+    if let Some(comparison) = comparison {
+        builder =
+            builder.initialization_script(format!("window.__dirlumeComparison = {comparison};"));
+    }
+    builder.build().map_err(message)?;
+    Ok(())
 }
 
 pub(crate) async fn blocking<T: Send + 'static>(
@@ -1273,6 +1351,33 @@ async fn save_text(directory: String, name: String, original: String, text: Stri
 }
 
 #[tauri::command]
+async fn save_text_as(path: String, encoding: Encoding, text: String) -> Result<()> {
+    blocking(move || {
+        let path = local::absolute(&path).map_err(message)?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("Enter a file name.")?;
+        local::name_component(name).map_err(message)?;
+        let directory = path.parent().ok_or("Choose a parent folder.")?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(message)?;
+        staged
+            .write_all(&encode_text(encoding, &text)?)
+            .map_err(message)?;
+        staged.as_file().sync_all().map_err(message)?;
+        staged.persist_noclobber(path).map_err(|error| {
+            if error.error.kind() == io::ErrorKind::AlreadyExists {
+                "A file already exists at that path. Choose a new file name.".to_owned()
+            } else {
+                message(error.error)
+            }
+        })?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
 async fn open_kswitcher(directory: String) -> Result<()> {
     blocking(move || kswitcher::launch(&directory)).await
 }
@@ -1334,6 +1439,15 @@ pub fn run() {
         context
     };
     let builder = tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
+                for (label, tool) in window.app_handle().webview_windows() {
+                    if label == "options" || label.starts_with("compare-") {
+                        let _ = tool.destroy();
+                    }
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(crate::updates::PendingUpdate::default())
@@ -1361,6 +1475,7 @@ pub fn run() {
     let dispatch: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         diagnostics::report_diagnostic,
         build_version,
+        open_tool_window,
         crate::updates::check_for_update,
         crate::updates::install_update,
         #[cfg(feature = "ui-automation")]
@@ -1427,6 +1542,7 @@ pub fn run() {
         read_bytes,
         read_server_bytes,
         save_text,
+        save_text_as,
         open_kswitcher,
         has_kswitcher_bridge,
         kswitcher_peers,

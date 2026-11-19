@@ -38,7 +38,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   transfer: Transfer;
   showHidden: boolean;
   onClose: () => void;
-  onFinished: () => void;
+  onFinished: (success: boolean) => void;
 }) {
   const [destination, setDestination] = useState(transfer.target);
   const [policy, setPolicy] = useState<ConflictPolicy>("ask");
@@ -113,6 +113,8 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
     setError("");
     setBlocked(undefined);
     let attempted: Transfer["items"][number] | undefined;
+    let finished = false;
+    let skippedItems = skipped;
     let totalBytes = bytes;
     let previousBytes = 0;
     const output = new Channel<TransferEvent>();
@@ -146,9 +148,10 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
         };
         const result = await api.transfer(id, request, output);
         if (result.kind === "completed") setCompleted((count) => count + 1);
-        else setSkipped((count) => count + 1);
+        else setSkipped(++skippedItems);
         setProcessed(index + 1);
       }
+      finished = true;
     } catch (error) {
       if (!cancelled.current) {
         setError(describeError(error));
@@ -159,8 +162,10 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
       running.current = null;
       output.onmessage = () => {};
       setConflict(null);
-      setPhase("done");
-      onFinished();
+      const success = finished && !cancelled.current && skippedItems === 0;
+      onFinished(success);
+      if (success) onClose();
+      else setPhase("done");
     }
   }
 
@@ -270,7 +275,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
         <footer className="dialog-footer">
           {conflict.replaceable && (
             <Button type="button" className={conflict.directory ? "primary" : "negative"} disabled={answering === conflict}
-              onClick={() => { void resolve("overwrite"); }}>{conflict.directory ? t("Merge") : t("Overwrite")}</Button>
+              onClick={() => { void resolve("overwrite"); }}>{t("Overwrite")}</Button>
           )}
           <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>{t("Skip")}</Button>
           <Button type="button" onClick={cancel}>{t("Cancel")}</Button>

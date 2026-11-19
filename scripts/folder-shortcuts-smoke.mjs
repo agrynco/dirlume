@@ -11,7 +11,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   const confirm = () => dialog().getByRole("button", { name: "OK", exact: true }).click();
   const address = (side) => page.getByLabel(`${side} path`, { exact: true });
   const opened = (side, target) => page.getByRole("region", { name: `${side} pane`, exact: true })
-    .getByRole("heading", { name: basename(target), exact: true }).waitFor();
+    .getByRole("heading", { name: basename(target), exact: true }).waitFor({ state: "attached" });
 
   async function navigate(side, target) {
     await address(side).fill(target);
@@ -55,6 +55,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await page.locator("#right-pane.active").waitFor();
   await list("right").press("Control+8");
   await opened("right", src);
+  await list("right").locator('[data-current="true"][title=".."]').waitFor();
   assert.equal(await dialog().count(), 0);
   assert.equal(await address("left").inputValue(), src);
   await navigate("right", dst);

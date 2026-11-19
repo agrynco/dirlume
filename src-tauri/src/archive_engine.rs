@@ -33,11 +33,15 @@ impl Engine {
             .collect();
         #[cfg(windows)]
         dirs.extend(
-            ["ProgramW6432", "ProgramFiles"]
+            ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
                 .iter()
                 .filter_map(std::env::var_os)
                 .map(|parent| PathBuf::from(parent).join("7-Zip")),
         );
+        #[cfg(windows)]
+        if let Some(base) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(base).join("Programs").join("7-Zip"));
+        }
         #[cfg(not(windows))]
         dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from));
         let executable = dirs
@@ -70,18 +74,18 @@ impl Engine {
             .lines()
             .skip_while(|line| line.trim() != "Formats:")
             .skip(1)
-            .take_while(|line| !line.trim().is_empty())
+            .take_while(|line| !line.trim().ends_with(':'))
             .filter_map(|line| {
-                let words: Vec<_> = line.split_whitespace().collect();
-                words
-                    .iter()
-                    .position(|word| word.starts_with('C') && word.len() > 10)
-                    .and_then(|index| words.get(index + 1))
-                    .copied()
+                let mut words = line.split_whitespace();
+                words.find(|word| word.starts_with('C') && word.contains('.'))?;
+                words.next()
             })
             .filter(|kind| ["7z", "zip", "tar", "wim"].contains(kind))
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>();
+        if formats.is_empty() {
+            return Err("7-Zip did not report any supported archive formats.".to_owned());
+        }
         Ok(formats)
     }
 

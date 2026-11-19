@@ -1,5 +1,6 @@
+import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function testCompareLayouts(page, root) {
@@ -23,16 +24,19 @@ export async function testCompareLayouts(page, root) {
   await row("left", "original.txt").click();
   await row("right", "revised.txt").click();
 
-  const dialog = page.getByRole("dialog", { name: "Compare files", exact: true });
-  const layout = dialog.getByLabel("Layout", { exact: true });
+  const compare = () => openToolWindow(page, () => page.keyboard.press("Shift+F11"), "Compare files");
+  let window = await compare();
+  const currentDialog = () => window.getByRole("dialog", { name: "Compare files", exact: true });
+  let dialog = currentDialog();
+  const layout = () => currentDialog().getByLabel("Layout", { exact: true });
   const whitespace = dialog.getByLabel("Show whitespace changes", { exact: true });
   const connectors = dialog.getByLabel("Show change connectors", { exact: true });
-  const list = dialog.getByLabel("File differences", { exact: true });
+  const differences = () => currentDialog().getByLabel("File differences", { exact: true });
+  let list = differences();
   const active = list.locator(".diff-block.current");
 
-  await page.keyboard.press("Shift+F11");
   await list.waitFor();
-  await layout.selectOption("side-by-side");
+  await layout().selectOption("side-by-side");
   await connectors.check();
   await whitespace.check();
   await list.locator('[data-change="3"]').waitFor();
@@ -64,10 +68,10 @@ export async function testCompareLayouts(page, root) {
   await assertAlignment();
   const divider = dialog.getByRole("separator", { name: "Comparison divider", exact: true });
   const before = await divider.boundingBox();
-  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(before.x - 65, before.y + before.height / 2, { steps: 6 });
-  await page.mouse.up();
+  await window.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await window.mouse.down();
+  await window.mouse.move(before.x - 65, before.y + before.height / 2, { steps: 6 });
+  await window.mouse.up();
   assert.ok(Number(await divider.getAttribute("aria-valuenow")) < 50);
   await assertAlignment();
   for (const width of ["620px", "1000px"]) {
@@ -85,7 +89,7 @@ export async function testCompareLayouts(page, root) {
   assert.equal(await list.locator(".diff-connector").count(), 0);
   await connectors.check();
 
-  await layout.selectOption("unified");
+  await layout().selectOption("unified");
   assert.equal(await active.getAttribute("data-change"), "1");
   assert.equal(await whitespace.isChecked(), true);
   const first = list.locator(".diff-unified.same").filter({ hasText: "First" });
@@ -96,20 +100,49 @@ export async function testCompareLayouts(page, root) {
   assert.equal(await active.getAttribute("data-change"), "2");
   await list.press("F7");
   assert.equal(await active.getAttribute("data-change"), "1");
-  await layout.selectOption("side-by-side");
+  const collapse = dialog.getByRole("checkbox", { name: "Collapse unchanged sections" });
+  await collapse.check();
+  const folded = dialog.getByRole("button", { name: /^Show \d+ unchanged lines/ });
+  await folded.first().click();
+  await collapse.uncheck();
+  await layout().selectOption("side-by-side");
   assert.equal(await active.getAttribute("data-change"), "1");
   if (process.env.DIRLUME_COMPARE_SCREENSHOT) await dialog.screenshot({ path: process.env.DIRLUME_COMPARE_SCREENSHOT });
-  await layout.selectOption("unified");
-  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await layout().selectOption("unified");
+  await closeToolWindow(window);
 
   await row("left", "original.txt").click();
   await row("left", "original.txt").click({ modifiers: ["Control"] });
   await row("left", "identical.txt").click({ modifiers: ["Control"] });
-  await page.keyboard.press("Shift+F11");
+  window = await compare();
+  dialog = currentDialog();
+  list = differences();
   await list.waitFor();
-  assert.equal(await layout.inputValue(), "unified");
+  assert.equal(await layout().inputValue(), "unified");
   assert.equal(await list.locator("[data-change]").count(), 0);
   assert.equal(await dialog.getByRole("button", { name: "Next", exact: true }).isEnabled(), false);
-  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await closeToolWindow(window);
   console.log("Verified both comparison layouts, original line numbers, intraline marks, ribbons, resizing, scrolling, and navigation.");
+
+  await row("left", "original.txt").click();
+  await row("right", "revised.txt").click();
+  window = await compare();
+  dialog = currentDialog();
+  await dialog.getByRole("button", { name: "Apply to right", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "Edit files", exact: true }).check();
+  for (const [side, text] of [["Left", "left edit"], ["Right", "right edit"]]) {
+    await dialog.getByRole("region", { name: `${side} file` }).locator(".cm-content").press("Control+End");
+    await window.keyboard.insertText("\n" + text);
+  }
+  await window.keyboard.press("Escape");
+  const save = window.getByRole("dialog", { name: "Unsaved changes", exact: true });
+  const rightSave = save.getByRole("group", { name: /^Right file/ });
+  await rightSave.getByRole("combobox", { name: "Save changes" }).selectOption("copy");
+  const copy = join(root, "comparison-copy.txt");
+  await rightSave.getByRole("combobox", { name: "Save as" }).fill(copy);
+  await closeToolWindow(window, () => save.getByRole("button", { name: "Save and close" }).click());
+  assert.equal(await readFile(join(left, "original.txt"), "utf8"), original + "\nleft edit");
+  assert.equal(await readFile(join(right, "revised.txt"), "utf8"), revised);
+  assert.equal(await readFile(copy, "utf8"), revised.replace("switch = 999;", "switch = 100;\n" + longLine) + "\nright edit");
+  console.log("Verified applying a comparison change, editing both sides, overwriting one original, and saving the other side to a new file.");
 }

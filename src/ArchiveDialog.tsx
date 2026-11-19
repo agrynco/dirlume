@@ -163,6 +163,7 @@ export function ArchiveDialog({ directory, names, showHidden, onClose, onCreated
     <Dialog title={t("Create archive")} wide onClose={close}>
       <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); void submit(false); }}>
         <div className="dialog-body">
+          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {progress !== null ? <div className="archive-progress">
             <progress aria-label={t("Archive progress")} value={progress} max={100} />
             <span>{progress}%</span>
@@ -176,8 +177,10 @@ export function ArchiveDialog({ directory, names, showHidden, onClose, onCreated
             {fieldCheck("Append extension", settings.appendExtension, (value) => change("appendExtension", value))}
             <div className="archive-settings">
               <label className="field">{t("Format")}
-                <select value={settings.format} aria-label={t("Format")} onChange={(event) => format(event.target.value)}>
-                  {(capabilities?.formats ?? [settings.format]).map((type) => <option key={type} value={type}>{type.toUpperCase()}</option>)}
+                <select value={capabilities ? settings.format : ""} aria-label={t("Format")} disabled={!capabilities}
+                  onChange={(event) => format(event.target.value)}>
+                  {!capabilities && <option value="">{t(error ? "No formats available" : "Checking archive formats…")}</option>}
+                  {capabilities?.formats.map((type) => <option key={type} value={type}>{type.toUpperCase()}</option>)}
                 </select>
               </label>
               <label className="field">{t("Compression level")}
@@ -230,7 +233,6 @@ export function ArchiveDialog({ directory, names, showHidden, onClose, onCreated
               <Button type="button" onClick={saveProfile} disabled={!profileName.trim()}>{t("Save profile")}</Button>
             </div>
           </>}
-          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         </div>
         <footer className="dialog-footer">
           <Button type="button" disabled={canceling} onClick={close}>{t(warning ? "Done" : canceling ? "Canceling…" : "Cancel")}</Button>

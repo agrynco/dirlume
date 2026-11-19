@@ -20,7 +20,7 @@ export async function testArchives(page, root) {
     await address.fill(path);
     await address.press("Enter");
     await page.getByRole("region", { name: `${side} pane`, exact: true })
-      .getByRole("heading", { name: basename(path), exact: true }).waitFor();
+      .getByRole("heading", { name: basename(path), exact: true }).waitFor({ state: "attached" });
     await list.waitFor();
   }
   const left = page.locator("#left-files");
@@ -59,7 +59,8 @@ export async function testArchives(page, root) {
   await row("folder").click();
   await page.keyboard.press("F5");
   await button(dialog("Copy"), "Copy").click();
-  await page.getByRole("dialog").getByRole("button", { name: "Done", exact: true }).click();
+  await page.locator("dialog[open]").first().waitFor({ state: "hidden" });
+  await page.locator(".statusbar").getByText("Transfer complete", { exact: true }).waitFor();
   assert.equal(await readFile(join(destination, "folder", "note.txt"), "utf8"), "archived text");
 
   await row("folder").dblclick();

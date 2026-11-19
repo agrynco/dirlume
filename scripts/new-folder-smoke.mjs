@@ -1,3 +1,4 @@
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -32,12 +33,12 @@ export async function testNewFolder({ page, startDesktop, exitDesktop, root }) {
   await entry("link-target").click();
 
   // The earlier shortcut test remaps New folder to F12.
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Options", exact: true });
-  await settings.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  await settings.getByLabel("Change shortcut for New folder", { exact: true }).click();
-  await settings.getByLabel("New shortcut for New folder", { exact: true }).press("F7");
-  await settings.getByRole("button", { name: "Done", exact: true }).click();
+  const window = await openOptionsWindow(page);
+  const options = window.getByRole("dialog", { name: "Options", exact: true });
+  await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  await options.getByLabel("Change shortcut for New folder", { exact: true }).click();
+  await options.getByLabel("New shortcut for New folder", { exact: true }).press("F7");
+  await closeToolWindow(window, () => options.getByRole("button", { name: "Done", exact: true }).click());
 
   await open();
   await name().fill("escape-cancelled");

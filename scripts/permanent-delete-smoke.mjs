@@ -1,3 +1,4 @@
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,20 +37,20 @@ export async function testPermanentDelete(page, root) {
   await standard.waitFor({ state: "hidden" });
   assert.ok((await stat(join(folder, "projects"))).isDirectory());
 
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const options = page.getByRole("dialog", { name: "Options", exact: true });
+  const window = await openOptionsWindow(page);
+  const options = window.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "General", exact: true }).click();
   await options.getByLabel("Language", { exact: true }).selectOption("uk");
-  await options.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(window, () => options.getByRole("button", { name: "Done", exact: true }).click());
   const translated = await open(longName, "Видалити остаточно", "Скасувати");
   await translated.getByText("Цю дію неможливо скасувати.", { exact: true }).waitFor();
   if (process.env.DIRLUME_DELETE_SCREENSHOT) await translated.screenshot({ path: process.env.DIRLUME_DELETE_SCREENSHOT, scale: "css" });
   await translated.getByRole("button", { name: "Видалити остаточно", exact: true }).click();
   await row(longName).waitFor({ state: "detached" });
   await assert.rejects(stat(join(folder, longName)), { code: "ENOENT" });
-  await page.getByRole("button", { name: "Налаштування", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Налаштування", exact: true });
+  const localized = await openOptionsWindow(page, () => page.getByRole("button", { name: "Налаштування", exact: true }).click(), "Налаштування");
+  const settings = localized.getByRole("dialog", { name: "Налаштування", exact: true });
   await settings.getByLabel("Мова", { exact: true }).selectOption("en");
-  await settings.getByRole("button", { name: "Готово", exact: true }).click();
+  await closeToolWindow(localized, () => settings.getByRole("button", { name: "Готово", exact: true }).click());
   console.log("Verified permanent delete dialog layout, translated long filenames, keyboard cancellation, and confirmed deletion.");
 }

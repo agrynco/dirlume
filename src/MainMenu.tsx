@@ -52,6 +52,20 @@ export function MainMenu({ groups, shortcut, ref }: {
     if (expanded !== null) bar.current?.querySelector<HTMLElement>(`[data-menu-item="${cursor}"]`)?.focus();
   }, [expanded, cursor]);
 
+  useLayoutEffect(() => {
+    const menu = bar.current?.querySelector<HTMLElement>(".main-menu-dropdown");
+    if (!menu) return;
+    const place = () => {
+      menu.style.insetInlineStart = "0px";
+      const bounds = menu.getBoundingClientRect();
+      menu.style.maxHeight = `${Math.max(0, window.innerHeight - bounds.top - 8)}px`;
+      menu.style.insetInlineStart = `${Math.min(0, window.innerWidth - bounds.right - 8)}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [expanded]);
+
   useEffect(() => {
     if (expanded === null) return;
     function outside(event: PointerEvent) {

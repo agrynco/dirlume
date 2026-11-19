@@ -262,7 +262,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         event.preventDefault();
         onDrop();
       }}>
-      <header className="pane-heading">
+      <header className={`pane-heading${localFolder && !processView && !search ? " local-heading" : ""}`}>
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" title={location.path} aria-pressed={location === currentLocation}

@@ -1,8 +1,9 @@
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 
 export async function testShortcutFields(page) {
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const options = page.getByRole("dialog", { name: "Options", exact: true });
+  const window = await openOptionsWindow(page);
+  const options = window.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   const lookup = (command) => options.getByLabel("Change shortcut for " + command, { exact: true });
   const check = async (command, shortcut) => {
@@ -26,11 +27,10 @@ export async function testShortcutFields(page) {
     await check("Forward", "Alt+→");
   };
   await verify();
-  const grip = options.getByRole("button", { name: "Resize Options", exact: true });
-  for (let index = 0; index < 24; index++) await grip.press("ArrowLeft");
+  await window.setViewportSize({ width: 600, height: 400 });
   await verify();
   await options.getByRole("button", { name: "Clear shortcut for Forward", exact: true }).click();
   assert.equal(await lookup("Forward").innerText(), "Unassigned");
-  await options.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await closeToolWindow(window);
   console.log("Verified long shortcut labels fit at normal and minimum Options width and Clear stays usable.");
 }

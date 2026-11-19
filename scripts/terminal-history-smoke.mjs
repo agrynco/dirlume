@@ -10,7 +10,7 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
     const address = page.getByLabel(`${side} path`, { exact: true });
     await address.fill(path);
     await address.press("Enter");
-    await page.getByRole("heading", { name: `history-${side}`, exact: true }).waitFor();
+    await page.getByRole("heading", { name: `history-${side}`, exact: true }).waitFor({ state: "attached" });
   }
   const terminal = () => page.getByRole("region", { name: "Terminal", exact: true });
   if (await terminal().isVisible()) await terminal().getByRole("button", { name: "Close terminal", exact: true }).click();

@@ -7,7 +7,7 @@ type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
 const resizeEdges = ["n", "ne", "e", "s", "sw", "w", "nw"] as const;
 
-function readSize(key: string | undefined): Dimensions | undefined {
+export function readDialogSize(key: string | undefined): Dimensions | undefined {
   if (!key) return;
   try {
     const value = JSON.parse(localStorage.getItem(sizePrefix + key) ?? "null") as Dimensions | null;
@@ -15,18 +15,23 @@ function readSize(key: string | undefined): Dimensions | undefined {
   } catch { /* Use the default size. */ }
 }
 
-export function Dialog({ title, children, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false }: {
+export function saveDialogSize(key: string, size: Dimensions) {
+  try { localStorage.setItem(sizePrefix + key, JSON.stringify(size)); } catch { /* The current size still applies. */ }
+}
+
+export function Dialog({ title, children, onClose, onKeyDown, wide = false, resizeKey, standalone = false, dismissOnOutside = false }: {
   title: string;
   children: ReactNode;
   onClose?: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   wide?: boolean;
   resizeKey?: string;
+  standalone?: boolean;
   dismissOnOutside?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
-  const [size, setSize] = useState(() => readSize(resizeKey));
+  const [size, setSize] = useState(() => readDialogSize(resizeKey));
   const drag = useRef<(Dimensions & { x: number; y: number; horizontal: number; vertical: number }) | null>(null);
   useLayoutEffect(() => {
     const dialog = ref.current;
@@ -45,9 +50,7 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
       height: Math.min(window.innerHeight - 42, Math.max(350, height)),
     };
     setSize(next);
-    if (persist && resizeKey) {
-      try { localStorage.setItem(sizePrefix + resizeKey, JSON.stringify(next)); } catch { /* The current size still applies. */ }
-    }
+    if (persist && resizeKey) saveDialogSize(resizeKey, next);
   }
 
   function finishResize() {
@@ -58,7 +61,7 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
   }
 
   return (
-    <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "")}
+    <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
       style={size} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
@@ -96,7 +99,7 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose?.(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>
-        {onClose && <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>}
+        {onClose && !standalone && <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>}
       </header>
       {children}
       {resizeKey && resizeEdges.map((edge) =>
