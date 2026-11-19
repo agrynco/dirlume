@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,14 +8,15 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
   const right = join(root, "history-right");
   for (const [side, path] of [["left", left], ["right", right]]) {
     await mkdir(path);
-    const address = page.getByLabel(`${side} path`, { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
     await page.getByRole("heading", { name: `history-${side}`, exact: true }).waitFor({ state: "attached" });
   }
   const terminal = () => page.getByRole("region", { name: "Terminal", exact: true });
+  const toggleTerminal = () => page.getByRole("button", { name: "Toggle terminal", exact: true }).click();
   if (await terminal().isVisible()) await terminal().getByRole("button", { name: "Close terminal", exact: true }).click();
-  await page.getByRole("button", { name: "Terminal", exact: true }).click();
+  await toggleTerminal();
   await terminal().locator(".xterm-rows").waitFor();
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("PS "));
   const terminalInput = () => terminal().locator(".xterm-helper-textarea");
@@ -47,6 +49,7 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
 
   const input = () => page.getByRole("combobox", { name: "Command line", exact: true });
   const fromField = "Write-Output 'history-from-field'";
+  await toggleTerminal();
   await input().fill(fromField);
   await input().press("Shift+Enter");
   await waitForCommand(fromField);
@@ -56,6 +59,7 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
   await run(secure);
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("history-password-prompt:"));
   const queued = "Write-Output ('queued-' + 'history-marker')";
+  await toggleTerminal();
   await input().fill(queued);
   await input().press("Shift+Enter");
   await run("disposable-history-password");

@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -14,8 +15,7 @@ export async function testCommandCompletion(page, root) {
     "commit", "--allow-empty", "--no-gpg-sign", "-qm", "Fixture");
   git("branch", "fixture-completion");
 
-  const address = page.getByLabel("left path", { exact: true });
-  await page.locator("#left-files").press("Control+l");
+  const address = await editPaneAddress(page);
   await address.fill(cwd);
   await address.press("Enter");
   await page.locator("#left-files").getByRole("option", { name: /^completion folder/ }).click();
@@ -63,7 +63,7 @@ export async function testCommandCompletion(page, root) {
     else await input.press("Shift+Enter");
     await page.waitForFunction((output) => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes(output),
       `completion-history-${suffix}`);
-    await page.locator(".xterm-helper-textarea").press("F12");
+    await page.getByRole("button", { name: "Toggle terminal", exact: true }).click();
   }
   await draft("Write-Output 'completion-history-", /completion-history-first/);
   assert.match(await list.getByRole("option").nth(0).innerText(), /completion-history-first/);

@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -16,7 +17,7 @@ export async function testArchives(page, root) {
   for (const [side, path] of [["left", source], ["right", destination]]) {
     const list = page.locator(`#${side}-files[aria-busy="false"]`);
     await list.waitFor();
-    const address = page.getByLabel(`${side} path`, { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
     await page.getByRole("region", { name: `${side} pane`, exact: true })

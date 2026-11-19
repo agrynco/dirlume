@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -13,7 +14,7 @@ export async function testLockingProcessPane(page, root) {
     await mkdir(target);
     const filename = join(target, "blocking-test.txt");
     await writeFile(filename, "Locking process fixture");
-    const address = page.getByLabel(side + " path", { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(target);
     await address.press("Enter");
     await row(side).waitFor();

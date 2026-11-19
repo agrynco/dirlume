@@ -1256,9 +1256,16 @@ try {
   await toggleTerminal.click();
   await commandLine.waitFor();
   await left.waitFor();
+  await toggleTerminal.click();
+  await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+  await commandLine.waitFor();
   await commandLine.fill("Write-Output ('dirlume-' + 'command-bar-ok')");
   await commandLine.press("Enter");
-  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("dirlume-command-bar-ok"));
+  try {
+    await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("dirlume-command-bar-ok"));
+  } catch (error) {
+    throw new Error(`The terminal did not run the command bar input. ${await terminal.innerText()}`, { cause: error });
+  }
   await terminalInput.press("ArrowUp");
   await terminalInput.press("Enter");
   await page.waitForFunction(() => (document.querySelector(".xterm-accessibility-tree")?.textContent?.match(/dirlume-command-bar-ok/g)?.length ?? 0) >= 2);
@@ -1667,8 +1674,8 @@ try {
   const helpTerminalInput = page.locator(".xterm-helper-textarea");
   await helpTerminalInput.press("F1");
   assert.equal(await help.isVisible(), false);
-  await terminalButton.focus();
-  await page.keyboard.press("F1");
+  await terminalButton.click();
+  await page.getByRole("combobox", { name: "Command line", exact: true }).press("F1");
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
   await page.keyboard.press("Escape");
 
@@ -1808,7 +1815,7 @@ try {
     await row.click();
     assert.deepEqual(await colors(), ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
     await row.click({ modifiers: ["Control"] });
-    await otherRow.click();
+    await attributeList.press("Home");
     const marked = await colors();
     assert.notEqual(marked[0], original[0]);
     assert.equal(marked[1], original[1]);

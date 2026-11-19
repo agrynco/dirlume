@@ -33,7 +33,7 @@ export async function testNewFolder({ page, startDesktop, exitDesktop, root }) {
   await address.press("Enter");
   await entry("link-target").click();
 
-  // The earlier shortcut test remaps New folder to F12.
+  // Restore the default after testing the custom New folder shortcut.
   const window = await openOptionsWindow(page);
   const options = window.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();

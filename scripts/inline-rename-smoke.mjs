@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ export async function testInlineRename(page, root) {
   await writeFile(join(right, "note.txt"), "Preserved contents.");
   await writeFile(join(right, "existing.txt"), "Existing contents.");
   for (const [side, path] of [["left", left], ["right", right]]) {
-    const address = page.getByLabel(`${side} path`, { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
     await page.getByRole("heading", { name: `rename-${side}`, exact: true }).waitFor({ state: "attached" });

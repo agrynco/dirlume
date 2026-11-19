@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -11,7 +12,7 @@ export async function testMcp({ page, root, startDesktop, exitDesktop, pid }) {
   await mkdir(source);
   await mkdir(target);
   for (const [side, path] of [["left", source], ["right", target]]) {
-    const address = page.getByLabel(side + " path", { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
     await page.getByRole("heading", { name: `mcp-${side === "left" ? "source" : "target"}`, exact: true }).waitFor({ state: "attached" });
