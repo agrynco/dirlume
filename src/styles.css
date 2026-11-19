@@ -322,9 +322,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .process-properties { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 16px; margin: 0; }
 .process-properties dt { color: var(--muted); }
 .process-properties dd { margin: 0; overflow-wrap: anywhere; }
-.process-search { display: flex; align-items: center; gap: 7px; padding: 5px 9px; border-top: 1px solid var(--line); }
-.process-search svg { width: 15px; height: 15px; flex: none; color: var(--panel-muted); }
-.process-search input { flex: 1; min-width: 0; min-height: 27px; padding-block: 3px; }
 .process-scroll { min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; }
 .process-table.file-list { width: 100%; table-layout: fixed; border-spacing: 0; padding: 0; }
 .process-table :is(th, td) { padding: 4px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

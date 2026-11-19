@@ -16,6 +16,7 @@ import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
+import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -907,7 +908,6 @@ try {
   assert.deepEqual(pids.map(Number), pids.map(Number).sort((a, b) => a - b));
   await pidHeader.getByRole("button").click();
   assert.equal(await pidHeader.getAttribute("aria-sort"), "descending");
-  await leftPane.getByRole("searchbox", { name: "Find process" }).fill(String(lockedBy.pid));
   const task = taskList.getByRole("row").filter({ has: page.getByRole("gridcell", { name: String(lockedBy.pid), exact: true }) });
   await task.locator(".process-icon").waitFor();
   await task.click();
@@ -916,7 +916,6 @@ try {
   await endProcesses.getByText(new RegExp(`PID ${lockedBy.pid}\\)`)).waitFor();
   await endProcesses.getByRole("button", { name: "Cancel", exact: true }).click();
   if (process.env.DIRLUME_PROCESSES_SCREENSHOT) {
-    await leftPane.getByRole("searchbox", { name: "Find process" }).fill("");
     await page.screenshot({ path: process.env.DIRLUME_PROCESSES_SCREENSHOT, scale: "css" });
   }
   await leftPane.getByRole("button", { name: "Close processes" }).click();
@@ -1581,6 +1580,7 @@ try {
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
   await testProcessColumns(page);
+  await testProcessQuickSearch(page, temp);
   await testLockingProcessPane(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);

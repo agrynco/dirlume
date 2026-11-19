@@ -2,8 +2,9 @@ import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
 import { ColumnResizeHandle, clampColumnWidth } from "./ColumnResizeHandle";
+import { QuickSearch, useQuickSearch } from "./QuickSearch";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Cpu, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Cpu } from "lucide-react";
 import { api, describeError, type ProcessInfo } from "./api";
 import { Dialog } from "./Dialog";
 import { formatSize, type Side } from "./panes";
@@ -152,7 +153,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const [partial, setPartial] = useState(false);
   const [properties, setProperties] = useState<ProcessInfo | null>(null);
   const [revision, setRevision] = useState(0);
-  const [filter, setFilter] = useState("");
+  const [quickSearch, setQuickSearch] = useQuickSearch(side);
   const [sort, setSort] = useState<{ column: ProcessColumn; asc: boolean }>({ column: "name", asc: true });
   const [focused, setFocused] = useState("");
   const [hidden, setHidden] = useState(() => hiddenProcessColumns(side));
@@ -164,14 +165,12 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const anchor = useRef("");
   const table = useRef<HTMLTableElement>(null);
   const visible = useMemo(() => {
-    const query = filter.trim().toLowerCase();
     const { column, asc } = sort;
-    return items.filter((process) => !query || process.name.toLowerCase().includes(query) || String(process.pid).includes(query))
-      .sort((a, b) => {
+    return [...items].sort((a, b) => {
         const order = column === "name" ? byProcessName.compare(a.name, b.name) : a[column] - b[column];
         return (asc ? order : -order) || a.pid - b.pid;
       });
-  }, [filter, items, sort]);
+  }, [items, sort]);
   const processIcons = useMemo(() => new Map(visible.map((item) => [processKey(item), { pid: item.pid, started: item.started }])), [visible]);
   const icons = useWindowsIcons(processIcons, api.processIcons);
   const marked = visible.filter((process) => process.canTerminate && selected.includes(processKey(process)));
@@ -187,6 +186,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
     setSelected([]);
     setFocused("");
     setProperties(null);
+    setQuickSearch(null);
   }, [lockingPath]);
 
   useEffect(() => {
@@ -269,15 +269,6 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
         <Button type="button" onClick={() => setRevision((previous) => previous + 1)}>{t("Refresh")}</Button>
         <Button type="button" onClick={onClose}>{t("Back to files")}</Button>
       </div>}
-      <label className="process-search">
-        <Search aria-hidden="true" />
-        <input type="search" aria-label={t("Find process")} placeholder={t("Find by name or PID")} value={filter} onChange={(event) => {
-          setFilter(event.target.value);
-          setFocused("");
-          setSelected([]);
-          anchor.current = "";
-        }} />
-      </label>
       <div className="process-scroll">
         <table ref={table} id={`${side}-files`} className="process-table file-list" tabIndex={0}
           style={{ width: fillName ? `max(100%, ${tableWidth}px)` : tableWidth }}
@@ -329,10 +320,18 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
             </tr>;
           })}</tbody>
         </table>
-        {!visible.length && <p className="pane-empty">{filter ? t("No processes match the search.") :
-          error ? t("Could not list processes.") : loaded ? t(lockingPath ? "Windows found no processes using these files." : "No running processes.") :
+        {!visible.length && <p className="pane-empty">{error ? t("Could not list processes.") :
+          loaded ? t(lockingPath ? "Windows found no processes using these files." : "No running processes.") :
             t(lockingPath ? "Checking files…" : "Loading processes…")}</p>}
       </div>
+      {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={focused}
+        items={visible.map((process) => ({ id: processKey(process), name: process.name }))}
+        onChange={setQuickSearch} onMatch={(key) => {
+          setFocused(key);
+          document.getElementById(`${side}-process-${key}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }}
+        onAccept={(key) => changeSelection(visible.findIndex((process) => processKey(process) === key), false, false)}
+        onClose={() => setQuickSearch(null)} focusList={() => table.current?.focus({ preventScroll: true })} />}
       {columnsAnchor && <ColumnMenu anchor={columnsAnchor} onClose={() => setColumnsAnchor(null)}
         fallback={() => table.current?.querySelector("thead button")} choices={processColumns.map(({ key, label }) => ({
           key, label, checked: !hidden.includes(key), disabled: displayed.length === 1 && !hidden.includes(key),
@@ -340,7 +339,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
         }))} />}
       {partial && <p role="status" className="pane-error">{t("Only some files could be checked.")}</p>}
       {error && <p role="alert" className="pane-error">{errorText(error)}</p>}
-      <div className="pane-footer"><span>{filter ? t("{0} of {1}", visible.length, countText(items.length, "process")) : countText(items.length, "process")}</span>
+      <div className="pane-footer"><span>{countText(items.length, "process")}</span>
         <Button type="button" disabled={!focusedProcess} onClick={() => setProperties(focusedProcess ?? null)}>{t("Properties")}</Button>
         <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>{t("End selected")}</Button></div>
       {properties && <ProcessProperties process={properties} onClose={() => setProperties(null)} onEnd={() => setEnding([properties])} />}
