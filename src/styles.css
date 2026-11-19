@@ -328,12 +328,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .process-scroll { min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; }
 .process-table.file-list { width: 100%; table-layout: fixed; border-spacing: 0; padding: 0; }
 .process-table :is(th, td) { padding: 4px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.process-table th { position: sticky; top: 0; z-index: 1; padding-block: 2px; text-align: left; background: var(--panel-header); border-block: 1px solid var(--line); }
+.process-table th { position: sticky; top: 0; z-index: 1; padding-block: 2px; padding-inline-end: 9px; overflow: visible; text-align: left; background: var(--panel-header); border-block: 1px solid var(--line); }
 .process-table :is(td, th):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
-.process-table th button { padding: 3px 4px; font-size: .88em; }
-.process-col-pid { width: 66px; }
-.process-col-cpu { width: 67px; }
-.process-col-memory { width: 94px; }
+.process-table th button { max-width: 100%; padding: 3px 4px; font-size: .88em; overflow: hidden; text-overflow: ellipsis; }
+.process-table th:last-child .file-column-resize { inset-inline-end: 0; }
 .process-cell-name > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .process-cell-name span span { overflow: hidden; text-overflow: ellipsis; }
 .process-cell-name :is(svg, img) { width: 17px; height: 17px; object-fit: contain; flex: none; }

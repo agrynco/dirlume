@@ -1,6 +1,7 @@
 import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
+import { ColumnResizeHandle, clampColumnWidth } from "./ColumnResizeHandle";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Cpu, Search } from "lucide-react";
 import { api, describeError, type ProcessInfo } from "./api";
@@ -84,10 +85,13 @@ function EndProcesses({ items, onClose, onFinished, onAttempted }: {
 }
 
 const processColumns = [
-  { key: "name", label: "Process" }, { key: "pid", label: "PID" },
-  { key: "cpu", label: "CPU" }, { key: "memory", label: "Memory" },
+  { key: "name", label: "Process", min: 82, width: 156 },
+  { key: "pid", label: "PID", min: 52, width: 76 },
+  { key: "cpu", label: "CPU", min: 53, width: 77 },
+  { key: "memory", label: "Memory", min: 64, width: 104 },
 ] as const;
 type ProcessColumn = (typeof processColumns)[number]["key"];
+type ProcessWidths = Partial<Record<ProcessColumn, number>>;
 
 function processColumnsKey(side: Side) {
   return `dirlume.process-columns.${side}`;
@@ -99,6 +103,18 @@ function hiddenProcessColumns(side: Side): ProcessColumn[] {
     const hidden = Array.isArray(value) ? processColumns.filter(({ key }) => value.includes(key)).map(({ key }) => key) : [];
     return hidden.length < processColumns.length ? hidden : [];
   } catch { return []; }
+}
+
+function readProcessWidths(side: Side): ProcessWidths {
+  const widths: ProcessWidths = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(`dirlume.process-widths.${side}`) ?? "null") as ProcessWidths | null;
+    for (const { key, min } of processColumns) {
+      const value = saved?.[key];
+      if (typeof value === "number" && Number.isFinite(value)) widths[key] = clampColumnWidth(value, min);
+    }
+  } catch { /* Use the default widths. */ }
+  return widths;
 }
 
 function processCpu(cpu: number) {
@@ -140,8 +156,11 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const [sort, setSort] = useState<{ column: ProcessColumn; asc: boolean }>({ column: "name", asc: true });
   const [focused, setFocused] = useState("");
   const [hidden, setHidden] = useState(() => hiddenProcessColumns(side));
+  const [widths, setWidths] = useState(() => readProcessWidths(side));
   const [columnsAnchor, setColumnsAnchor] = useState<ColumnMenuAnchor | null>(null);
   const displayed = processColumns.filter(({ key }) => !hidden.includes(key));
+  const fillName = widths.name === undefined && !hidden.includes("name");
+  const tableWidth = displayed.reduce((sum, column) => sum + (widths[column.key] ?? column.width), 0);
   const anchor = useRef("");
   const table = useRef<HTMLTableElement>(null);
   const visible = useMemo(() => {
@@ -229,6 +248,20 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
     try { localStorage.setItem(processColumnsKey(side), JSON.stringify(next)); } catch { /* Keep the current layout. */ }
   }
 
+  function resizeColumn(key: ProcessColumn, width: number | undefined, persist: boolean) {
+    const next = { ...widths };
+    if (width === undefined) delete next[key];
+    else {
+      const currentNameWidth = table.current?.querySelector(".process-col-name")?.getBoundingClientRect().width;
+      if (key !== "name" && fillName && currentNameWidth) next.name = clampColumnWidth(currentNameWidth, processColumns[0].min);
+      next[key] = width;
+    }
+    setWidths(next);
+    if (persist) {
+      try { localStorage.setItem(`dirlume.process-widths.${side}`, JSON.stringify(next)); } catch { /* Keep the current layout. */ }
+    }
+  }
+
   return (
     <div className="process-browser">
       {lockingPath && <div className="locking-process-target">
@@ -247,6 +280,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
       </label>
       <div className="process-scroll">
         <table ref={table} id={`${side}-files`} className="process-table file-list" tabIndex={0}
+          style={{ width: fillName ? `max(100%, ${tableWidth}px)` : tableWidth }}
           role="grid" aria-label={t("Running processes")} aria-multiselectable="true"
           aria-activedescendant={focused && visible.some((item) => processKey(item) === focused) ? `${side}-process-${focused}` : undefined}
           onKeyDown={(event) => {
@@ -261,12 +295,16 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
             changeSelection(next, event.shiftKey, event.key === " ");
             document.getElementById(`${side}-process-${processKey(visible[next])}`)?.scrollIntoView({ block: "nearest" });
           }}>
-          <thead {...columnMenuBindings<HTMLTableSectionElement>((_header, anchor) => setColumnsAnchor(anchor))}><tr>{displayed.map(({ key, label }) => (
+          <colgroup>{displayed.map(({ key, width }) =>
+            <col key={key} style={{ width: key === "name" && fillName ? undefined : widths[key] ?? width }} />)}</colgroup>
+          <thead {...columnMenuBindings<HTMLTableSectionElement>((_header, anchor) => setColumnsAnchor(anchor))}><tr>{displayed.map(({ key, label, min }) => (
             <th key={key} scope="col" className={`process-col-${key}`}
               aria-sort={sort.column === key ? sort.asc ? "ascending" : "descending" : undefined}>
               <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : key === "name" || key === "pid" })}>
                 {t(label)}{sort.column === key && (sort.asc ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
               </Button>
+              <ColumnResizeHandle label={label} min={min} width={widths[key]}
+                onResize={(width, persist) => resizeColumn(key, width, persist)} onReset={() => resizeColumn(key, undefined, true)} />
             </th>
           ))}</tr></thead>
           <tbody>{visible.map((process, index) => {

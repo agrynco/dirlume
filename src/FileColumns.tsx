@@ -3,6 +3,7 @@ import { useRef, useState, type CSSProperties, type Ref } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "./Button";
 import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
+import { ColumnResizeHandle, clampColumnWidth } from "./ColumnResizeHandle";
 import type { PaneState, Side, SortColumn } from "./panes";
 
 const columns = [
@@ -10,16 +11,11 @@ const columns = [
   { key: "size", label: "Size", min: 48 },
   { key: "modified", label: "Modified", min: 74 },
 ] as const;
-const maxWidth = 2400;
 const storageKey = (side: Side) => `dirlume.file-column-layout.${side}`;
 export type ColumnWidths = Partial<Record<SortColumn, number>>;
 type OptionalColumn = Exclude<SortColumn, "name">;
 type ColumnVisibility = Partial<Record<OptionalColumn, boolean>>;
 export type ColumnLayout = { widths: ColumnWidths; visibility: ColumnVisibility };
-
-function clampWidth(width: number, min: number) {
-  return Math.max(min, Math.min(maxWidth, Math.round(width)));
-}
 
 export function readColumnLayout(side: Side): ColumnLayout {
   const layout: ColumnLayout = { widths: {}, visibility: {} };
@@ -28,7 +24,7 @@ export function readColumnLayout(side: Side): ColumnLayout {
     const widths = saved?.widths ?? JSON.parse(localStorage.getItem(`dirlume.file-column-widths.${side}`) ?? "null") as ColumnWidths | null;
     for (const { key, min } of columns) {
       const width = widths?.[key];
-      if (typeof width === "number" && Number.isFinite(width)) layout.widths[key] = clampWidth(width, min);
+      if (typeof width === "number" && Number.isFinite(width)) layout.widths[key] = clampColumnWidth(width, min);
       if (key !== "name") {
         const visible = saved?.visibility?.[key];
         if (typeof visible === "boolean") layout.visibility[key] = visible;
@@ -50,7 +46,6 @@ export function columnWidthsStyle(widths: ColumnWidths): CSSProperties {
   return style as CSSProperties;
 }
 
-type Drag = { pointer: number; x: number; width: number; base: ColumnWidths; latest: ColumnWidths | null };
 type FileColumnMenu = { anchor: ColumnMenuAnchor; visible: Record<OptionalColumn, boolean> };
 
 export function FileColumns({ container, layout, sort, onSort, onResize, onVisibility }: {
@@ -64,7 +59,6 @@ export function FileColumns({ container, layout, sort, onSort, onResize, onVisib
   const { widths, visibility } = layout;
   const nameColumn = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<FileColumnMenu | null>(null);
-  const drag = useRef<Drag | null>(null);
 
   function openMenu(header: HTMLDivElement, anchor: ColumnMenuAnchor) {
     const displayed = (column: OptionalColumn) => {
@@ -77,7 +71,7 @@ export function FileColumns({ container, layout, sort, onSort, onResize, onVisib
   function captureWidths(): ColumnWidths {
     if (widths.name !== undefined || !nameColumn.current) return widths;
     // Keep Name in place when a neighboring column changes width.
-    return { ...widths, name: clampWidth(nameColumn.current.getBoundingClientRect().width, columns[0].min) };
+    return { ...widths, name: clampColumnWidth(nameColumn.current.getBoundingClientRect().width, columns[0].min) };
   }
 
   function reset(key: SortColumn) {
@@ -93,40 +87,8 @@ export function FileColumns({ container, layout, sort, onSort, onResize, onVisib
           <Button type="button" onClick={() => onSort(key)} title={t("Sort by {0}", t(label).toLocaleLowerCase())}>
             <span>{t(label)}</span>{sort.column === key && (sort.asc ? <ArrowUp /> : <ArrowDown />)}
           </Button>
-          <div className="file-column-resize" role="separator" aria-orientation="vertical" tabIndex={0}
-            aria-label={t("Resize {0} column", t(label))} aria-valuemin={min} aria-valuemax={maxWidth} aria-valuenow={widths[key]}
-            aria-valuetext={widths[key] === undefined ? t("Automatic width") : t("{0} pixels", widths[key])}
-            title={t("Resize {0} column (drag or use the arrow keys, double-click to reset)", t(label))}
-            onPointerDown={(event) => {
-              if (event.button !== 0 || drag.current || !event.currentTarget.parentElement) return;
-              event.preventDefault();
-              event.currentTarget.focus({ preventScroll: true });
-              event.currentTarget.setPointerCapture(event.pointerId);
-              drag.current = { pointer: event.pointerId, x: event.clientX,
-                width: event.currentTarget.parentElement.getBoundingClientRect().width, base: captureWidths(), latest: null };
-            }}
-            onPointerMove={(event) => {
-              const start = drag.current;
-              if (!start || start.pointer !== event.pointerId || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-              const width = clampWidth(start.width + event.clientX - start.x, min);
-              if (width === (start.latest?.[key] ?? Math.round(start.width))) return;
-              start.latest = { ...start.base, [key]: width };
-              onResize(start.latest, false);
-            }}
-            onLostPointerCapture={(event) => {
-              const start = drag.current;
-              if (!start || start.pointer !== event.pointerId) return;
-              drag.current = null;
-              if (start.latest) onResize(start.latest, true);
-            }}
-            onDoubleClick={() => reset(key)}
-            onKeyDown={(event) => {
-              if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
-                  (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
-              event.preventDefault();
-              const width = event.currentTarget.parentElement!.getBoundingClientRect().width;
-              onResize({ ...captureWidths(), [key]: clampWidth(width + (event.key === "ArrowLeft" ? -8 : 8), min) }, true);
-            }} />
+          <ColumnResizeHandle label={label} min={min} width={widths[key]} onReset={() => reset(key)}
+            onResize={(width, persist) => onResize({ ...captureWidths(), [key]: width }, persist)} />
         </div>
       ))}
     </div>
