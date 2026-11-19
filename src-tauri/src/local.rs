@@ -50,6 +50,11 @@ impl EntryAttributes {
 }
 
 impl Entry {
+    #[cfg(feature = "desktop")]
+    pub(crate) fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+
     pub(crate) fn new(
         name: String,
         directory: bool,

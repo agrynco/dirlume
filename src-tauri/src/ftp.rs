@@ -17,7 +17,7 @@ use suppaftp::{
     types::FileType,
     FtpError, FtpStream, Mode, Status,
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
 use uuid::Uuid;
 
 use crate::{
@@ -62,6 +62,7 @@ pub struct ProfileInput {
 #[derive(Default)]
 pub struct FtpState {
     connections: Mutex<HashMap<u32, Arc<Connection>>>,
+    searches: Mutex<HashMap<u32, Arc<AtomicBool>>>,
     next: AtomicU32,
 }
 
@@ -379,20 +380,7 @@ pub struct Entries {
 impl Entries {
     fn into_listing(self) -> RemoteListing {
         RemoteListing {
-            entries: self
-                .files
-                .into_iter()
-                .map(|file| {
-                    local::Entry::new(
-                        file.name().to_owned(),
-                        file.is_directory(),
-                        file.is_symlink(),
-                        local::EntryAttributes::default(),
-                        file.is_file().then_some(file.size() as u64),
-                        Some(file.modified()),
-                    )
-                })
-                .collect(),
+            entries: self.files.into_iter().map(listing_entry).collect(),
             omitted: self.omitted,
         }
     }
@@ -406,6 +394,17 @@ impl Entries {
         }
         Ok(self.files)
     }
+}
+
+fn listing_entry(file: File) -> local::Entry {
+    local::Entry::new(
+        file.name().to_owned(),
+        file.is_directory(),
+        file.is_symlink(),
+        local::EntryAttributes::default(),
+        file.is_file().then_some(file.size() as u64),
+        Some(file.modified()),
+    )
 }
 
 pub fn valid_name(name: &str) -> bool {
@@ -679,6 +678,161 @@ pub async fn list_ftp(
             .map(Entries::into_listing)
     })
     .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FtpSearchRequest {
+    connection: u32,
+    segments: Vec<String>,
+    mask: String,
+    show_hidden: bool,
+}
+
+#[derive(Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum FtpSearchEvent {
+    Batch {
+        segments: Vec<String>,
+        prefix: String,
+        entries: Vec<local::Entry>,
+    },
+    Done {
+        omitted: usize,
+    },
+}
+
+#[tauri::command]
+pub async fn search_ftp(
+    id: u32,
+    request: FtpSearchRequest,
+    output: Channel<FtpSearchEvent>,
+    state: State<'_, FtpState>,
+) -> Result<()> {
+    let connection = state.connection(request.connection)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let mut searches = state.searches.lock().map_err(message)?;
+        if searches.contains_key(&id) {
+            return Err("An FTP search is already running.".to_owned());
+        }
+        searches.insert(id, Arc::clone(&stop));
+    }
+    let result = blocking(move || {
+        let mut session = connection.open()?;
+        let search = search_session(&mut session, request, &stop, &output);
+        let _ = session.stream.quit();
+        search
+    })
+    .await;
+    state.searches.lock().map_err(message)?.remove(&id);
+    result
+}
+
+#[tauri::command]
+pub fn cancel_ftp_search(id: u32, state: State<'_, FtpState>) -> Result<()> {
+    if let Some(stop) = state.searches.lock().map_err(message)?.get(&id) {
+        stop.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+fn search_session(
+    session: &mut Session,
+    request: FtpSearchRequest,
+    stop: &AtomicBool,
+    output: &Channel<FtpSearchEvent>,
+) -> Result<()> {
+    const BATCH_SIZE: usize = 128;
+    let mask: Vec<_> = request.mask.to_lowercase().chars().collect();
+    let mut omitted = 0;
+    let mut pending = vec![(request.segments, String::new())];
+    while let Some((segments, prefix)) = pending.pop() {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let listing = match session.list(&segments) {
+            Ok(listing) => listing,
+            Err(error) if prefix.is_empty() => return Err(error),
+            Err(_) => {
+                omitted += 1;
+                continue;
+            }
+        };
+        omitted += listing.omitted;
+        let mut matches = Vec::new();
+        let send = |entries| {
+            output
+                .send(FtpSearchEvent::Batch {
+                    segments: segments.clone(),
+                    prefix: prefix.clone(),
+                    entries,
+                })
+                .map_err(message)
+        };
+        for file in listing.files {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let entry = listing_entry(file);
+            if entry.is_hidden() && !request.show_hidden {
+                continue;
+            }
+            if entry.directory {
+                if !entry.link {
+                    pending.push((
+                        child(&segments, &entry.name),
+                        format!("{}{}/", prefix, entry.name),
+                    ));
+                }
+            } else if matches_mask(&mask, &entry.name) {
+                matches.push(entry);
+                if matches.len() == BATCH_SIZE {
+                    send(std::mem::take(&mut matches))?;
+                }
+            }
+        }
+        if !matches.is_empty() {
+            send(matches)?;
+        }
+    }
+    if !stop.load(Ordering::Relaxed) {
+        output
+            .send(FtpSearchEvent::Done { omitted })
+            .map_err(message)?;
+    }
+    Ok(())
+}
+
+fn matches_mask(pattern: &[char], name: &str) -> bool {
+    let name: Vec<_> = name.to_lowercase().chars().collect();
+    let (mut index, mut next) = (0, 0);
+    let mut wildcard = None;
+    while index < name.len() {
+        match pattern.get(next) {
+            Some('*') => {
+                next += 1;
+                wildcard = Some((next, index));
+            }
+            Some(letter) if *letter == '?' || *letter == name[index] => {
+                index += 1;
+                next += 1;
+            }
+            _ => {
+                let Some((after, previous)) = wildcard else {
+                    return false;
+                };
+                index = previous + 1;
+                next = after;
+                wildcard = Some((after, index));
+            }
+        }
+    }
+    pattern[next..].iter().all(|&letter| letter == '*')
 }
 
 #[tauri::command]

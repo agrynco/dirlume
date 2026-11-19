@@ -1361,6 +1361,8 @@ pub fn run() {
         ftp::connect_ftp,
         ftp::disconnect_ftp,
         ftp::list_ftp,
+        ftp::search_ftp,
+        ftp::cancel_ftp_search,
         ftp::rename_ftp,
         ftp::delete_ftp,
         read_ftp_text,
