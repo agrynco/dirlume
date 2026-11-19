@@ -2,7 +2,7 @@ import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FileServer, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { childPlace, formatSize, localPath } from "./panes";
 import { useTimestamps } from "./useTimestamps";
@@ -15,7 +15,7 @@ export interface Transfer {
   source: Place;
   items: { place: Place; entry: Entry }[];
   target: string;
-  ftpDestination?: number;
+  remoteDestination?: FileServer;
   chooseOperation?: boolean;
 }
 
@@ -26,7 +26,7 @@ export const nextTransferId = () => ++nextSession;
 
 export function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
-  if (place.kind === "ftp") return { kind: "ftp", connection: place.id, segments: [...place.segments, item.name] };
+  if (isFileServer(place)) return { kind: place.kind, connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "server") {
     return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
@@ -68,8 +68,8 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   const cancelled = useRef(false);
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
-  const localTarget = transfer.ftpDestination === undefined;
-  const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp" || transfer.source.kind === "archive";
+  const localTarget = !transfer.remoteDestination;
+  const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
   const manyDestinations = multipleDestinations && !moving;
@@ -152,12 +152,14 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
         const { place, entry } = item;
         setProgress({ file: entry.name, bytes: 0, total: null });
         previousBytes = 0;
-        const ftpCopy = !localTarget || transfer.source.kind === "ftp";
-        const target = ftpCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
+        const remoteCopy = !localTarget || isFileServer(transfer.source);
+        const target = remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
           : destination;
         const request = {
-          source: itemSource(place, entry), destination: target, ftpDestination: transfer.ftpDestination, moving,
+          source: itemSource(place, entry), destination: target, moving,
+          ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
+          sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
           multiple: itemCount > 1 || manyDestinations, policy, askReadOnly,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
@@ -198,14 +200,14 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
                 {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
               </label>
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
-                required initialFocus selectOnFocus showHidden={showHidden} ftp={transfer.ftpDestination} includeFiles={singleFile}
+                required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />
             </div>
             {manyDestinations && <>
               {additional.map((path, index) => <PathField key={index} id={`transfer-destination-${index + 2}`}
                 label={t("Destination {0}", index + 2)} historyKey="transfer-destination" value={path} required
                 onChange={(value) => setAdditional((current) => current.map((old, offset) => offset === index ? value : old))}
-                showHidden={showHidden} ftp={transfer.ftpDestination} browse="folder" />)}
+                showHidden={showHidden} server={transfer.remoteDestination} browse="folder" />)}
               <div className="transfer-destination-actions">
                 <Button type="button" onClick={() => setAdditional([...additional, ""])}>{t("Add destination")}</Button>
                 <Button type="button" onClick={() => {

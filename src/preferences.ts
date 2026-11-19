@@ -24,7 +24,7 @@ export const commands = {
   pageDown: { label: "Next page", key: "PageDown" },
   mark: { label: "Mark or unmark item", key: "Insert" },
   open: { label: "Open", key: "Enter" },
-  parent: { label: "Parent folder", key: "Backspace" },
+  parent: { label: "Parent folder", key: "" },
   back: { label: "Back", key: "Alt+ArrowLeft" },
   forward: { label: "Forward", key: "Alt+ArrowRight" },
   address: { label: "Go to path", key: "Ctrl+L" },
@@ -83,8 +83,11 @@ export const commands = {
   ftpSources: { label: "Select FTP in the sources menu", key: "2" },
   smbSources: { label: "Select SMB in the sources menu", key: "3" },
   remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
+  sshSources: { label: "Select SSH in the sources menu", key: "5" },
   addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
+  addSshProfile: { label: "Add SSH connection", key: "Shift+F4" },
+  editSshProfile: { label: "Edit SSH connection", key: "F4" },
   folderShortcuts: { label: "Folder shortcuts", key: "" },
   addFolderShortcut: { label: "Bookmark current folder in group 8", key: "Ctrl+Shift+F8" },
   ...folderGroupCommands,
@@ -122,6 +125,7 @@ export function commandScope(command: Command) {
   if (command === "zoomFont") return "wheel";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
+  if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
@@ -264,7 +268,7 @@ function readMenuAlignment(value: unknown): MenuPosition | undefined {
 
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
-    theme: "system", layout: "standard", actionButtonWidth: "full", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
+    theme: "system", layout: "standard", actionButtonWidth: "compact", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
     mainMenuAlignment: "center", activeShortcutScheme: null, shortcutSchemes: [],
     viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
     terminalResizeRows: 1,
@@ -294,7 +298,8 @@ export function readPreferences(): Preferences {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
       layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
-      actionButtonWidth: saved.actionButtonWidth === "compact" ? "compact" : defaults.actionButtonWidth,
+      actionButtonWidth: saved.actionButtonWidth === "full" || saved.actionButtonWidth === "compact"
+        ? saved.actionButtonWidth : defaults.actionButtonWidth,
       mainMenuAlignment: readMenuAlignment(saved.mainMenuAlignment) ?? readMenuAlignment(saved.menuPosition) ?? defaults.mainMenuAlignment,
       systemLightScheme: readSystemScheme(saved.systemLightScheme, schemes, "light"),
       systemDarkScheme: readSystemScheme(saved.systemDarkScheme, schemes, "dark"),

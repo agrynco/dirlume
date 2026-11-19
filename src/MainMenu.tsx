@@ -1,4 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { BookOpen, Bug, CodeXml, Coffee, Package, X } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { api, describeError } from "./api";
@@ -6,6 +7,13 @@ import { errorText, t } from "./i18n";
 import appIcon from "../src-tauri/icons/128x128.png";
 
 const donationUrl = "https://send.monobank.ua/jar/6ZninEa3R4";
+const repositoryUrl = "https://github.com/agrynco/dirlume";
+const licenseUrl = `${repositoryUrl}/blob/main/LICENSE`;
+const aboutLinks = [
+  { label: "Source code", href: repositoryUrl, Icon: CodeXml },
+  { label: "Report an issue", href: `${repositoryUrl}/issues/new`, Icon: Bug },
+  { label: "Releases", href: `${repositoryUrl}/releases`, Icon: Package },
+];
 
 interface MenuItem {
   label: string;
@@ -135,10 +143,10 @@ export function MainMenu({ groups, shortcut, ref }: {
   );
 }
 
-export function AboutDialog({ onClose }: { onClose: () => void }) {
+export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onOpenGuide: () => void }) {
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
-  const [donationError, setDonationError] = useState("");
+  const [linkError, setLinkError] = useState("");
   useEffect(() => {
     let open = true;
     void api.buildVersion().then(
@@ -147,22 +155,48 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
     );
     return () => { open = false; };
   }, []);
-  return <Dialog title={t("About")} onClose={onClose}>
+
+  function openLink(href: string) {
+    setLinkError("");
+    void api.openWebLink(href).catch((failure: unknown) => setLinkError(describeError(failure)));
+  }
+
+  return <Dialog title={t("About")} onClose={onClose} footer={<>
+    <Button type="button" className="primary about-donate" onClick={() => openLink(donationUrl)}>
+      <Coffee aria-hidden="true" /><span>{t("Donate via monobank")}</span>
+    </Button>
+    <Button data-initial-focus type="button" onClick={onClose}><X aria-hidden="true" />{t("Close")}</Button>
+  </>}>
     <div className="dialog-body about-body">
-      <img src={appIcon} width={52} height={52} alt="" />
-      <div>
-        <strong>Dirlume</strong>
-        {version ? <p>{t("Version")} <code>{version}</code></p> :
-          error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}
+      <div className="about-identity">
+        <img src={appIcon} width={52} height={52} alt="" />
+        <div>
+          <strong>Dirlume</strong>
+          <p>{t("Two-pane desktop file manager")}</p>
+        </div>
       </div>
-      {donationError && <p role="alert" className="dialog-error">{errorText(donationError)}</p>}
+      <dl className="about-details">
+        <dt>{t("Version")}</dt>
+        <dd>{version ? <code>{version}</code> :
+          error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}</dd>
+        <dt>{t("Created by")}</dt>
+        <dd>bitcodepro</dd>
+        <dt>{t("License")}</dt>
+        <dd><a href={licenseUrl} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
+          event.preventDefault();
+          openLink(licenseUrl);
+        }}>MIT</a></dd>
+      </dl>
+      <p className="about-stack">{t("Built with Rust, Tauri, React, and TypeScript.")}</p>
+      <div className="about-actions">
+        <Button type="button" onClick={onOpenGuide}><BookOpen aria-hidden="true" /><span>{t("User guide")}</span></Button>
+        {aboutLinks.map(({ label, href, Icon }) => (
+          <Button key={href} type="button" onClick={() => openLink(href)}>
+            <Icon aria-hidden="true" /><span>{t(label)}</span>
+          </Button>
+        ))}
+      </div>
+      {linkError && <p role="alert" className="dialog-error">{errorText(linkError)}</p>}
     </div>
-    <footer className="dialog-footer">
-      <Button type="button" className="about-donate" onClick={() => {
-        setDonationError("");
-        void api.openWebLink(donationUrl).catch((failure: unknown) => setDonationError(describeError(failure)));
-      }}>{t("Donate via monobank")}</Button>
-      <Button data-initial-focus type="button" onClick={onClose}>{t("Close")}</Button>
-    </footer>
   </Dialog>;
 }

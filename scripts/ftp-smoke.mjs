@@ -95,7 +95,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   const rightPane = page.getByRole("region", { name: "right pane" });
   const right = rightPane.getByRole("listbox", { name: "right files" });
   const left = page.getByRole("listbox", { name: "left files" });
-  const connections = page.getByRole("dialog", { name: "FTP connections", exact: true });
+  const connections = page.getByRole("dialog", { name: "FTP and SFTP connections", exact: true });
   const remoteRow = (text) => right.getByRole("option", { name: new RegExp("^" + text) });
   const button = (scope, name) => scope.getByRole("button", { name, exact: true });
   const remotePath = page.getByLabel("right path", { exact: true });
@@ -120,10 +120,16 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("Alt+F2");
     await button(rightPane, "FTP").waitFor();
     await page.keyboard.press("2");
-    await connections.getByText("No saved FTP connections.", { exact: true }).waitFor();
+    await connections.getByText("No saved FTP or SFTP connections.", { exact: true }).waitFor();
     await page.keyboard.press("Shift+F4");
     const add = page.getByRole("dialog", { name: "Add FTP connection" });
     await add.getByLabel("Connection name").fill("Local FTP fixture");
+    await add.getByLabel("Protocol", { exact: true }).selectOption("sftp");
+    const sftp = page.getByRole("dialog", { name: "Add SFTP connection", exact: true });
+    assert.equal(await sftp.getByLabel("Port", { exact: true }).inputValue(), "22");
+    assert.equal(await sftp.getByLabel("Connection name").inputValue(), "Local FTP fixture");
+    await sftp.getByLabel("Protocol", { exact: true }).selectOption("ftp");
+    assert.equal(await add.getByLabel("Port", { exact: true }).inputValue(), "21");
     await add.getByLabel("Server", { exact: true }).fill("127.0.0.1");
     await add.getByLabel("Port").fill(String(ftpPort));
     await add.getByLabel("Username").fill("dirlume");
