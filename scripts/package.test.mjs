@@ -22,7 +22,7 @@ test("release metadata pairs the signed packages with their platform and exact v
   try {
     for (const [platform, extensions] of Object.entries(formats)) {
       const files = extensions.map((extension) => `Dirlume-${label}-${platform}.${extension}`);
-      files.push(`Dirlume-Server-${label}-${platform}.tar.gz`);
+      files.push(`Dirlume-Server-${label}-${platform}.tar.gz`, `Dirlume-${label}-${platform}-portable.zip`);
       for (const path of files) {
         await writeFile(join(release, path), path);
         await writeFile(join(release, `${path}.sha256`), "placeholder checksum");
@@ -35,6 +35,11 @@ test("release metadata pairs the signed packages with their platform and exact v
     assert.notEqual(run("v2.1.4").status, 0);
     const result = run(`v${product}`);
     assert.equal(result.status, 0, result.stderr);
+    for (const [platform, extensions] of Object.entries(formats)) {
+      for (const suffix of [`.${extensions[0]}`, "-portable.zip"]) {
+        assert.ok(result.stdout.includes(`https://github.com/agrynco/dirlume/releases/download/v${product}/Dirlume-${label}-${platform}${suffix}`));
+      }
+    }
     const manifest = JSON.parse(await readFile(join(release, "latest.json"), "utf8"));
     assert.equal(manifest.version, product);
     const packages = {
@@ -47,6 +52,13 @@ test("release metadata pairs the signed packages with their platform and exact v
       signature: `${name}.sig`, url: `https://github.com/agrynco/dirlume/releases/download/v${product}/${name}`,
     }])));
     await rm(join(release, "latest.json"));
+    const zip = join(release, `Dirlume-${label}-windows-x64-portable.zip`);
+    await rm(zip);
+    assert.notEqual(run(`v${product}`).status, 0);
+    await writeFile(zip, "portable package");
+    await rm(`${zip}.sha256`);
+    assert.notEqual(run(`v${product}`).status, 0);
+    await writeFile(`${zip}.sha256`, "placeholder checksum");
     await rm(join(release, `${packages["linux-x86_64"]}.sig`));
     assert.notEqual(run(`v${product}`).status, 0);
   } finally {
