@@ -26,7 +26,10 @@ function global:prompt {
     $command = ''
     if ($previous -and $previous.Id -gt $global:DirlumeLastHistoryId) {
         $global:DirlumeLastHistoryId = $previous.Id
-        $command = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($previous.CommandLine))
+        # The first prompt can see the encoded startup script in PowerShell history.
+        if ($global:DirlumePromptCount -gt 0) {
+            $command = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($previous.CommandLine))
+        }
     }
     $location = Get-Location
     $path = if ($location.Provider.Name -eq 'FileSystem') {
