@@ -47,7 +47,7 @@ import {
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
-  compactShortcut, preferenceKey, quickSearchSeed, readPreferences, showShortcut, type Command, type Preferences } from "./preferences";
+  compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -98,7 +98,6 @@ type Modal =
 
 const rowCommands = {
   firstRow: 0, lastRow: Number.POSITIVE_INFINITY, upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
-  firstRowAlternate: 0, lastRowAlternate: Number.POSITIVE_INFINITY,
   selectUpRow: -1, selectDownRow: 1,
 };
 
@@ -201,7 +200,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const otherFtp = !other.search && other.place?.kind === "ftp";
   const canTransfer = Boolean(current && pane.place);
-  const helpShortcut = preferences.shortcuts.help;
+  const shortcuts = shortcutBindings(preferences);
+  const helpShortcut = shortcuts.help;
   const modalKind = modal?.kind;
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
 
@@ -236,9 +236,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, [updateNotice, modal, helpTopic]);
 
   useLayoutEffect(() => {
-    if (!helpShortcut) return;
+    if (!helpShortcut.length) return;
     function openHelp(event: WindowEventMap["keydown"]) {
-      if (event.defaultPrevented || event.isComposing || eventShortcut(event) !== helpShortcut) return;
+      if (event.defaultPrevented || event.isComposing || !helpShortcut.includes(eventShortcut(event))) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest("[data-shortcut-capture], .terminal-card")) return;
       event.preventDefault();
@@ -252,7 +252,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, [helpShortcut, modalKind, editingDocument]);
 
   useEffect(() => {
-    if (preferences.shortcuts.menuAlternate !== "Alt") return;
+    if (!shortcuts.menuAlternate.includes("Alt")) return;
     let singleAlt = false;
     function down(event: globalThis.KeyboardEvent) {
       if (event.target instanceof Element && event.target.closest(".terminal-card")) { singleAlt = false; return; }
@@ -277,7 +277,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       window.removeEventListener("blur", reset);
       window.removeEventListener("pointerdown", reset, true);
     };
-  }, [preferences.shortcuts.menuAlternate, modal, helpTopic]);
+  }, [shortcuts.menuAlternate, modal, helpTopic]);
 
   const updatePane = useCallback((side: Side, updater: (pane: PaneState) => PaneState) => {
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
@@ -614,13 +614,13 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (modal || helpTopic || event.defaultPrevented || event.isComposing) return;
     if (event.target instanceof Element && event.target.closest("dialog[open], [role=menu], .terminal-card")) return;
     const shortcut = eventShortcut(event);
-    if (shortcut && shortcut === preferences.shortcuts.cancelMeasure && activeDocument === null &&
+    if (shortcuts.cancelMeasure.includes(shortcut) && activeDocument === null &&
         !panelsHidden && cancelFolderOperation(active)) {
       event.preventDefault();
       event.stopPropagation();
       return;
     }
-    const direction = shortcut === preferences.shortcuts.nextDocument ? 1 : shortcut === preferences.shortcuts.previousDocument ? -1 : 0;
+    const direction = shortcuts.nextDocument.includes(shortcut) ? 1 : shortcuts.previousDocument.includes(shortcut) ? -1 : 0;
     if (shortcut && direction && documents.length) {
       event.preventDefault();
       event.stopPropagation();
@@ -631,11 +631,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     const element = event.target instanceof Element ? event.target : null;
     const noControl = !element?.closest(".app");
-    if (noControl && shortcut === preferences.shortcuts.attributes) return;
+    if (noControl && shortcuts.attributes.includes(shortcut)) return;
     const inTitlebar = element?.closest(".topbar") && !element.closest("select, input");
     const hasModifier = event.ctrlKey || event.altKey || event.metaKey || /^F\d+$/.test(event.key);
     if ((!noControl && (!inTitlebar || !hasModifier)) ||
-        !shortcut || !commandNames.some((command) => preferences.shortcuts[command] === shortcut)) return;
+        !shortcut || !commandNames.some((command) => shortcuts[command].includes(shortcut))) return;
     const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".xterm-helper-textarea" : `#${active}-files`;
     const target = document.querySelector(selector);
     if (target && !target.dispatchEvent(new globalThis.KeyboardEvent("keydown", {
@@ -701,13 +701,13 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((event.target as HTMLElement).closest("dialog[open], .terminal-card")) return;
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
-    if (shortcut === preferences.shortcuts.menu) {
+    if (shortcuts.menu.includes(shortcut)) {
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) perform("menu");
       return;
     }
-    const resize = shortcut === preferences.shortcuts.expandTerminal ? 1 : shortcut === preferences.shortcuts.collapseTerminal ? -1 : 0;
+    const resize = shortcuts.expandTerminal.includes(shortcut) ? 1 : shortcuts.collapseTerminal.includes(shortcut) ? -1 : 0;
     if (resize && activeDocument === null) {
       event.preventDefault();
       event.stopPropagation();
@@ -1201,6 +1201,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     });
   }
 
+  function copyPath(path: string) {
+    void api.copyPath(path).then(() => setStatus({ text: "Path copied to the clipboard." }),
+      (error: unknown) => setStatus({ text: describeError(error), error: true }));
+  }
+
   function fileFor(side: Side, entry = entries[side][paneCursorIndex(panes[side], entries[side])]): NamedFile | null {
     const item = paneItem(panes[side], entry);
     return item && item.place.kind !== "kswitcher" && !item.entry.directory && !item.entry.link
@@ -1319,7 +1324,6 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "parent": parent(active); break;
       case "back": history(active, -1); break;
       case "forward": history(active, 1); break;
-      case "refreshAlternate":
       case "refresh": refresh(active); break;
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
@@ -1351,6 +1355,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "commandName":
         if (currentItem?.place.kind === "local") insertCommand(command === "commandPath"
           ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name);
+        break;
+      case "copyFullPath":
+        if (currentFullPath !== null) copyPath(currentFullPath);
         break;
       case "previousCommand": {
         const previous = commandTexts[historyIndex.current + 1];
@@ -1475,9 +1482,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const physical = /^Key[A-Z]$/.test(event.code) && !event.getModifierState("AltGraph")
       ? eventShortcut(event, event.code.slice(3)) : "";
     const command = commandNames.find((command) => shortcut && commandScope(command) === "main" &&
-      preferences.shortcuts[command] === shortcut) ?? (["settings", "hidden", "attributes"] as const).find((command) =>
-      commands[command].key === physical && preferences.shortcuts[command] === physical) ??
-      physicalFolderBinding(native, preferences.shortcuts);
+      shortcuts[command].includes(shortcut)) ?? (["settings", "hidden", "attributes", "copyFullPath"] as const).find((command) =>
+      commands[command].key === physical && shortcuts[command].includes(physical)) ??
+      physicalFolderBinding(native, shortcuts);
     if (command === "settings") {
       event.preventDefault();
       if (!event.repeat) perform(command);
@@ -1490,13 +1497,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (!command || command === "quickSearch") {
       const unavailable = processPanels[active] ? target !== onFiles || !onFiles?.classList.contains("process-table") : !pane.place;
       if (panelsHidden || unavailable || (inField && !inCommandLine)) return;
-      const seed = quickSearchSeed(native, preferences.shortcuts.quickSearch);
+      const seed = quickSearchSeed(native, shortcuts.quickSearch);
       if (seed === null) return;
       event.preventDefault();
       document.getElementById(active + "-pane")?.dispatchEvent(new CustomEvent("dirlume-quick-search", { detail: seed }));
       return;
     }
     if (inField && (event.key === "Delete" || command === "copyClipboard" || command === "pasteClipboard")) return;
+    if (command === "copyFullPath" && (!onFiles || inField || currentFullPath === null)) return;
     if (command === "attributes" && (!onFiles || inField || panelsHidden || processPanels[active])) return;
     if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
     const fileNavigation = command in rowCommands || command === "open";
@@ -1505,14 +1513,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
-    if (!event.repeat || (!["hidden", "attributes", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
+    if (!event.repeat || (!["hidden", "attributes", "copyFullPath", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command))) {
       perform(command);
     }
   }
 
   function keyLabel(command: Command) {
-    return showShortcut(preferences.shortcuts[command]);
+    return showShortcut(shortcuts[command][0]);
   }
 
   const currentFile = fileFor(active);
@@ -1531,6 +1539,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const panesAvailable = !panelsHidden && activeDocument === null;
   const filesAvailable = panesAvailable && !processPanels[active] && !pane.loading;
+  const currentFullPath = filesAvailable && currentItem ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : null;
 
   function menuCommand(command: Command, disabled = false, label: string = commands[command].label) {
     return { label, disabled, shortcut: keyLabel(command), run: () => perform(command) };
@@ -1575,6 +1584,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     ] },
     { label: "Commands", items: [
       menuCommand("search", !filesAvailable || !pane.place),
+      menuCommand("copyFullPath", currentFullPath === null),
       menuCommand("connect", activeDocument !== null, "Connect"),
       menuCommand("swap", !panesAvailable || !canSwapPanes),
       menuCommand("commandHistory", activeDocument !== null),
@@ -1652,14 +1662,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               } else void load(side, localPath(path));
             }}
             onPathAncestor={(place) => { showProcesses(side, false); void load(side, place); }}
-            onCopyPath={(path) => {
-              void api.copyPath(path).then(() => setStatus({ text: "Path copied to the clipboard." }),
-                (error: unknown) => setStatus({ text: describeError(error), error: true }));
-            }}
+            onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
             onCancelFolderOperation={() => {
               if (cancelFolderOperation(side)) requestAnimationFrame(() => focus(side));
-            }} cancelFolderShortcut={preferences.shortcuts.cancelMeasure}
+            }} cancelFolderShortcut={shortcuts.cancelMeasure}
             onCloseResults={() => closeResults(side)}
             onStartDrag={(entry, event) => startDrag(side, entry, event)} dropTarget={dropTarget === side}
             processView={processPanels[side]} onProcesses={(visible) => showProcesses(side, visible)}
@@ -1671,7 +1678,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter, keyboardRange: undefined }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
             onSmb={() => setModal({ kind: "smb", side })}
-            sourceBindings={preferences.shortcuts} zoomShortcut={preferences.shortcuts.zoomFont}
+            sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator"
@@ -1706,9 +1713,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             viewerContentWidth={preferences.viewerContentWidth} colors={scheme?.colors}
-            saveShortcut={preferences.shortcuts.saveText} alternateSaveShortcut={preferences.shortcuts.saveTextAlternate}
-            closeShortcut={preferences.shortcuts.closeText} cancelShortcut={preferences.shortcuts.cancelText}
-            hexShortcut={preferences.shortcuts.viewAsHex} zoomShortcut={preferences.shortcuts.zoomFont}
+            saveShortcut={shortcuts.saveText}
+            closeShortcut={shortcuts.closeText} cancelShortcut={shortcuts.cancelText}
+            hexShortcut={shortcuts.viewAsHex} zoomShortcut={shortcuts.zoomFont}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             onOptions={() => setModal({ kind: "settings", page: editing ? "editor" : "viewer" })}
             anchor={linkedAnchor?.id === id ? linkedAnchor.anchor : null}
@@ -1743,12 +1750,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
           fileActions.map(({ command, label, Icon, disabled }) => (
           <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
-            aria-keyshortcuts={preferences.shortcuts[command] || undefined}>
-            {keyLabel(command) && <kbd aria-hidden="true">{compactShortcut(preferences.shortcuts[command])}</kbd>}<Icon /><span>{t(label)}</span>
+            aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
+            {keyLabel(command) && <kbd aria-hidden="true">{compactShortcut(shortcuts[command][0])}</kbd>}<Icon /><span>{t(label)}</span>
           </Button>
         ))}
         <Button type="button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
-          <TerminalIcon /><span>{t("Terminal")}</span>{preferences.shortcuts.toggleTerminal && <kbd aria-hidden="true">{preferences.shortcuts.toggleTerminal}</kbd>}
+          <TerminalIcon /><span>{t("Terminal")}</span>{keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
         </Button>
       </nav>
       <nav className="document-bar" aria-label={t("Open documents")} aria-hidden={!documents.length}>
@@ -1898,7 +1905,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       {modal?.kind === "attributes" && <AttributesDialog item={modal.item} onClose={() => setModal(null)}
         onApplied={() => { refresh("left"); refresh("right"); }} />}
       {modal?.kind === "folderShortcuts" && <FolderShortcutsDialog screen={modal.screen} shortcuts={folderShortcuts}
-        currentFolder={currentFolderShortcut(modal.side)} bridgeDirectory={preferences.kswitcher} bindings={preferences.shortcuts}
+        currentFolder={currentFolderShortcut(modal.side)} bridgeDirectory={preferences.kswitcher} bindings={shortcuts}
         onScreen={(screen) => setModal({ ...modal, screen })}
         onSave={(next) => { persistFolderShortcuts(next); setFolderShortcuts(next); }}
         onAssigned={(group) => setStatus({ text: t("Folder shortcut saved in group {0}.", group) })}
@@ -1908,7 +1915,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         }}
         onClose={() => closeFolderShortcuts(modal.side)} />}
       {modal?.kind === "ftp" && (
-        <FtpDialog shortcuts={preferences.shortcuts} onClose={() => setModal(null)}
+        <FtpDialog shortcuts={shortcuts} onClose={() => setModal(null)}
           onConnect={(place, listing) => {
             routeLocation(modal.side, place, listing);
             setModal(null);
@@ -1916,9 +1923,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           }} />
       )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
-        previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange} onClose={() => setModal(null)} />}
+        previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} onClose={() => setModal(null)} />}
       {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
-        historyShortcut={preferences.shortcuts.folderNameHistory} onClose={() => setModal(null)}
+        historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
           await load(modal.side, modal.place, "refresh", name);
           refresh(opposite(modal.side));

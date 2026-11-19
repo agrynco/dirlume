@@ -21,17 +21,17 @@ import { PathField } from "./PathField";
 const CodeSurface = lazy(() => import("./CodeSurface"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
 
-export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, fontSizes, viewerContentWidth, colors, onZoom, onOptions, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, saveShortcut, closeShortcut, cancelShortcut,
+  hexShortcut, zoomShortcut, fontSizes, viewerContentWidth, colors, onZoom, onOptions, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
   theme: BaseTheme;
-  saveShortcut: string;
-  alternateSaveShortcut: string;
-  closeShortcut: string;
-  cancelShortcut: string;
-  hexShortcut: string;
-  zoomShortcut: string;
+  saveShortcut: readonly string[];
+  closeShortcut: readonly string[];
+  cancelShortcut: readonly string[];
+  hexShortcut: readonly string[];
+  zoomShortcut: readonly string[];
   fontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   colors?: Palette;
@@ -138,16 +138,17 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
-      if (shortcut === cancelShortcut && event.target instanceof Element && event.target.hasAttribute("data-history-open")) return;
-      if (editing && (shortcut === saveShortcut || shortcut === alternateSaveShortcut)) {
+      const cancel = cancelShortcut.includes(shortcut);
+      if (cancel && event.target instanceof Element && event.target.hasAttribute("data-history-open")) return;
+      if (editing && saveShortcut.includes(shortcut)) {
         event.preventDefault();
         event.stopPropagation();
         void save();
-      } else if (shortcut === closeShortcut || shortcut === cancelShortcut) {
+      } else if (closeShortcut.includes(shortcut) || cancel) {
         event.preventDefault();
         event.stopPropagation();
         close();
-      } else if (!editing && shortcut === hexShortcut) {
+      } else if (!editing && hexShortcut.includes(shortcut)) {
         event.preventDefault();
         event.stopPropagation();
         setHex((visible) => !visible);
@@ -159,7 +160,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
           {document.encoding.replaceAll("_", " ").toUpperCase()}{saving ? ` · ${t("Saving…")}` : dirty ? ` · ${t("Modified")}` : ""}
         </span>}
         <div ref={setSyntaxTarget} />
-        <Button className="icon-button" type="button" aria-label={t("Close document")} shortcut={showShortcut(closeShortcut)}
+        <Button className="icon-button" type="button" aria-label={t("Close document")} shortcut={showShortcut(closeShortcut[0] ?? cancelShortcut[0])}
           onClick={close} disabled={saving}><X /></Button>
       </header>
       <div className="text-toolbar">
@@ -170,7 +171,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
             {t("HTML formatting")}
           </Button>
         )}
-        {!editing && <Button shortcut={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
+        {!editing && <Button shortcut={showShortcut(hexShortcut[0])} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
         <Button type="button" onClick={onOptions}><Settings2 /> {t("Settings")}</Button>
       </div>
       {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
@@ -295,8 +296,8 @@ function DiffRows({ block, current, split, connectors, ratio }: {
 export function CompareDialog({ left, right, previousShortcut, nextShortcut, onClose, onDirtyChange, standalone = false }: {
   left: NamedFile;
   right: NamedFile;
-  previousShortcut: string;
-  nextShortcut: string;
+  previousShortcut: readonly string[];
+  nextShortcut: readonly string[];
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   standalone?: boolean;
@@ -453,14 +454,15 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   return <>
     <Dialog title={t("Compare files")} wide standalone={standalone} onClose={requestClose} onKeyDown={(event) => {
       const shortcut = eventShortcut(event);
-      if (shortcut && (shortcut === previousShortcut || shortcut === nextShortcut)) {
+      const previous = previousShortcut.includes(shortcut);
+      if (previous || nextShortcut.includes(shortcut)) {
         event.preventDefault();
-        jump(shortcut === previousShortcut ? -1 : 1);
+        jump(previous ? -1 : 1);
       }
     }}>
       <div className="comparison-toolbar">
-        <Button disabled={!groups} shortcut={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
-        <Button disabled={!groups} shortcut={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
+        <Button disabled={!groups} shortcut={showShortcut(previousShortcut[0])} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
+        <Button disabled={!groups} shortcut={showShortcut(nextShortcut[0])} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
         <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
         <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge("right", "left")}><ArrowLeft /> {t("Apply to left")}</Button>
         <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge("left", "right")}>{t("Apply to right")} <ArrowRight /></Button>

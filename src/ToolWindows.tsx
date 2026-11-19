@@ -5,7 +5,7 @@ import { applyAppearance, resolveAppearance, useSystemTheme } from "./appearance
 import { saveDialogSize } from "./Dialog";
 import { HelpDialog } from "./HelpDialog";
 import { setLanguage, t } from "./i18n";
-import { eventShortcut, persistPreferences, preferenceKey, readPreferences, type Preferences } from "./preferences";
+import { eventShortcut, persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
 import { Settings } from "./Settings";
 import { CompareDialog } from "./TextTools";
 import type { NamedFile } from "./api";
@@ -16,6 +16,7 @@ export function ToolWindow({ initialPreferences, comparison }: {
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
   const [help, setHelp] = useState(false);
+  const shortcuts = shortcutBindings(preferences);
   const { scheme, theme } = resolveAppearance(preferences, useSystemTheme());
   const title = t(comparison ? "Compare files" : "Options");
   const windowHandle = getCurrentWindow();
@@ -61,12 +62,12 @@ export function ToolWindow({ initialPreferences, comparison }: {
     else void windowHandle.close();
   };
   if (comparison) return <CompareDialog {...comparison} standalone
-    previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange}
+    previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange}
     onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} />;
 
   return <div onKeyDownCapture={(event) => {
-    if (event.defaultPrevented || event.nativeEvent.isComposing || eventShortcut(event) !== preferences.shortcuts.help ||
-        !preferences.shortcuts.help || (event.target instanceof Element && event.target.closest("[data-shortcut-capture]"))) return;
+    if (event.defaultPrevented || event.nativeEvent.isComposing || !shortcuts.help.includes(eventShortcut(event)) ||
+        (event.target instanceof Element && event.target.closest("[data-shortcut-capture]"))) return;
     event.preventDefault();
     setHelp(true);
   }}>
