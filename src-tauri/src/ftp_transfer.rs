@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
 };
@@ -48,6 +49,9 @@ pub fn download(
         ask: &mut ask,
     };
     let prepared = transfer.stage(segments, &entry, staged, plan)?;
+    if entry.is_file() && !transfer.session.matches_file(segments, &entry)? {
+        return Err(file_changed());
+    }
     prepared.publish(&mut progress).map_err(message)
 }
 
@@ -55,10 +59,20 @@ fn download_entry(session: &mut Session, segments: &[String]) -> Result<File> {
     let entry = session
         .stat(segments)?
         .ok_or("The FTP item no longer exists.")?;
-    if !entry.is_directory() && !entry.is_file() {
-        return Err("Choose FTP files and folders without symbolic links.".to_owned());
-    }
+    validate_entry(&entry)?;
     Ok(entry)
+}
+
+fn validate_entry(entry: &File) -> Result<()> {
+    if entry.is_directory() || entry.is_file() {
+        Ok(())
+    } else {
+        Err("Choose FTP files and folders without symbolic links.".to_owned())
+    }
+}
+
+fn file_changed() -> String {
+    "The FTP file changed during the download.".to_owned()
 }
 
 struct StagedDownload {
@@ -135,10 +149,12 @@ impl Download<'_> {
             (self.progress)(&prepared.source, 0, None).map_err(message)?;
             local_transfer::verify_folder(&prepared.target.path, folder).map_err(message)?;
             fs::create_dir(&prepared.source).map_err(message)?;
-            for listed in self.session.list(segments)?.complete()? {
-                let name = local::name_component(listed.name()).map_err(message)?;
-                let child = ftp::child(segments, listed.name());
-                let entry = download_entry(self.session, &child)?;
+            let children = self.session.list(segments)?.complete()?;
+            let mut downloaded = Vec::new();
+            for entry in children {
+                validate_entry(&entry)?;
+                let name = local::name_component(entry.name()).map_err(message)?;
+                let child = ftp::child(segments, entry.name());
                 local_transfer::verify_folder(&prepared.target.path, folder).map_err(message)?;
                 let target = prepared.target.path.join(name);
                 if let Some(plan) = local_transfer::plan_target(
@@ -156,10 +172,14 @@ impl Download<'_> {
                         prepared.source.join(name),
                         plan,
                     )?);
+                    if entry.is_file() {
+                        downloaded.push(entry);
+                    }
                 } else {
                     prepared.complete = false;
                 }
             }
+            self.verify_files(segments, &downloaded)?;
         } else {
             self.stage_contents(segments, entry, &prepared.source)?;
         }
@@ -170,13 +190,15 @@ impl Download<'_> {
         (self.progress)(target, 0, None).map_err(message)?;
         if entry.is_directory() {
             fs::create_dir(target).map_err(message)?;
-            for listed in self.session.list(segments)?.complete()? {
-                let child = ftp::child(segments, listed.name());
-                let entry = download_entry(self.session, &child)?;
+            let children = self.session.list(segments)?.complete()?;
+            for entry in &children {
+                validate_entry(entry)?;
+                let child = ftp::child(segments, entry.name());
                 let destination =
-                    target.join(local::name_component(listed.name()).map_err(message)?);
-                self.stage_contents(&child, &entry, &destination)?;
+                    target.join(local::name_component(entry.name()).map_err(message)?);
+                self.stage_contents(&child, entry, &destination)?;
             }
+            self.verify_files(segments, &children)?;
             return Ok(());
         }
         let mut staged = fs::OpenOptions::new()
@@ -189,13 +211,27 @@ impl Download<'_> {
         self.session.download(segments, &mut staged, |bytes| {
             (self.progress)(target, bytes, Some(size)).map_err(message)
         })?;
-        if staged.metadata().map_err(message)?.len() != size
-            || self.session.stat(segments)?.as_ref() != Some(entry)
-        {
-            return Err("The FTP file changed during the download.".to_owned());
+        if staged.metadata().map_err(message)?.len() != size {
+            return Err(file_changed());
         }
         staged.set_modified(entry.modified()).map_err(message)?;
         staged.sync_all().map_err(message)?;
+        Ok(())
+    }
+
+    fn verify_files(&mut self, segments: &[String], expected: &[File]) -> Result<()> {
+        if !expected.iter().any(File::is_file) {
+            return Ok(());
+        }
+        let current = self.session.list(segments)?.complete()?;
+        let by_name: HashMap<_, _> = current.iter().map(|entry| (entry.name(), entry)).collect();
+        if expected
+            .iter()
+            .filter(|entry| entry.is_file())
+            .any(|entry| by_name.get(entry.name()).copied() != Some(entry))
+        {
+            return Err(file_changed());
+        }
         Ok(())
     }
 }
