@@ -14,7 +14,9 @@ export async function testProcessColumns(page) {
     await pane(side).getByRole("button", { name: "Processes", exact: true }).click();
     await table(side).locator("tbody tr").first().waitFor();
   }
-  const target = table("left").locator("tbody tr").filter({ hasText: "node.exe" }).first();
+  const target = table("left").getByRole("row").filter({
+    has: page.getByRole("gridcell", { name: String(process.pid), exact: true }),
+  });
   await target.click();
   const row = target.and(table("left").locator("[data-current='true']"));
   await row.waitFor();
