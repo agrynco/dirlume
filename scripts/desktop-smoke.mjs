@@ -1450,8 +1450,13 @@ try {
     await page.keyboard.press("Escape");
     await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
-    // The restored workspace keeps earlier document tabs, so closing a viewer can reveal another document.
-    await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "Files", exact: true }).click();
+    await sampleSurface.waitFor({ state: "hidden" });
+    const filesPane = page.getByRole("listbox", { name: "left files", exact: true });
+    if (!await filesPane.isVisible()) {
+      const documents = page.getByRole("navigation", { name: "Open documents" });
+      await documents.getByRole("button", { name: "Files", exact: true }).click();
+    }
+    await filesPane.waitFor();
   }
   assert.equal(await page.getByRole("combobox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
   console.log("Verified feature settings search, independent font overrides, and persistence after restart.");
@@ -1463,7 +1468,7 @@ try {
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
-    assert.equal(topicLinks.length, 19);
+    assert.equal(topicLinks.length, 20);
     assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
     if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
     for (const href of topicLinks) {
