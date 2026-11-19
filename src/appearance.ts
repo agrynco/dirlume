@@ -5,10 +5,22 @@ export const builtInThemes = {
   dark: "Dark",
   light: "Light",
   slate: "Slate",
+  "classic-blue": "Classic blue",
 } as const;
 
 export type Theme = keyof typeof builtInThemes;
 type BaseTheme = Exclude<Theme, "system">;
+
+function isTheme(value: unknown): value is Theme {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(builtInThemes, value);
+}
+
+function isBaseTheme(value: unknown): value is BaseTheme {
+  return isTheme(value) && value !== "system";
+}
+
+export const baseThemes = Object.keys(builtInThemes).filter(isBaseTheme);
+export const readTheme = (value: unknown): Theme => isTheme(value) ? value : "system";
 
 export const colorGroups = {
   window: {
@@ -154,7 +166,7 @@ export function readSchemes(value: unknown): Scheme[] {
   for (const scheme of value as Partial<Scheme>[]) {
     if (!scheme || typeof scheme.id !== "string" || typeof scheme.name !== "string" ||
         result.some(({ id }) => id === scheme.id) ||
-        (scheme.base !== "dark" && scheme.base !== "light" && scheme.base !== "slate")) continue;
+        !isBaseTheme(scheme.base)) continue;
     const palette: Palette = {};
     for (const color of colors) {
       const value = scheme.colors?.[color];
