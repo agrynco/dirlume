@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  basePalette, builtInThemes, colorGroups, fontGroups, fontKeys, isHexColor,
+  basePalette, builtInThemes, colorGroups, fontGroups, isHexColor,
   maxFontSize, maxSchemeNameLength, minFontSize, systemTheme,
   type Color, type Font, type FontGroup, type Palette, type Scheme, type Theme,
 } from "./appearance";
@@ -11,34 +11,36 @@ import type { Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { ColorPicker } from "./ColorPicker";
 import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
-import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts } from "./viewFonts";
+import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFont } from "./viewFonts";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const baseThemes = ["dark", "light", "slate"] as const;
+const sharedFonts = ["ui", "panel", "dialog", "mono"] as const;
 
-export function ViewFontSettings({ preferences, onChange }: {
+export function ViewFontSettings({ preferences, onChange, views = viewFontKeys }: {
   preferences: Preferences;
   onChange: (value: Preferences) => void;
+  views?: readonly ViewFont[];
 }) {
-  return <div className="dialog-body appearance-settings">
+  return <div className="font-settings">
     <p className="appearance-hint">{t("Font sizes are in pixels. Clear a size to use the scheme default.")}</p>
-    <div className="font-settings">
-      {viewFontKeys.map((view) => (
-        <label className="view-font-setting" key={view}>
-          <span>{t(viewFonts[view].label)}</span>
-          <FontSizeInput label={t(viewFonts[view].label)} size={preferences.viewFontSizes[view]}
-            min={minViewFontSize} max={maxViewFontSize}
-            onChange={(size) => onChange({ ...preferences, viewFontSizes: { ...preferences.viewFontSizes, [view]: size } })} />
-        </label>
-      ))}
-    </div>
+    {views.map((view) => (
+      <label className="view-font-setting" key={view}>
+        <span>{t(viewFonts[view].label)}</span>
+        <FontSizeInput label={t(viewFonts[view].label)} size={preferences.viewFontSizes[view]}
+          min={minViewFontSize} max={maxViewFontSize}
+          onChange={(size) => onChange({ ...preferences, viewFontSizes: { ...preferences.viewFontSizes, [view]: size } })} />
+      </label>
+    ))}
   </div>;
 }
 
-export function AppearanceSettings({ section, preferences, onChange }: {
+export function AppearanceSettings({ section, preferences, onChange, fontGroup, views }: {
   section: AppearanceSection;
   preferences: Preferences;
   onChange: (value: Preferences) => void;
+  fontGroup?: FontGroup;
+  views?: readonly ViewFont[];
 }) {
   const [deleting, setDeleting] = useState(false);
   const [system, setSystem] = useState(systemTheme);
@@ -48,6 +50,9 @@ export function AppearanceSettings({ section, preferences, onChange }: {
   const active = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
   const base = active?.base ?? (preferences.theme === "system" ? system : preferences.theme);
   const overrides = active?.colors;
+  const groups = fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : [];
+  const showingFonts = groups.length > 0;
+  const colorSections = section === "fonts" ? [] : section === "panels" && fontGroup === "panel" ? ["panels", "files"] as const : [section];
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -59,14 +64,14 @@ export function AppearanceSettings({ section, preferences, onChange }: {
   useLayoutEffect(() => setPalette(basePalette(base, overrides)), [base, overrides]);
 
   useEffect(() => {
-    if (section !== "fonts") return;
+    if (!showingFonts) return;
     let current = true;
     void api.installedFonts().then(
       (families) => { if (current) setInstalled({ families }); },
       (error: unknown) => { if (current) setInstalled({ families: [], error: describeError(error) }); },
     );
     return () => { current = false; };
-  }, [section]);
+  }, [showingFonts]);
 
   function select(value: string) {
     const custom = preferences.schemes.find(({ id }) => value === `custom:${id}`);
@@ -74,7 +79,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
     onChange({ ...preferences, activeScheme: custom?.id ?? null, theme: custom ? preferences.theme : value as Theme });
   }
 
-  function create(fonts = active?.fonts ?? {}, colors = active?.colors ?? {}) {
+  function create(fonts = active?.fonts ?? {}, colors = active?.colors ?? {}, viewFontSizes = preferences.viewFontSizes) {
     let number = 1;
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
     const scheme: Scheme = {
@@ -82,7 +87,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
       base, colors, fonts,
     };
     setDeleting(false);
-    onChange({ ...preferences, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
+    onChange({ ...preferences, viewFontSizes, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
   }
 
   function update(scheme: Scheme, viewFontSizes = preferences.viewFontSizes) {
@@ -91,17 +96,16 @@ export function AppearanceSettings({ section, preferences, onChange }: {
 
   function setFont(group: FontGroup, font?: Font) {
     const fonts = { ...active?.fonts, [group]: font };
-    if (!active) {
-      create(fonts);
-      return;
-    }
     const viewFontSizes = { ...preferences.viewFontSizes };
-    if (font?.size !== active.fonts[group]?.size) {
+    if (font?.size !== active?.fonts[group]?.size) {
       for (const view of viewFontKeys) {
-        if (viewFonts[view].group === group) delete viewFontSizes[view];
+        const viewGroup = viewFonts[view].group;
+        const inheritsMono = viewGroup !== "panel" && active?.fonts[viewGroup]?.size === undefined;
+        if (viewGroup === group || (group === "mono" && inheritsMono)) delete viewFontSizes[view];
       }
     }
-    update({ ...active, fonts }, viewFontSizes);
+    if (active) update({ ...active, fonts }, viewFontSizes);
+    else create(fonts, {}, viewFontSizes);
   }
 
   function setColor(color: Color, value?: string) {
@@ -146,22 +150,25 @@ export function AppearanceSettings({ section, preferences, onChange }: {
           <Button type="button" className="icon-button appearance-button" aria-label={t("Delete scheme")}
             title={t("Delete scheme")} onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
         </div>
-      ) : <p className="appearance-hint">{section === "fonts" ? t("Changing a font family creates a custom scheme.") :
+      ) : <p className="appearance-hint">{showingFonts ? t("Changing a font creates a custom scheme.") :
         t("Editing a color creates a custom scheme.")}</p>}
       {active && deleting && <div className="scheme-confirm">
         <span>{t("Delete this color scheme?")}</span>
         <Button type="button" onClick={() => setDeleting(false)}>{t("Keep scheme")}</Button>
         <Button type="button" className="negative" onClick={() => remove(active)}>{t("Delete scheme")}</Button>
       </div>}
-      {section === "fonts" ? (
+      {showingFonts && (
         <div className="font-settings">
-          {fontKeys.map((group) => <FontFields key={group} group={group}
+          {groups.map((group) => <FontFields key={group} group={group}
             font={active?.fonts[group]} installed={installed} disabled={!active}
             onChange={(font) => setFont(group, font)} />)}
         </div>
-      ) : (
-        <div className="color-settings">
-          {Object.entries(colorGroups[section].colors).map(([key, label]) => {
+      )}
+      {views && views.length > 0 && <ViewFontSettings views={views} preferences={preferences} onChange={onChange} />}
+      {colorSections.map((colorSection) => (
+        <div className="color-settings" key={colorSection}>
+          {colorSections.length > 1 && <h4>{t(colorGroups[colorSection].label)}</h4>}
+          {Object.entries(colorGroups[colorSection].colors).map(([key, label]) => {
             const color = key as Color;
             const value = palette[color] ?? "#000000";
             return <ColorField key={key} label={label} value={value}
@@ -169,7 +176,7 @@ export function AppearanceSettings({ section, preferences, onChange }: {
               onOpen={() => setPicker({ color, label, initial: value, previous: preferences })} />;
           })}
         </div>
-      )}
+      ))}
       {picker && <ColorPicker label={picker.label} initial={picker.initial}
         onChange={(value) => setColor(picker.color, value)} onCommit={() => setPicker(null)}
         onCancel={() => { onChange(picker.previous); setPicker(null); }} />}
@@ -218,7 +225,7 @@ function FontFields({ group, font, installed, disabled, onChange }: {
       <FontFamilyField label={label} value={font?.family ?? ""} installed={installed} builtIn={disabled}
         onChange={(family) => onChange({ ...font, family: family || undefined })} />
       <label className="field">{t("Size (px)")}
-        <FontSizeInput label={label} size={font?.size} min={minFontSize} max={maxFontSize} disabled={disabled}
+        <FontSizeInput label={label} size={font?.size} min={minFontSize} max={maxFontSize}
           onChange={(size) => onChange({ ...font, size })} />
       </label>
       <Button type="button" className="icon-button" aria-label={t("Reset {0} font", t(label).toLocaleLowerCase())}

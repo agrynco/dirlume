@@ -39,8 +39,8 @@ function terminalAppearance(): ITerminalOptions {
   const value = (name: string) => root.getPropertyValue(name).trim();
   const background = value("--text-bg");
   return {
-    fontFamily: value("--mono"),
-    fontSize: Number.parseFloat(value("--mono-size")),
+    fontFamily: value("--terminal-font"),
+    fontSize: Number.parseFloat(value("--terminal-size")),
     minimumContrastRatio: 4.5,
     theme: {
       ...(isLightBackground(background) ? lightAnsi : darkAnsi),

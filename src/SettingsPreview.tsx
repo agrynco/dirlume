@@ -5,8 +5,9 @@ import { applyAppearance, fileColor } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { showShortcut, type Preferences } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
+import { featureOptions, type FeaturePage } from "./featureOptions";
 
-type PreviewPage = AppearanceSection | "viewFonts" | "general" | "shortcuts";
+type PreviewPage = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 
 const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "recording.mp4", "backup.zip", "config.json", "setup.exe"];
 const hiddenSample = { name: ".env", hidden: true };
@@ -42,6 +43,7 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
   const preview = useRef<HTMLDivElement>(null);
   const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
   const { theme } = preferences;
+  const fontViews = page === "viewFonts" ? viewFontKeys : page === "viewer" || page === "editor" ? featureOptions[page].views : null;
   useLayoutEffect(() => {
     const element = preview.current;
     if (!element) return;
@@ -62,9 +64,9 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
             <div className="preview-field">{t("Downloads")}</div>
             <div className="preview-dialog-actions"><span>{t("Cancel")}</span><span className="preview-primary">{t("Copy")}</span></div>
           </div>
-        ) : page === "viewFonts" ? (
+        ) : fontViews ? (
           <dl className="preview-view-fonts">
-            {viewFontKeys.map((view) => {
+            {fontViews.map((view) => {
               const { label, group, family, sample } = viewFonts[view];
               return <div key={view}>
                 <dt>{t(label)}</dt>
@@ -72,6 +74,8 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
               </div>;
             })}
           </dl>
+        ) : page === "terminal" ? (
+          <pre className="preview-code" style={{ fontFamily: "var(--terminal-font)", fontSize: "var(--terminal-size)" }}>$ dirlume</pre>
         ) : page === "text" ? <CodeSample /> :
           page === "files" ? <Samples hidden={preferences.hidden} all /> :
           page === "shortcuts" ? (

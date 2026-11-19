@@ -14,7 +14,9 @@ Use **Options → Appearance → New scheme** to save your own colors for the wi
 
 **File types** also has separate colors for hidden and system files and folders. Hidden items include dot-prefixed names and items with the Windows Hidden attribute. Items with the Windows System attribute use the system color, including when they are also hidden. **Show hidden files** controls whether hidden items are listed.
 
-Use **Search settings** above the Options tree to find a section or shortcut. Drag any edge or corner of Options to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
+Use **Search settings** above the Options tree to find a setting or shortcut. **Main File Panels** contains hidden-file visibility, pane fonts and sizes, and panel colors. **Viewer**, **Editor**, and **Terminal** each have their own font settings. They inherit the scheme's shared text font and size until you set their own values. **General** contains the interface language and remote connection settings, and **Appearance** contains shared themes and styles.
+
+Drag any edge or corner of Options to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 
 | Default keys | Action |
 | --- | --- |
@@ -47,7 +49,7 @@ Viewers and editors use the same syntax highlighting and let you change the dete
 
 In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
 
-Mouse-wheel font changes are saved in **Options → Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview uses the saved size for all documents and keeps it when you follow links or restart Dirlume. In **Fonts**, changing a scheme’s size for file panels or text tools clears individual sizes for those views. Markdown uses the font family you choose for the editor, viewer, and terminal.
+Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing a scheme’s font size clears wheel adjustments for views that use that size. A custom Viewer family also applies to Markdown.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
