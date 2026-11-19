@@ -163,7 +163,7 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     const shortcut = eventShortcut(event);
-    const action = actions.find(({ command }) => shortcut && bindings[command] === shortcut);
+    const action = actions.find(({ command }) => bindings[command].includes(shortcut));
     if (action) {
       event.preventDefault();
       if (!action.disabled && !event.repeat) action.run();
@@ -199,7 +199,7 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
     </div>
     <footer className="dialog-footer folder-shortcut-actions">
       {actions.map(({ label, command, disabled, run }) => {
-        const shortcut = showShortcut(bindings[command]);
+        const shortcut = showShortcut(bindings[command][0]);
         return <Button key={command} type="button" disabled={disabled} shortcut={shortcut} onClick={run}>
           {t(label)}{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
         </Button>;

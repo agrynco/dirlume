@@ -4,15 +4,15 @@ import { viewFonts, type ViewFont, type ZoomViewFont } from "./viewFonts";
 
 const pixelsPerStep = 60;
 
-export function useFontZoom(ref: RefObject<HTMLElement | null>, binding: string, view: ViewFont, onZoom: ZoomViewFont) {
+export function useFontZoom(ref: RefObject<HTMLElement | null>, bindings: readonly string[], view: ViewFont, onZoom: ZoomViewFont) {
   useEffect(() => {
     const element = ref.current;
-    if (!element || !binding) return;
+    if (!element || !bindings.length) return;
     let pending = 0;
     let lastWheel = 0;
 
     const zoom = (event: WheelEvent) => {
-      if (!event.deltaY || wheelShortcut(event) !== binding ||
+      if (!event.deltaY || !bindings.includes(wheelShortcut(event)) ||
         (event.target instanceof Element && event.target.closest("dialog"))) return;
       event.preventDefault();
 
@@ -29,5 +29,5 @@ export function useFontZoom(ref: RefObject<HTMLElement | null>, binding: string,
 
     element.addEventListener("wheel", zoom, { passive: false });
     return () => element.removeEventListener("wheel", zoom);
-  }, [ref, binding, view, onZoom]);
+  }, [ref, bindings, view, onZoom]);
 }
