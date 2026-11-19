@@ -43,6 +43,13 @@ const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" }>;
+type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
+type RowRename = { side: Side; place: RenameLocation; name: string };
+
+function sameRenameLocation(current: Place | null, place: RenameLocation) {
+  return current !== null && current.kind === place.kind && placePath(current) === placePath(place) &&
+    (place.kind === "local" || sameConnection(current, place));
+}
 
 type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string }
@@ -95,6 +102,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const [startup] = useState(readWorkspace);
   const [ready, setReady] = useState(false);
   const [panes, setPanes] = useState(() => ({ left: restorePane(startup?.panels.left), right: restorePane(startup?.panels.right) }));
+  const visiblePanes = useRef(panes);
+  visiblePanes.current = panes;
+  const [rowRename, setRowRename] = useState<RowRename | null>(null);
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
   const [processPanels, setProcessPanels] = useState({ left: false, right: false });
@@ -754,6 +764,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
+    if (rowRename && (rowRename.side !== side || rowRename.name !== entry.name)) setRowRename(null);
     const items = entries[side];
     const index = items.findIndex(({ name }) => name === entry.name);
     const anchorName = selectionAnchor.current[side] ?? panes[side].selected ?? entry.name;
@@ -766,6 +777,30 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
         : pane.marked.includes(entry.name) ? pane.marked : [],
     }));
+  }
+
+  async function renameItem(place: RenameLocation, name: string, newName: string) {
+    if (place.kind === "ftp") await api.renameFtp(place.id, [...place.segments, name], newName);
+    else await api.operate(place.path, { kind: "rename", name, new_name: newName });
+  }
+
+  function closeRowRename(side: Side) {
+    setRowRename(null);
+    requestAnimationFrame(() => document.getElementById(side + "-files")?.focus());
+  }
+
+  async function submitRowRename(rename: RowRename, name: string) {
+    if (name !== rename.name) {
+      await renameItem(rename.place, rename.name, name);
+      if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+        await load(rename.side, rename.place, "refresh", name);
+        refresh(opposite(rename.side));
+      }
+    }
+    setRowRename((current) => current === rename ? null : current);
+    if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+      requestAnimationFrame(() => document.getElementById(rename.side + "-files")?.focus());
+    }
   }
 
   function resizeSplit(value: number) {
@@ -1000,11 +1035,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             names: transferItems(active, current).map(({ entry }) => entry.name) });
         }
         break;
-      case "rename":
+      case "rename": {
+        const place = local ?? ftp;
+        if (place && current && !pane.search && !busy && !pane.loading) {
+          setRowRename({ side: active, place, name: current.name });
+        }
+        break;
+      }
       case "newFile": {
-        const writable = local ?? (command === "rename" ? ftp : undefined);
-        if (writable && !pane.search && !busy && !pane.loading && (command !== "rename" || current)) {
-          setModal({ kind: command, path: placePath(writable), name: command === "rename" ? current?.name ?? "" : "", ftp });
+        if (local && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "newFile", path: local.path, name: "" });
         }
         break;
       }
@@ -1052,6 +1092,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function keyDown(event: KeyboardEvent) {
+    if ((event.target as HTMLElement).closest(".inline-rename")) return;
     if (modal || event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
     if (target.closest("dialog[open]")) return;
@@ -1107,7 +1148,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !writableTextPlace(currentFile.place) },
     { command: "copy", label: local || ftp || archive ? "Copy" : "Download", Icon: local || ftp || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp) || !!pane.search || !current || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
     { command: "recycle", label: ftp || archive ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp && !archive?.writable) || !!pane.search || !current || busy },
@@ -1195,6 +1236,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
+            rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
+              ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name, keyboardRange: undefined })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
@@ -1446,9 +1489,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               refresh("right");
             }
           } else if (operation) {
-            if (ftp && operation.kind === "rename") {
-              await api.renameFtp(ftp.id, [...ftp.segments, operation.name], operation.new_name);
-            } else await api.operate(modal.path, operation);
+            if (operation.kind === "rename") await renameItem(ftp ?? localPath(modal.path), operation.name, operation.new_name);
+            else await api.operate(modal.path, operation);
             refresh("left");
             refresh("right");
             if (modal.kind === "newFile") {

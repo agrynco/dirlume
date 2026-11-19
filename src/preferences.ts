@@ -28,12 +28,12 @@ export const commands = {
   forward: { label: "Forward", key: "Alt+ArrowRight" },
   address: { label: "Go to path", key: "Ctrl+L" },
   refresh: { label: "Refresh", key: "Ctrl+R" },
-  refreshAlternate: { label: "Refresh (alternate)", key: "F2" },
+  refreshAlternate: { label: "Refresh (alternate)", key: "" },
   filter: { label: "Filter folder", key: "" },
   attributes: { label: "File attributes", key: "Ctrl+A" },
   quickSearch: { label: "Quick search by name prefix", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
-  rename: { label: "Rename", key: "" },
+  rename: { label: "Rename", key: "F2" },
   view: { label: "View text or measure folder", key: "F3" },
   cancelMeasure: { label: "Clear command line or cancel folder size scan", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
@@ -162,6 +162,8 @@ export function readPreferences(): Preferences {
       const value = saved.shortcuts?.[command];
       if (typeof value !== "string" || (!saved.bindingDefaults && value === oldDefaults[command])) continue;
       if (command === "settings" && (saved.bindingDefaults ?? 0) < 3 && value === (mac ? "Meta+," : "Ctrl+,")) continue;
+      if ((saved.bindingDefaults ?? 0) < 4 && (command === "refreshAlternate" && value === "F2" ||
+        command === "rename" && !value && saved.shortcuts?.refreshAlternate === "F2")) continue;
       shortcuts[command] = value;
       configured.add(command);
     }
@@ -197,7 +199,7 @@ export function readPreferences(): Preferences {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 3 }));
+  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 4 }));
 }
 
 export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {

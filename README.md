@@ -42,6 +42,7 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
+| F2 | Rename the selected file or folder in its row. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |

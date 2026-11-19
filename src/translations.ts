@@ -333,6 +333,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Delete permanently": ["Видалити остаточно", "Удалить безвозвратно"],
   "Delete FTP folder contents": ["Видалити вміст папки FTP", "Удалить содержимое папки FTP"],
   "Permanently delete {0}?": ["Видалити остаточно {0}?", "Удалить безвозвратно {0}?"],
+  "New name for {0}": ["Нова назва для {0}", "Новое имя для {0}"],
   "Move {0} to Trash?": ["Перемістити {0} до кошика?", "Переместить {0} в корзину?"],
   "Items selected: {0}": ["Вибрано: {0}", "Выбрано: {0}"],
   "Working…": ["Обробка…", "Обработка…"],
