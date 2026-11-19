@@ -24,6 +24,13 @@ export async function testArchives(page, root) {
     await list.waitFor();
   }
   const left = page.locator("#left-files");
+  async function returnToFiles() {
+    // Closing a viewer can return to a document opened by an earlier smoke test.
+    const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true })
+      .getByRole("button", { name: "Files", exact: true });
+    if (await filesTab.isVisible()) await filesTab.click();
+    await left.waitFor();
+  }
   const row = (name) => left.getByRole("option").and(page.getByTitle(name, { exact: true }));
   const badge = (name) => page.getByTitle(name, { exact: true }).filter({ hasText: name });
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
@@ -62,12 +69,14 @@ export async function testArchives(page, root) {
   await document.getByText("archived text", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await document.waitFor({ state: "hidden" });
+  await returnToFiles();
   await row("note.txt").click();
   await page.keyboard.press("F4");
   await document.getByLabel("Edit note.txt").fill("updated in archive");
   await button(document, "Save").click();
   await button(document, "Save").and(document.locator("button:disabled")).waitFor();
   await button(document, "Close document").click();
+  await returnToFiles();
   await row("keep.txt").click();
   await page.keyboard.press("F8");
   await button(dialog("Delete permanently"), "Delete permanently").click();
@@ -88,6 +97,7 @@ export async function testArchives(page, root) {
   await document.getByText("updated in archive", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await document.waitFor({ state: "hidden" });
+  await returnToFiles();
   assert.equal(await row("keep.txt").count(), 0);
   for (let index = 0; index < 2; index++) {
     await left.focus();
@@ -122,11 +132,7 @@ export async function testArchives(page, root) {
   await document.getByText("archived text", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await document.waitFor({ state: "hidden" });
-  // Closing a viewer can return to a document opened by an earlier smoke test.
-  const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true })
-    .getByRole("button", { name: "Files", exact: true });
-  if (await filesTab.isVisible()) await filesTab.click();
-  await left.waitFor();
+  await returnToFiles();
   for (let depth = 0; depth < 2; depth++) {
     await left.focus();
     await page.keyboard.press("Backspace");

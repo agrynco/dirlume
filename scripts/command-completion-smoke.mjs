@@ -44,6 +44,7 @@ export async function testCommandCompletion(page, root) {
   assert.equal(await input.inputValue(), "git checkout fixture-completion");
 
   await input.fill("git ch --quiet");
+  assert.equal(await input.inputValue(), "git ch --quiet");
   await input.press("Home");
   for (let i = 0; i < 6; i++) await input.press("ArrowRight");
   await option("checkout").click();

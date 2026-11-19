@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { api, windowsClient, type CommandCompletion } from "./api";
 import { t } from "./i18n";
 
@@ -17,6 +17,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   const [position, setPosition] = useState(draft.length);
   const [selection, setSelection] = useState<{ query: string; index: number } | null>(null);
   const [dismissed, setDismissed] = useState("");
+  const completionCaret = useRef<{ draft: string; position: number } | null>(null);
   const [native, setNative] = useState<{ query: string; result: CommandCompletion } | null>(null);
   const caret = Math.min(position, draft.length);
   const query = JSON.stringify([draft, caret, directory, refreshEnvironment]);
@@ -61,6 +62,14 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     if (open && selected >= 0) document.getElementById(`${id}-${selected}`)?.scrollIntoView({ block: "nearest" });
   }, [open, id, query, selected]);
 
+  useLayoutEffect(() => {
+    const completion = completionCaret.current;
+    completionCaret.current = null;
+    if (completion?.draft === draft && document.activeElement === input.current) {
+      input.current?.setSelectionRange(completion.position, completion.position);
+    }
+  }, [draft, dismissed, input]);
+
   function dismiss() {
     setDismissed(query);
     setSelected(-1);
@@ -72,10 +81,8 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     setDismissed(JSON.stringify([value, next, directory, refreshEnvironment]));
     setSelected(-1);
     setPosition(next);
+    completionCaret.current = { draft: value, position: next };
     onChange(value);
-    requestAnimationFrame(() => {
-      if (document.activeElement === input.current) input.current?.setSelectionRange(next, next);
-    });
   }
 
   function selectCaret(element: HTMLTextAreaElement) {
