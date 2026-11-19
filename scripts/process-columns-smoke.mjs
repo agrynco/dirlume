@@ -14,7 +14,9 @@ export async function testProcessColumns(page) {
     await pane(side).getByRole("button", { name: "Processes", exact: true }).click();
     await table(side).locator("tbody tr").first().waitFor();
   }
-  const target = table("left").locator("tbody tr").filter({ hasText: "node.exe" }).first();
+  const target = table("left").getByRole("row").filter({
+    has: page.getByRole("gridcell", { name: String(process.pid), exact: true }),
+  });
   const originalColumns = await table("left").getByRole("columnheader").count();
   const optionalColumns = (await table("left").getByRole("columnheader").getByRole("button").allTextContents())
     .filter((name) => name !== "Process");
