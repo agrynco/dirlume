@@ -474,6 +474,10 @@ enum TransferSource {
         connection: u32,
         segments: Vec<String>,
     },
+    Archive {
+        archive: u32,
+        segments: Vec<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -583,6 +587,7 @@ async fn transfer_item(
     sessions: State<'_, TransferSessions>,
     connections: State<'_, Connections>,
     ftp_state: State<'_, ftp::FtpState>,
+    archives: State<'_, crate::archives::Archives>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
     let connection = match &request.source {
@@ -591,6 +596,10 @@ async fn transfer_item(
     };
     let ftp_source = match &request.source {
         TransferSource::Ftp { connection, .. } => Some(ftp_state.connection(*connection)?),
+        _ => None,
+    };
+    let archive = match &request.source {
+        TransferSource::Archive { archive, .. } => Some(archives.get(*archive)?),
         _ => None,
     };
     let ftp_destination = request
@@ -603,7 +612,9 @@ async fn transfer_item(
                 name.as_str(),
                 Some(selected(directory, name).map_err(message)?),
             ),
-            TransferSource::Server { segments, .. } | TransferSource::Ftp { segments, .. } => (
+            TransferSource::Server { segments, .. }
+            | TransferSource::Ftp { segments, .. }
+            | TransferSource::Archive { segments, .. } => (
                 segments.last().ok_or("Choose a remote item.")?.as_str(),
                 None,
             ),
@@ -658,7 +669,7 @@ async fn transfer_item(
             name,
             source.as_deref(),
             request.multiple,
-            source.is_some() || ftp_source.is_some(),
+            source.is_some() || ftp_source.is_some() || archive.is_some(),
         )
         .map_err(message)?;
         let options = local_transfer::Options {
@@ -666,6 +677,17 @@ async fn transfer_item(
             policy: request.policy,
             ask_read_only: request.ask_read_only,
         };
+        if let TransferSource::Archive { segments, .. } = &request.source {
+            if request.moving {
+                return Err("Use Copy to extract an archive item.".to_owned());
+            }
+            let archive = archive.ok_or("Open the archive first.")?;
+            return archive
+                .lock()
+                .map_err(message)?
+                .copy_to(segments, &target, &options, progress, ask)
+                .map(transfer_outcome);
+        }
         if let TransferSource::Ftp { segments, .. } = &request.source {
             if request.moving {
                 return Err("Use Copy to download FTP items.".to_owned());
@@ -699,7 +721,9 @@ async fn transfer_item(
         }
 
         match request.source {
-            TransferSource::Local { .. } | TransferSource::Ftp { .. } => {
+            TransferSource::Local { .. }
+            | TransferSource::Ftp { .. }
+            | TransferSource::Archive { .. } => {
                 return Err("Choose a supported transfer source.".to_owned())
             }
             TransferSource::Server {
@@ -898,11 +922,11 @@ mod server_download_tests {
     }
 }
 
-const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
+pub(crate) const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Encoding {
+pub(crate) enum Encoding {
     #[default]
     Utf8,
     Utf8Bom,
@@ -911,11 +935,11 @@ enum Encoding {
 }
 
 #[derive(Deserialize, Serialize)]
-struct TextDocument {
-    text: String,
-    encoding: Encoding,
+pub(crate) struct TextDocument {
+    pub(crate) text: String,
+    pub(crate) encoding: Encoding,
     #[serde(skip_serializing_if = "Option::is_none")]
-    revision: Option<String>,
+    pub(crate) revision: Option<String>,
 }
 
 fn open_regular_file(path: &Path) -> Result<fs::File> {
@@ -930,7 +954,7 @@ fn load_text(path: &Path) -> Result<TextDocument> {
     decode_text(open_regular_file(path)?)
 }
 
-fn decode_text(reader: impl Read) -> Result<TextDocument> {
+pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
     let mut bytes = Vec::new();
     reader
         .take(TEXT_LIMIT + 1)
@@ -1075,7 +1099,7 @@ async fn read_server_bytes(
     serde_json::from_slice(&bytes).map_err(message)
 }
 
-fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
+pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
     let mut buffer = Vec::new();
     match encoding {
         Encoding::Utf8 => buffer.extend_from_slice(text.as_bytes()),
@@ -1306,6 +1330,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(crate::updates::PendingUpdate::default())
         .manage(Connections::default())
+        .manage(crate::archives::Archives::default())
+        .manage(crate::archive_create::ArchiveJobs::default())
         .manage(ftp::FtpState::default())
         .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
@@ -1351,6 +1377,15 @@ pub fn run() {
         file_attributes,
         update_file_attributes,
         operate,
+        crate::archive_create::archive_capabilities,
+        crate::archive_create::create_archive,
+        crate::archive_create::cancel_archive,
+        crate::archives::open_archive,
+        crate::archives::list_archive,
+        crate::archives::read_archive_text,
+        crate::archives::read_archive_bytes,
+        crate::archives::save_archive_text,
+        crate::archives::delete_archive_entries,
         crate::folders::create_folders,
         connect_server,
         list_server,

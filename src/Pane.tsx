@@ -216,7 +216,9 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
           <h2 title={pane.search?.mask ?? title}>{title}</h2>
-          {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name" title={pane.place.address}>{t("Remote")}</span>}
+          {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name"
+            title={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
+            {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
         </div>
         <div className="pane-tools">
           {processView && <Button className="icon-button" aria-label={t("Close processes")} title={t("Close processes")}

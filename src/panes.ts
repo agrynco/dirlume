@@ -136,7 +136,7 @@ export function localPath(path: string): Place {
 }
 
 export function childPlace(place: Place, name: string): Place {
-  if (place.kind === "server" || place.kind === "ftp") return { ...place, segments: [...place.segments, name] };
+  if (place.kind === "server" || place.kind === "ftp" || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
     return { ...place, path, parent: null };
@@ -146,6 +146,8 @@ export function childPlace(place: Place, name: string): Place {
 }
 
 export function parentPlace(place: Place): Place | null {
+  if (place.kind === "archive") return place.segments.length
+    ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || place.kind === "ftp") {
     return place.segments.length ? { ...place, segments: place.segments.slice(0, -1) } : null;
   }
@@ -154,6 +156,7 @@ export function parentPlace(place: Place): Place | null {
 }
 
 export async function readPlace(place: Place): Promise<{ place: Place; listing: Listing }> {
+  if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
