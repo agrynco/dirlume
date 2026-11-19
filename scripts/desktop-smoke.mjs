@@ -984,7 +984,7 @@ try {
   await optionsPage.getByRole("button", { name: "Change F7 for New folder", exact: true }).click();
   const captureNewFolder = optionsPage.getByRole("textbox", { name: "New shortcut to replace F7 for New folder", exact: true });
   await captureNewFolder.press("F5");
-  await page.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
+  await shortcutConflict().getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
   await shortcutConflict().getByRole("button", { name: "Choose another shortcut", exact: true }).click();
   await captureNewFolder.press("Control+F12");
   await optionsDialog.getByRole("button", { name: "Change F5 for Copy", exact: true }).waitFor();
