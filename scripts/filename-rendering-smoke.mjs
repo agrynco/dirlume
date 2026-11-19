@@ -6,7 +6,7 @@ import { join } from "node:path";
 export async function testFilenameRendering(page, root) {
   const folder = join(root, "filename-rendering-fixture");
   await mkdir(folder);
-  const sample = "Invoice №123 (Example Holding OÜ,Sample Name) (1).pdf";
+  const sample = "Invoice №123 (Example OÜ,Name) (1).pdf";
   const forms = [sample, sample.normalize("NFD")];
   for (const name of forms) await writeFile(join(folder, name), "");
   assert.deepEqual(new Set(await readdir(folder)), new Set(forms));
