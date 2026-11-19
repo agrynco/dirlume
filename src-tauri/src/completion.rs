@@ -324,6 +324,19 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
             "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
         )
     });
+    if cfg!(windows) && directory && !context.prefix.starts_with('-') {
+        // Use filesystem metadata for local navigation. PowerShell providers can
+        // classify a file as a container, depending on the active provider.
+        let mut matches = paths(cwd, &context.prefix, true);
+        if !matches.is_empty() {
+            matches.truncate(MAX_MATCHES);
+            return CompletionBatch {
+                index: context.index,
+                length: context.length,
+                matches,
+            };
+        }
+    }
     let shell = terminal::shell_program();
     // Shell completion hooks may expand expressions in a draft.
     let native = (!request.line.contains(['$', '`']))
