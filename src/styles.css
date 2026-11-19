@@ -626,6 +626,7 @@ button.primary, button.primary:hover:not(:disabled) { color: var(--on-accent); b
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.negative, button.negative:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
 .field { display: grid; gap: 5px; }
+.new-file-encoding { margin-top: 12px; }
 .quick-search {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
   gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); background: var(--raised);

@@ -7,7 +7,7 @@ import {
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
-import type { AppUpdate, UpdateProgress } from "./api";
+import { textEncodingLabels, type AppUpdate, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
@@ -1427,6 +1427,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   hasNonemptyFolders?: () => Promise<boolean>;
 }) {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
+  const [encoding, setEncoding] = useState<TextEncoding>("utf8");
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
@@ -1446,7 +1447,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         return;
       }
       await onSubmit(modal.kind === "mkdir" ? { kind: "create_folder", name } :
-        modal.kind === "newFile" ? { kind: "create_file", name } :
+        modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
     } catch (error) {
       setError(describeError(error));
@@ -1469,6 +1470,12 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
               <input data-initial-focus value={name} type="text" required onChange={(event) => setName(event.target.value)}
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
             </label>}
+          {modal.kind === "newFile" && <label className="field new-file-encoding">{t("Encoding")}
+            <select aria-label={t("Encoding")} value={encoding} disabled={waiting}
+              onChange={(event) => setEncoding(event.target.value as TextEncoding)}>
+              {Object.entries(textEncodingLabels).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+            </select>
+          </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {!modal.ftp && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
         </div>
