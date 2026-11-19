@@ -169,6 +169,16 @@ while ($null -ne ($line = [Console]::ReadLine())) {
         $command = Get-CompletionCommand $request;
         $result = TabExpansion2 -inputScript $request.line -cursorColumn $request.caret;
         $candidates = $result.CompletionMatches;
+        $prefix = $request.line.Substring(0, $request.caret);
+        if ($result.ReplacementIndex -eq 0 -and $prefix -match '^[\p{L}\p{N}_-]+$') {
+            # Keep short aliases visible even on hosts with many matching cmdlets.
+            $aliases = @(Get-Alias -Name ([WildcardPattern]::Escape($prefix) + '*') -ErrorAction SilentlyContinue |
+                Sort-Object Name | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'Command', $_.Definition)
+                });
+            $aliasNames = @($aliases | ForEach-Object CompletionText);
+            $candidates = $aliases + @($candidates | Where-Object { $_.CompletionText -notin $aliasNames });
+        }
         if ($command -and $command.GetCommandName() -in 'cd','sl','chdir','Set-Location','pushd','Push-Location') {
             $candidates = $candidates | Where-Object { $_.ResultType -ne 'ProviderItem' };
         }
