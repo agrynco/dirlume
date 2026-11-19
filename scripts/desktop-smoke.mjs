@@ -1640,14 +1640,14 @@ try {
   await testCommandCompletion(page, temp);
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
-  await testInlineRename(page, temp);
-  await testPermanentDelete(page, temp);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
+  await testOsTimestamps(page, temp);
+  await testPermanentDelete(page, temp);
+  await testInlineRename(page, temp);
+  await testLockingProcessPane(page, temp);
   await testProcessColumns(page);
   await testProcessQuickSearch(page, temp);
   await testProcessExecutablePath(page, child.pid);
-  await testLockingProcessPane(page, temp);
-  await testOsTimestamps(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await exitDesktop(page);
