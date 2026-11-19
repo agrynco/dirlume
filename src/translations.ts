@@ -7,6 +7,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Toggle terminal": ["Показати або приховати термінал", "Показать или скрыть терминал"],
   "Commands": ["Команди", "Команды"],
   "Options": ["Налаштування", "Настройки"],
+  "Version": ["Версія", "Версия"],
   "Pane divider": ["Межа між панелями", "Разделитель панелей"],
   "Opening terminal…": ["Відкриття термінала…", "Открытие терминала…"],
   "Terminal": ["Термінал", "Терминал"],

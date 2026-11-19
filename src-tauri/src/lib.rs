@@ -25,3 +25,5 @@ mod windows_shell;
 
 #[cfg(feature = "desktop")]
 pub use desktop::run;
+
+pub const BUILD_VERSION: &str = env!("DIRLUME_BUILD_VERSION");

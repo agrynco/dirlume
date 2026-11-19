@@ -11,14 +11,40 @@ permissions:
   contents: read
 
 concurrency:
-  group: dirlume-${{ github.ref }}
+  group: dirlume-${{ ((github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && 'release' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  version:
+    name: Resolve build version
+    runs-on: ubuntu-22.04
+    outputs:
+      product-version: ${{ steps.resolve.outputs.product-version }}
+      build-number: ${{ steps.resolve.outputs.build-number }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - run: node --test scripts/build-version.test.mjs
+      - name: Resolve product version and build number
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
+        run: node scripts/build-version.mjs resolve
+
   build:
     name: Build and test (${{ matrix.platform }})
+    needs: version
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    env:
+      DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
+      DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +74,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
+      - name: Apply the resolved version to the manifests
+        run: node scripts/build-version.mjs prepare
       - name: Install frontend dependencies
         run: npm ci
       - name: Check package and release versions
@@ -87,30 +115,54 @@ jobs:
         run: node scripts/package.mjs collect "${{ matrix.platform }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dirlume-${{ matrix.platform }}
+          name: dirlume-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}
           path: release/*
           if-no-files-found: error
+          overwrite: true
 
   release:
     name: Publish GitHub release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: needs.version.outputs.publish == 'true'
+    needs: [version, build]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    env:
+      DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
+      DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
+      TAG: v${{ needs.version.outputs.product-version }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: dirlume-*
+          pattern: dirlume-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-*
           path: release
           merge-multiple: true
       - name: Publish checked packages
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          node scripts/package.mjs verify-release
           (cd release && sha256sum --check --strict *.sha256)
+          node scripts/build-version.mjs check-release
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            tag_ref="repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG"
+            if ! gh api "$tag_ref" --silent; then
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+            fi
+          fi
+          actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          if [[ "$actual_sha" != "$GITHUB_SHA" ]]; then
+            echo "The release tag does not point to the built commit." >&2
+            exit 1
+          fi
           options=()
           if [[ "$TAG" == *-* ]]; then options+=(--prerelease); fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "Dirlume $TAG" "${options[@]}" release/*
