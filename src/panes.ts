@@ -131,7 +131,7 @@ export function paneItem(pane: PaneState, entry?: Entry): { place: Place; entry:
 
 export const opposite = (side: Side): Side => side === "left" ? "right" : "left";
 
-export function localPath(path: string): Place {
+export function localPath(path: string): Extract<Place, { kind: "local" }> {
   return { kind: "local", path, parent: null };
 }
 

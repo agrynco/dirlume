@@ -1,12 +1,12 @@
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
@@ -23,6 +23,7 @@ interface PaneProps {
   pane: PaneState;
   entries: Entry[];
   locations: QuickLocation[];
+  rename?: { name: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
   activate: () => void;
   onRow: (entry: Entry, range: boolean, mark: boolean) => void;
   onQuickMatch: (name: string) => void;
@@ -50,7 +51,45 @@ interface PaneProps {
   onContext: (entry?: Entry) => void;
 }
 
-export function Pane({ side, active, showHidden, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
+function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["rename"]>) {
+  const input = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  const [draft, setDraft] = useState(name);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  useLayoutEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+
+  async function save() {
+    if (!draft.trim() || saving) return;
+    setError("");
+    setSaving(true);
+    try { await onSave(draft); }
+    catch (failure) {
+      setSaving(false);
+      setError(describeError(failure));
+      requestAnimationFrame(() => input.current?.focus());
+    }
+  }
+
+  return <span className="inline-rename" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+    <input ref={input} type="text" aria-label={t("New name for {0}", name)} value={draft}
+      readOnly={saving} aria-invalid={!!error} aria-describedby={error ? errorId : undefined}
+      onChange={(event) => { setDraft(event.target.value); setError(""); }}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || !["Enter", "Escape"].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "Enter") void save();
+        else if (!saving) onCancel();
+      }} />
+    {error && <span id={errorId} className="inline-rename-error" role="alert">{errorText(error)}</span>}
+  </span>;
+}
+
+export function Pane({ side, active, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const section = useRef<HTMLElement>(null);
@@ -341,7 +380,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
             aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
             onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (entry.name !== "..") onContext(entry); }}
-            draggable={entry.name !== ".."} onDragStart={(event) => {
+            draggable={entry.name !== ".." && rename?.name !== entry.name} onDragStart={(event) => {
               if (onStartDrag(entry, event.dataTransfer)) setDraggedRow(entry.name);
               else event.preventDefault();
             }}
@@ -349,7 +388,8 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
               icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
-              <span>{entry.name}</span>{entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
+              {rename?.name === entry.name ? <InlineRenameField {...rename} /> : <span>{entry.name}</span>}
+              {entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
             <span className="file-date">{formatDate(entry.modified)}</span>
