@@ -27,6 +27,8 @@ mod updates;
 #[cfg(feature = "desktop")]
 mod watch;
 #[cfg(all(feature = "desktop", windows))]
+mod windows_environment;
+#[cfg(all(feature = "desktop", windows))]
 mod windows_shell;
 
 #[cfg(feature = "desktop")]

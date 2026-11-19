@@ -8,6 +8,7 @@ import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
+import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -64,6 +65,7 @@ async function startDesktop() {
     windowsHide: true,
     env: {
       ...process.env,
+      DIRLUME_TEST_PROCESS_ONLY: "launcher-value",
       ...(process.env.DIRLUME_INTERNAL_CDP === "1"
         ? { DIRLUME_CDP_PORT: String(debuggingPort) }
         : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
@@ -1515,6 +1517,7 @@ try {
   assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
   console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
+  if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

@@ -7,7 +7,7 @@ import {
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
-import { textEncodingLabels, type AppUpdate, type TextEncoding, type UpdateProgress } from "./api";
+import { textEncodingLabels, type AppUpdate, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
@@ -109,7 +109,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const dirtyDocuments = useRef(new Set<number>());
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
-  const [terminal, setTerminal] = useState<{ id: number; path: string } | null>(null);
+  const [terminal, setTerminal] = useState<TerminalSession | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
   const [split, setSplit] = useState(Number.isFinite(startup?.split) ? Math.max(20, Math.min(80, startup!.split)) : 50);
   const [commandLine, setCommandLine] = useState("");
@@ -742,7 +742,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       setStatus({ text: "Choose a local folder to open a terminal.", error: true });
       return false;
     }
-    if (!terminal) setTerminal({ id: ++nextSession.current, path: local.path });
+    if (!terminal) setTerminal({ id: ++nextSession.current, path: local.path, refreshEnvironment: preferences.refreshEnvironment });
     return true;
   }
 
@@ -1215,6 +1215,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <Suspense fallback={<div className="terminal-card pane-empty">{t("Opening terminal…")}</div>}>
           <TerminalPanel key={terminal.id} session={terminal} directory={processPanels[active] ? null : local?.path ?? null}
             theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal} historyShortcut={preferences.shortcuts.commandHistory}
+            watchEnvironment={preferences.refreshEnvironment}
             pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
             onShortcut={() => perform("terminal")} onHistory={() => setModal({ kind: "commandHistory" })} onClose={closeTerminal} />
         </Suspense>

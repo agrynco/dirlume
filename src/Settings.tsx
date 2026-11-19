@@ -68,8 +68,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const showGeneral = matches("General", "Language", ...Object.values(languages), "Remote connection", "Dirlume server", "KSwitcher installation folder", "Version");
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
-    const panelTerms = feature === "filePanels" ? ["Show hidden files", ...Object.values(colorGroups.panels.colors)] : [];
-    return matches(label, fontGroups[font].label, "Font family", "Size (px)", "font size", ...views.map((view) => viewFonts[view].label), ...panelTerms);
+    const terms = feature === "filePanels" ? ["Show hidden files", ...Object.values(colorGroups.panels.colors)] :
+      feature === "terminal" && windowsClient ? ["Automatically refresh environment variables"] : [];
+    return matches(label, fontGroups[font].label, "Font family", "Size (px)", "font size", ...views.map((view) => viewFonts[view].label), ...terms);
   });
   const appearanceMatches = appearancePages.filter(({ label, terms }) => matches("Appearance", "Color scheme", label, ...terms));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings");
@@ -197,6 +198,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </div>
       ) : isFeaturePage(page) ? (
         <>
+          {page === "terminal" && windowsClient && <div className="dialog-body settings-general">
+            <label className="setting"><span>{t("Automatically refresh environment variables")}</span>
+              <input type="checkbox" checked={preferences.refreshEnvironment}
+                onChange={(event) => onChange({ ...preferences, refreshEnvironment: event.target.checked })} />
+            </label>
+          </div>}
           {page === "filePanels" && <div className="dialog-body settings-general">
             <label className="setting"><span>{t("Show hidden files")}</span>
               <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />

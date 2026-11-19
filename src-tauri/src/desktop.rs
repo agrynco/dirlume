@@ -1201,6 +1201,11 @@ pub fn run() {
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
+    #[cfg(windows)]
+    let builder = builder.setup(|app| {
+        crate::windows_environment::attach(app.handle());
+        Ok(())
+    });
     #[cfg(feature = "ui-automation")]
     let builder = builder.on_page_load(crate::updates::fixture::page_loaded);
     let dispatch: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![

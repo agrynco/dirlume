@@ -2,10 +2,11 @@ import { t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { X } from "lucide-react";
-import { api, describeError, type TerminalOutput } from "./api";
+import { api, describeError, windowsClient, type TerminalOutput, type TerminalSession } from "./api";
 import { eventShortcut } from "./preferences";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
@@ -50,15 +51,16 @@ function terminalAppearance(): ITerminalOptions {
   };
 }
 
-export default function TerminalPanel({ session, directory, theme, scheme, shortcut, historyShortcut, pendingCommands,
+export default function TerminalPanel({ session, directory, theme, scheme, shortcut, historyShortcut, pendingCommands, watchEnvironment,
   onCommandsQueued, onShortcut, onHistory, onClose }: {
-  session: { id: number; path: string };
+  session: TerminalSession;
   directory: string | null;
   theme: Theme;
   scheme: Scheme | null;
   shortcut: string;
   historyShortcut: string;
   pendingCommands: string[];
+  watchEnvironment: boolean;
   onCommandsQueued: (count: number) => void;
   onShortcut: () => void;
   onHistory: () => void;
@@ -69,10 +71,23 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
   const shortcuts = useRef({ onShortcut, shortcut, onHistory, historyShortcut });
   shortcuts.current = { onShortcut, shortcut, onHistory, historyShortcut };
   const [shellDirectory, setShellDirectory] = useState(session.path);
+  const [environmentChanged, setEnvironmentChanged] = useState(false);
   const enqueue = useRef<((data: string) => void) | null>(null);
   const moveTo = useRef<((path: string | null) => void) | null>(null);
   const acknowledge = useRef(onCommandsQueued);
   acknowledge.current = onCommandsQueued;
+
+  useEffect(() => {
+    if (!windowsClient || !watchEnvironment) return;
+    let open = true;
+    const listener = listen("terminal-environment-changed", () => {
+      if (open) setEnvironmentChanged(true);
+    });
+    return () => {
+      open = false;
+      void listener.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, [watchEnvironment]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -136,7 +151,7 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
         term.write(Uint8Array.from(atob(message.data), (byte) => byte.charCodeAt(0)));
       }
     };
-    const opening = api.openTerminal(session.id, session.path, promptToken, term.rows, term.cols, output);
+    const opening = api.openTerminal(session, promptToken, term.rows, term.cols, output);
     void opening.then(() => { ready = true; }, (error: unknown) => {
       if (!stopped) term.writeln(describeError(error));
     });
@@ -200,6 +215,9 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
       <header><h2>{t("Terminal")}</h2><span title={shellDirectory}>{shellDirectory}</span>
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
+      {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">
+        {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}
+      </p>}
       <div className="terminal-surface" ref={container} />
     </section>
   );
