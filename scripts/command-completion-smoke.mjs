@@ -24,7 +24,7 @@ export async function testCommandCompletion(page, root) {
   const option = (name) => list.getByRole("option", { name, exact: typeof name === "string" });
   async function draft(value, suggestion) {
     await input.fill(value);
-    await option(suggestion).waitFor();
+    await option(suggestion).waitFor({ timeout: 15_000 });
   }
 
   await draft("cl", "cls");
