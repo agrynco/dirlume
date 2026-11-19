@@ -16,7 +16,7 @@ export async function testInlineRename(page, root) {
     await page.getByRole("heading", { name: `rename-${side}`, exact: true }).waitFor({ state: "attached" });
   }
   const pane = (side) => page.locator(`#${side}-files`);
-  const row = (side, name) => pane(side).getByRole("option").and(page.getByTitle(name, { exact: true }));
+  const row = (side, name) => pane(side).getByRole("option").and(page.locator("[data-tooltip=" + JSON.stringify(name) + "]"));
 
   async function edit(side, name) {
     const item = row(side, name);

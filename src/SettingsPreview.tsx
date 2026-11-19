@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 import { useLayoutEffect, useRef } from "react";
 import { File, Folder, FolderTree } from "lucide-react";
-import { applyAppearance, fileColor } from "./appearance";
+import { applyAppearance, fileColor, resolveAppearance, useSystemTheme } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { showShortcut, type Preferences } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
@@ -41,17 +41,10 @@ function CodeSample() {
 
 export function SettingsPreview({ page, preferences }: { page: PreviewPage; preferences: Preferences }) {
   const preview = useRef<HTMLDivElement>(null);
-  const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
-  const { theme } = preferences;
+  const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const fontViews = page === "viewFonts" ? viewFontKeys : page === "viewer" || page === "editor" ? featureOptions[page].views : null;
   useLayoutEffect(() => {
-    const element = preview.current;
-    if (!element) return;
-    const apply = () => applyAppearance(theme, scheme, element);
-    const media = matchMedia("(prefers-color-scheme: dark)");
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
+    if (preview.current) applyAppearance(theme, scheme, preview.current);
   }, [theme, scheme]);
 
   return (

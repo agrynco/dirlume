@@ -32,8 +32,8 @@ use windows::{
         UI::{
             Shell::{
                 DefSubclassProc, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
-                RemoveWindowSubclass, SHBindToParent, SHParseDisplayName, SetWindowSubclass,
-                ShellExecuteW, CMF_NORMAL, CMINVOKECOMMANDINFO,
+                RemoveWindowSubclass, SHBindToParent, SHGetDesktopFolder, SHParseDisplayName,
+                SetWindowSubclass, ShellExecuteW, CMF_NORMAL, CMINVOKECOMMANDINFO,
             },
             WindowsAndMessaging::{
                 CreatePopupMenu, DestroyMenu, GetCursorPos, SetForegroundWindow, TrackPopupMenuEx,
@@ -237,7 +237,7 @@ fn shell_icon(path: &Path) -> Option<String> {
     Some(STANDARD.encode(bytes))
 }
 
-fn show_item_menu(hwnd: HWND, path: &Path) -> Result<()> {
+fn show_item_menu(hwnd: HWND, path: &Path, background: bool) -> Result<()> {
     if MENU_HANDLERS.with(|handlers| handlers.borrow().is_some()) {
         return Err("A Windows context menu is already open.".to_owned());
     }
@@ -249,11 +249,20 @@ fn show_item_menu(hwnd: HWND, path: &Path) -> Result<()> {
         SHParseDisplayName(PCWSTR(path.as_ptr()), None::<&IBindCtx>, &mut item, 0, None)
             .map_err(message)?;
         let result = (|| {
-            let mut child = ptr::null_mut();
-            let folder: IShellFolder = SHBindToParent(item, Some(&mut child)).map_err(message)?;
-            let context: IContextMenu = folder
-                .GetUIObjectOf(hwnd, &[child], None)
-                .map_err(message)?;
+            let context: IContextMenu = if background {
+                let desktop = SHGetDesktopFolder().map_err(message)?;
+                let folder: IShellFolder = desktop
+                    .BindToObject(item, None::<&IBindCtx>)
+                    .map_err(message)?;
+                folder.CreateViewObject(hwnd).map_err(message)?
+            } else {
+                let mut child = ptr::null_mut();
+                let folder: IShellFolder =
+                    SHBindToParent(item, Some(&mut child)).map_err(message)?;
+                folder
+                    .GetUIObjectOf(hwnd, &[child], None)
+                    .map_err(message)?
+            };
             let menu = CreatePopupMenu().map_err(message)?;
             let selected = (|| {
                 context
@@ -308,11 +317,13 @@ fn show_item_menu(hwnd: HWND, path: &Path) -> Result<()> {
 pub async fn windows_item_menu(
     window: WebviewWindow,
     directory: String,
-    name: String,
+    name: Option<String>,
 ) -> Result<()> {
-    let path = local::absolute(&directory)
-        .map_err(message)?
-        .join(local::name_component(&name).map_err(message)?);
+    let mut path = local::absolute(&directory).map_err(message)?.to_owned();
+    let background = name.is_none();
+    if let Some(name) = name {
+        path.push(local::name_component(&name).map_err(message)?);
+    }
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let selected_window = window.clone();
     window
@@ -320,7 +331,7 @@ pub async fn windows_item_menu(
             let result = selected_window
                 .hwnd()
                 .map_err(message)
-                .and_then(|hwnd| show_item_menu(hwnd, &path));
+                .and_then(|hwnd| show_item_menu(hwnd, &path, background));
             let _ = sender.send(result);
         })
         .map_err(message)?;

@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,13 +10,13 @@ export async function testFilenameRendering(page, root) {
   const forms = [sample, sample.normalize("NFD")];
   for (const name of forms) await writeFile(join(folder, name), "");
   assert.deepEqual(new Set(await readdir(folder)), new Set(forms));
-  const address = page.getByLabel("left path", { exact: true });
+  const address = await editPaneAddress(page);
   await address.fill(folder);
   await address.press("Enter");
   const pane = page.getByRole("region", { name: "left pane", exact: true });
   await pane.getByRole("heading", { name: "filename-rendering-fixture", exact: true }).waitFor({ state: "attached" });
   const rows = pane.getByRole("option");
-  const nameField = (name) => rows.and(pane.getByTitle(name, { exact: true })).locator(".file-name > span");
+  const nameField = (name) => rows.and(pane.locator("[data-tooltip=" + JSON.stringify(name) + "]")).locator(".file-name > span");
   const dimensions = (name, selected) => nameField(name).evaluate((field, selected) => {
     const range = document.createRange();
     range.selectNodeContents(field);
@@ -38,7 +39,7 @@ export async function testFilenameRendering(page, root) {
     await resize.press("ArrowRight");
   }
   for (let index = 0; index < forms.length; index++) {
-    await rows.and(pane.getByTitle(forms[index], { exact: true })).click();
+    await rows.and(pane.locator("[data-tooltip=" + JSON.stringify(forms[index]) + "]")).click();
     const values = await Promise.all(forms.map((form, other) => dimensions(form, other === index)));
     for (const value of values) {
       assert.equal(value.fontSize, "15px");

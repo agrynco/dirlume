@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
-import { applyAppearance } from "./appearance";
+import { applyAppearance, resolveAppearance, useSystemTheme } from "./appearance";
 import { saveDialogSize } from "./Dialog";
 import { HelpDialog } from "./HelpDialog";
 import { setLanguage, t } from "./i18n";
@@ -16,8 +16,7 @@ export function ToolWindow({ initialPreferences, comparison }: {
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
   const [help, setHelp] = useState(false);
-  const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
-  const theme = scheme?.base ?? preferences.theme;
+  const { scheme, theme } = resolveAppearance(preferences, useSystemTheme());
   const title = t(comparison ? "Compare files" : "Options");
   const windowHandle = getCurrentWindow();
 
@@ -30,7 +29,7 @@ export function ToolWindow({ initialPreferences, comparison }: {
   }, [theme, scheme]);
 
   useEffect(() => {
-    void windowHandle.setTheme(theme === "system" ? null : theme === "light" ? "light" : "dark").catch(() => {});
+    void windowHandle.setTheme(theme === "light" ? "light" : "dark").catch(() => {});
     void windowHandle.setTitle(title).catch(() => {});
   }, [theme, title]);
 

@@ -9,6 +9,7 @@ export async function testMarkdown(page, source, wheelFont) {
   const original = "\uFEFF# Catalogue 📚\r\n\r\n" +
     "- [ ] Main task\r\n  - [X] Nested task\n\n" +
     "~~~markdown\r\n- [ ] Literal example\r\n~~~\r\n\r\n" +
+    "```mermaid\nflowchart LR\n  A --> B\n```\n\n" +
     "[Linked notes][notes]\r\n\r\n[notes]: notes%20folder/child.md#target-section\r\n";
   await writeFile(catalogue, original);
   await writeFile(join(docs, "child.md"), [
@@ -30,6 +31,11 @@ export async function testMarkdown(page, source, wheelFont) {
   }
 
   await openCatalogue();
+  const diagram = catalogueViewer.getByRole("img", { name: "Mermaid diagram" });
+  await diagram.waitFor();
+  assert.ok(await diagram.evaluate((image) =>
+    image.width <= Number(image.getAttribute("width")) && image.width <= 960 &&
+    image.height <= Math.min(640, innerHeight * 0.7) + 1), "A diagram should fit the reader without upscaling.");
   assert.equal(await catalogueViewer.getByRole("checkbox").count(), 2);
   await task("Main task", false).click();
   await task("Main task", true).waitFor();

@@ -31,8 +31,8 @@ export async function testArchives(page, root) {
     if (await filesTab.isVisible()) await filesTab.click();
     await left.waitFor();
   }
-  const row = (name) => left.getByRole("option").and(page.getByTitle(name, { exact: true }));
-  const badge = (name) => page.getByTitle(name, { exact: true }).filter({ hasText: name });
+  const row = (name) => left.getByRole("option").and(page.locator("[data-tooltip=" + JSON.stringify(name) + "]"));
+  const badge = (name) => page.locator("[data-tooltip=" + JSON.stringify(name) + "]").filter({ hasText: name });
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
   const options = dialog("Create archive");

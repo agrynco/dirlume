@@ -1,21 +1,22 @@
+import { HistoryField } from "./HistoryField";
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, placePath, windowsClient, type DiskSpace, type Entry, type QuickLocation } from "./api";
-import { folderMeasurement, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type Place, type QuickLocation } from "./api";
+import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
-import { eventShortcut, showShortcut, type PanelLayout } from "./preferences";
+import { eventShortcut, showShortcut, type Bindings, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
-import { columnWidthsStyle, FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
+import { FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
 
 interface PaneProps {
@@ -32,26 +33,29 @@ interface PaneProps {
   onQuickMatch: (name: string) => void;
   onOpen: (entry: Entry) => void;
   onPath: (path: string) => void;
+  onPathAncestor: (place: Place) => void;
+  onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
   onParent: () => void;
   onRefresh: () => void;
+  onCancelFolderOperation: () => void;
+  cancelFolderShortcut: string;
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
   onRemote: () => void;
   onFtp: () => void;
-  ftpShortcut: string;
+  onSmb: () => void;
+  sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "smbSources" | "remoteSources">;
   zoomShortcut: string;
   fontSize?: number;
   onZoom: ZoomViewFont;
   onCloseResults: () => void;
   onRevealResult: (entry: Entry) => void;
-  onStartDrag: (entry: Entry, data: DataTransfer) => boolean;
-  onEndDrag: () => void;
-  canDrop: (data: DataTransfer) => boolean;
-  onDrop: () => void;
+  onStartDrag: (entry: Entry, event: ReactPointerEvent) => void;
+  dropTarget: boolean;
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
-  onContext: (entry?: Entry) => void;
+  onContext: (x: number, y: number, entry?: Entry) => void;
 }
 
 function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["rename"]>) {
@@ -93,16 +97,15 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 }
 
 export function Pane({ side, active, layout, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath,
-  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
-  onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
+  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
+  onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
+  onPathAncestor, onCopyPath }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const [locationsOpen, setLocationsOpen] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [draggedRow, setDraggedRow] = useState<string | null>(null);
   const locationsBox = useRef<HTMLDivElement>(null);
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -118,16 +121,14 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const start = virtual ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
   const end = virtual ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
   const indices = Array.from({ length: end - start }, (_, offset) => start + offset);
-  if (virtual) {
-    // Keep the active descendant and the source of an ongoing drag mounted.
-    const dragged = draggedRow === null ? -1 : entries.findIndex((entry) => entry.name === draggedRow);
-    for (const index of new Set([selected, dragged])) {
-      if (index >= 0 && (index < start || index >= end)) indices.push(index);
-    }
+  if (virtual && selected >= 0 && (selected < start || selected >= end)) {
+    indices.push(selected);
     indices.sort((left, right) => left - right);
   }
   const fileIcons = new Map<string, { directory: string; name: string }>();
-  const dateLabel = useTimestamps(processView ? [] : indices.map((index) => entries[index].modified));
+  const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
+  const dateLabel = useTimestamps(visibleTimestamps, "date");
+  const timeLabel = useTimestamps(visibleTimestamps, "time");
   const byName = new Map<string, string>();
   if (windowsClient && !processView) {
     for (const index of indices) {
@@ -219,7 +220,16 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   }, [side]);
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
-  const isRemote = pane.place && pane.place.kind !== "local";
+  const cancelKey = cancelFolderShortcut === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut);
+  const operationLabel = t(pane.loading ? "Opening folder…" : "Calculating folder sizes…");
+  const host = smbHost(pane.place);
+  const isRemote = host || (pane.place && pane.place.kind !== "local");
+  const sources = [
+    { label: t("Processes"), key: sourceBindings.processSources, Icon: Activity, open: () => onProcesses(true) },
+    { label: "FTP", key: sourceBindings.ftpSources, Icon: Server, open: onFtp },
+    ...(windowsClient ? [{ label: "SMB", key: sourceBindings.smbSources, Icon: Server, open: onSmb }] : []),
+    { label: t("Remote machine"), key: sourceBindings.remoteSources, Icon: Server, open: onRemote },
+  ];
   const folderItems = entries.filter(({ name }) => name !== "..");
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
@@ -242,30 +252,16 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
     return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
   }, undefined) : undefined;
   return (
-    <section ref={section} id={`${side}-pane`} style={{ ...viewFontStyle(fontSize), ...columnWidthsStyle(columnLayout.widths) }}
+    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)}
       data-size-column={columnLayout.visibility.size} data-modified-column={columnLayout.visibility.modified}
-      data-layout={layout} className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={t(side === "left" ? "left pane" : "right pane")}
-      onPointerDown={activate} onFocus={activate} onContextMenu={(event) => {
-        if (processView || !(event.target instanceof HTMLElement) || event.target.closest("input, select, textarea, dialog")) return;
-        event.preventDefault();
-        onContext();
-      }} onDragOver={(event) => {
-        if (!canDrop(event.dataTransfer)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-        setDragOver(true);
-      }} onDragLeave={(event) => {
-        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragOver(false);
-      }} onDrop={(event) => {
-        setDragOver(false);
-        if (!canDrop(event.dataTransfer)) return;
-        event.preventDefault();
-        onDrop();
-      }}>
+      data-time-column={columnLayout.visibility.time}
+      data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
+      aria-label={t(side === "left" ? "left pane" : "right pane")}
+      onPointerDown={activate} onFocus={activate}>
       <header className={`pane-heading${localFolder && !processView && !search ? " local-heading" : ""}`}>
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
-            <Button key={location.path} type="button" title={location.path} aria-pressed={location === currentLocation}
+            <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
               onClick={() => { onPath(location.path); list.current?.focus(); }}>
               {twin && (/^[a-z]:$/i.test(location.label) ? <HardDrive aria-hidden="true" /> : <Folder aria-hidden="true" />)}{t(location.label)}
             </Button>
@@ -273,18 +269,19 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         </nav>}
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
-          <h2 title={pane.search?.mask ?? title}>{title}</h2>
+          <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
           {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name"
-            title={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
+            data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
+          {!processView && host && <span className="remote-name" data-tooltip={pane.place?.kind === "local" ? pane.place.path : host}>SMB · {host}</span>}
         </div>
         <div className="pane-tools">
-          {processView && <Button className="icon-button" aria-label={t("Close processes")} title={t("Close processes")}
+          {processView && <Button className="icon-button" aria-label={t("Close processes")}
             onClick={() => onProcesses(false)}><X /></Button>}
           {search && !processView && <>
-            <Button className="icon-button" aria-label={t("Go to selected file")} title={t("Go to selected file")} disabled={selected < 0}
+            <Button className="icon-button" aria-label={t("Go to selected file")} disabled={selected < 0}
               onClick={() => onRevealResult(entries[selected])}><ArrowUpRight /></Button>
-            <Button className="icon-button" aria-label={t("Close search results")} title={t("Close search results")}
+            <Button className="icon-button" aria-label={t("Close search results")}
               onClick={onCloseResults}><X /></Button>
           </>}
           {!processView && <Button className="icon-button" aria-label={t("Filter folder")} aria-pressed={filterOpen}
@@ -299,7 +296,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
               }
             }}><Search /></Button>}
           {!processView && <Button className="icon-button" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
-            {pane.loading ? <LoaderCircle className="spin" /> : <RefreshCw />}
+            <RefreshCw />
           </Button>}
         </div>
       </header>
@@ -313,15 +310,17 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
         <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        <AddressField side={side} place={pane.place} showHidden={showHidden}
-          onNavigate={onPath} focusFiles={() => list.current?.focus()} />
+        <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
+          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
           if (!locationsOpen) return;
-          if (ftpShortcut && eventShortcut(event) === ftpShortcut) {
+          const shortcut = eventShortcut(event);
+          const source = shortcut && sources.find(({ key }) => key === shortcut);
+          if (source) {
             event.preventDefault();
             event.stopPropagation();
             setLocationsOpen(false);
-            onFtp();
+            source.open();
             return;
           }
           if (event.key === "Escape") {
@@ -344,23 +343,38 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           {locationsOpen && (
             <div className="location-popup">
               {locations.map((location) => (
-                <Button key={location.path} title={location.path} onClick={() => { onPath(location.path); setLocationsOpen(false); list.current?.focus(); }}>
+                <Button key={location.path} tooltip={location.path} onClick={() => { onPath(location.path); setLocationsOpen(false); list.current?.focus(); }}>
                   <Folder /> {t(location.label)}
                 </Button>
               ))}
-              <Button onClick={() => { setLocationsOpen(false); onProcesses(true); }}><Activity /> {t("Processes")}</Button>
-              <Button shortcut={showShortcut(ftpShortcut)} onClick={() => { setLocationsOpen(false); onFtp(); }}><Server /> FTP</Button>
-              <Button onClick={() => { setLocationsOpen(false); onRemote(); }}><Server /> {t("Remote machine")}</Button>
+              <div className="location-source-group" role="group" aria-label={t("Sources")}>
+                {sources.map(({ label, key, Icon, open }) => (
+                  <Button key={label} shortcut={showShortcut(key)} onClick={() => { setLocationsOpen(false); open(); }}>
+                    <Icon /> {label}{key && <kbd aria-hidden="true">{showShortcut(key)}</kbd>}
+                  </Button>
+                ))}
+              </div>
             </div>
           )}
         </div>
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
+      {(pane.loading || pane.measuring.length > 0) && <div className="pane-progress">
+        <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? operationLabel}>
+          <LoaderCircle className="spin" aria-hidden="true" />
+          <span>{operationLabel}</span>
+          {pane.loadingPath && <span className="pane-progress-path">{pane.loadingPath}</span>}
+        </div>
+        <Button type="button" aria-label={t(pane.loading ? "Cancel folder navigation" : "Cancel folder size calculation")}
+          shortcut={cancelKey} onClick={onCancelFolderOperation}>
+          {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
+        </Button>
+      </div>}
       {(filterOpen || pane.filter) && (
         <label className="pane-filter">
           <Search />
-          <input ref={filterField} aria-label={t(side === "left" ? "Filter left folder" : "Filter right folder")} type="text" placeholder={t("Filter this folder")}
-            value={pane.filter} onChange={(event) => onFilter(event.target.value)}
+          <HistoryField historyKey="pane-filter" ref={filterField} aria-label={t(side === "left" ? "Filter left folder" : "Filter right folder")}
+            type="text" placeholder={t("Filter this folder")} value={pane.filter} onValueChange={onFilter}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 setFilterOpen(false);
@@ -372,16 +386,13 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         </label>
       )}
       <FileColumns container={columnHeader} layout={columnLayout} sort={pane.sort} onSort={onSort}
-        onResize={(widths, persist) => {
-          const next = { ...columnLayout, widths };
-          setColumnLayout(next);
-          if (persist) saveColumnLayout(side, next);
-        }} onVisibility={(column, visible) => {
+        onVisibility={(column, visible) => {
           const next = { ...columnLayout, visibility: { ...columnLayout.visibility, [column]: visible } };
           setColumnLayout(next);
           saveColumnLayout(side, next);
         }} />
       <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
+        onContextMenu={(event) => { event.preventDefault(); onContext(event.clientX, event.clientY); }}
         onScroll={(event) => {
           if (columnHeader.current) columnHeader.current.scrollLeft = event.currentTarget.scrollLeft;
           if (!virtual) return;
@@ -402,14 +413,15 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
             role="option" aria-setsize={virtual ? entries.length : undefined} aria-posinset={virtual ? index + 1 : undefined}
             data-file-color={fileColor(entry)}
-            aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
+            aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} data-tooltip={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
-            onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (entry.name !== "..") onContext(entry); }}
-            draggable={entry.name !== ".." && rename?.name !== entry.name} onDragStart={(event) => {
-              if (onStartDrag(entry, event.dataTransfer)) setDraggedRow(entry.name);
-              else event.preventDefault();
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onContext(event.clientX, event.clientY, entry.name === ".." ? undefined : entry);
             }}
-            onDragEnd={() => { setDraggedRow(null); onEndDrag(); }}
+            onPointerDown={(event) => { if (entry.name !== ".." && rename?.name !== entry.name) onStartDrag(entry, event); }}
+            onDragStart={(event) => event.preventDefault()}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
               icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
@@ -417,7 +429,8 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
               {entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
-            <span className="file-date">{dateLabel(entry.modified) ?? "–"}</span>
+            <span className="file-date">{dateLabel(entry.modified) ?? formatDate(entry.modified, "date")}</span>
+            <span className="file-time">{timeLabel(entry.modified) ?? formatDate(entry.modified, "time")}</span>
           </div>
           </Fragment>;
         })}

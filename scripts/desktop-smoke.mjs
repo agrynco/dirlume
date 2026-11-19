@@ -144,6 +144,44 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => { pageErrors.push(error.message); });
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+  assert.equal(await page.locator(".topbar-scheme").count(), 0, "The scheme picker is hidden by default.");
+  await page.waitForFunction(() => window.__TAURI_INTERNALS__.invoke("plugin:window|is_visible", { label: "main" }));
+  await page.getByRole("button", { name: "Maximize window" }).click();
+  await page.getByRole("button", { name: "Restore window" }).click();
+  await page.getByRole("button", { name: "Maximize window" }).waitFor();
+  const resizeMain = page.getByRole("button", { name: "Resize Dirlume", exact: true });
+  await resizeMain.waitFor();
+  assert.equal(await resizeMain.evaluate((grip) => {
+    const corner = grip.getBoundingClientRect();
+    return innerWidth - corner.right <= 2 && innerHeight - corner.bottom <= 2;
+  }), true);
+  const initialWidth = await page.evaluate(() => innerWidth);
+  await resizeMain.press("ArrowRight");
+  await page.waitForFunction((width) => innerWidth > width, initialWidth);
+  await resizeMain.press("ArrowLeft");
+  await page.waitForFunction((width) => innerWidth === width, initialWidth);
+  assert.equal(await page.locator(".window-titlebar").getAttribute("data-tauri-drag-region"), "deep");
+  assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
+  const paneDivider = page.getByRole("separator", { name: "Pane divider" });
+  async function dragHorizontally(handle, delta) {
+    const bounds = await handle.boundingBox();
+    assert.ok(bounds);
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + delta, y, { steps: 6 });
+    await page.mouse.up();
+  }
+  const paneSplit = async () => Number(await paneDivider.getAttribute("aria-valuenow"));
+  await dragHorizontally(paneDivider, 150);
+  assert.ok(await paneSplit() >= 55);
+  await paneDivider.dblclick();
+  assert.equal(await paneSplit(), 50);
+  await dragHorizontally(paneDivider, -150);
+  assert.ok(await paneSplit() <= 45, "The splitter should move freely after being reset with a double-click.");
+  await paneDivider.dblclick();
+  assert.equal(await paneSplit(), 50);
   const bundledFamily = "GoMono Nerd Font Mono";
   const defaultFonts = await page.evaluate(async (family) => {
     const styles = ["400", "700", "italic 400", "italic 700"];
@@ -159,19 +197,45 @@ try {
     };
   }, bundledFamily);
   assert.deepEqual(defaultFonts.faces, [true, true, true, true]);
-  // The window and dialogs use the system font; file panels and text tools use the bundled monospace font.
   assert.deepEqual(defaultFonts.bundled, [false, true, false, true, true, true]);
   assert.deepEqual(defaultFonts.system, [true, false, true, false, false, false]);
   assert.deepEqual(defaultFonts.sizes, ["14px", "15px", "14px", "18px", "18px", "18px"]);
-  assert.equal(await page.getByRole("button", { name: "Find files" }).getAttribute("title"), "Find files (Alt+F7)");
-  assert.equal(await page.getByRole("region", { name: "right pane" }).getByRole("button", { name: "Refresh folder" }).getAttribute("title"), "Refresh folder");
+  assert.equal(await page.getByRole("button", { name: "Find files" }).getAttribute("data-tooltip"), "Find files (Alt+F7)");
+  assert.equal(await page.getByRole("region", { name: "right pane" }).getByRole("button", { name: "Refresh folder" }).getAttribute("data-tooltip"), "Refresh folder");
   assert.deepEqual(await page.locator("button:visible").evaluateAll((buttons) =>
-    buttons.filter((button) => !button.title.trim()).map((button) => button.textContent)), []);
+    buttons.filter((button) => !button.closest(".address-ancestor") && !button.dataset.tooltip?.trim()).map((button) => button.textContent)), []);
   await page.waitForFunction(() => ["left", "right"].every((side) =>
-    document.getElementById(`${side}-address`)?.value &&
+    document.getElementById(`${side}-path`)?.dataset.path &&
     document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
+  const tooltip = page.getByRole("tooltip");
+  await page.getByRole("button", { name: "Find files" }).dispatchEvent("pointerover", { pointerType: "mouse" });
+  await tooltip.filter({ hasText: /^Find files \(Alt\+F7\)$/ }).waitFor();
+  await page.keyboard.press("Escape");
+  await tooltip.waitFor({ state: "hidden" });
+  async function editAddress(side) {
+    const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
+    if (!await input.isVisible()) {
+      await page.locator(`#${side}-files`).press("Control+l");
+      await input.waitFor();
+    }
+    return input;
+  }
+  const panePath = (side) => page.locator(`#${side}-path`).getAttribute("data-path");
+  for (const side of ["left", "right"]) {
+    const path = await panePath(side);
+    const breadcrumbs = page.getByRole("navigation", { name: `${side} path breadcrumbs` });
+    const blankArea = await breadcrumbs.boundingBox();
+    assert.ok(blankArea);
+    await breadcrumbs.click({ position: { x: blankArea.width - 8, y: blankArea.height / 2 } });
+    const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
+    assert.equal(await input.inputValue(), path);
+    assert.equal(await input.evaluate((field) => field === document.activeElement), true);
+    await input.press("Escape");
+    await breadcrumbs.waitFor();
+    assert.equal(await panePath(side), path);
+  }
   async function navigate(side, path) {
-    const input = page.getByLabel(`${side} path`, { exact: true });
+    const input = await editAddress(side);
     await input.fill(path);
     await input.press("Enter");
     try {
@@ -191,7 +255,7 @@ try {
         await window.__TAURI_INTERNALS__.invoke("list_directory", { path });
       }
     }, src);
-    const address = page.getByLabel("left path", { exact: true });
+    const address = await editAddress("left");
     await address.fill(join(src, secret));
     await address.press("Enter");
     await page.locator("#left-pane").getByRole("alert").waitFor();
@@ -227,16 +291,36 @@ try {
   }
   await navigate("left", src);
   await navigate("right", dst);
+  const branchFolder = join(src, "breadcrumb-branch");
+  const branchLeaf = join(branchFolder, "breadcrumb-leaf");
+  await mkdir(branchLeaf, { recursive: true });
+  await navigate("left", branchLeaf);
+  const leftBreadcrumbs = page.getByRole("navigation", { name: "left path breadcrumbs" });
+  const currentCrumb = leftBreadcrumbs.locator('[aria-current="location"]');
+  const forwardCrumbs = leftBreadcrumbs.locator(".address-forward");
+  await leftBreadcrumbs.getByRole("button", { name: "from", exact: true }).click();
+  await forwardCrumbs.getByRole("button", { name: "breadcrumb-leaf", exact: true }).waitFor();
+  assert.equal(await currentCrumb.innerText(), "from");
+  await forwardCrumbs.getByRole("button", { name: "breadcrumb-branch", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#left-path [aria-current=location]")?.textContent === "breadcrumb-branch");
+  await forwardCrumbs.getByRole("button", { name: "breadcrumb-leaf", exact: true }).click();
+  await forwardCrumbs.waitFor({ state: "hidden" });
+  assert.equal(await currentCrumb.innerText(), "breadcrumb-leaf");
+  await leftBreadcrumbs.getByRole("button", { name: "from", exact: true }).click();
+  await forwardCrumbs.waitFor();
+  await navigate("left", dst);
+  await navigate("left", src);
+  await forwardCrumbs.waitFor({ state: "hidden" });
   if (process.env.DIRLUME_BUNDLED_FONT_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_BUNDLED_FONT_SCREENSHOT, scale: "css" });
   const leftList = page.getByRole("listbox", { name: "left files", exact: true });
   const rightList = page.getByRole("listbox", { name: "right files", exact: true });
-  const parentRow = '[role="option"][title=".."]';
+  const parentRow = '[role="option"][data-tooltip=".."]';
   const emptyFolder = join(temp, "empty");
   await mkdir(emptyFolder);
   for (const [side, list] of [["left", leftList], ["right", rightList]]) {
     const pane = page.getByRole("region", { name: `${side} pane`, exact: true });
-    const other = page.getByLabel(`${side === "left" ? "right" : "left"} path`, { exact: true });
-    const otherPath = await other.inputValue();
+    const otherSide = side === "left" ? "right" : "left";
+    const otherPath = await panePath(otherSide);
     const up = pane.getByRole("button", { name: "Parent folder", exact: true });
     await navigate(side, emptyFolder);
     await list.locator(parentRow).waitFor();
@@ -248,20 +332,18 @@ try {
     await pane.getByRole("button", { name: "Filter folder", exact: true }).click();
     await pane.getByRole("textbox", { name: `Filter ${side} folder`, exact: true }).fill("no match");
     assert.equal(await list.getByRole("option").count(), 1);
-    assert.equal(await list.getByRole("option").first().getAttribute("title"), "..");
+    assert.equal(await list.getByRole("option").first().getAttribute("data-tooltip"), "..");
     await pane.getByRole("button", { name: "Close filter", exact: true }).click();
-    assert.equal(await list.getByRole("option").first().getAttribute("title"), "..");
+    assert.equal(await list.getByRole("option").first().getAttribute("data-tooltip"), "..");
     await column.click();
     await navigate(side, emptyFolder);
     await list.press("ArrowLeft");
     assert.equal(await list.locator(parentRow).getAttribute("data-current"), "true");
-    assert.equal(await list.locator(parentRow).getAttribute("draggable"), "false");
-    const copyAction = page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Copy", exact: true });
-    assert.equal(await copyAction.getAttribute("aria-keyshortcuts"), "F5");
-    assert.equal(await copyAction.isEnabled(), false);
+    assert.equal(await list.locator(parentRow).evaluate((row) => row.draggable), false);
+    assert.equal(await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Copy", exact: true }).isEnabled(), false);
     await list.press("Enter");
-    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
-    assert.equal(await other.inputValue(), otherPath);
+    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
+    assert.equal(await panePath(otherSide), otherPath);
     await navigate(side, parse(temp).root);
     assert.equal(await list.locator(parentRow).count(), 0);
     assert.equal(await up.isEnabled(), false);
@@ -279,7 +361,7 @@ try {
   await page.keyboard.press("Control+a");
   assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
     "Ctrl+A with focus on the workspace background must not highlight the interface.");
-  const pathField = page.getByLabel("left path", { exact: true });
+  const pathField = await editAddress("left");
   await pathField.press("Control+a");
   assert.deepEqual(await pathField.evaluate((field) => [field.selectionStart, field.selectionEnd]),
     [0, src.length], "Ctrl+A must still select the text in the address field.");
@@ -363,18 +445,18 @@ try {
   assert.equal(await fontSize("#right-pane"), rightFont, "Unmodified wheel input should leave font size alone.");
   const leftAddress = page.getByLabel("left path", { exact: true });
   const leftSuggestions = page.getByRole("listbox", { name: "left path suggestions", exact: true });
-  await leftAddress.fill(join(src, "me"));
+  await (await editAddress("left")).fill(join(src, "me"));
   await leftSuggestions.getByRole("option", { name: "measured", exact: true }).waitFor();
   if (process.env.DIRLUME_ADDRESS_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_ADDRESS_SCREENSHOT, scale: "css" });
   await leftAddress.press("Tab");
   assert.equal(await leftAddress.inputValue(), join(src, "measured") + "\\");
   await leftAddress.press("Enter");
   const filePane = page.getByRole("region", { name: "left pane", exact: true });
-  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor({ state: "attached" });
-  await leftAddress.fill(join(src, "ov"));
+  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await (await editAddress("left")).fill(join(src, "ov"));
   await leftSuggestions.getByRole("option", { name: "overlap", exact: true }).click();
-  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor({ state: "attached" });
-  await leftAddress.fill(join(src, "me"));
+  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor();
+  await (await editAddress("left")).fill(join(src, "me"));
   await leftSuggestions.getByRole("option", { name: "measured", exact: true }).waitFor();
   await leftAddress.press("ArrowDown");
   await leftSuggestions.getByRole("option", { name: "measured", selected: true }).waitFor();
@@ -397,6 +479,14 @@ try {
   assert.equal(await copySetup.isVisible(), true);
   await destination.fill(join(src, "sec"));
   await destinationSuggestions.getByRole("option", { name: "second.txt", exact: true }).click();
+  assert.equal(await destination.inputValue(), join(src, "second.txt"));
+  await copySetup.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.keyboard.press("F5");
+  await copySetup.getByRole("button", { name: "Show entry history" }).click();
+  await copySetup.getByRole("listbox", { name: "Entry history", exact: true })
+    .getByRole("option", { name: join(src, "second.txt"), exact: true }).waitFor();
+  await destination.press("ArrowDown");
+  await destination.press("Enter");
   assert.equal(await destination.inputValue(), join(src, "second.txt"));
   await copySetup.getByRole("button", { name: "Cancel", exact: true }).click();
   await filePane.getByRole("option", { name: /^measured/ }).click();
@@ -485,10 +575,10 @@ try {
   await guideRow.click();
   assert.equal(await guideRow.getAttribute("aria-selected"), "true");
   assert.equal(await left.getByRole("option", { selected: true }).count(), 1);
-  const orderedRows = await left.locator(".file-row").evaluateAll((rows) => rows.map((row) => row.title));
+  const orderedRows = await left.locator(".file-row").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   const guideIndex = orderedRows.indexOf("guide.md");
   const nextAfterGuide = orderedRows[guideIndex + 1];
-  const markedRows = () => left.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.title));
+  const markedRows = () => left.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   assert.ok(guideIndex > 1 && guideIndex + 2 < orderedRows.length);
   await page.keyboard.press("Shift+ArrowDown");
   await page.keyboard.press("Shift+ArrowDown");
@@ -522,7 +612,12 @@ try {
   const dragFile = left.getByRole("option", { name: /^drag-file.txt/ });
   await dragFile.click({ modifiers: ["Control"] });
   await left.getByRole("option", { name: /^drag-folder/ }).click({ modifiers: ["Control"] });
-  await dragFile.dragTo(right);
+  const sourceBounds = await dragFile.boundingBox();
+  const destinationBounds = await right.boundingBox();
+  await page.mouse.move(sourceBounds.x + 30, sourceBounds.y + sourceBounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(destinationBounds.x + 50, destinationBounds.y + 60, { steps: 15 });
+  await page.mouse.up();
   const dragDialog = page.getByRole("dialog", { name: "Copy", exact: true });
   await dragDialog.getByText("2 selected items", { exact: true }).waitFor();
   await dragDialog.getByLabel("Move instead of copying").check();
@@ -530,6 +625,17 @@ try {
   assert.equal(await readFile(join(dst, "drag-file.txt"), "utf8"), "Dragged file");
   assert.equal(await readFile(join(dst, "drag-folder", "child.txt"), "utf8"), "Dragged folder");
   await assert.rejects(readFile(join(src, "drag-file.txt")), { code: "ENOENT" });
+  const droppedPath = join(temp, "from-explorer.txt");
+  await writeFile(droppedPath, "Dropped from outside Dirlume");
+  await page.evaluate(async (path) => {
+    const pane = document.querySelector("#right-files").getBoundingClientRect();
+    const position = { x: (pane.left + 20) * devicePixelRatio, y: (pane.top + 20) * devicePixelRatio };
+    await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {
+      event: "tauri://drag-drop", payload: { paths: [path], position },
+    });
+  }, droppedPath);
+  await finishTransfer("Copy");
+  assert.equal(await readFile(join(dst, "from-explorer.txt"), "utf8"), "Dropped from outside Dirlume");
   await page.getByRole("option", { name: /^measured/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("option", { name: /^measured/ }).getByText("12 B", { exact: true }).waitFor();
@@ -608,7 +714,7 @@ try {
   assert.equal((await quick.inputValue()).toLowerCase(), "s");
   await quick.fill("sec");
   const secondRow = left.getByRole("option", { name: /^second.txt/ });
-  await page.waitForFunction(() => document.querySelector("#left-files [data-current=true]")?.getAttribute("title") === "second.txt");
+  await page.waitForFunction(() => document.querySelector("#left-files [data-current=true]")?.getAttribute("data-tooltip") === "second.txt");
   if (process.env.DIRLUME_QUICK_SEARCH_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_QUICK_SEARCH_SCREENSHOT, scale: "css" });
   await quick.fill("nosuchfile");
   await leftPane.getByText("No match", { exact: true }).waitFor();
@@ -626,7 +732,7 @@ try {
     searchSettings = optionsDialog.getByRole("searchbox", { name: "Search settings", exact: true });
     assert.notEqual(optionsPage, page);
   }
-  await showOptions(() => leftAddress.press("Alt+Control+S"));
+  await showOptions(() => page.locator("#left-files").press("Alt+Control+S"));
   await optionsDialog.getByRole("button", { name: "General", exact: true }).click();
   const provider = optionsDialog.getByLabel("Remote connection");
   await provider.selectOption("kswitcher");
@@ -638,7 +744,7 @@ try {
   assert.equal(await bridgePath.inputValue(), join(src, "measured"));
   await provider.selectOption("server");
   await closeToolWindow(optionsPage);
-  await showOptions(() => leftAddress.dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true }));
+  await showOptions(() => page.locator("#left-files").dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true }));
   await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   const zoomBinding = () => optionsDialog.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true });
   assert.equal(await zoomBinding().inputValue(), "Ctrl+Wheel");
@@ -652,7 +758,7 @@ try {
   await wheelFont("#left-files", -120, "Alt");
   assert.ok(await fontSize("#left-pane") > leftFont);
   await wheelFont("#left-files", 120, "Alt");
-  await showOptions(() => leftAddress.press("Alt+Control+S"));
+  await showOptions(() => page.locator("#left-files").press("Alt+Control+S"));
   assert.equal(await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).getAttribute("aria-pressed"), "true");
   assert.equal(await searchSettings.inputValue(), "keyboard shortcuts");
   assert.equal(await optionsContent.evaluate((content) => content.scrollTop), shortcutScroll);
@@ -688,6 +794,7 @@ try {
     };
   });
   assert.deepEqual(settingsFocus, { visible: true, fits: true }, "The Options tree should show the full keyboard focus outline.");
+  await optionsPage.getByRole("button", { name: "Window", exact: true }).click();
   await optionsPage.getByLabel("Color scheme").selectOption("light");
   await optionsPage.getByRole("button", { name: "Apply", exact: true }).click();
   await optionsPage.getByRole("dialog", { name: "Options", exact: true }).waitFor();
@@ -789,7 +896,7 @@ try {
   await optionsContent.evaluate((content, position) => { content.scrollTop = position; }, fontScroll);
   for (const closeWith of ["button", "Escape"]) {
     await closeToolWindow(optionsPage, closeWith === "button" ? () => optionsDialog.getByRole("button", { name: "Cancel", exact: true }).click() : undefined);
-    await showOptions(() => leftAddress.press("Alt+Control+S"));
+    await showOptions(() => page.locator("#left-files").press("Alt+Control+S"));
     assert.equal(await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await optionsContent.evaluate((content) => content.scrollTop), fontScroll);
     assert.equal(await optionsPage.getByLabel("File panels font size").inputValue(), "17");
@@ -801,7 +908,7 @@ try {
   await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("F12");
   await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await navigate("left", attributes);
-  const attributeRow = (name) => left.locator(`.file-row[title="${name}"]`);
+  const attributeRow = (name) => left.locator(`.file-row[data-tooltip="${name}"]`);
   const attributeName = (name) => attributeRow(name).locator(".file-name");
   assert.equal(await attributeRow("hidden.rs").count(), 0);
   assert.equal(await attributeRow("system-hidden.dll").count(), 0);
@@ -822,7 +929,7 @@ try {
   const flag = (name) => properties.getByRole("checkbox", { name, exact: true });
   const applyAttributes = () => properties.getByRole("button", { name: "Apply", exact: true }).click();
   const cancelAttributes = () => properties.getByRole("button", { name: "Cancel", exact: true }).click();
-  await leftAddress.press("Control+a");
+  await (await editAddress("left")).press("Control+a");
   assert.equal(await leftAddress.evaluate((field) => field.selectionEnd - field.selectionStart), attributes.length);
   assert.equal(await properties.count(), 0);
   await attributeRow("ordinary.sys").click();
@@ -843,14 +950,14 @@ try {
   await properties.getByText("Attributes saved.", { exact: true }).waitFor();
   assert.equal(await flag("Read-only").isChecked(), true);
   await page.waitForFunction((expected) =>
-    getComputedStyle(document.querySelector('#left-files [title="ordinary.sys"] .file-name')).color === expected, attributeColors.system);
+    getComputedStyle(document.querySelector('#left-files [data-tooltip="ordinary.sys"] .file-name')).color === expected, attributeColors.system);
   await flag("Read-only").uncheck();
   await flag("System attribute").uncheck();
   await applyAttributes();
   await properties.getByText("Attributes saved.", { exact: true }).waitFor();
   await cancelAttributes();
   await navigate("right", attributes);
-  const rightSystemFolder = right.locator('.file-row[title="system-folder"]');
+  const rightSystemFolder = right.locator('.file-row[data-tooltip="system-folder"]');
   await rightSystemFolder.click();
   await right.press("Control+a");
   await properties.getByText("system-folder", { exact: true }).waitFor();
@@ -868,8 +975,8 @@ try {
   console.log("Verified file and folder attributes, cancel, pane refresh, and text selection.");
   await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
-  await page.keyboard.press("F12");
-  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name", { exact: true }).fill("verified");
+  await page.keyboard.press("Control+F12");
+  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name").fill("verified");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
 
@@ -885,8 +992,11 @@ try {
   await page.getByRole("textbox", { name: "Edit draft.md" }).fill("# Draft");
   await page.keyboard.press("F2");
   const editor = page.getByRole("region", { name: "draft.md", exact: true });
-  await editor.getByRole("button", { name: "Save", exact: true }).waitFor();
-  await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .footer-message")?.textContent === "UTF8");
+  await editor.locator(".document-heading .document-encoding").getByText("UTF8", { exact: true }).waitFor();
+  await editor.locator(".document-heading").getByRole("combobox", { name: "Syntax" }).waitFor();
+  assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
+    parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
+  assert.equal(await editor.getByRole("button", { name: "Save", exact: true }).count(), 0);
   await page.keyboard.press("F10");
   await editor.waitFor({ state: "hidden" });
   assert.equal(await readFile(join(src, "draft.md"), "utf8"), "# Draft");
@@ -1049,6 +1159,7 @@ try {
   await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "Files", exact: true }).click();
   await page.keyboard.press("F10");
   await unsaved.getByRole("button", { name: "Keep working", exact: true }).click();
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press("Control+Shift+Tab");
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("Control+Shift+Tab");
@@ -1057,7 +1168,7 @@ try {
   await page.keyboard.press("Control+Tab");
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("F2");
-  await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .footer-message")?.textContent === "UTF8");
+  await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .document-encoding")?.textContent?.trim() === "UTF8");
   await page.keyboard.press("Escape");
   await diagram.waitFor();
   await page.keyboard.press("Escape");
@@ -1074,7 +1185,7 @@ try {
   await wheelFont(hexSurface, -120);
   const viewerFont = await fontSize(hexSurface);
   assert.ok(viewerFont > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Close document", exact: true }).click();
   await left.getByRole("option", { name: /^sample.rs/ }).click();
   await page.keyboard.press("F3");
   await page.getByText("fn", { exact: true }).first().waitFor();
@@ -1083,25 +1194,88 @@ try {
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 
   const commandLine = page.getByRole("combobox", { name: "Command line" });
-  await commandLine.press("Control+ArrowRight");
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  const toggleTerminal = page.getByRole("button", { name: "Toggle terminal", exact: true });
+  const terminalInput = page.locator(".xterm-helper-textarea");
+  const paneHeight = () => left.evaluate((pane) => pane.getBoundingClientRect().height);
+  const compactHeight = await paneHeight();
+  await page.locator("#left-files").press("Control+ArrowRight");
   assert.equal(await page.getByRole("separator", { name: "Pane divider" }).getAttribute("aria-valuenow"), "51");
+  await commandLine.fill("preserved draft");
+  await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
+  await terminal.waitFor();
+  await commandLine.waitFor({ state: "hidden" });
+  const firstHeight = await paneHeight();
+  assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
+  const terminalSplit = await paneSplit();
+  for (const key of ["ArrowUp", "ArrowDown", "Control+ArrowLeft", "Control+ArrowRight",
+    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "Control+ArrowUp", "F1", "F8", "F12"]) {
+    await terminalInput.press(key);
+  }
+  assert.equal(await paneSplit(), terminalSplit);
+  assert.equal(await paneHeight(), firstHeight);
+  assert.equal(await page.getByRole("dialog").count(), 0);
+  await page.locator("#left-files").press("Control+ArrowUp");
+  const expandedHeight = await paneHeight();
+  assert.ok(expandedHeight < firstHeight, "Ctrl+Up should make more room for the terminal.");
+  await toggleTerminal.click();
+  await terminal.waitFor({ state: "hidden" });
+  await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Terminal", exact: true }).click();
+  await terminal.waitFor();
+  assert.equal(await paneHeight(), expandedHeight);
+  await page.locator("#left-files").press("Control+ArrowDown");
+  assert.ok(Math.abs(await paneHeight() - firstHeight) <= 2);
+  const terminalDivider = page.getByRole("separator", { name: "Resize terminal" });
+  const terminalBounds = await terminalDivider.boundingBox();
+  assert.ok(terminalBounds);
+  const dividerX = terminalBounds.x + terminalBounds.width / 2;
+  const dividerY = terminalBounds.y + terminalBounds.height / 2;
+  await page.mouse.move(dividerX, dividerY);
+  await page.mouse.down();
+  await page.mouse.move(dividerX, dividerY - 30, { steps: 4 });
+  await page.mouse.up();
+  const draggedHeight = await paneHeight();
+  assert.ok(draggedHeight < firstHeight - 20, "Dragging up should grow the terminal.");
+  await toggleTerminal.click();
+  await terminal.waitFor({ state: "hidden" });
+  assert.equal(await commandLine.inputValue(), "preserved draft");
+  assert.equal(await paneHeight(), compactHeight);
+  await toggleTerminal.click();
+  await terminal.waitFor();
+  assert.equal(await paneHeight(), draggedHeight);
+  await toggleTerminal.click();
+  await commandLine.waitFor();
+  assert.equal(await paneHeight(), compactHeight);
+  await commandLine.press("Control+ArrowUp");
+  await terminal.waitFor();
+  assert.equal(await paneHeight(), draggedHeight);
+  await toggleTerminal.click();
+  await commandLine.waitFor();
   await commandLine.press("Control+o");
   await left.waitFor({ state: "hidden" });
-  await commandLine.press("Control+o");
+  await toggleTerminal.click();
+  await commandLine.waitFor();
   await left.waitFor();
   await commandLine.fill("Write-Output ('dirlume-' + 'command-bar-ok')");
   await commandLine.press("Enter");
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("dirlume-command-bar-ok"));
+  await terminalInput.press("ArrowUp");
+  await terminalInput.press("Enter");
+  await page.waitForFunction(() => (document.querySelector(".xterm-accessibility-tree")?.textContent?.match(/dirlume-command-bar-ok/g)?.length ?? 0) >= 2);
+  await toggleTerminal.click();
   await commandLine.press("Control+e");
   assert.match(await commandLine.inputValue(), /command-bar-ok/);
   await commandLine.fill("");
-  const terminalToggle = page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true });
-  await terminalToggle.click();
-  await page.getByRole("region", { name: "Terminal" }).waitFor({ state: "hidden" });
-  await terminalToggle.click();
+  await toggleTerminal.click();
 
-  const input = page.locator(".xterm-helper-textarea");
+  const input = terminalInput;
   await input.focus();
+  await left.getByRole("option", { name: /^notes\.txt/ }).click();
+  await input.press("F5");
+  await copySetup.waitFor();
+  await copySetup.getByRole("button", { name: "Cancel", exact: true }).click();
+  await terminal.waitFor();
+  assert.ok(await input.evaluate((field) => field === document.activeElement), "Copy should restore focus to the terminal.");
   const terminalText = () => page.locator(".terminal-card").innerText();
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("PS "));
   await input.pressSequentially("if ((Get-Location).Path.EndsWith('from')) { Write-Output ('dirlume-' + 'terminal-ok') }");
@@ -1122,6 +1296,9 @@ try {
   assert.ok(await input.count(), "Changing folders should keep the terminal open.");
   await input.pressSequentially("$dirlumeTestSession = 42");
   await input.press("Enter");
+  await toggleTerminal.click();
+  await commandLine.waitFor();
+  await toggleTerminal.click();
   await input.pressSequentially("Write-Output ('dirlume-' + 'busy'); Start-Sleep -Seconds 2; Write-Output ('from:' + (Get-Location).Path)");
   await input.press("Enter");
   await waitForTerminalText("dirlume-busy");
@@ -1137,11 +1314,13 @@ try {
   await input.press("Enter");
   await waitForTerminalText("dirlume-draft");
   await waitForDirectory(subfolder);
-  await input.press("Alt+F8");
+  await toggleTerminal.click();
+  await commandLine.press("Alt+F8");
   const commandHistory = page.getByRole("dialog", { name: "Command history", exact: true });
   await commandHistory.getByRole("button", { name: /command-bar-ok/ }).click();
   assert.match(await commandLine.inputValue(), /command-bar-ok/);
   await commandLine.fill("");
+  await toggleTerminal.click();
   await navigate("left", src);
   await waitForDirectory(src);
   await input.pressSequentially('[Console]::WriteLine(("$([char]27)[93m" + "dirlume-" + "yellow-probe" + "$([char]27)[0m"))');
@@ -1209,7 +1388,7 @@ try {
     await page.keyboard.press("F4");
     await raw.waitFor();
     assert.match(await raw.innerText(), /23 20 52 65 6D 6F 74 65/);
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("button", { name: "Close document", exact: true }).click();
     await page.getByRole("option", { name: /^файл.bin/ }).click();
     await page.keyboard.press("F5");
     await finishTransfer("Download");
@@ -1217,7 +1396,7 @@ try {
     assert.deepEqual(await readFile(join(dst, "файл.bin")), bytes);
     const back = leftPane.getByRole("button", { name: "Back", exact: true });
     await back.click();
-    await page.waitForFunction(() => document.getElementById("left-address")?.value === "/");
+    await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "/");
     await back.click();
     await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
   });
@@ -1231,62 +1410,45 @@ try {
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
   const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
-  // Default tracks use em units and can start at fractional pixels, while dragged widths are stored as whole pixels.
-  const assertColumnWidth = async (side, column, expected) => {
-    const actual = await columnWidth(side, column);
-    assert.ok(Math.abs(actual - expected) <= 1, `${side} ${column} column is ${actual}px, expected about ${expected}px.`);
-  };
-  const columnHandle = (side, name) => page.getByRole("region", { name: `${side} pane`, exact: true })
-    .getByRole("separator", { name: `Resize ${name} column`, exact: true });
-  async function dragColumn(side, name, delta) {
-    const bounds = await columnHandle(side, name).boundingBox();
-    assert.ok(bounds);
-    const x = bounds.x + bounds.width / 2;
-    const y = bounds.y + bounds.height / 2;
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(x + delta, y, { steps: 5 });
-    await page.mouse.up();
-  }
-  const leftName = await columnWidth("left", "name");
+  assert.equal(await page.locator(".file-columns [role=separator]").count(), 0);
   const leftSize = await columnWidth("left", "size");
   const rightSize = await columnWidth("right", "size");
   const rightModified = await columnWidth("right", "modified");
-  await dragColumn("left", "Name", 56);
-  assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
-  await dragColumn("left", "Size", 32);
-  await assertColumnWidth("left", "size", leftSize + 32);
-  assert.equal(await columnWidth("right", "size"), rightSize);
-  await page.locator("#left-files").evaluate((list) => { list.scrollLeft = 60; });
-  await page.waitForFunction(() => {
-    const header = document.querySelector("#left-pane .file-columns");
-    const list = document.getElementById("left-files");
-    return list.scrollLeft > 0 && header.scrollLeft === list.scrollLeft &&
-      Math.abs(header.querySelector(".col-size").getBoundingClientRect().left -
-        list.querySelector(".file-size").getBoundingClientRect().left) <= 1;
-  });
-  await dragColumn("right", "Modified", -28);
-  await assertColumnWidth("right", "modified", rightModified - 28);
-  await columnHandle("right", "Modified").dblclick();
-  assert.equal(await columnWidth("right", "modified"), rightModified);
-  await dragColumn("right", "Modified", -28);
+  const rightTime = await columnWidth("right", "time");
+  const timeEdge = () => page.locator("#right-pane .col-time").evaluate((element) => element.getBoundingClientRect().right);
+  const initialTimeEdge = await timeEdge();
+  const timedRow = left.getByRole("option", { name: /^guide\.md/ });
+  assert.doesNotMatch(await timedRow.locator(".file-date").innerText(), /:/);
+  assert.match(await timedRow.locator(".file-time").innerText(), /\d{1,2}:\d{2}/);
+  assert.ok(await left.evaluate((list) => {
+    const pane = list.closest(".pane");
+    const fits = list.scrollWidth === list.clientWidth;
+    const column = pane.querySelector(".col-size").getBoundingClientRect();
+    const cell = list.querySelector(".file-size").getBoundingClientRect();
+    const name = pane.querySelector(".col-name").getBoundingClientRect();
+    return fits && Math.abs(column.left - cell.left) <= 1 && Math.abs(column.left - name.right) <= 1;
+  }), "Name should fill the space up to Size, with matching headers and rows.");
+  assert.ok(Math.abs(await timeEdge() - initialTimeEdge) <= 1);
   const columnMenu = () => page.getByRole("menu", { name: "Columns", exact: true });
   const rightHeader = () => page.locator("#right-pane .file-columns");
-  await rightHeader().getByRole("button", { name: "Modified", exact: true }).click({ button: "right" });
+  await rightHeader().getByRole("button", { name: "Time", exact: true }).click();
+  await rightHeader().locator(".col-time button svg").waitFor();
+  await rightHeader().getByRole("button", { name: "Date", exact: true }).click({ button: "right" });
   assert.equal(await columnMenu().getByRole("menuitemcheckbox", { name: "Name", exact: true, checked: true }).isDisabled(), true);
   const modifiedPosition = await rightHeader().locator(".col-modified").evaluate((column) => column.getBoundingClientRect().left);
   await columnMenu().getByRole("menuitemcheckbox", { name: "Size", exact: true, checked: true }).click();
   await rightHeader().getByRole("button", { name: "Size", exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.locator("#right-files .file-size:visible").count(), 0);
-  await assertColumnWidth("right", "modified", rightModified - 28);
+  assert.equal(await columnWidth("right", "modified"), rightModified);
   const newModifiedPosition = await rightHeader().locator(".col-modified").evaluate((column) => column.getBoundingClientRect().left);
-  assert.ok(Math.abs(newModifiedPosition - (modifiedPosition - rightSize)) <= 1);
-  await assertColumnWidth("left", "size", leftSize + 32);
+  assert.ok(Math.abs(newModifiedPosition - modifiedPosition) <= 1);
+  assert.equal(await columnWidth("left", "size"), leftSize);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  await columnMenu().getByRole("menuitemcheckbox", { name: "Modified", exact: true, checked: false }).waitFor();
-  await rightHeader().getByRole("button", { name: "Modified", exact: true }).waitFor({ state: "hidden" });
+  await columnMenu().getByRole("menuitemcheckbox", { name: "Date", exact: true, checked: false }).waitFor();
+  await rightHeader().getByRole("button", { name: "Date", exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.locator("#right-files .file-date:visible").count(), 0);
+  assert.ok(await rightHeader().getByRole("button", { name: "Time", exact: true }).isVisible());
   await columnMenu().getByRole("menuitemcheckbox", { name: "Size", exact: true, checked: false }).click();
   assert.equal(await columnWidth("right", "size"), rightSize);
   await page.keyboard.press("Escape");
@@ -1303,17 +1465,18 @@ try {
   assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
-  assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
-  await assertColumnWidth("left", "size", leftSize + 32);
+  assert.equal(await columnWidth("left", "size"), leftSize);
   assert.equal(await columnWidth("right", "size"), rightSize);
-  await rightHeader().getByRole("button", { name: "Modified", exact: true }).waitFor({ state: "hidden" });
+  await rightHeader().getByRole("button", { name: "Date", exact: true }).waitFor({ state: "hidden" });
+  assert.equal(await columnWidth("right", "time"), rightTime);
+  await rightHeader().locator(".col-time button svg").waitFor();
   await rightHeader().getByRole("button", { name: "Name", exact: true }).press("Shift+F10");
-  await columnMenu().getByRole("menuitemcheckbox", { name: "Modified", exact: true, checked: false }).click();
+  await columnMenu().getByRole("menuitemcheckbox", { name: "Date", exact: true, checked: false }).click();
   await page.keyboard.press("Escape");
   await columnMenu().waitFor({ state: "hidden" });
-  await assertColumnWidth("right", "modified", rightModified - 28);
-  assert.equal(await page.getByLabel("left path").inputValue(), src);
-  assert.equal(await page.getByLabel("right path").inputValue(), dst);
+  assert.equal(await columnWidth("right", "modified"), rightModified);
+  assert.equal(await panePath("left"), src);
+  assert.equal(await panePath("right"), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
   await showOptions();
   assert.equal(await optionsDialog.getByRole("button", { name: "Text tools", exact: true }).getAttribute("aria-pressed"), "true");
@@ -1437,6 +1600,11 @@ try {
     await featureDialog.getByRole("heading", { name, exact: true }).waitFor();
     await featureDialog.getByRole("combobox", { name: `${name} font family`, exact: true }).fill(family);
     await featureDialog.getByRole("spinbutton", { name: `${name} font size`, exact: true }).fill(size);
+    if (name === "Viewer") {
+      await featureDialog.getByRole("spinbutton", { name: "Maximum content width (px)", exact: true }).fill("640");
+      await featureDialog.getByLabel("Viewer background hex", { exact: true }).fill("#142335");
+      await featureDialog.getByLabel("Block background hex", { exact: true }).fill("#056767");
+    }
   }
   await featureSearch.fill("");
   await closeToolWindow(optionsPage, () => featureDialog.getByRole("button", { name: "Done", exact: true }).click());
@@ -1495,13 +1663,15 @@ try {
     await page.context().setOffline(false);
   }
 
-  const terminalButton = page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true });
+  const terminalButton = page.getByRole("button", { name: "Toggle terminal", exact: true });
   if (await terminalButton.getAttribute("aria-pressed") === "false") await terminalButton.click();
-  const terminalInput = page.locator(".xterm-helper-textarea");
-  await terminalInput.press("F1");
+  const helpTerminalInput = page.locator(".xterm-helper-textarea");
+  await helpTerminalInput.press("F1");
+  assert.equal(await help.isVisible(), false);
+  await terminalButton.focus();
+  await page.keyboard.press("F1");
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
   await page.keyboard.press("Escape");
-  assert.equal(await terminalInput.evaluate((field) => field === document.activeElement), true);
 
   await showOptions();
   const shortcutOptions = optionsDialog;
@@ -1537,7 +1707,7 @@ try {
   await menu("Left").waitFor();
   await page.keyboard.press("ArrowLeft");
   const helpItems = menu("Help").getByRole("menuitem");
-  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About"]);
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About", "Open error log"]);
   await page.keyboard.press("Enter");
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
@@ -1548,10 +1718,12 @@ try {
   const about = page.getByRole("dialog", { name: "About", exact: true });
   await about.getByText("Dirlume", { exact: true }).waitFor();
   await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
+  await about.getByRole("button", { name: "Donate via monobank", exact: true }).waitFor();
+  assert.ok(await about.locator("img").evaluate((image) => image.complete && image.naturalWidth > 0));
   await page.keyboard.press("Escape");
   await group("Files").click();
   const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });
-  assert.match(await attributesAction.getAttribute("title"), /Ctrl\+A/);
+  assert.match(await attributesAction.getAttribute("data-tooltip"), /Ctrl\+A/);
   if (process.env.DIRLUME_MENU_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_MENU_SCREENSHOT, scale: "css" });
   await page.keyboard.press("Escape");
   await menu("Files").waitFor({ state: "hidden" });
@@ -1564,6 +1736,9 @@ try {
     const settings = optionsDialog;
     await settings.getByRole("searchbox", { name: "Search settings" }).fill("");
     await settings.getByRole("button", { name: "Appearance", exact: true }).click();
+    const windowSection = settings.getByRole("button", { name: "Window", exact: true });
+    if (!await windowSection.isVisible()) await settings.getByRole("button", { name: "Appearance", exact: true }).click();
+    await windowSection.click();
     return settings;
   }
   const themeRoot = () => page.locator("html[data-theme=classic-blue]");
@@ -1573,19 +1748,43 @@ try {
   assert.equal(await themeRoot().count(), 0);
   await appearance.getByRole("button", { name: "Apply", exact: true }).click();
   await themeRoot().waitFor();
-  const pairs = await themeRoot().evaluate((root) => {
-    const style = getComputedStyle(root);
-    const value = (name) => style.getPropertyValue(`--${name}`).trim();
+  const { paneColors, pairs } = await themeRoot().evaluate((root) => {
+    const probe = document.createElement("span");
+    probe.hidden = true;
+    document.body.append(probe);
+    const value = (name) => {
+      probe.style.color = `var(--${name})`;
+      return getComputedStyle(probe).color;
+    };
+    const pane = (selector) => getComputedStyle(root.querySelector(selector));
     const files = ["panel-ink", "panel-muted", "file-source", "file-text", "file-document", "file-image", "file-media",
       "file-archive", "file-config", "file-executable", "file-hidden", "file-system"];
-    return [
-      ...files.flatMap((color) => ["panel-bg", "panel-selection", "panel-inactive-selection"].map((background) =>
-        [value(color), value(background)])),
-      [value("dialog-ink"), value("dialog-bg")], [value("text-ink"), value("text-bg")], [value("ink"), value("surface")],
-    ];
+    const result = {
+      paneColors: {
+        list: pane("#left-pane").backgroundColor,
+        heading: pane("#left-pane .pane-heading").backgroundColor,
+        columns: pane("#left-pane .file-columns").backgroundColor,
+        columnText: pane("#left-pane .file-columns button").color,
+        frames: [pane("#left-pane").borderTopColor, pane("#right-pane").borderTopColor],
+        scrollbars: [pane("#left-files").scrollbarColor, pane(".actionbar").scrollbarColor],
+      },
+      pairs: [
+        ...files.flatMap((color) => ["panel-bg", "panel-inactive-selection"].map((background) =>
+          [value(color), value(background)])),
+        [value("panel-selected-ink"), value("panel-selection")], [value("dialog-ink"), value("dialog-bg")],
+        [value("text-ink"), value("text-bg")], [value("ink"), value("surface")],
+      ],
+    };
+    probe.remove();
+    return result;
   });
-  const luminance = (hex) => [1, 3, 5].map((offset) => {
-    const channel = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+  assert.deepEqual(paneColors, {
+    list: "rgb(0, 0, 128)", heading: "rgb(0, 0, 128)", columns: "rgb(0, 0, 128)",
+    columnText: "rgb(255, 255, 0)", frames: ["rgb(0, 255, 255)", "rgb(0, 255, 255)"],
+    scrollbars: ["rgb(0, 255, 255) rgb(0, 0, 128)", "rgb(0, 255, 255) rgb(0, 0, 128)"],
+  });
+  const luminance = (rgb) => rgb.match(/\d+/g).map((value) => {
+    const channel = Number(value) / 255;
     return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
   }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
   for (const [foreground, background] of pairs) {
@@ -1597,14 +1796,19 @@ try {
   const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
   if (await showHidden.getAttribute("aria-pressed") === "false") await showHidden.click();
   const attributeList = page.getByRole("listbox", { name: "left files", exact: true });
+  const otherRow = attributeList.getByRole("option", { name: /^ordinary\.sys/ });
   for (const name of [/^hidden\.rs/, /^system-hidden\.dll/]) {
     const row = attributeList.getByRole("option", { name });
-    const color = () => row.locator(".file-name").evaluate((element) => getComputedStyle(element).color);
-    const originalColor = await color();
+    const colors = () => row.evaluate((element) => [getComputedStyle(element).backgroundColor,
+      getComputedStyle(element.querySelector(".file-name")).color,
+      getComputedStyle(element.querySelector(".file-size")).color]);
+    await otherRow.click();
+    const original = await colors();
     await row.click();
-    assert.equal(await color(), originalColor);
+    assert.deepEqual(await colors(), ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
     await row.click({ modifiers: ["Control"] });
-    assert.equal(await color(), originalColor);
+    await otherRow.click();
+    assert.deepEqual(await colors(), original);
   }
   if (process.env.DIRLUME_CLASSIC_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CLASSIC_SCREENSHOT, scale: "css" });
   await exitDesktop(page);
@@ -1614,13 +1818,18 @@ try {
   await customAppearance.getByRole("button", { name: "New scheme", exact: true }).click();
   assert.equal(await customAppearance.getByLabel("Base theme", { exact: true }).inputValue(), "classic-blue");
   await customAppearance.getByLabel("Scheme name", { exact: true }).fill("Classic blue custom");
+  const selectedScheme = await customAppearance.getByLabel("Color scheme", { exact: true }).inputValue();
+  await customAppearance.getByRole("combobox", { name: "Favorite dark scheme", exact: true }).selectOption(selectedScheme);
+  await customAppearance.getByRole("checkbox", { name: "Show color scheme switcher in the title bar" }).check();
+
+  await customAppearance.getByRole("button", { name: "Panels", exact: true }).click();
   await customAppearance.getByLabel("Panel background hex", { exact: true }).fill("#142560");
   await closeToolWindow(optionsPage, () => customAppearance.getByRole("button", { name: "Done", exact: true }).click());
   await exitDesktop(page);
   page = await startDesktop();
   await themeRoot().waitFor();
   assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
-  console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
+  console.log("Verified Classic blue colors, selection contrast, preview, and custom and built-in theme persistence.");
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);

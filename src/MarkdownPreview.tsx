@@ -7,7 +7,9 @@ import { toString } from "mdast-util-to-string";
 import type { Parent, PhrasingContent, Root } from "mdast";
 import { visit } from "unist-util-visit";
 import { api, describeError, type NamedFile } from "./api";
+import { isMarkdownFile } from "./markdown";
 import { MermaidDiagram } from "./MermaidDiagram";
+import type { Palette } from "./appearance";
 
 export type MarkdownAnchor = { fragment: string };
 export type OpenMarkdownLink = (file: NamedFile, newTab: boolean, anchor?: MarkdownAnchor) => void;
@@ -18,6 +20,7 @@ const PreviewContext = createContext<{
   writable: boolean;
   saving: boolean;
   light: boolean;
+  colors?: Palette;
   onToggleTask: (marker: TaskMarker, checked: boolean) => void;
   followLink: (href: string, newTab: boolean) => void;
 } | null>(null);
@@ -121,10 +124,6 @@ function isWebLink(href: string) {
   return /^https?:\/\//i.test(href) || href.startsWith("//");
 }
 
-export function isMarkdownFile(name: string) {
-  return /\.(md|markdown)$/i.test(name);
-}
-
 function PreviewLink({ href, children, ...props }: ComponentProps<"a">) {
   const preview = useContext(PreviewContext);
   if (!href || (scheme.test(href) && !isWebLink(href))) return <span>{children}</span>;
@@ -139,7 +138,7 @@ function PreviewCode({ children }: ComponentProps<"pre">) {
   const preview = useContext(PreviewContext);
   if (isValidElement<{ className?: string; children?: ReactNode }>(children) &&
       children.props.className === "language-mermaid" && typeof children.props.children === "string") {
-    return <MermaidDiagram source={children.props.children} light={preview?.light ?? false} />;
+    return <MermaidDiagram source={children.props.children} light={preview?.light ?? false} colors={preview?.colors} />;
   }
   return <pre>{children}</pre>;
 }
@@ -170,12 +169,13 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
   return { place: { ...place, segments }, name };
 }
 
-export function MarkdownPreview({ file, source, active, anchor, light, writable, saving, htmlFormatting, onToggleTask, onOpenDocument, onError }: {
+export function MarkdownPreview({ file, source, active, anchor, light, colors, writable, saving, htmlFormatting, onToggleTask, onOpenDocument, onError }: {
   file: NamedFile;
   source: string;
   active: boolean;
   anchor: MarkdownAnchor | null;
   light: boolean;
+  colors?: Palette;
   writable: boolean;
   saving: boolean;
   htmlFormatting: boolean;
@@ -230,7 +230,7 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
 
   return (
     <div ref={preview} className="markdown">
-      <PreviewContext.Provider value={{ writable, saving, light, onToggleTask, followLink }}>
+      <PreviewContext.Provider value={{ writable, saving, light, colors, onToggleTask, followLink }}>
         <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
           skipHtml components={components}>{source}</Markdown>
       </PreviewContext.Provider>

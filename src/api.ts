@@ -47,6 +47,18 @@ export interface FolderCreation {
   failure: { name: string; error: string } | null;
 }
 
+export interface CopyOptions {
+  access: "default" | "copy" | "inherit";
+  preserveTimestamps: boolean;
+  followLinks: boolean;
+  mask?: string;
+}
+
+type SmbConnection =
+  | { kind: "opened"; listing: LocalListing; warning: string | null }
+  | { kind: "shares"; server: string; names: string[]; warning: string | null }
+  | { kind: "credentials_required"; error: string | null };
+
 export interface QuickLocation {
   label: string;
   path: string;
@@ -181,6 +193,7 @@ export const api = {
   mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
   mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
+  errorLog: () => invoke<string | null>("error_log"),
   checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile }) =>
     invoke<void>("open_tool_window", { title, ...size, comparison }),
@@ -193,10 +206,12 @@ export const api = {
   fileIcons: (items: { directory: string; name: string }[]) => invoke<(string | null)[]>("file_icons", { items }),
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
   lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),
-  windowsItemMenu: (directory: string, name: string) => invoke<void>("windows_item_menu", { directory, name }),
+  windowsItemMenu: (directory: string, name?: string) => invoke<void>("windows_item_menu", { directory, name }),
   openElevated: (directory: string) => invoke<void>("open_elevated", { directory }),
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
+  copyPath: (path: string) => invoke<void>("copy_path", { path }),
+  droppedFiles: (paths: string[]) => invoke<{ directory: string; entry: Entry }[]>("dropped_files", { paths }),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
   formatTimestamps: (timestamps: number[], style: "date" | "time" | "date_time") =>
     invoke<(string | null)[]>("format_timestamps", { timestamps, style }),
@@ -215,6 +230,8 @@ export const api = {
     invoke<TextDocument>("save_archive_text", { id, segments, revision, text, encoding }),
   deleteArchiveEntries: (id: number, paths: string[][]) => invoke<void>("delete_archive_entries", { id, paths }),
   diskSpace: (path: string) => invoke<DiskSpace>("disk_space", { path }),
+  connectSmb: (path: string, credentials: { username: string; password: string } | null, remember: boolean) =>
+    invoke<SmbConnection>("connect_smb", { path, credentials, remember }),
   fileAttributes: (directory: string, name: string) =>
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
@@ -287,7 +304,7 @@ export const api = {
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; multiple: boolean; moving: boolean;
-    policy: ConflictPolicy; askReadOnly: boolean;
+    policy: ConflictPolicy; askReadOnly: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
 
@@ -352,6 +369,10 @@ export function folderLabel(place: Place) {
 }
 
 export const windowsClient = /Windows/i.test(navigator.userAgent);
+
+export function smbHost(place: Place | null) {
+  return windowsClient && place?.kind === "local" ? /^\\\\([^\\]+)\\/.exec(place.path)?.[1] : undefined;
+}
 
 export function describeError(error: unknown) {
   reportFrontendError("desktop_action", error);

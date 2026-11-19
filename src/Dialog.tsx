@@ -2,10 +2,11 @@ import { t } from "./i18n";
 import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { ResizeGrip, WindowResizeGrip } from "./ResizeGrip";
 
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
-const resizeEdges = ["n", "ne", "e", "s", "sw", "w", "nw"] as const;
+const resizeEdges = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as const;
 
 export function readDialogSize(key: string | undefined): Dimensions | undefined {
   if (!key) return;
@@ -19,15 +20,17 @@ export function saveDialogSize(key: string, size: Dimensions) {
   try { localStorage.setItem(sizePrefix + key, JSON.stringify(size)); } catch { /* The current size still applies. */ }
 }
 
-export function Dialog({ title, children, onClose, onKeyDown, wide = false, resizeKey, standalone = false, dismissOnOutside = false }: {
+export function Dialog({ title, children, footer, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false, standalone = false, tone }: {
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
   onClose?: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   wide?: boolean;
   resizeKey?: string;
   standalone?: boolean;
   dismissOnOutside?: boolean;
+  tone?: "warning" | "destructive";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -62,7 +65,7 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
 
   return (
     <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
-      style={size} aria-labelledby={heading} onKeyDown={(event) => {
+      style={size} data-tone={tone} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
       onPointerDown={(event) => {
@@ -102,20 +105,14 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
         {onClose && !standalone && <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>}
       </header>
       {children}
+      {footer && <footer className="dialog-footer">{footer}</footer>}
+      {resizeKey && <ResizeGrip title={title} edge="se" onResize={(width, height) => {
+        const bounds = ref.current?.getBoundingClientRect();
+        if (bounds) resize(bounds.width + width, bounds.height + height, true);
+      }} />}
+      {standalone && <WindowResizeGrip title={title} />}
       {resizeKey && resizeEdges.map((edge) =>
         <div key={edge} className="dialog-resize-edge" data-resize-edge={edge} aria-hidden="true" />)}
-      {resizeKey && <Button type="button" className="dialog-resize-grip" aria-label={t("Resize {0}", title)}
-        title={t("Resize {0} (drag or use arrow keys)", title)}
-        data-resize-edge="se"
-        onKeyDown={(event) => {
-          const bounds = ref.current?.getBoundingClientRect();
-          if (!bounds || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          const w = event.key === "ArrowRight" ? 16 : event.key === "ArrowLeft" ? -16 : 0;
-          const h = event.key === "ArrowDown" ? 16 : event.key === "ArrowUp" ? -16 : 0;
-          resize(bounds.width + w, bounds.height + h, true);
-        }} />}
     </dialog>
   );
 }

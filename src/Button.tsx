@@ -8,8 +8,8 @@ function caption(children: ReactNode): string {
   }).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
-export function Button({ title, shortcut, children, ...props }: ComponentPropsWithRef<"button"> & { shortcut?: string }) {
-  const action = title?.trim() || props["aria-label"] || caption(children);
+export function Button({ tooltip, title, shortcut, children, "data-tooltip": override, ...props }: ComponentPropsWithRef<"button"> & { tooltip?: string; shortcut?: string; "data-tooltip"?: string }) {
+  const action = tooltip?.trim() || title?.trim() || override || props["aria-label"] || caption(children);
   const hint = shortcut ? `${action} (${shortcut})` : action;
-  return <button {...props} title={hint}>{children}</button>;
+  return <button {...props} data-tooltip={hint || undefined}>{children}</button>;
 }

@@ -1,3 +1,4 @@
+import { HistoryField } from "./HistoryField";
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -168,9 +169,9 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
       <form className="dialog-form" onSubmit={(event) => { void search(event); }}>
         <div className="dialog-body search-body">
           <label className="field">{t("File mask")}
-            <input ref={maskField} data-initial-focus type="text" value={mask} required spellCheck={false} autoComplete="off"
+            <HistoryField historyKey="file-mask" aria-label={t("File mask")} ref={maskField} data-initial-focus type="text" value={mask} required spellCheck={false}
               disabled={running} maxLength={512} onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) => setMask(event.target.value)} />
+              onValueChange={setMask} />
           </label>
           <p className="search-hint">{t("Use * for any number of characters and ? for one character.")}</p>
           <p className="search-location"><strong>{t("Folder and subfolders")}</strong><span>{placePath(root) || root.kind === "kswitcher" && root.address}</span></p>

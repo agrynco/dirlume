@@ -379,7 +379,7 @@ impl Archive {
         self.verify()?;
         let options = Options {
             moving: true,
-            ..*options
+            ..options.clone()
         };
         local_transfer::transfer(
             &source,

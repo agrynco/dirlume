@@ -2,14 +2,15 @@ import { errorText, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Save, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, describeError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { HexViewer } from "./HexViewer";
-import { isMarkdownFile, MarkdownPreview, type MarkdownAnchor, type OpenMarkdownLink, type TaskMarker } from "./MarkdownPreview";
+import { isMarkdownFile } from "./markdown";
+import type { MarkdownAnchor, OpenMarkdownLink, TaskMarker } from "./MarkdownPreview";
 import { eventShortcut, showShortcut } from "./preferences";
-import { systemTheme, type Theme } from "./appearance";
+import type { BaseTheme, Palette } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
 import { normalized } from "./textFormat";
@@ -18,12 +19,13 @@ import { SplitDivider } from "./SplitDivider";
 import { PathField } from "./PathField";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
+const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
 
-export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, fontSizes, onZoom, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, fontSizes, viewerContentWidth, colors, onZoom, onOptions, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
-  theme: Theme;
+  theme: BaseTheme;
   saveShortcut: string;
   alternateSaveShortcut: string;
   closeShortcut: string;
@@ -31,7 +33,10 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   hexShortcut: string;
   zoomShortcut: string;
   fontSizes: ViewFontSizes;
+  viewerContentWidth?: number;
+  colors?: Palette;
   onZoom: ZoomViewFont;
+  onOptions: () => void;
   anchor: MarkdownAnchor | null;
   onOpenDocument: OpenMarkdownLink;
   onDirtyChange: (dirty: boolean) => void;
@@ -43,7 +48,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const [preview, setPreview] = useState(!editing && isMarkdownFile(file.name));
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
-  const [system, setSystem] = useState(systemTheme);
+  const [syntaxTarget, setSyntaxTarget] = useState<HTMLDivElement | null>(null);
   const [readError, setReadError] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -58,7 +63,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];
   useFontZoom(section, zoomShortcut, fontView, onZoom);
-  const light = (theme === "system" ? system : theme) === "light";
+  const light = theme === "light";
 
   useLayoutEffect(() => {
     if (active) section.current?.focus({ preventScroll: true });
@@ -74,13 +79,6 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const reportDirty = useRef(onDirtyChange);
   reportDirty.current = onDirtyChange;
   useEffect(() => { reportDirty.current(dirty); }, [dirty]);
-
-  useEffect(() => {
-    const media = matchMedia("(prefers-color-scheme: dark)");
-    function update() { setSystem(systemTheme()); }
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,10 +132,13 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   }
 
   return (
-    <section ref={section} style={viewFontStyle(fontSize)} hidden={!active} className="text-window" data-editing={editing} aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
+    <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
+      hidden={!active} className="text-window" data-editing={editing} data-reading={!editing || preview}
+      aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
+      if (shortcut === cancelShortcut && event.target instanceof Element && event.target.hasAttribute("data-history-open")) return;
       if (editing && (shortcut === saveShortcut || shortcut === alternateSaveShortcut)) {
         event.preventDefault();
         event.stopPropagation();
@@ -153,11 +154,16 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
       }
     }}>
       <header className="document-heading">
-        <h2>{file.name}</h2>
-        <Button className="icon-button" type="button" aria-label={t("Close document")} onClick={close} disabled={saving}><X /></Button>
+        <h2 data-tooltip={file.name}>{file.name}</h2>
+        {document && <span className="document-encoding">
+          {document.encoding.replaceAll("_", " ").toUpperCase()}{saving ? ` · ${t("Saving…")}` : dirty ? ` · ${t("Modified")}` : ""}
+        </span>}
+        <div ref={setSyntaxTarget} />
+        <Button className="icon-button" type="button" aria-label={t("Close document")} shortcut={showShortcut(closeShortcut)}
+          onClick={close} disabled={saving}><X /></Button>
       </header>
       <div className="text-toolbar">
-        <span title={path}>{path}</span>
+        <span data-tooltip={path}>{path}</span>
         {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? t("Source") : t("Preview")}</Button>}
         {isMarkdown && document && preview && !hex && (
           <Button type="button" aria-pressed={htmlFormatting} onClick={() => setHtmlFormatting((enabled) => !enabled)}>
@@ -165,31 +171,27 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
           </Button>
         )}
         {!editing && <Button shortcut={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
+        <Button type="button" onClick={onOptions}><Settings2 /> {t("Settings")}</Button>
       </div>
       {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
       {hex ? <HexViewer file={file} /> : readError ? <p className="dialog-error" role="alert">{errorText(readError)}</p> :
         !document && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
         {preview && !hex && (
-          <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light}
+          <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
+          <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light} colors={colors}
             writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
             onOpenDocument={onOpenDocument} onError={setError} />
+          </Suspense>
         )}
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
-              fontSize={fontSize} value={text} onChange={setText} />
+              fontSize={fontSize} value={text} syntaxTarget={preview || hex ? null : syntaxTarget} onChange={setText} />
           </Suspense>
         </div>
       </>}
-      <footer className="dialog-footer">
-        {document && <span className="footer-message">{document.encoding.replaceAll("_", " ").toUpperCase()}{dirty ? ` · ${t("Modified")}` : ""}</span>}
-        {editing && <Button className="primary" disabled={!dirty || saving} shortcut={showShortcut(saveShortcut)} onClick={() => { void save(); }}>
-          <Save /> {saving ? t("Saving…") : t("Save")}
-        </Button>}
-        <Button onClick={close} disabled={saving}>{t("Close")}</Button>
-      </footer>
-      {confirm && <Dialog title={t("Unsaved changes")} onClose={() => setConfirm(false)}>
+      {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setConfirm(false)}>
         <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
@@ -493,7 +495,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
           <div className="comparison-editor-name" title={placePath(files[side].place)}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
             <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === "left"}
-              value={documents[side]} onChange={(text) => {
+              value={documents[side]} syntaxTarget={null} onChange={(text) => {
                 setDocuments((previous) => previous && { ...previous, [side]: text });
                 setCurrent(0);
               }} />

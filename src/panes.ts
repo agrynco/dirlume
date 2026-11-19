@@ -2,7 +2,7 @@ import { api, windowsClient, type Entry, type Listing, type Place, type SizeResu
 import { locale } from "./i18n";
 
 export type Side = "left" | "right";
-export type SortColumn = "name" | "size" | "modified";
+export type SortColumn = "name" | "size" | "modified" | "time";
 
 export interface SearchMatch {
   directory: Place;
@@ -29,6 +29,8 @@ export interface PaneState {
   position: number;
   filter: string;
   loading: boolean;
+  loadingPath?: string;
+  addressRevision?: number;
   omitted: number;
   error: string;
   elevationPath?: string;
@@ -201,18 +203,25 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     history,
     position: typeof action === "number" ? action : history === pane.history ? pane.position : history.length - 1,
     loading: false,
+    loadingPath: undefined,
     error: "",
     elevationPath: undefined,
   };
 }
 
-const formats = new Map<string, Intl.NumberFormat>();
+type DatePart = "timestamp" | "date" | "time";
+const formats = new Map<string, { number: Intl.NumberFormat } & Record<DatePart, Intl.DateTimeFormat>>();
 
 function currentFormats() {
   const language = locale();
   let format = formats.get(language);
   if (!format) {
-    format = new Intl.NumberFormat(language, { maximumFractionDigits: 1 });
+    format = {
+      number: new Intl.NumberFormat(language, { maximumFractionDigits: 1 }),
+      timestamp: new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }),
+      date: new Intl.DateTimeFormat(language, { dateStyle: "short" }),
+      time: new Intl.DateTimeFormat(language, { timeStyle: "short" }),
+    };
     formats.set(language, format);
   }
   return format;
@@ -226,5 +235,9 @@ export function formatSize(size: number | null) {
     size /= 1024;
     unit++;
   }
-  return `${currentFormats().format(size)} ${units[unit]}`;
+  return `${currentFormats().number.format(size)} ${units[unit]}`;
+}
+
+export function formatDate(time: number | null, part: DatePart = "timestamp") {
+  return time === null ? "–" : currentFormats()[part].format(new Date(time * 1000));
 }

@@ -1,4 +1,4 @@
-import { readSchemes, readTheme, type Scheme, type Theme } from "./appearance";
+import { readSchemes, readSystemScheme, readTheme, type Scheme, type Theme } from "./appearance";
 import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
@@ -19,6 +19,8 @@ export const commands = {
   selectDownRow: { label: "Extend selection down", key: "Shift+ArrowDown" },
   firstRow: { label: "First item", key: "ArrowLeft" },
   lastRow: { label: "Last item", key: "ArrowRight" },
+  firstRowAlternate: { label: "First item (alternate)", key: "Home" },
+  lastRowAlternate: { label: "Last item (alternate)", key: "End" },
   pageUp: { label: "Previous page", key: "PageUp" },
   pageDown: { label: "Next page", key: "PageDown" },
   mark: { label: "Mark or unmark item", key: "Insert" },
@@ -36,7 +38,7 @@ export const commands = {
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
-  cancelMeasure: { label: "Clear command line or cancel folder size scan", key: "Escape" },
+  cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
   createArchive: { label: "Create archive", key: "Shift+F1" },
@@ -47,6 +49,7 @@ export const commands = {
   copyClipboard: { label: "Copy files to clipboard", key: "Ctrl+C" },
   pasteClipboard: { label: "Paste files from clipboard", key: "Ctrl+V" },
   recycle: { label: "Move to Trash", key: "F8" },
+  recycleAlternate: { label: "Move to Trash (alternate)", key: "Delete" },
   delete: { label: "Delete permanently", key: "Shift+Delete" },
   menu: { label: "Open main menu", key: "F9" },
   menuAlternate: { label: "Open main menu (alternate)", key: "Alt" },
@@ -58,6 +61,9 @@ export const commands = {
   zoomFont: { label: "Font zoom with mouse wheel", key: "Ctrl+Wheel" },
   compare: { label: "Compare files", key: "Shift+F11" },
   terminal: { label: "Show or hide file panels", key: "Ctrl+O" },
+  toggleTerminal: { label: "Toggle terminal", key: "F12" },
+  expandTerminal: { label: "Make the terminal taller", key: "Ctrl+ArrowUp" },
+  collapseTerminal: { label: "Make the terminal shorter", key: "Ctrl+ArrowDown" },
   commandPath: { label: "Insert selected path in command line", key: "Ctrl+F" },
   commandName: { label: "Insert selected name in command line", key: "Ctrl+Enter" },
   previousCommand: { label: "Previous command", key: "Ctrl+E" },
@@ -75,7 +81,10 @@ export const commands = {
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
   folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
-  ftpSources: { label: "Select FTP in the sources menu", key: "1" },
+  processSources: { label: "Select Processes in the sources menu", key: "1" },
+  ftpSources: { label: "Select FTP in the sources menu", key: "2" },
+  smbSources: { label: "Select SMB in the sources menu", key: "3" },
+  remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
   addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
   folderShortcuts: { label: "Folder shortcuts", key: "" },
@@ -105,7 +114,7 @@ export function commandLabel(command: Command) {
 export function commandScope(command: Command) {
   if (command === "help" || command === "menu") return "global";
   if (command === "zoomFont") return "wheel";
-  if (command === "ftpSources") return "sources";
+  if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
@@ -136,6 +145,9 @@ export interface Preferences {
   layout: PanelLayout;
   actionButtonWidth: ActionButtonWidth;
   menuPosition: MenuPosition;
+  systemLightScheme: string;
+  systemDarkScheme: string;
+  showTitlebarScheme: boolean;
   activeScheme: string | null;
   schemes: Scheme[];
   hidden: boolean;
@@ -144,7 +156,13 @@ export interface Preferences {
   kswitcher: string;
   shortcuts: Bindings;
   viewFontSizes: ViewFontSizes;
+  viewerContentWidth?: number;
+  terminalResizeRows: number;
 }
+
+export const minViewerContentWidth = 320;
+export const maxViewerContentWidth = 2400;
+export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
 const mac = /Mac/i.test(navigator.userAgent);
@@ -152,6 +170,7 @@ export const commandNames = Object.keys(commands) as Command[];
 export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wheel"];
 export const defaultBindings = Object.fromEntries(
   commandNames.map((command) => [command, mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
+    command !== "expandTerminal" && command !== "collapseTerminal" &&
     command !== "addFolderShortcut" && !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
 ) as Bindings;
@@ -159,7 +178,9 @@ export const defaultBindings = Object.fromEntries(
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
     theme: "system", layout: "standard", actionButtonWidth: "full", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
-    viewFontSizes: {}, language: "en", menuPosition: "center",
+    menuPosition: "center",
+    viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
+    terminalResizeRows: 1,
   };
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as (Partial<Preferences> & { bindingDefaults?: number }) | null;
@@ -177,6 +198,7 @@ export function readPreferences(): Preferences {
       if (command === "settings" && (saved.bindingDefaults ?? 0) < 3 && value === (mac ? "Meta+," : "Ctrl+,")) continue;
       if ((saved.bindingDefaults ?? 0) < 4 && (command === "refreshAlternate" && value === "F2" ||
         command === "rename" && !value && saved.shortcuts?.refreshAlternate === "F2")) continue;
+      if (command === "ftpSources" && (saved.bindingDefaults ?? 0) < 5 && value === "1") continue;
       shortcuts[command] = value;
       configured.add(command);
     }
@@ -199,6 +221,9 @@ export function readPreferences(): Preferences {
       layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
       actionButtonWidth: saved.actionButtonWidth === "compact" ? "compact" : defaults.actionButtonWidth,
       menuPosition: saved.menuPosition === "left" || saved.menuPosition === "right" ? saved.menuPosition : defaults.menuPosition,
+      systemLightScheme: readSystemScheme(saved.systemLightScheme, schemes, "light"),
+      systemDarkScheme: readSystemScheme(saved.systemDarkScheme, schemes, "dark"),
+      showTitlebarScheme: saved.showTitlebarScheme === true,
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
@@ -207,6 +232,10 @@ export function readPreferences(): Preferences {
       kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
       shortcuts,
       viewFontSizes,
+      terminalResizeRows: typeof saved.terminalResizeRows === "number" && Number.isInteger(saved.terminalResizeRows) &&
+        saved.terminalResizeRows >= 1 && saved.terminalResizeRows <= maxTerminalResizeRows ? saved.terminalResizeRows : 1,
+      viewerContentWidth: typeof saved.viewerContentWidth === "number" && Number.isInteger(saved.viewerContentWidth) &&
+        saved.viewerContentWidth >= minViewerContentWidth && saved.viewerContentWidth <= maxViewerContentWidth ? saved.viewerContentWidth : undefined,
     };
   } catch (error) {
     reportFrontendError("load_preferences", error);
@@ -215,7 +244,7 @@ export function readPreferences(): Preferences {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 4 }));
+  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 5 }));
 }
 
 export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {

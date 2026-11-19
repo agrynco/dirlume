@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -38,7 +39,7 @@ export async function testProcessQuickSearch(page, root) {
     const folder = join(root, "quick-search-files");
     await mkdir(folder);
     await writeFile(join(folder, "sample-name.txt"), "");
-    const address = page.getByLabel("left path", { exact: true });
+    const address = await editPaneAddress(page);
     await address.fill(folder);
     await address.press("Enter");
     const files = pane("left").getByRole("listbox", { name: "left files", exact: true });

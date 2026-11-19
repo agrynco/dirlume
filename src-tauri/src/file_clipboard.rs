@@ -37,6 +37,12 @@ fn with_clipboard<T>(
 }
 
 #[tauri::command]
+pub async fn copy_path(path: String, app: AppHandle) -> Result<()> {
+    blocking(move || with_clipboard(&app, |clipboard| clipboard.set_text(path).map_err(message)))
+        .await
+}
+
+#[tauri::command]
 pub async fn copy_file_references(items: Vec<ClipboardPath>, app: AppHandle) -> Result<()> {
     blocking(move || {
         let paths = items
@@ -73,14 +79,31 @@ pub async fn clipboard_files(app: AppHandle) -> Result<Vec<ClipboardItem>> {
                 } else {
                     PathBuf::from(local::absolute(&name).map_err(message)?)
                 };
-                let directory = path
-                    .parent()
-                    .ok_or("The clipboard item has no containing folder.")?;
-                let directory = local::display_path(directory).map_err(message)?;
-                Ok(ClipboardItem {
-                    directory,
-                    entry: local::describe_entry(&path).map_err(message)?,
-                })
+                describe_path(&path, "The clipboard item has no containing folder.")
+            })
+            .collect()
+    })
+    .await
+}
+
+fn describe_path(path: &std::path::Path, parent_error: &str) -> Result<ClipboardItem> {
+    let directory = path.parent().ok_or(parent_error)?;
+    Ok(ClipboardItem {
+        directory: local::display_path(directory).map_err(message)?,
+        entry: local::describe_entry(path).map_err(message)?,
+    })
+}
+
+#[tauri::command]
+pub async fn dropped_files(paths: Vec<String>) -> Result<Vec<ClipboardItem>> {
+    blocking(move || {
+        let mut seen = std::collections::HashSet::new();
+        paths
+            .into_iter()
+            .filter(|path| seen.insert(path.clone()))
+            .map(|path| {
+                let path = local::absolute(&path).map_err(message)?;
+                describe_path(path, "The dropped item has no containing folder.")
             })
             .collect()
     })

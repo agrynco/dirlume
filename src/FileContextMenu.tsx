@@ -1,0 +1,55 @@
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { t } from "./i18n";
+
+export function FileContextMenu({ x, y, onClose, onReturn, children }: {
+  x: number; y: number; onClose: () => void; onReturn: () => void; children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!menu) return;
+    menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4))}px`;
+    menu.querySelector("button")?.focus({ preventScroll: true });
+  }, [x, y]);
+
+  useEffect(() => {
+    function dismiss() { close.current(); }
+    function outside(event: PointerEvent) {
+      if (event.target instanceof Node && !ref.current?.contains(event.target)) dismiss();
+    }
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("blur", dismiss);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      window.removeEventListener("pointerdown", outside);
+      window.removeEventListener("blur", dismiss);
+      window.removeEventListener("resize", dismiss);
+    };
+  }, []);
+
+  return createPortal(<div ref={ref} className="file-column-menu" role="menu" aria-label={t("File actions")}
+    onContextMenu={(event) => event.preventDefault()}
+    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onClose(); }}
+    onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        onReturn();
+        return;
+      }
+      if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:enabled")];
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
+        (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+      items[next]?.focus();
+    }}>{children}</div>, document.body);
+}

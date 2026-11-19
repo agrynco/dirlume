@@ -90,13 +90,13 @@ export function AttributesDialog({ item, onClose, onApplied }: {
                 {(Object.keys(labels) as FileFlag[]).map((flag) => {
                   const value = attributes.flags.find((value) => value.flag === flag);
                   if (flag === "ownerWritable" && !value) return null;
-                  return <label key={flag} className="attribute-flag">
+                  return <label key={flag} className="field-checkbox">
+                    <span>{t(labels[flag])}</span>
                     <input type="checkbox" checked={draft[flag] ?? value?.enabled ?? false}
                       disabled={busy || !value?.writable} onChange={(event) => {
                         setDraft({ ...draft, [flag]: event.target.checked });
                         setStatus("");
                       }} />
-                    <span>{t(labels[flag])}</span>
                     {!value && <small>{t("Unavailable")}</small>}
                   </label>;
                 })}

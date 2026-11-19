@@ -15,6 +15,7 @@ export async function testCommandCompletion(page, root) {
   git("branch", "fixture-completion");
 
   const address = page.getByLabel("left path", { exact: true });
+  await page.locator("#left-files").press("Control+l");
   await address.fill(cwd);
   await address.press("Enter");
   await page.locator("#left-files").getByRole("option", { name: /^completion folder/ }).click();
@@ -62,6 +63,7 @@ export async function testCommandCompletion(page, root) {
     else await input.press("Shift+Enter");
     await page.waitForFunction((output) => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes(output),
       `completion-history-${suffix}`);
+    await page.locator(".xterm-helper-textarea").press("F12");
   }
   await draft("Write-Output 'completion-history-", /completion-history-first/);
   assert.match(await list.getByRole("option").nth(0).innerText(), /completion-history-first/);
