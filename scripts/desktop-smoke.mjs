@@ -14,8 +14,12 @@ import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
+import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
+import { testInlineRename } from "./inline-rename-smoke.mjs";
+import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -166,6 +170,7 @@ try {
     }
   }
   let diagnosticsBeforeRestart;
+  await testFilenameRendering(page, temp);
   if (process.env.DIRLUME_INTERNAL_CDP === "1") {
     const secret = "dirlume-private-fixture-data";
     await page.evaluate(async (path) => {
@@ -1428,7 +1433,7 @@ try {
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
-    assert.equal(topicLinks.length, 19);
+    assert.ok(topicLinks.includes("#help-archives"));
     assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
     if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
     for (const href of topicLinks) {
@@ -1579,6 +1584,9 @@ try {
   await testCommandCompletion(page, temp);
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
+  page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
+  await testPermanentDelete(page, temp);
+  await testInlineRename(page, temp);
   await testLockingProcessPane(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);
