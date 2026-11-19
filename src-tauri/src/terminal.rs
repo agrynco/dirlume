@@ -316,7 +316,7 @@ mod tests {
             output,
         )
         .unwrap();
-        let read_until = |marker: &str| {
+        let read_until = |marker: &str, found: &dyn Fn(&str) -> bool| {
             let expires = Instant::now() + Duration::from_secs(12);
             let mut bytes = Vec::new();
             let mut answered = 0;
@@ -334,7 +334,7 @@ mod tests {
                     terminal.writer.flush().unwrap();
                     answered = reports;
                 }
-                if output.contains(marker) {
+                if found(&output) {
                     return;
                 }
             }
@@ -343,16 +343,24 @@ mod tests {
                 String::from_utf8_lossy(&bytes[..bytes.len().min(2200)])
             );
         };
-        read_until("Dirlume-terminal-fixture:1:");
+        read_until("initial prompt", &|output| {
+            output.contains("Dirlume-terminal-fixture:1:")
+        });
         let submitted = "Write-Output 'terminal-history-fixture'";
         {
             let mut terminal = terminal.lock().unwrap();
             write!(terminal.writer, "{submitted}\r").unwrap();
             terminal.writer.flush().unwrap();
         }
-        read_until(&format!(
-            "Dirlume-terminal-fixture:command:1:{}",
-            STANDARD.encode(submitted)
-        ));
+        let command = STANDARD.encode(submitted);
+        let submitted_marker = format!("Dirlume-terminal-fixture:command:1:{command}\x07");
+        let prompt_marker = format!(":1:{command}\x07");
+        // ConPTY can coalesce the submission and prompt title updates for a fast command.
+        read_until("submitted command", &|output| {
+            output.contains(&submitted_marker)
+                || output.split("\x1b]").any(|title| {
+                    title.contains("Dirlume-terminal-fixture:2:") && title.contains(&prompt_marker)
+                })
+        });
     }
 }
