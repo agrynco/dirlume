@@ -1339,6 +1339,7 @@ pub fn run() {
         .manage(watch::Measurements::default())
         .manage(Arc::new(crate::completion::CompletionQueue::default()))
         .manage(crate::processes::ProcessMonitor::default())
+        .manage(crate::mcp::McpService::default())
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
@@ -1362,6 +1363,11 @@ pub fn run() {
         #[cfg(windows)]
         crate::processes::process_icons,
         crate::processes::terminate_processes,
+        crate::mcp::start_mcp,
+        crate::mcp::stop_mcp,
+        crate::mcp::mcp_connection,
+        crate::mcp::mcp_decision,
+        crate::mcp::mcp_result,
         crate::file_clipboard::copy_file_references,
         crate::file_clipboard::clipboard_files,
         #[cfg(windows)]

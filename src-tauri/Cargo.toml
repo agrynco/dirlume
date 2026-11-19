@@ -19,7 +19,7 @@ required-features = ["server"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:png", "dep:portable-pty", "dep:reqwest", "dep:ring", "dep:rustls", "dep:semver", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows"]
+desktop = ["dep:axum", "dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:png", "dep:portable-pty", "dep:reqwest", "dep:ring", "dep:rustls", "dep:semver", "dep:subtle", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows"]
 ui-automation = ["desktop", "tauri/devtools"]
 server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util"]
 
