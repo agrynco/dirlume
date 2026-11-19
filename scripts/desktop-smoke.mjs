@@ -7,6 +7,7 @@ import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
+import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
@@ -948,6 +949,7 @@ try {
   }
 
   const linkedMarkdownFont = await testMarkdown(page, src, wheelFont);
+  await testMarkdownNoWrap(page, temp);
   await page.getByRole("option", { name: /^guide.md/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("heading", { name: "Getting started" }).waitFor();
