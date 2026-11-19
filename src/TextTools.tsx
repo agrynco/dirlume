@@ -39,6 +39,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
   const [preview, setPreview] = useState(!editing && isMarkdownFile(file.name));
+  const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
   const [system, setSystem] = useState(systemTheme);
   const [readError, setReadError] = useState("");
@@ -156,6 +157,11 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
       <div className="text-toolbar">
         <span title={path}>{path}</span>
         {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? t("Source") : t("Preview")}</Button>}
+        {isMarkdown && document && preview && !hex && (
+          <Button type="button" aria-pressed={htmlFormatting} onClick={() => setHtmlFormatting((enabled) => !enabled)}>
+            {t("HTML formatting")}
+          </Button>
+        )}
         {!editing && <Button shortcut={showShortcut(hexShortcut)} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
       </div>
       {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
@@ -164,7 +170,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
       {document && <>
         {preview && !hex && (
           <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light}
-            writable={writable} saving={saving} onToggleTask={toggleTask}
+            writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
             onOpenDocument={onOpenDocument} onError={setError} />
         )}
         <div className="source-surface" hidden={preview || hex}>

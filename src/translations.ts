@@ -484,6 +484,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "End of file.": ["Кінець файла.", "Конец файла."],
   "This file is empty.": ["Цей файл порожній.", "Этот файл пуст."],
   "Offset": ["Зміщення", "Смещение"],
+  "HTML formatting": ["HTML-форматування", "Форматирование HTML"],
   "Markdown task": ["Завдання Markdown", "Задача Markdown"],
   "Use a path relative to this document.": ["Використовуйте шлях відносно цього документа.", "Используйте путь относительно этого документа."],
   "Use a file path on this source.": ["Використовуйте шлях до файла в цьому джерелі.", "Используйте путь к файлу в этом источнике."],
