@@ -48,6 +48,10 @@ function hasParentRow(place: Place | null) {
   return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
 }
 
+export function folderMeasurement(pane: PaneState, entry: Entry) {
+  return entry.directory && !entry.link && !pane.search ? pane.sizes.get(entry.name) : undefined;
+}
+
 export function visibleEntries(pane: PaneState, hidden: boolean) {
   const filter = pane.filter.toLocaleLowerCase();
   const { column, asc } = pane.sort;
@@ -59,7 +63,7 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
     .sort((a, b) => {
       if (a.directory !== b.directory) return a.directory ? -1 : 1;
       const byName = collator.compare(a.name, b.name);
-      const metric = (entry: Entry) => column === "size" ? (pane.sizes.get(entry.name)?.bytes ?? entry.size) : entry.modified;
+      const metric = (entry: Entry) => column === "size" ? (folderMeasurement(pane, entry)?.bytes ?? entry.size) : entry.modified;
       const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
       return asc ? order : -order;
     });
@@ -160,15 +164,21 @@ export async function readPlace(place: Place): Promise<{ place: Place; listing: 
   return { place: { kind: "local", path: listing.path, parent: listing.parent }, listing };
 }
 
-export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | number): PaneState {
-  if (action === "refresh" && pane.search) {
+export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number): PaneState {
+  if ((action === "refresh" || action === "background") && pane.search) {
     const updated = applyListing(closeSearchResults(pane), place, listing, action);
     return { ...updated, selected: pane.selected, marked: pane.marked, keyboardRange: pane.keyboardRange, filter: pane.filter,
       search: { ...pane.search, previous: { selected: updated.selected, marked: updated.marked, filter: updated.filter } } };
   }
   pane = closeSearchResults(pane);
   const samePlace = JSON.stringify(pane.place) === JSON.stringify(place);
-  const retained = new Set(listing.entries.map((entry) => entry.name));
+  const current = new Map(listing.entries.map((entry) => [entry.name, entry]));
+  const keepMeasurements = samePlace && action === "background";
+  const unchangedFolders = new Set(keepMeasurements ? pane.entries.flatMap((entry) => {
+    const next = current.get(entry.name);
+    return entry.directory && !entry.link && next?.directory && !next.link && next.modified === entry.modified
+      ? [entry.name] : [];
+  }) : []);
   const keyboardRange = pane.keyboardRange;
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
@@ -179,11 +189,11 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     entries: listing.entries,
     omitted: listing.omitted,
     selected: samePlace && pane.selected &&
-      (pane.selected === ".." ? hasParentRow(place) : retained.has(pane.selected)) ? pane.selected : null,
-    marked: samePlace ? pane.marked.filter((name) => retained.has(name)) : [],
-    keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => retained.has(name)) } : undefined,
-    sizes: samePlace ? new Map([...pane.sizes].filter(([name]) => retained.has(name))) : new Map(),
-    measuring: samePlace ? pane.measuring : [],
+      (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : null,
+    marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
+    keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => current.has(name)) } : undefined,
+    sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
+    measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),
     filter: samePlace ? pane.filter : "",
     history,
     position: typeof action === "number" ? action : history === pane.history ? pane.position : history.length - 1,
