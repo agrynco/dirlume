@@ -241,6 +241,19 @@ try {
     assert.equal(await up.isEnabled(), false);
     await navigate(side, side === "left" ? src : dst);
   }
+  await leftList.getByRole("option", { name: /^notes\.txt/ }).click();
+  await page.keyboard.press("Control+a");
+  assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
+    "Ctrl+A in a file pane must not highlight the workspace text.");
+  await leftList.evaluate((list) => list.blur());
+  await page.keyboard.press("Control+a");
+  assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
+    "Ctrl+A with focus on the workspace background must not highlight the interface.");
+  const pathField = page.getByLabel("left path", { exact: true });
+  await pathField.press("Control+a");
+  assert.deepEqual(await pathField.evaluate((field) => [field.selectionStart, field.selectionEnd]),
+    [0, src.length], "Ctrl+A must still select the text in the address field.");
+
   const hiddenFile = leftList.getByRole("option", { name: /^\.hidden-file/ });
   const hiddenFolder = rightList.getByRole("option", { name: /^\.hidden-folder/ });
   const hiddenToggle = page.getByRole("button", { name: "Show hidden files", exact: true });
