@@ -16,7 +16,12 @@ export async function testProcessExecutablePath(page, appPid) {
     assert.match(displayed, /[\\/]dirlume\.exe$/i);
     assert.equal(await executable.getAttribute("title"), displayed);
     await table.locator(".process-cell-executable").getByText("—", { exact: true }).first().waitFor();
-    const heading = table.getByRole("columnheader", { name: "Executable path", exact: true }).getByRole("button");
+    const column = table.getByRole("columnheader").filter({ has: page.getByRole("button", { name: "Executable path", exact: true }) });
+    const heading = column.getByRole("button", { name: "Executable path", exact: true });
+    await heading.click();
+    assert.equal(await column.getAttribute("aria-sort"), "ascending");
+    await heading.click();
+    assert.equal(await column.getAttribute("aria-sort"), "descending");
     await heading.click({ button: "right" });
     const checkbox = page.getByRole("menuitemcheckbox", { name: "Executable path", exact: true });
     await checkbox.click();
