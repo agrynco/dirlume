@@ -1255,6 +1255,16 @@ try {
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);
   console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
+  await page.getByRole("button", { name: "Commands", exact: true }).click();
+  const updateAction = page.getByRole("dialog", { name: "Commands", exact: true })
+    .getByRole("button", { name: "Check for updates", exact: true });
+  if (!process.env.DIRLUME_UPDATER_PUBLIC_KEY) {
+    await updateAction.click();
+    await page.getByRole("alert").filter({ hasText: /^Updates are unavailable in this build\.$/ }).waitFor();
+  } else {
+    await updateAction.waitFor();
+    await page.keyboard.press("Escape");
+  }
   await exitDesktop(page);
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {

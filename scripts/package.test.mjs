@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { test } from "node:test";
+
+test("release metadata pairs the signed packages with their platform and exact version", async () => {
+  const scratch = await realpath(tmpdir());
+  const directory = await mkdtemp(join(scratch, "dirlume-package-"));
+  const release = join(directory, "release");
+  await mkdir(release);
+  const runner = resolve("scripts/package.mjs");
+  const product = "2.1.3";
+  const label = `${product}-build.66001`;
+  const formats = {
+    "windows-x64": ["setup.exe", "setup.exe.sig"],
+    "linux-x64": ["deb", "AppImage", "AppImage.sig"],
+    "macos-x64": ["dmg", "app.tar.gz", "app.tar.gz.sig"],
+    "macos-arm64": ["dmg", "app.tar.gz", "app.tar.gz.sig"],
+  };
+  try {
+    for (const [platform, extensions] of Object.entries(formats)) {
+      const files = extensions.map((extension) => `Dirlume-${label}-${platform}.${extension}`);
+      files.push(`Dirlume-Server-${label}-${platform}.tar.gz`);
+      for (const path of files) {
+        await writeFile(join(release, path), path);
+        await writeFile(join(release, `${path}.sha256`), "placeholder checksum");
+      }
+    }
+    const run = (tag) => spawnSync(process.execPath, [runner, "verify-release"], {
+      cwd: directory, encoding: "utf8", env: { ...process.env,
+        DIRLUME_PRODUCT_VERSION: product, DIRLUME_BUILD_NUMBER: "66001", TAG: tag, GITHUB_REPOSITORY: "agrynco/dirlume" },
+    });
+    assert.notEqual(run("v2.1.4").status, 0);
+    const result = run(`v${product}`);
+    assert.equal(result.status, 0, result.stderr);
+    const manifest = JSON.parse(await readFile(join(release, "latest.json"), "utf8"));
+    assert.equal(manifest.version, product);
+    const packages = {
+      "windows-x86_64": `Dirlume-${label}-windows-x64.setup.exe`,
+      "linux-x86_64": `Dirlume-${label}-linux-x64.AppImage`,
+      "darwin-x86_64": `Dirlume-${label}-macos-x64.app.tar.gz`,
+      "darwin-aarch64": `Dirlume-${label}-macos-arm64.app.tar.gz`,
+    };
+    assert.deepEqual(manifest.platforms, Object.fromEntries(Object.entries(packages).map(([target, name]) => [target, {
+      signature: `${name}.sig`, url: `https://github.com/agrynco/dirlume/releases/download/v${product}/${name}`,
+    }])));
+    await rm(join(release, "latest.json"));
+    await rm(join(release, `${packages["linux-x86_64"]}.sig`));
+    assert.notEqual(run(`v${product}`).status, 0);
+  } finally {
+    const resolved = await realpath(directory);
+    assert.equal(dirname(resolved), scratch);
+    assert.ok(basename(resolved).startsWith("dirlume-package-"));
+    await rm(resolved, { recursive: true, force: true });
+  }
+});

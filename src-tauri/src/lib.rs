@@ -19,6 +19,8 @@ pub mod server;
 #[cfg(feature = "desktop")]
 mod terminal;
 #[cfg(feature = "desktop")]
+mod updates;
+#[cfg(feature = "desktop")]
 mod watch;
 #[cfg(all(feature = "desktop", windows))]
 mod windows_shell;

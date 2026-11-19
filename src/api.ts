@@ -110,8 +110,14 @@ export interface ProcessInfo extends ProcessId {
   canTerminate: boolean;
 }
 
+export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
+export type UpdateProgress = { downloaded: number; total: number | null };
+
 export const api = {
   buildVersion: () => invoke<string>("build_version"),
+  checkForUpdate: (manual: boolean) => invoke<AppUpdate | null>("check_for_update", { manual }),
+  installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
+    invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
