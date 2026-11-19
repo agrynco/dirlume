@@ -21,6 +21,7 @@ import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
 import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
@@ -1645,6 +1646,7 @@ try {
   await testProcessColumns(page);
   await testProcessQuickSearch(page, temp);
   await testProcessExecutablePath(page, child.pid);
+  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await testLockingProcessPane(page, temp);
   await testOsTimestamps(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);

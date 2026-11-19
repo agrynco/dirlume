@@ -19,6 +19,7 @@ import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortc
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
@@ -71,7 +72,7 @@ type Modal =
   | { kind: "fileActions"; side: Side; entry?: Entry }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
-  | { kind: "about" | "commandHistory" }
+  | { kind: "about" | "commandHistory" | "mcp" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
   | { kind: "installUpdate"; version: string }
@@ -1229,6 +1230,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       menuCommand("commandHistory", activeDocument !== null),
       menuCommand("folderShortcuts", !panesAvailable),
       { label: "Toggle terminal", disabled: activeDocument !== null, run: toggleTerminal },
+      ...(isTauri() ? [{ label: "MCP server", run: () => setModal({ kind: "mcp" }) }] : []),
       ...(isTauri() ? [{ label: "Check for updates", run: () => { void checkUpdates(true); } }] : []),
     ] },
     { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
@@ -1424,6 +1426,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           }} />
       )}
       {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
+      {modal?.kind === "mcp" && <McpDialog onClose={() => setModal(null)} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
@@ -1518,6 +1521,15 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         }} />
       )}
       {helpTopic && <HelpDialog initialTopic={helpTopic} language={preferences.language} onClose={() => setHelpTopic(null)} />}
+      <McpRequests context={{
+        active, panes, preferences, shortcuts: folderShortcuts, load, remote: routeRemote, refresh,
+        selection: (side, names) => {
+          updatePane(side, (pane) => ({ ...pane, marked: names, selected: names[0] ?? pane.selected, keyboardRange: undefined }));
+          setActive(side);
+        },
+        setPreferences: (next) => { persistPreferences(next); setPreferences(next); },
+        setShortcuts: (next) => { persistFolderShortcuts(next); setFolderShortcuts(next); },
+      }} />
     </div>
   );
 }
