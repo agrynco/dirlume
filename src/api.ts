@@ -183,7 +183,7 @@ export interface ProcessInfo extends ProcessId {
 
 export type McpConnection = { endpoint: string; token: string };
 
-export type AppUpdate = { kind: "install"; version: string } | { kind: "debian" | "release"; version: string; url: string };
+export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {

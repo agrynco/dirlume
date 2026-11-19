@@ -28,10 +28,8 @@ impl UpdateFixture {
         self,
         app: &AppHandle,
         pending: &PendingUpdate,
-        key: &str,
     ) -> Result<Option<UpdateOffer>, &'static str> {
-        let Some(mut update) =
-            restore_update(app, key, "https://localhost/latest.json", self.metadata)?
+        let Some(mut update) = restore_update(app, "https://localhost/latest.json", self.metadata)?
         else {
             return Ok(None);
         };

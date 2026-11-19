@@ -122,7 +122,6 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Checking for updates…": ["Перевірка оновлень…", "Проверка обновлений…"],
   "Dirlume is up to date.": ["Встановлено актуальну версію Dirlume.", "Установлена актуальная версия Dirlume."],
   "Update available": ["Доступне оновлення", "Доступно обновление"],
-  "Open release page": ["Відкрити сторінку випуску", "Открыть страницу выпуска"],
   "Dirlume {0} is available.": ["Доступна версія Dirlume {0}.", "Доступна версия Dirlume {0}."],
   "Later": ["Пізніше", "Позже"],
   "Install and restart": ["Встановити й перезапустити", "Установить и перезапустить"],

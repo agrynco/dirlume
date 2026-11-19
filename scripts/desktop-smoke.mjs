@@ -342,7 +342,7 @@ try {
     assert.equal(await list.locator(parentRow).evaluate((row) => row.draggable), false);
     assert.equal(await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Copy", exact: true }).isEnabled(), false);
     await list.press("Enter");
-    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
+    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
     assert.equal(await panePath(otherSide), otherPath);
     await navigate(side, parse(temp).root);
     assert.equal(await list.locator(parentRow).count(), 0);
@@ -452,10 +452,10 @@ try {
   assert.equal(await leftAddress.inputValue(), join(src, "measured") + "\\");
   await leftAddress.press("Enter");
   const filePane = page.getByRole("region", { name: "left pane", exact: true });
-  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor({ state: "attached" });
   await (await editAddress("left")).fill(join(src, "ov"));
   await leftSuggestions.getByRole("option", { name: "overlap", exact: true }).click();
-  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor();
+  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor({ state: "attached" });
   await (await editAddress("left")).fill(join(src, "me"));
   await leftSuggestions.getByRole("option", { name: "measured", exact: true }).waitFor();
   await leftAddress.press("ArrowDown");

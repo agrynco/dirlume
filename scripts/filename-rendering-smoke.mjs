@@ -32,8 +32,8 @@ export async function testFilenameRendering(page, root) {
     };
   }, selected);
   await page.evaluate(() => document.fonts.ready.then(() => {}));
-  const resize = pane.getByRole("separator", { name: "Resize Name column", exact: true });
-  for (let attempt = 0; attempt < 128; attempt++) {
+  const resize = page.getByRole("separator", { name: "Pane divider", exact: true });
+  for (let attempt = 0; attempt < 40; attempt++) {
     const names = await Promise.all(forms.map((form) => dimensions(form, false)));
     if (names.every(({ overflowing }) => !overflowing)) break;
     await resize.press("ArrowRight");
@@ -58,7 +58,7 @@ export async function testFilenameRendering(page, root) {
       }
     }
   }
-  for (let attempt = 0; attempt < 128 && !(await dimensions(forms[1], true)).overflowing; attempt++) {
+  for (let attempt = 0; attempt < 40 && !(await dimensions(forms[1], true)).overflowing; attempt++) {
     await resize.press("ArrowLeft");
   }
   assert.equal((await dimensions(forms[1], true)).overflowing, true);

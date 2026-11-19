@@ -92,6 +92,7 @@ type Modal =
   | { kind: "about" | "commandHistory" | "mcp" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
+  | { kind: "upToDate" }
   | { kind: "installUpdate"; version: string }
   | ActionModal;
 
@@ -139,7 +140,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const [modal, setModal] = useState<Modal | null>(null);
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
   const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
-  const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
+  const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const checkingUpdates = useRef(false);
   const manualUpdateCheck = useRef(false);
@@ -213,8 +214,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     checkingUpdates.current = true;
     try {
       const update = await api.checkForUpdate();
-      if (update) setAvailableUpdate(update);
-      if (manualUpdateCheck.current) setStatus({ text: update ? "Ready" : "Dirlume is up to date." });
+      if (update) setUpdateNotice({ kind: "update", update });
+      else if (manualUpdateCheck.current) setUpdateNotice({ kind: "upToDate" });
+      if (manualUpdateCheck.current) setStatus({ text: "Ready" });
     } catch (error) {
       if (manualUpdateCheck.current) setStatus({ text: describeError(error), error: true });
     } finally {
@@ -228,10 +230,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, [checkUpdates]);
 
   useEffect(() => {
-    if (!availableUpdate || modal || helpTopic) return;
-    setModal({ kind: "update", update: availableUpdate });
-    setAvailableUpdate(null);
-  }, [availableUpdate, modal, helpTopic]);
+    if (!updateNotice || modal || helpTopic) return;
+    setModal(updateNotice);
+    setUpdateNotice(null);
+  }, [updateNotice, modal, helpTopic]);
 
   useLayoutEffect(() => {
     if (!helpShortcut) return;
@@ -1804,8 +1806,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             <Button type="button" className="primary" onClick={() => {
               if (modal.update.kind === "install" && dirtyDocuments.current.size) setModal({ kind: "exit", update: modal.update });
               else installUpdate(modal.update);
-            }}>{t(modal.update.kind === "debian" ? "Download Debian package" : modal.update.kind === "release" ? "Open release page" : "Install and restart")}</Button>
+            }}>{t(modal.update.kind === "debian" ? "Download Debian package" : "Install and restart")}</Button>
           </footer>
+        </Dialog>
+      )}
+      {modal?.kind === "upToDate" && (
+        <Dialog title={t("Check for updates")} onClose={() => setModal(null)}
+          footer={<Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Close")}</Button>}>
+          <div className="dialog-body"><p>{t("Dirlume is up to date.")}</p></div>
         </Dialog>
       )}
       {modal?.kind === "installUpdate" && (

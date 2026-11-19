@@ -13,7 +13,6 @@ pub mod fixture;
 
 const RELEASE_API: &str = "https://api.github.com/repos/agrynco/dirlume/releases/latest";
 const RELEASE_DOWNLOADS: &str = "https://github.com/agrynco/dirlume/releases/download";
-const RELEASE_PAGES: &str = "https://github.com/agrynco/dirlume/releases/tag";
 const CHECK_FAILED: &str = "Could not check for updates. Try again later.";
 const MANIFEST_FAILED: &str = "The latest release has no compatible update package.";
 const INSTALL_FAILED: &str = "Could not download, verify, or install the update. Try again.";
@@ -39,7 +38,6 @@ struct Asset {
 pub enum UpdateOffer {
     Install { version: String },
     Debian { version: String, url: String },
-    Release { version: String, url: String },
 }
 
 #[derive(Clone, Serialize)]
@@ -58,7 +56,6 @@ impl PendingUpdate {
 
 fn restore_update(
     app: &AppHandle,
-    key: &str,
     endpoint: &str,
     metadata: serde_json::Value,
 ) -> Result<Option<Update>, &'static str> {
@@ -66,7 +63,6 @@ fn restore_update(
         .updater_builder()
         .endpoints(vec![Url::parse(endpoint).map_err(|_| MANIFEST_FAILED)?])
         .map_err(|_| MANIFEST_FAILED)?
-        .pubkey(key.trim())
         .build()
         .map_err(|_| MANIFEST_FAILED)?;
     let mut update = updater
@@ -116,10 +112,9 @@ pub async fn check_for_update(
     let debian = app.env().appimage.is_none();
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
     let debian = false;
-    let key = option_env!("DIRLUME_UPDATER_PUBLIC_KEY").filter(|key| !key.trim().is_empty());
     #[cfg(feature = "ui-automation")]
     if let Some(fixture) = fixture::read(&app) {
-        return fixture.offer(&app, &state, key.ok_or(MANIFEST_FAILED)?);
+        return fixture.offer(&app, &state);
     }
 
     let client = reqwest::Client::builder()
@@ -152,12 +147,6 @@ pub async fn check_for_update(
             url: format!("{download_base}/{package}"),
         }));
     }
-    let Some(key) = key else {
-        return Ok(Some(UpdateOffer::Release {
-            url: format!("{RELEASE_PAGES}/v{version}"),
-            version: version.to_string(),
-        }));
-    };
     if !release.includes("latest.json") {
         return Err(MANIFEST_FAILED);
     }
@@ -173,7 +162,7 @@ pub async fn check_for_update(
         .json()
         .await
         .map_err(|_| MANIFEST_FAILED)?;
-    let update = restore_update(&app, key, &endpoint, metadata)?.ok_or(MANIFEST_FAILED)?;
+    let update = restore_update(&app, &endpoint, metadata)?.ok_or(MANIFEST_FAILED)?;
     let version = version.to_string();
     let package = update
         .download_url

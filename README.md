@@ -182,7 +182,7 @@ Each entry records the failed operation, an error code, a timestamp in Unix mill
 
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows NSIS, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
-Install the first signed release manually to enable in-app updates for later releases.
+Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
 
 [GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64, Ubuntu x64, macOS Apple Silicon, and macOS Intel. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
 
@@ -194,6 +194,6 @@ For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.tom
 
 The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime. To update the Windows ZIP edition without an installer, download and extract a newer ZIP.
 
-The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. Configure `DIRLUME_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. Store the matching encrypted key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. Generate the key outside the repository with `npm run tauri -- signer generate -w <key-file>` and keep the private key available to the release maintainers. Installed apps trust the key embedded at build time. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
+The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 
 The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks that a modified package is rejected and that the original signed package installs, restarts, and restores a saved pane font setting.

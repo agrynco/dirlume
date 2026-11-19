@@ -130,15 +130,13 @@ async function collect(platform) {
 }
 
 async function configureSigning() {
-  const key = process.env.DIRLUME_UPDATER_PUBLIC_KEY?.trim();
-  if (!key || !process.env.TAURI_SIGNING_PRIVATE_KEY) {
-    throw new Error("A release needs DIRLUME_UPDATER_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY.");
+  if (!process.env.TAURI_SIGNING_PRIVATE_KEY) {
+    throw new Error("A release needs TAURI_SIGNING_PRIVATE_KEY.");
   }
   const directory = "src-tauri/target";
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "updater-config.json"), JSON.stringify({
     bundle: { createUpdaterArtifacts: true },
-    plugins: { updater: { pubkey: key, requireSignedVersion: true } },
   }));
 }
 

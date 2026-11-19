@@ -45,7 +45,6 @@ jobs:
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
-      DIRLUME_UPDATER_PUBLIC_KEY: ${{ vars.DIRLUME_UPDATER_PUBLIC_KEY }}
       DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
     strategy:
       fail-fast: false
