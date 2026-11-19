@@ -38,7 +38,7 @@ foreach ($row in ($initial.catalog -split '\r?\n')) {
 }
 $windowsRoots = @($windowsCommands.Keys | Where-Object { !($_.Contains(' ')) } | Sort-Object);
 $windowsPrograms = @(foreach ($name in $windowsRoots) { $name; $name + '.exe'; $name + '.com' });
-function Get-WindowsCommandContext($command, $position, $includeCurrent) {
+function Get-WindowsCommandContext($command, $position) {
     if (!$command) { return }
     $invoked = $command.GetCommandName();
     if (!$invoked -or !$windowsCommands.ContainsKey([IO.Path]::GetFileNameWithoutExtension($invoked))) { return }
@@ -47,7 +47,7 @@ function Get-WindowsCommandContext($command, $position, $includeCurrent) {
     if ($resolved -is [System.Management.Automation.AliasInfo]) { $resolved = $resolved.ResolvedCommand }
     if ($resolved -isnot [System.Management.Automation.ApplicationInfo]) { return }
     $name = [IO.Path]::GetFileNameWithoutExtension($resolved.Name);
-    $arguments = @(Get-CompletedArguments $command $position $includeCurrent);
+    $arguments = @(Get-CompletedArguments $command $position $false);
     $values = $null;
     if ($name -eq 'cmd') {
         for ($i = 0; $i -lt $arguments.Count; ++$i) {
@@ -73,7 +73,7 @@ function Get-WindowsCommandContext($command, $position, $includeCurrent) {
 
 Register-ArgumentCompleter -Native -CommandName $windowsPrograms -ScriptBlock {
     param($word, $command, $position)
-    $context = Get-WindowsCommandContext $command $position $false;
+    $context = Get-WindowsCommandContext $command $position;
     if (!$context) { return }
     if ($context.root -eq 'ipconfig' -and $context.arguments.Count -and
         $context.arguments[0] -in '/renew','/release') {
@@ -169,6 +169,9 @@ while ($null -ne ($line = [Console]::ReadLine())) {
         $command = Get-CompletionCommand $request;
         $result = TabExpansion2 -inputScript $request.line -cursorColumn $request.caret;
         $candidates = $result.CompletionMatches;
+        if ($command -and $command.GetCommandName() -in 'cd','sl','chdir','Set-Location','pushd','Push-Location') {
+            $candidates = $candidates | Where-Object { $_.ResultType -ne 'ProviderItem' };
+        }
         if ($candidates.Count -and $candidates[0].ResultType -in 'ProviderItem','ProviderContainer' -and
             ($script:adapterArguments -or (Test-NoCommandArguments $command))) {
             $candidates = $candidates | Where-Object { $_.ResultType -notin 'ProviderItem','ProviderContainer' };
