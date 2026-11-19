@@ -11,6 +11,22 @@ export interface Entry {
   modified: number | null;
 }
 
+export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
+
+export interface AttributeChange {
+  flag: FileFlag;
+  enabled: boolean;
+}
+
+export interface FileAttributes {
+  flags: (AttributeChange & { writable: boolean })[];
+  created: number | null;
+  accessed: number | null;
+  modified: number | null;
+  owner: string | null;
+  mode: string | null;
+}
+
 export interface Listing {
   entries: Entry[];
   omitted: number;
@@ -131,6 +147,10 @@ export const api = {
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
+  fileAttributes: (directory: string, name: string) =>
+    invoke<FileAttributes>("file_attributes", { directory, name }),
+  updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
+    invoke<FileAttributes>("update_file_attributes", { directory, name, changes }),
   operate: (directory: string, operation: Operation) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
   connect: (invitation: string) => invoke<Connection>("connect_server", { invitation }),

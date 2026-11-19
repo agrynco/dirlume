@@ -87,6 +87,31 @@ fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
     Ok(local::absolute(directory)?.join(local::name_component(name)?))
 }
 
+#[tauri::command]
+async fn file_attributes(
+    directory: String,
+    name: String,
+) -> Result<crate::file_attributes::Attributes> {
+    blocking(move || {
+        let path = selected(&directory, &name).map_err(message)?;
+        crate::file_attributes::read(&path).map_err(message)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn update_file_attributes(
+    directory: String,
+    name: String,
+    changes: Vec<crate::file_attributes::Change>,
+) -> Result<crate::file_attributes::Attributes> {
+    blocking(move || {
+        let path = selected(&directory, &name).map_err(message)?;
+        crate::file_attributes::update(&path, &changes).map_err(message)
+    })
+    .await
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Operation {
@@ -1161,6 +1186,8 @@ pub fn run() {
         crate::windows_shell::file_icons,
         installed_fonts,
         list_directory,
+        file_attributes,
+        update_file_attributes,
         operate,
         connect_server,
         list_server,

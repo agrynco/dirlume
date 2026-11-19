@@ -23,6 +23,7 @@ export const commands = {
   refresh: { label: "Refresh", key: "Ctrl+R" },
   refreshAlternate: { label: "Refresh (alternate)", key: "F2" },
   filter: { label: "Filter folder", key: "" },
+  attributes: { label: "File attributes", key: "Ctrl+A" },
   quickSearch: { label: "Quick search by name prefix", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
   rename: { label: "Rename", key: "" },

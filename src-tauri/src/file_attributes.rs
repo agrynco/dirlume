@@ -1,0 +1,339 @@
+use std::{
+    fs, io,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Flag {
+    ReadOnly,
+    Archive,
+    Hidden,
+    System,
+    Compressed,
+    Encrypted,
+    NotIndexed,
+    OwnerWritable,
+}
+
+#[derive(Serialize)]
+struct FlagValue {
+    flag: Flag,
+    enabled: bool,
+    writable: bool,
+}
+
+#[derive(Deserialize)]
+pub struct Change {
+    flag: Flag,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attributes {
+    flags: Vec<FlagValue>,
+    created: Option<u64>,
+    accessed: Option<u64>,
+    modified: Option<u64>,
+    owner: Option<String>,
+    mode: Option<String>,
+}
+
+fn seconds(time: io::Result<SystemTime>) -> Option<u64> {
+    time.ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|value| value.as_secs())
+}
+
+pub fn read(path: &Path) -> io::Result<Attributes> {
+    let metadata = fs::symlink_metadata(path)?;
+    let (flags, owner, mode) = platform::read(path, &metadata);
+    Ok(Attributes {
+        flags,
+        created: seconds(metadata.created()),
+        accessed: seconds(metadata.accessed()),
+        modified: seconds(metadata.modified()),
+        owner,
+        mode,
+    })
+}
+
+pub fn update(path: &Path, changes: &[Change]) -> io::Result<Attributes> {
+    if !changes.is_empty() {
+        platform::update(path, changes)?;
+    }
+    let attributes = read(path)?;
+    if changes.iter().any(|change| {
+        !attributes
+            .flags
+            .iter()
+            .any(|value| value.flag == change.flag && value.enabled == change.enabled)
+    }) {
+        return Err(io::Error::other(
+            "The file system did not apply every requested attribute.",
+        ));
+    }
+    Ok(attributes)
+}
+
+fn unsupported_flag() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "This attribute cannot be changed for this item.",
+    )
+}
+
+#[cfg(windows)]
+mod platform {
+    use std::{
+        os::windows::{ffi::OsStrExt, fs::MetadataExt},
+        ptr,
+    };
+
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
+            LookupAccountSidW, OWNER_SECURITY_INFORMATION,
+        },
+        Storage::FileSystem::{
+            SetFileAttributesW, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_COMPRESSED,
+            FILE_ATTRIBUTE_ENCRYPTED, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_NORMAL,
+            FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_READONLY,
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM, FILE_ATTRIBUTE_TEMPORARY,
+        },
+    };
+
+    use super::*;
+
+    const FLAGS: [(Flag, u32, bool); 7] = [
+        (Flag::ReadOnly, FILE_ATTRIBUTE_READONLY, true),
+        (Flag::Archive, FILE_ATTRIBUTE_ARCHIVE, true),
+        (Flag::Hidden, FILE_ATTRIBUTE_HIDDEN, true),
+        (Flag::System, FILE_ATTRIBUTE_SYSTEM, true),
+        (Flag::Compressed, FILE_ATTRIBUTE_COMPRESSED, false),
+        (Flag::Encrypted, FILE_ATTRIBUTE_ENCRYPTED, false),
+        (Flag::NotIndexed, FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, true),
+    ];
+
+    fn writable(metadata: &fs::Metadata, flag: Flag) -> bool {
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+            && !(flag == Flag::ReadOnly && metadata.is_dir())
+    }
+
+    fn wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    fn owner(path: &Path) -> Option<String> {
+        let mut sid = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        let path = wide_path(path);
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                path.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                &mut sid,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let mut account_len = 0;
+        let mut domain_len = 0;
+        let mut kind = 0;
+        let name = if sid.is_null() {
+            None
+        } else {
+            unsafe {
+                LookupAccountSidW(
+                    ptr::null(),
+                    sid,
+                    ptr::null_mut(),
+                    &mut account_len,
+                    ptr::null_mut(),
+                    &mut domain_len,
+                    &mut kind,
+                );
+            }
+            let mut account = vec![0; account_len as usize];
+            let mut domain = vec![0; domain_len as usize];
+            let found = unsafe {
+                LookupAccountSidW(
+                    ptr::null(),
+                    sid,
+                    account.as_mut_ptr(),
+                    &mut account_len,
+                    domain.as_mut_ptr(),
+                    &mut domain_len,
+                    &mut kind,
+                )
+            };
+            (found != 0).then(|| {
+                let account = String::from_utf16_lossy(&account[..account_len as usize]);
+                let domain = String::from_utf16_lossy(&domain[..domain_len as usize]);
+                if domain.is_empty() {
+                    account
+                } else {
+                    format!("{domain}\\{account}")
+                }
+            })
+        };
+        unsafe { LocalFree(descriptor) };
+        name
+    }
+
+    pub(super) fn read(
+        path: &Path,
+        metadata: &fs::Metadata,
+    ) -> (Vec<FlagValue>, Option<String>, Option<String>) {
+        let mask = metadata.file_attributes();
+        let flags = FLAGS
+            .iter()
+            .map(|&(flag, bit, editable)| FlagValue {
+                flag,
+                enabled: mask & bit != 0,
+                writable: editable && writable(metadata, flag),
+            })
+            .collect();
+        (flags, owner(path), None)
+    }
+
+    pub(super) fn update(path: &Path, changes: &[Change]) -> io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        // Keep existing flags that SetFileAttributesW accepts, including those not shown in the dialog.
+        let settable = FLAGS.iter().filter(|(_, _, editable)| *editable).fold(
+            FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_OFFLINE,
+            |mask, (_, bit, _)| mask | bit,
+        );
+        let mut mask = metadata.file_attributes() & settable;
+        for change in changes {
+            let &(_, bit, _) = FLAGS
+                .iter()
+                .find(|&&(flag, _, editable)| {
+                    editable && flag == change.flag && writable(&metadata, flag)
+                })
+                .ok_or_else(unsupported_flag)?;
+            if change.enabled {
+                mask |= bit;
+            } else {
+                mask &= !bit;
+            }
+        }
+        let path = wide_path(path);
+        if mask == 0 {
+            mask = FILE_ATTRIBUTE_NORMAL;
+        }
+        if unsafe { SetFileAttributesW(path.as_ptr(), mask) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+mod platform {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+    use super::*;
+
+    const OWNER_WRITE: u32 = 0o200;
+
+    pub(super) fn read(
+        path: &Path,
+        metadata: &fs::Metadata,
+    ) -> (Vec<FlagValue>, Option<String>, Option<String>) {
+        let flags = vec![
+            FlagValue {
+                flag: Flag::Hidden,
+                enabled: path
+                    .file_name()
+                    .is_some_and(|name| name.as_encoded_bytes().starts_with(b".")),
+                writable: false,
+            },
+            FlagValue {
+                flag: Flag::OwnerWritable,
+                enabled: metadata.mode() & OWNER_WRITE != 0,
+                writable: metadata.is_file() || metadata.is_dir(),
+            },
+        ];
+        (
+            flags,
+            Some(metadata.uid().to_string()),
+            Some(format!("{:04o}", metadata.mode() & 0o7777)),
+        )
+    }
+
+    pub(super) fn update(path: &Path, changes: &[Change]) -> io::Result<()> {
+        let [change] = changes else {
+            return Err(unsupported_flag());
+        };
+        if change.flag != Flag::OwnerWritable {
+            return Err(unsupported_flag());
+        }
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.is_file() && !metadata.is_dir() {
+            return Err(unsupported_flag());
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() && !metadata.is_dir() {
+            return Err(unsupported_flag());
+        }
+        let mut permissions = metadata.permissions();
+        let mode = permissions.mode();
+        permissions.set_mode(if change.enabled {
+            mode | OWNER_WRITE
+        } else {
+            mode & !OWNER_WRITE
+        });
+        file.set_permissions(permissions)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn changes_only_the_owner_write_bit_and_does_not_follow_links() {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("document");
+            fs::write(&path, "hello").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o664)).unwrap();
+            let disable = [Change {
+                flag: Flag::OwnerWritable,
+                enabled: false,
+            }];
+            let attributes = super::super::update(&path, &disable).unwrap();
+            assert_eq!(attributes.mode.as_deref(), Some("0464"));
+
+            let link = directory.path().join("link");
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            let enable = [Change {
+                flag: Flag::OwnerWritable,
+                enabled: true,
+            }];
+            assert!(super::super::update(&link, &enable).is_err());
+            assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o464);
+
+            let attributes = super::super::update(&path, &enable).unwrap();
+            assert_eq!(attributes.mode.as_deref(), Some("0664"));
+        }
+    }
+}
