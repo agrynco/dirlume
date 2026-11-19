@@ -49,6 +49,7 @@ export const commands = {
   recycle: { label: "Move to Trash", key: "F8" },
   delete: { label: "Delete permanently", key: "Shift+Delete" },
   menu: { label: "Open main menu", key: "F9" },
+  menuAlternate: { label: "Open main menu (alternate)", key: "Alt" },
   close: { label: "Close main window", key: "F10" },
   leftLocations: { label: "Left pane sources", key: "Alt+F1" },
   rightLocations: { label: "Right pane sources", key: "Alt+F2" },
@@ -124,10 +125,17 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
 export const panelLayouts = { standard: "Standard", twin: "Twin panels", classic: "Classic commander" } as const;
 export type PanelLayout = keyof typeof panelLayouts;
 
+export const actionButtonWidths = { full: "Full width", compact: "Compact" } as const;
+export type ActionButtonWidth = keyof typeof actionButtonWidths;
+export const menuPositions = { left: "Left", center: "Center", right: "Right" } as const;
+export type MenuPosition = keyof typeof menuPositions;
+
 export interface Preferences {
   language: Language;
   theme: Theme;
   layout: PanelLayout;
+  actionButtonWidth: ActionButtonWidth;
+  menuPosition: MenuPosition;
   activeScheme: string | null;
   schemes: Scheme[];
   hidden: boolean;
@@ -138,7 +146,7 @@ export interface Preferences {
   viewFontSizes: ViewFontSizes;
 }
 
-const preferenceKey = "dirlume.preferences.v1";
+export const preferenceKey = "dirlume.preferences.v1";
 const mac = /Mac/i.test(navigator.userAgent);
 export const commandNames = Object.keys(commands) as Command[];
 export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wheel"];
@@ -150,8 +158,8 @@ export const defaultBindings = Object.fromEntries(
 
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
-    theme: "system", layout: "standard", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
-    viewFontSizes: {}, language: "en",
+    theme: "system", layout: "standard", actionButtonWidth: "full", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
+    viewFontSizes: {}, language: "en", menuPosition: "center",
   };
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as (Partial<Preferences> & { bindingDefaults?: number }) | null;
@@ -189,6 +197,8 @@ export function readPreferences(): Preferences {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
       layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
+      actionButtonWidth: saved.actionButtonWidth === "compact" ? "compact" : defaults.actionButtonWidth,
+      menuPosition: saved.menuPosition === "left" || saved.menuPosition === "right" ? saved.menuPosition : defaults.menuPosition,
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
@@ -248,7 +258,7 @@ export function showShortcut(shortcut: string) {
   return readable;
 }
 
-/** A narrow label for the function-key bar, where every cell has the same width. */
+/** A narrow label for the function-key bar. */
 export function compactShortcut(shortcut: string) {
   return showShortcut(shortcut).replace(/^Shift\+/, "⇧").replace(/\bInsert\b/, "Ins").replace(/\bDelete\b/, "Del");
 }

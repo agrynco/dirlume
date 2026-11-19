@@ -27,6 +27,7 @@ import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -83,6 +84,7 @@ async function startDesktop() {
     env: {
       ...process.env,
       DIRLUME_TEST_PROCESS_ONLY: "launcher-value",
+      DIRLUME_TEST_SKIP_UPDATE_CHECK: "1",
       ...(process.env.DIRLUME_INTERNAL_CDP === "1"
         ? { DIRLUME_CDP_PORT: String(debuggingPort) }
         : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
@@ -131,13 +133,13 @@ try {
     assert.equal(await setup.getByLabel("Destination", { exact: true }).inputValue(), destination);
     await setup.getByRole("button", { name: action, exact: true }).click();
   }
-  async function finishTransfer(action, expectedCount = 1, destination = dst) {
+  async function waitForCompletedTransfer() {
+    await page.locator("dialog[open]").first().waitFor({ state: "hidden" });
+    await page.locator(".statusbar").getByText("Transfer complete", { exact: true }).waitFor();
+  }
+  async function finishTransfer(action, destination = dst) {
     await startTransfer(action, destination);
-    const result = page.getByRole("dialog", { name: "Transfer complete", exact: true });
-    await result.getByText(`${expectedCount} completed.`, { exact: true }).waitFor();
-    const progress = result.getByRole("progressbar", { name: "Overall transfer progress" });
-    assert.equal(await progress.getAttribute("value"), String(expectedCount));
-    await result.getByRole("button", { name: "Done" }).click();
+    await waitForCompletedTransfer();
   }
   const pageErrors = [];
   page.on("pageerror", (error) => { pageErrors.push(error.message); });
@@ -174,7 +176,7 @@ try {
     await input.press("Enter");
     try {
       await page.getByRole("region", { name: `${side} pane`, exact: true })
-        .getByRole("heading", { name: path.split(/[\\/]/).filter(Boolean).at(-1), exact: true }).waitFor();
+        .getByRole("heading", { name: path.split(/[\\/]/).filter(Boolean).at(-1), exact: true }).waitFor({ state: "attached" });
       await page.waitForFunction((side) => document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false", side);
     } catch (error) {
       throw new Error(`Could not navigate the ${side} pane: ${await page.getByRole("alert").allTextContents()}`, { cause: error });
@@ -240,7 +242,7 @@ try {
     await list.locator(parentRow).waitFor();
     assert.equal(await list.getByRole("option").count(), 1);
     await up.click();
-    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
+    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
     const column = pane.getByRole("button", { name: /^Name/ });
     await column.click();
     await pane.getByRole("button", { name: "Filter folder", exact: true }).click();
@@ -258,7 +260,7 @@ try {
     assert.equal(await copyAction.getAttribute("aria-keyshortcuts"), "F5");
     assert.equal(await copyAction.isEnabled(), false);
     await list.press("Enter");
-    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
+    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
     assert.equal(await other.inputValue(), otherPath);
     await navigate(side, parse(temp).root);
     assert.equal(await list.locator(parentRow).count(), 0);
@@ -286,7 +288,8 @@ try {
   const hiddenFolder = rightList.getByRole("option", { name: /^\.hidden-folder/ });
   const hiddenToggle = page.getByRole("button", { name: "Show hidden files", exact: true });
   const optionsButton = page.getByRole("button", { name: "Options", exact: true });
-  const options = page.getByRole("dialog", { name: "Options", exact: true });
+  let optionsPage;
+  let options;
   const ukrainianCtrlH = { key: "р", code: "KeyH", ctrlKey: true, bubbles: true };
   await hiddenFile.waitFor({ state: "detached" });
   await hiddenFolder.waitFor({ state: "detached" });
@@ -294,44 +297,55 @@ try {
   await hiddenFile.waitFor();
   await hiddenFolder.waitFor();
   assert.equal(await hiddenToggle.getAttribute("aria-pressed"), "true");
-  await optionsButton.click();
+  optionsPage = await openOptionsWindow(page, () => optionsButton.click());
+  options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "General", exact: true }).click();
+  const menuPosition = options.getByRole("combobox", { name: "Main menu position" });
+  assert.equal(await menuPosition.inputValue(), "center");
+  for (const alignment of ["left", "right", "center"]) {
+    await menuPosition.selectOption(alignment);
+    await options.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.locator(`.topbar[data-menu-position="${alignment}"]`).waitFor();
+  }
   const productVersion = JSON.parse(await readFile("package.json", "utf8")).version;
   const buildNumber = process.env.DIRLUME_BUILD_NUMBER;
   await options.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
   await options.getByRole("button", { name: "Main File Panels", exact: true }).click();
   assert.equal(await options.getByRole("checkbox", { name: "Show hidden files" }).isChecked(), true);
-  await options.getByRole("button", { name: "Done" }).click();
+  await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
   await rightList.focus();
   await rightList.dispatchEvent("keydown", ukrainianCtrlH);
   await hiddenFile.waitFor({ state: "detached" });
   await hiddenFolder.waitFor({ state: "detached" });
   assert.equal(await hiddenToggle.getAttribute("aria-pressed"), "false");
 
-  await optionsButton.click();
+  optionsPage = await openOptionsWindow(page, () => optionsButton.click());
+  options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
   assert.equal(await options.getByRole("checkbox", { name: "Show hidden files" }).isChecked(), false);
   const shortcuts = options.getByRole("button", { name: "Keyboard shortcuts", exact: true });
   await shortcuts.click();
   await options.getByRole("button", { name: "Clear shortcut for Show or hide hidden files" }).click();
-  await options.getByRole("button", { name: "Done" }).click();
+  await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
   await rightList.focus();
   await rightList.dispatchEvent("keydown", ukrainianCtrlH);
   await rightList.press("Control+h");
   assert.equal(await hiddenToggle.getAttribute("aria-pressed"), "false");
 
-  await optionsButton.click();
+  optionsPage = await openOptionsWindow(page, () => optionsButton.click());
+  options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "Change shortcut for Show or hide hidden files" }).click();
   await options.getByRole("textbox", { name: "New shortcut for Show or hide hidden files" }).press("Control+Shift+h");
-  await options.getByRole("button", { name: "Done" }).click();
+  await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
   await leftList.press("Control+Shift+h");
   await hiddenFile.waitFor();
   await hiddenFolder.waitFor();
   await leftList.press("Control+Shift+h");
   await hiddenFile.waitFor({ state: "detached" });
-  await optionsButton.click();
+  optionsPage = await openOptionsWindow(page, () => optionsButton.click());
+  options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "Restore defaults" }).click();
   await options.getByRole("button", { name: "General", exact: true }).click();
-  await options.getByRole("button", { name: "Done" }).click();
+  await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
 
   const leftFont = await fontSize("#left-pane");
   const rightFont = await fontSize("#right-pane");
@@ -356,16 +370,16 @@ try {
   assert.equal(await leftAddress.inputValue(), join(src, "measured") + "\\");
   await leftAddress.press("Enter");
   const filePane = page.getByRole("region", { name: "left pane", exact: true });
-  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor({ state: "attached" });
   await leftAddress.fill(join(src, "ov"));
   await leftSuggestions.getByRole("option", { name: "overlap", exact: true }).click();
-  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor();
+  await filePane.getByRole("heading", { name: "overlap", exact: true }).waitFor({ state: "attached" });
   await leftAddress.fill(join(src, "me"));
   await leftSuggestions.getByRole("option", { name: "measured", exact: true }).waitFor();
   await leftAddress.press("ArrowDown");
   await leftSuggestions.getByRole("option", { name: "measured", selected: true }).waitFor();
   await leftAddress.press("Enter");
-  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await filePane.getByRole("heading", { name: "measured", exact: true }).waitFor({ state: "attached" });
   await navigate("left", src);
   const copySetup = page.getByRole("dialog", { name: "Copy", exact: true });
   const destination = copySetup.getByRole("combobox", { name: "Destination", exact: true });
@@ -415,7 +429,7 @@ try {
   await finishTransfer("Copy");
   assert.deepEqual(await readFile(join(dst, "data.bin")), Buffer.alloc(12));
   await leftPane.getByRole("button", { name: "Go to selected file", exact: true }).click();
-  await page.getByRole("heading", { name: "measured", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "measured", exact: true }).waitFor({ state: "attached" });
   await page.getByRole("option", { name: /^data.bin/, selected: true }).waitFor();
   const bulk = join(temp, "bulk");
   await mkdir(bulk);
@@ -461,7 +475,7 @@ try {
   assert.equal(await left.getByRole("option", { selected: true }).count(), 1);
   assert.ok(await left.getByRole("option").count() < 100);
   await leftPane.getByRole("button", { name: "Close search results" }).click();
-  await leftPane.getByRole("heading", { name: "bulk" }).waitFor();
+  await leftPane.getByRole("heading", { name: "bulk" }).waitFor({ state: "attached" });
   await navigate("left", src);
   await left.getByRole("option", { name: /^sample-app\.exe/ }).locator(".native-file-icon").waitFor();
   await left.getByRole("option", { name: /^notes.txt/ }).click({ modifiers: ["Control"] });
@@ -512,7 +526,7 @@ try {
   const dragDialog = page.getByRole("dialog", { name: "Copy", exact: true });
   await dragDialog.getByText("2 selected items", { exact: true }).waitFor();
   await dragDialog.getByLabel("Move instead of copying").check();
-  await finishTransfer("Move", 2);
+  await finishTransfer("Move");
   assert.equal(await readFile(join(dst, "drag-file.txt"), "utf8"), "Dragged file");
   assert.equal(await readFile(join(dst, "drag-folder", "child.txt"), "utf8"), "Dragged folder");
   await assert.rejects(readFile(join(src, "drag-file.txt")), { code: "ENOENT" });
@@ -552,7 +566,7 @@ try {
   await page.keyboard.press("Insert");
   await left.getByRole("option", { name: /^second.txt/ }).click({ modifiers: ["Control"] });
   await page.getByRole("combobox", { name: "Command line" }).press("F5");
-  await finishTransfer("Copy", 2);
+  await finishTransfer("Copy");
   await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^notes.txt/ }).waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
   assert.equal(await readFile(join(dst, "second.txt"), "utf8"), "Second file\n");
@@ -566,21 +580,21 @@ try {
   await conflict.waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Previous version\n");
   await conflict.getByRole("button", { name: "Overwrite" }).click();
-  await page.getByRole("dialog", { name: "Transfer complete" }).getByRole("button", { name: "Done" }).click();
+  await waitForCompletedTransfer();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
   const folderConflict = page.getByRole("dialog", { name: "Folder already exists" });
   await navigate("left", src);
   await left.getByRole("option", { name: /^overlap/ }).click();
   await page.keyboard.press("F5");
   await startTransfer("Copy");
-  await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
+  await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
   await conflict.getByText("Incoming", { exact: true }).waitFor();
   await conflict.getByText("2 B", { exact: true }).waitFor();
   assert.equal(await conflict.getByRole("button", { name: "Skip", exact: true }).evaluate((button) => document.activeElement === button), true);
   if (process.env.DIRLUME_CONFLICT_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CONFLICT_SCREENSHOT, scale: "css" });
   await conflict.getByLabel("Remember choice").check();
   await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
-  await page.getByRole("dialog", { name: "Transfer complete" }).getByRole("button", { name: "Done" }).click();
+  await waitForCompletedTransfer();
   assert.deepEqual(await readFile(join(dst, "overlap", "data.bin")), Buffer.alloc(12));
   assert.deepEqual(await readFile(join(dst, "overlap", "other.bin")), Buffer.alloc(13, 7));
   await writeFile(join(src, "outside-change.txt"), "watch me");
@@ -604,10 +618,15 @@ try {
   assert.match(await guideRow.getAttribute("class"), /marked/);
   await secondRow.click();
 
-  await leftAddress.press("Alt+Control+S");
-  const optionsDialog = page.getByRole("dialog", { name: "Options", exact: true });
-  const optionsContent = optionsDialog.locator(".settings-page-body");
-  const searchSettings = optionsDialog.getByRole("searchbox", { name: "Search settings", exact: true });
+  let optionsDialog, optionsContent, searchSettings;
+  async function showOptions(trigger) {
+    optionsPage = await openOptionsWindow(page, trigger);
+    optionsDialog = optionsPage.getByRole("dialog", { name: "Options", exact: true });
+    optionsContent = optionsDialog.locator(".settings-page-body");
+    searchSettings = optionsDialog.getByRole("searchbox", { name: "Search settings", exact: true });
+    assert.notEqual(optionsPage, page);
+  }
+  await showOptions(() => leftAddress.press("Alt+Control+S"));
   await optionsDialog.getByRole("button", { name: "General", exact: true }).click();
   const provider = optionsDialog.getByLabel("Remote connection");
   await provider.selectOption("kswitcher");
@@ -618,56 +637,27 @@ try {
     .getByRole("option", { name: "measured", exact: true }).click();
   assert.equal(await bridgePath.inputValue(), join(src, "measured"));
   await provider.selectOption("server");
-  const sizeBefore = await optionsDialog.boundingBox();
-  const grip = await optionsDialog.getByRole("button", { name: "Resize Options" }).boundingBox();
-  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(grip.x + grip.width / 2 - 55, grip.y + grip.height / 2 - 40, { steps: 5 });
-  await page.mouse.up();
-  const shrunkSize = await optionsDialog.boundingBox();
-  assert.ok(shrunkSize.width < sizeBefore.width - 40);
-  assert.ok(shrunkSize.height < sizeBefore.height - 30);
-  for (const [edge, dx, dy] of [["e", 28, 0], ["n", 0, -20]]) {
-    const handle = await optionsDialog.locator('[data-resize-edge="' + edge + '"]').boundingBox();
-    const x = handle.x + handle.width / 2;
-    const y = handle.y + handle.height / 2;
-    assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.getAttribute("data-resize-edge"), { x, y }), edge);
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(x + dx, y + dy, { steps: 5 });
-    await page.mouse.up();
-  }
-  const sizeAfter = await optionsDialog.boundingBox();
-  assert.ok(sizeAfter.width > shrunkSize.width + 40, "Dragging the right edge should increase the Options width.");
-  assert.ok(sizeAfter.height > shrunkSize.height + 30, "Dragging the top edge should increase the Options height from " +
-    shrunkSize.height + " to " + sizeAfter.height + ".");
-  await page.keyboard.press("Escape");
-  await optionsDialog.waitFor({ state: "hidden" });
-  await leftAddress.dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true });
-  assert.deepEqual(await optionsDialog.boundingBox(), sizeAfter);
-  const resizeGrip = optionsDialog.getByRole("button", { name: "Resize Options" });
-  await resizeGrip.press("ArrowRight");
-  assert.ok((await optionsDialog.boundingBox()).width >= sizeAfter.width + 15);
-
+  await closeToolWindow(optionsPage);
+  await showOptions(() => leftAddress.dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true }));
   await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  const zoomBinding = optionsDialog.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true });
-  assert.equal(await zoomBinding.inputValue(), "Ctrl+Wheel");
-  await zoomBinding.selectOption("Alt+Wheel");
+  const zoomBinding = () => optionsDialog.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true });
+  assert.equal(await zoomBinding().inputValue(), "Ctrl+Wheel");
+  await zoomBinding().selectOption("Alt+Wheel");
   await searchSettings.fill("keyboard shortcuts");
   const shortcutScroll = await optionsContent.evaluate((content) => { content.scrollTop = 180; return content.scrollTop; });
   assert.ok(shortcutScroll > 0);
-  await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await wheelFont("#left-files", -120);
   assert.equal(await fontSize("#left-pane"), leftFont);
   await wheelFont("#left-files", -120, "Alt");
   assert.ok(await fontSize("#left-pane") > leftFont);
   await wheelFont("#left-files", 120, "Alt");
-  await leftAddress.press("Alt+Control+S");
+  await showOptions(() => leftAddress.press("Alt+Control+S"));
   assert.equal(await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).getAttribute("aria-pressed"), "true");
   assert.equal(await searchSettings.inputValue(), "keyboard shortcuts");
   assert.equal(await optionsContent.evaluate((content) => content.scrollTop), shortcutScroll);
   await searchSettings.fill("");
-  await zoomBinding.selectOption("Ctrl+Wheel");
+  await zoomBinding().selectOption("Ctrl+Wheel");
   await optionsDialog.getByRole("button", { name: "View font sizes", exact: true }).click();
   for (const [side, size] of [["Left", leftFont], ["Right", rightFont]]) {
     const field = optionsDialog.getByRole("spinbutton", { name: `${side} file pane font size` });
@@ -679,9 +669,9 @@ try {
   const panelsSection = optionsDialog.getByRole("button", { name: "Panels", exact: true });
   await panelsSection.click();
   await panelsSection.press("Tab");
-  await page.keyboard.press("Shift+Tab");
+  await optionsPage.keyboard.press("Shift+Tab");
   if (process.env.DIRLUME_SETTINGS_FOCUS_SCREENSHOT) {
-    await page.screenshot({ path: process.env.DIRLUME_SETTINGS_FOCUS_SCREENSHOT, scale: "css" });
+    await optionsPage.screenshot({ path: process.env.DIRLUME_SETTINGS_FOCUS_SCREENSHOT, scale: "css" });
   }
   const settingsFocus = await panelsSection.evaluate((button) => {
     const tree = button.closest(".settings-tree");
@@ -698,14 +688,14 @@ try {
     };
   });
   assert.deepEqual(settingsFocus, { visible: true, fits: true }, "The Options tree should show the full keyboard focus outline.");
-  await page.getByLabel("Color scheme").selectOption("light");
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await page.getByRole("dialog", { name: "Options", exact: true }).waitFor();
-  assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
-  await page.getByRole("button", { name: "Window", exact: true }).click();
-  assert.notEqual(await page.getByLabel("Toolbar and status bar hex").inputValue(), "#000000");
+  await optionsPage.getByLabel("Color scheme").selectOption("light");
+  await optionsPage.getByRole("button", { name: "Apply", exact: true }).click();
+  await optionsPage.getByRole("dialog", { name: "Options", exact: true }).waitFor();
+  await page.locator("html[data-theme=light]").waitFor();
+  await optionsPage.getByRole("button", { name: "Window", exact: true }).click();
+  assert.notEqual(await optionsPage.getByLabel("Toolbar and status bar hex").inputValue(), "#000000");
   const swatch = optionsDialog.getByRole("button", { name: "Window background color", exact: true });
-  const picker = page.getByRole("dialog", { name: "Window background color", exact: true });
+  const picker = optionsPage.getByRole("dialog", { name: "Window background color", exact: true });
   await swatch.click();
   const spectrum = picker.getByRole("group", { name: /^Saturation and brightness/ });
   await spectrum.click({ position: { x: 120, y: 45 } });
@@ -717,34 +707,34 @@ try {
   const previewColor = () => optionsDialog.locator(".preview-frame")
     .evaluate((element) => getComputedStyle(element).getPropertyValue("--canvas").trim());
   assert.equal(await previewColor(), "#112233");
-  if (process.env.DIRLUME_COLOR_PICKER_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_COLOR_PICKER_SCREENSHOT, scale: "css" });
+  if (process.env.DIRLUME_COLOR_PICKER_SCREENSHOT) await optionsPage.screenshot({ path: process.env.DIRLUME_COLOR_PICKER_SCREENSHOT, scale: "css" });
   await hex.press("Escape");
   await picker.waitFor({ state: "hidden" });
   await optionsDialog.waitFor();
-  assert.equal(await page.getByLabel("Color scheme").inputValue(), "light");
+  assert.equal(await optionsPage.getByLabel("Color scheme").inputValue(), "light");
   await swatch.click();
   const initialColor = await hex.inputValue();
   await spectrum.click({ position: { x: 120, y: 45 } });
   const chosenColor = await hex.inputValue();
   assert.notEqual(chosenColor, initialColor);
   await picker.getByRole("button", { name: "Use color", exact: true }).click();
-  assert.equal(await page.getByLabel("Window background hex").inputValue(), chosenColor);
-  await page.getByLabel("Window background hex").fill("#eef3fe");
-  await page.getByLabel("Scheme name").fill("Blueprint");
-  assert.equal(await page.getByLabel("Window background hex").inputValue(), "#eef3fe");
-  await page.getByRole("button", { name: "Panels", exact: true }).click();
-  await page.getByLabel("Panel background hex").fill("#ecf9f5");
-  await page.getByRole("button", { name: "Dialogs", exact: true }).click();
-  await page.getByLabel("Dialog background hex").fill("#f5f9fe");
+  assert.equal(await optionsPage.getByLabel("Window background hex").inputValue(), chosenColor);
+  await optionsPage.getByLabel("Window background hex").fill("#eef3fe");
+  await optionsPage.getByLabel("Scheme name").fill("Blueprint");
+  assert.equal(await optionsPage.getByLabel("Window background hex").inputValue(), "#eef3fe");
+  await optionsPage.getByRole("button", { name: "Panels", exact: true }).click();
+  await optionsPage.getByLabel("Panel background hex").fill("#ecf9f5");
+  await optionsPage.getByRole("button", { name: "Dialogs", exact: true }).click();
+  await optionsPage.getByLabel("Dialog background hex").fill("#f5f9fe");
   const sourceName = left.getByRole("option", { name: /^sample\.rs/ }).locator(".file-name");
   const textName = left.getByRole("option", { name: /^guide\.md/ }).locator(".file-name");
   const foreground = (element) => element.evaluate((name) => getComputedStyle(name).color);
   assert.notEqual(await foreground(sourceName), await foreground(textName));
   await searchSettings.fill("office documents");
   await searchSettings.press("Enter");
-  await page.getByRole("heading", { name: "File types", exact: true }).waitFor();
-  await page.getByLabel("Source code hex").fill("#7c2144");
-  const exampleSource = page.getByRole("region", { name: "Settings preview" }).getByText("main.rs", { exact: true });
+  await optionsPage.getByRole("heading", { name: "File types", exact: true }).waitFor();
+  await optionsPage.getByLabel("Source code hex").fill("#7c2144");
+  const exampleSource = optionsPage.getByRole("region", { name: "Settings preview" }).getByText("main.rs", { exact: true });
   assert.equal(await foreground(exampleSource), "rgb(124, 33, 68)");
   assert.notEqual(await foreground(sourceName), "rgb(124, 33, 68)");
   const attributeColors = { hidden: "rgb(65, 83, 109)", system: "rgb(115, 18, 76)" };
@@ -754,7 +744,7 @@ try {
   assert.equal(await foreground(preview.getByText(".env", { exact: true })), attributeColors.hidden);
   assert.equal(await foreground(preview.getByText("System Volume Information", { exact: true })), attributeColors.system);
   await searchSettings.fill("");
-  await page.getByRole("button", { name: "Fonts", exact: true }).click();
+  await optionsPage.getByRole("button", { name: "Fonts", exact: true }).click();
   const panelFont = optionsDialog.getByRole("combobox", { name: "File panels font family", exact: true });
   const panelSuggestions = optionsDialog.getByRole("listbox", { name: "File panels font suggestions", exact: true });
   await optionsDialog.getByRole("button", { name: "Browse installed fonts for file panels", exact: true }).click();
@@ -762,7 +752,7 @@ try {
   await panelFont.press("Escape");
   await panelSuggestions.waitFor({ state: "hidden" });
   await optionsDialog.waitFor();
-  assert.equal(await page.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.equal(await optionsPage.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
   await panelFont.fill("GoMono Nerd");
   await panelSuggestions.getByRole("option", { name: bundledFamily, exact: true }).click();
   assert.equal(await panelFont.inputValue(), bundledFamily);
@@ -774,44 +764,42 @@ try {
   await panelFont.fill("aRiAl");
   const arial = panelSuggestions.getByRole("option", { name: "Arial", exact: true });
   await arial.waitFor();
-  assert.equal(await page.getByRole("dialog").count(), 1, "Font suggestions should appear inside Options.");
+  assert.equal(await optionsPage.getByRole("dialog").count(), 1, "Font suggestions should appear inside Options.");
   assert.ok((await panelSuggestions.getByRole("option").allTextContents()).every((family) => /arial/i.test(family)));
   await panelFont.press("ArrowDown");
   assert.equal(await arial.getAttribute("aria-selected"), "true");
   await panelFont.press("Enter");
   assert.equal(await panelFont.inputValue(), "Arial");
   await panelSuggestions.waitFor({ state: "hidden" });
-  await page.getByLabel("File panels font size").fill("17");
+  await optionsPage.getByLabel("File panels font size").fill("17");
   assert.notEqual(await page.locator("#left-pane").evaluate((pane) => getComputedStyle(pane).fontSize), "17px");
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await page.getByRole("button", { name: "Apply", exact: true }).isDisabled().then((disabled) => assert.equal(disabled, true));
-  assert.equal(await page.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
-  assert.equal(await page.locator("body").evaluate((body) => getComputedStyle(body).backgroundColor), "rgb(238, 243, 254)");
+  await optionsPage.getByRole("button", { name: "Apply", exact: true }).click();
+  await optionsPage.getByRole("button", { name: "Apply", exact: true }).isDisabled().then((disabled) => assert.equal(disabled, true));
+  assert.equal(await optionsPage.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
+  await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(238, 243, 254)");
   assert.equal(await page.locator("#left-pane").evaluate((pane) => getComputedStyle(pane).backgroundColor), "rgb(236, 249, 245)");
   assert.equal(await page.locator("#left-pane").evaluate((pane) => getComputedStyle(pane).fontSize), "17px");
-  assert.equal(await page.getByRole("dialog", { name: "Options" }).evaluate((dialog) => getComputedStyle(dialog).backgroundColor), "rgb(245, 249, 254)");
+  assert.equal(await optionsPage.getByRole("dialog", { name: "Options" }).evaluate((dialog) => getComputedStyle(dialog).backgroundColor), "rgb(245, 249, 254)");
   assert.equal(await foreground(sourceName), "rgb(124, 33, 68)");
   assert.notEqual(await foreground(textName), "rgb(124, 33, 68)");
-  if (process.env.DIRLUME_APPEARANCE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_APPEARANCE_SCREENSHOT, scale: "css" });
+  if (process.env.DIRLUME_APPEARANCE_SCREENSHOT) await optionsPage.screenshot({ path: process.env.DIRLUME_APPEARANCE_SCREENSHOT, scale: "css" });
   const fontScroll = await optionsContent.evaluate((content) => { content.scrollTop = 120; return content.scrollTop; });
   assert.ok(fontScroll > 0);
-  await page.getByLabel("File panels font size").fill("19");
+  await optionsPage.getByLabel("File panels font size").fill("19");
   await optionsContent.evaluate((content, position) => { content.scrollTop = position; }, fontScroll);
   for (const closeWith of ["button", "Escape"]) {
-    if (closeWith === "button") await optionsDialog.getByRole("button", { name: "Close dialog", exact: true }).click();
-    else await page.keyboard.press("Escape");
-    await optionsDialog.waitFor({ state: "hidden" });
-    await leftAddress.press("Alt+Control+S");
+    await closeToolWindow(optionsPage, closeWith === "button" ? () => optionsDialog.getByRole("button", { name: "Cancel", exact: true }).click() : undefined);
+    await showOptions(() => leftAddress.press("Alt+Control+S"));
     assert.equal(await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await optionsContent.evaluate((content) => content.scrollTop), fontScroll);
-    assert.equal(await page.getByLabel("File panels font size").inputValue(), "17");
+    assert.equal(await optionsPage.getByLabel("File panels font size").inputValue(), "17");
   }
-  await page.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  await page.getByRole("button", { name: "Change shortcut for New folder" }).click();
-  await page.getByRole("textbox", { name: "New shortcut for New folder" }).press("F5");
-  await page.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
-  await page.getByRole("textbox", { name: "New shortcut for New folder" }).press("F12");
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await optionsPage.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  await optionsPage.getByRole("button", { name: "Change shortcut for New folder" }).click();
+  await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("F5");
+  await optionsPage.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
+  await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("F12");
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await navigate("left", attributes);
   const attributeRow = (name) => left.locator(`.file-row[title="${name}"]`);
   const attributeName = (name) => attributeRow(name).locator(".file-name");
@@ -975,7 +963,7 @@ try {
     await navigate("left", src);
     await left.getByRole("option", { name: /^volume.txt/ }).click();
     await page.keyboard.press("F6");
-    await finishTransfer("Move", 1, otherVolume);
+    await finishTransfer("Move", otherVolume);
     await assert.rejects(readFile(join(src, "volume.txt")), { code: "ENOENT" });
     assert.equal(await readFile(join(otherVolume, "volume.txt"), "utf8"), "Cross-volume move");
 
@@ -987,7 +975,7 @@ try {
     await mergeRow.click();
     await page.keyboard.press("F6");
     await startTransfer("Move", otherVolume);
-    await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
+    await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
     await conflict.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByRole("dialog", { name: "Transfer canceled" }).getByRole("button", { name: "Done" }).click();
     assert.equal(await readFile(join(src, "merge", "update.txt"), "utf8"), "New contents");
@@ -995,11 +983,9 @@ try {
     await mergeRow.click();
     await page.keyboard.press("F6");
     await startTransfer("Move", otherVolume);
-    await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
+    await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
     await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
-    const completed = page.getByRole("dialog", { name: "Transfer complete" });
-    await completed.getByText("1 completed.", { exact: true }).waitFor();
-    await completed.getByRole("button", { name: "Done" }).click();
+    await waitForCompletedTransfer();
     await assert.rejects(readFile(join(src, "merge", "update.txt")), { code: "ENOENT" });
     assert.equal(await readFile(join(otherVolume, "merge", "update.txt"), "utf8"), "New contents");
     assert.equal(await readFile(join(otherVolume, "merge", "keep.txt"), "utf8"), "Destination-only file");
@@ -1017,7 +1003,7 @@ try {
   assert.ok(await diagram.evaluate((image) => image.complete && image.naturalWidth > 0));
   const markdownSurface = ".text-window:not([hidden]) .markdown";
   assert.equal(await fontSize(markdownSurface), linkedMarkdownFont, "Unrelated Markdown files should open with the same saved preview size.");
-  await page.keyboard.press("Control+Alt+S");
+  await showOptions(() => page.keyboard.press("Control+Alt+S"));
   await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).click();
   const textFontFamily = optionsDialog.getByLabel("Editor, viewer, and terminal font family");
   const textFontSize = optionsDialog.getByLabel("Editor, viewer, and terminal font size");
@@ -1032,12 +1018,12 @@ try {
   assert.match(await markdownFamily(), /^Arial,/);
   await textFontFamily.fill("Georgia");
   await textFontSize.fill("16");
-  await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   assert.match(await markdownFamily(), /^Georgia,/);
   assert.equal(await fontSize(markdownSurface), 16, "Done should update the open Markdown preview without reopening the file.");
-  await page.keyboard.press("Control+Alt+S");
+  await showOptions(() => page.keyboard.press("Control+Alt+S"));
   await optionsDialog.getByRole("button", { name: "Reset editor, viewer, and terminal font", exact: true }).click();
-  await optionsDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   const markdownFont = await fontSize(markdownSurface);
   await wheelFont(markdownSurface, -120);
   const enlargedMarkdown = await fontSize(markdownSurface);
@@ -1053,10 +1039,8 @@ try {
   await wheelFont(codeSurface, 120);
   assert.ok(await fontSize(codeSurface) < sourceFont, "Ctrl+Wheel should shrink the editor's font.");
   await sourceEditor.fill("fn main() { let retained = true; }");
-  await sourceEditor.press("Control+Alt+S");
-  await optionsDialog.waitFor();
-  await page.keyboard.press("Escape");
-  await optionsDialog.waitFor({ state: "hidden" });
+  await showOptions(() => sourceEditor.press("Control+Alt+S"));
+  await closeToolWindow(optionsPage);
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("Escape");
   const unsaved = page.getByRole("dialog", { name: "Unsaved changes" });
@@ -1187,12 +1171,12 @@ try {
   }
   const lightYellow = await assertTerminalContrast();
   if (process.env.DIRLUME_TERMINAL_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_TERMINAL_SCREENSHOT, scale: "css" });
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  await page.getByRole("button", { name: "Text tools", exact: true }).click();
-  const textBackground = page.getByLabel("Editor, viewer, and terminal background hex");
+  await showOptions();
+  await optionsDialog.getByRole("button", { name: "Text tools", exact: true }).click();
+  const textBackground = optionsDialog.getByLabel("Editor, viewer, and terminal background hex");
   await textBackground.fill("#101924");
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await assertTerminalContrast(lightYellow);
   if (process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT, scale: "css" });
   await page.getByRole("button", { name: "Close terminal" }).click();
@@ -1235,7 +1219,7 @@ try {
     await back.click();
     await page.waitForFunction(() => document.getElementById("left-address")?.value === "/");
     await back.click();
-    await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor();
+    await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
   });
   await left.getByRole("option", { name: /^guide.md/ }).click({ modifiers: ["Control"] });
   await page.keyboard.press("F3");
@@ -1331,41 +1315,41 @@ try {
   assert.equal(await page.getByLabel("left path").inputValue(), src);
   assert.equal(await page.getByLabel("right path").inputValue(), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  assert.equal(await page.getByRole("button", { name: "Text tools", exact: true }).getAttribute("aria-pressed"), "true");
-  await page.getByRole("button", { name: "View font sizes", exact: true }).click();
-  assert.equal(await page.getByRole("spinbutton", { name: "Markdown preview font size" }).inputValue(), String(enlargedMarkdown));
-  assert.equal(await page.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
-  await page.getByRole("button", { name: "Window", exact: true }).click();
-  assert.equal(await page.getByLabel("Scheme name").inputValue(), "Blueprint");
+  await showOptions();
+  assert.equal(await optionsDialog.getByRole("button", { name: "Text tools", exact: true }).getAttribute("aria-pressed"), "true");
+  await optionsDialog.getByRole("button", { name: "View font sizes", exact: true }).click();
+  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Markdown preview font size" }).inputValue(), String(enlargedMarkdown));
+  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
+  await optionsDialog.getByRole("button", { name: "Window", exact: true }).click();
+  assert.equal(await optionsDialog.getByLabel("Scheme name").inputValue(), "Blueprint");
   assert.equal(await page.locator("html").evaluate((element) => element.style.getPropertyValue("--file-hidden")), "#41536d");
   assert.equal(await page.locator("html").evaluate((element) => element.style.getPropertyValue("--file-system")), "#73124c");
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
 
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const englishOptions = page.getByRole("dialog", { name: "Options", exact: true });
+  await showOptions();
+  const englishOptions = optionsPage.getByRole("dialog", { name: "Options", exact: true });
   await englishOptions.getByRole("button", { name: "General", exact: true }).click();
   await englishOptions.getByLabel("Language", { exact: true }).selectOption("uk");
   await englishOptions.getByRole("button", { name: "Apply", exact: true }).click();
-  const ukrainianOptions = page.getByRole("dialog", { name: "Налаштування", exact: true });
+  const ukrainianOptions = optionsPage.getByRole("dialog", { name: "Налаштування", exact: true });
   assert.equal(await ukrainianOptions.getByLabel("Мова", { exact: true }).inputValue(), "uk");
   assert.equal(await page.locator("html").getAttribute("lang"), "uk");
   const ukrainianSearch = ukrainianOptions.getByRole("searchbox", { name: "Пошук налаштувань", exact: true });
   await ukrainianSearch.fill("Шрифти");
   await ukrainianSearch.press("F1");
-  const ukrainianHelp = page.getByRole("dialog", { name: "Довідка", exact: true });
+  const ukrainianHelp = optionsPage.getByRole("dialog", { name: "Довідка", exact: true });
   await ukrainianHelp.getByRole("heading", { name: "Загальні", exact: true }).waitFor();
   const ukrainianTopics = ukrainianHelp.getByRole("navigation", { name: "Зміст" }).getByRole("link");
   const topicLinks = await ukrainianTopics.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
   await ukrainianHelp.getByRole("link", { name: "Термінал", exact: true }).click();
   assert.match(await ukrainianHelp.locator("#help-terminal p").innerText(), /інтерактивну оболонку/);
-  await page.keyboard.press("Escape");
+  await optionsPage.keyboard.press("Escape");
   assert.equal(await ukrainianSearch.inputValue(), "Шрифти");
   assert.equal(await ukrainianSearch.evaluate((field) => field === document.activeElement), true);
   await ukrainianSearch.press("Enter");
   await ukrainianOptions.getByRole("heading", { name: "Шрифти", exact: true }).waitFor();
   await ukrainianSearch.fill("");
-  await ukrainianOptions.getByRole("button", { name: "Готово", exact: true }).click();
+  await closeToolWindow(optionsPage, () => ukrainianOptions.getByRole("button", { name: "Готово", exact: true }).click());
   await page.getByRole("button", { name: "Знайти файли", exact: true }).click();
   const ukrainianFind = page.getByRole("dialog", { name: "Знайти файли", exact: true });
   await ukrainianFind.getByLabel("Маска файлів", { exact: true }).waitFor();
@@ -1380,11 +1364,11 @@ try {
   await ukrainianColumns.getByRole("menuitemcheckbox", { name: "Розмір", exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await ukrainianColumns.waitFor({ state: "hidden" });
-  await page.getByRole("button", { name: "Налаштування", exact: true }).click();
-  const reopenedOptions = page.getByRole("dialog", { name: "Налаштування", exact: true });
+  optionsPage = await openOptionsWindow(page, () => page.getByRole("button", { name: "Налаштування", exact: true }).click(), "Налаштування");
+  const reopenedOptions = optionsPage.getByRole("dialog", { name: "Налаштування", exact: true });
   await reopenedOptions.getByRole("button", { name: "Загальні", exact: true }).click();
   await reopenedOptions.getByLabel("Мова", { exact: true }).selectOption("ru");
-  await reopenedOptions.getByRole("button", { name: "Готово", exact: true }).click();
+  await closeToolWindow(optionsPage, () => reopenedOptions.getByRole("button", { name: "Готово", exact: true }).click());
   assert.equal(await page.locator("html").getAttribute("lang"), "ru");
   assert.equal(await page.locator("#left-pane .col-name button").textContent(), "Имя");
   await page.locator("#left-pane .file-list").press("F1");
@@ -1398,11 +1382,11 @@ try {
   const russianFind = page.getByRole("dialog", { name: "Найти файлы", exact: true });
   await russianFind.getByLabel("Маска файлов", { exact: true }).waitFor();
   await russianFind.getByRole("button", { name: "Закрыть", exact: true }).click();
-  await page.getByRole("button", { name: "Настройки", exact: true }).click();
-  const russianOptions = page.getByRole("dialog", { name: "Настройки", exact: true });
+  optionsPage = await openOptionsWindow(page, () => page.getByRole("button", { name: "Настройки", exact: true }).click(), "Настройки");
+  const russianOptions = optionsPage.getByRole("dialog", { name: "Настройки", exact: true });
   assert.equal(await russianOptions.getByLabel("Язык", { exact: true }).inputValue(), "ru");
   await russianOptions.getByLabel("Язык", { exact: true }).selectOption("en");
-  await russianOptions.getByRole("button", { name: "Готово", exact: true }).click();
+  await closeToolWindow(optionsPage, () => russianOptions.getByRole("button", { name: "Готово", exact: true }).click());
   assert.equal(await page.locator("html").getAttribute("lang"), "en");
   await page.getByRole("button", { name: "Options", exact: true }).waitFor();
   console.log("Verified English, Ukrainian and Russian interface switching and language restoration after restart.");
@@ -1416,8 +1400,8 @@ try {
       return page;
     });
   }
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const featureDialog = page.getByRole("dialog", { name: "Options", exact: true });
+  await showOptions();
+  const featureDialog = optionsDialog;
   const featureSearch = featureDialog.getByRole("searchbox", { name: "Search settings" });
   await featureSearch.fill("show hidden files");
   await featureSearch.press("Enter");
@@ -1426,17 +1410,24 @@ try {
   const layoutSelect = featureDialog.getByRole("combobox", { name: "Panel layout" });
   assert.deepEqual(await layoutSelect.locator("option").evaluateAll((options) => options.map((option) => option.value)),
     ["standard", "twin", "classic"]);
+  const actionButtonWidth = featureDialog.getByRole("combobox", { name: "Action button width" });
+  const actionBarDisplay = () => page.locator(".actionbar").evaluate((bar) => getComputedStyle(bar).display);
+  assert.equal(await actionButtonWidth.inputValue(), "full");
+  assert.equal(await actionBarDisplay(), "grid");
+  await actionButtonWidth.selectOption("compact");
   const leftDrives = page.getByRole("navigation", { name: "Drives and places for left pane", exact: true });
   for (const layout of ["twin", "classic"]) {
     await layoutSelect.selectOption(layout);
     await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
     assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
     assert.ok(await leftDrives.getByRole("button").count() > 0);
+    assert.equal(await actionBarDisplay(), "flex");
   }
   await layoutSelect.selectOption("standard");
   await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
   assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
   assert.equal(await leftDrives.count(), 0);
+  assert.equal(await actionBarDisplay(), "flex");
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
   const featureFonts = [["Viewer", "Consolas", "21"], ["Editor", "Courier New", "19"], ["Terminal", "Arial", "17"]];
@@ -1448,10 +1439,11 @@ try {
     await featureDialog.getByRole("spinbutton", { name: `${name} font size`, exact: true }).fill(size);
   }
   await featureSearch.fill("");
-  await featureDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => featureDialog.getByRole("button", { name: "Done", exact: true }).click());
   await exitDesktop(page);
   page = await startDesktop();
   await page.getByRole("button", { name: "Options", exact: true }).waitFor();
+  assert.equal(await page.locator(".actionbar").getAttribute("data-button-width"), "compact");
   const featureValues = await page.locator("html").evaluate((root) => {
     const style = getComputedStyle(root);
     return ["viewer", "editor", "terminal"].map((view) => [style.getPropertyValue(`--${view}-font`), style.getPropertyValue(`--${view}-size`)]);
@@ -1464,6 +1456,7 @@ try {
     await sampleForFonts.click();
     await page.keyboard.press(shortcut);
     assert.equal(await sampleSurface.evaluate((surface) => getComputedStyle(surface).fontSize), expected);
+    assert.equal(await actionBarDisplay(), "none");
     await page.keyboard.press("F1");
     await page.getByRole("dialog", { name: "Help", exact: true })
       .getByRole("heading", { name: shortcut === "F3" ? "Viewer" : "Editor", exact: true }).waitFor();
@@ -1510,8 +1503,8 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await terminalInput.evaluate((field) => field === document.activeElement), true);
 
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const shortcutOptions = page.getByRole("dialog", { name: "Options", exact: true });
+  await showOptions();
+  const shortcutOptions = optionsDialog;
   const shortcutSearch = shortcutOptions.getByRole("searchbox", { name: "Search settings" });
   await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
@@ -1527,10 +1520,10 @@ try {
   await shortcutSearch.dispatchEvent("keydown", { key: "F1", code: "F1", bubbles: true });
   assert.equal(await help.count(), 0);
   await shortcutSearch.press("Control+Shift+F1");
-  await help.waitFor();
-  await page.keyboard.press("Escape");
+  await optionsPage.getByRole("dialog", { name: "Help", exact: true }).waitFor();
+  await optionsPage.keyboard.press("Escape");
   await shortcutOptions.getByRole("button", { name: "Clear shortcut for Help", exact: true }).click();
-  await shortcutOptions.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => shortcutOptions.getByRole("button", { name: "Done", exact: true }).click());
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);
   console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
@@ -1540,7 +1533,7 @@ try {
   const fileList = page.getByRole("listbox", { name: "left files", exact: true });
   assert.deepEqual(await menubar.getByRole("menuitem").allTextContents(), ["Left", "Files", "Commands", "Options", "Right", "Help"]);
   await fileList.focus();
-  await page.keyboard.press("F9");
+  await page.keyboard.press("Alt");
   await menu("Left").waitFor();
   await page.keyboard.press("ArrowLeft");
   const helpItems = menu("Help").getByRole("menuitem");
@@ -1564,16 +1557,11 @@ try {
   await menu("Files").waitFor({ state: "hidden" });
   await group("Commands").click();
   const updateAction = menu("Commands").getByRole("menuitem", { name: "Check for updates", exact: true });
-  if (!process.env.DIRLUME_UPDATER_PUBLIC_KEY) {
-    await updateAction.click();
-    await page.getByRole("alert").filter({ hasText: /^Updates are unavailable in this build\.$/ }).waitFor();
-  } else {
-    await updateAction.waitFor();
-    await page.keyboard.press("Escape");
-  }
+  await updateAction.click();
+  await page.getByRole("status").filter({ hasText: "Dirlume is up to date." }).waitFor();
   async function openAppearance() {
-    await page.getByRole("button", { name: "Options", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "Options", exact: true });
+    await showOptions();
+    const settings = optionsDialog;
     await settings.getByRole("searchbox", { name: "Search settings" }).fill("");
     await settings.getByRole("button", { name: "Appearance", exact: true }).click();
     return settings;
@@ -1604,7 +1592,7 @@ try {
     const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
     assert.ok((light + 0.05) / (dark + 0.05) >= 4.5, `${foreground} on ${background} must be readable`);
   }
-  await appearance.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => appearance.getByRole("button", { name: "Done", exact: true }).click());
   await navigate("left", attributes);
   const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
   if (await showHidden.getAttribute("aria-pressed") === "false") await showHidden.click();
@@ -1627,7 +1615,7 @@ try {
   assert.equal(await customAppearance.getByLabel("Base theme", { exact: true }).inputValue(), "classic-blue");
   await customAppearance.getByLabel("Scheme name", { exact: true }).fill("Classic blue custom");
   await customAppearance.getByLabel("Panel background hex", { exact: true }).fill("#142560");
-  await customAppearance.getByRole("button", { name: "Done", exact: true }).click();
+  await closeToolWindow(optionsPage, () => customAppearance.getByRole("button", { name: "Done", exact: true }).click());
   await exitDesktop(page);
   page = await startDesktop();
   await themeRoot().waitFor();

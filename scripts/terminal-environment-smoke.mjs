@@ -1,3 +1,4 @@
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -38,7 +39,6 @@ $result = [UIntPtr]::Zero
 export async function testTerminalEnvironment(page) {
   const variable = `DIRLUME_SMOKE_ENV_${randomBytes(8).toString("hex").toUpperCase()}`;
   const change = (value, kind = "String") => userEnvironment({ name: variable, value, kind });
-  const options = page.getByRole("dialog", { name: "Options", exact: true });
   const field = page.getByRole("combobox", { name: "Command line", exact: true });
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const notice = terminal.getByText(/Windows environment changed/);
@@ -47,13 +47,14 @@ export async function testTerminalEnvironment(page) {
   let serial = 0;
 
   async function setting(enabled) {
-    await page.getByRole("button", { name: "Options", exact: true }).click();
+    const window = await openOptionsWindow(page);
+    const options = window.getByRole("dialog", { name: "Options", exact: true });
     const search = options.getByRole("searchbox", { name: "Search settings" });
     await search.fill("refresh environment variables");
     await options.getByRole("button", { name: "Terminal", exact: true }).click();
     await options.getByRole("checkbox", { name: "Automatically refresh environment variables", exact: true }).setChecked(enabled);
     await search.fill("");
-    await options.getByRole("button", { name: "Done", exact: true }).click();
+    await closeToolWindow(window, () => options.getByRole("button", { name: "Done", exact: true }).click());
   }
 
   async function run(code, expected) {

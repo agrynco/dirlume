@@ -43,7 +43,7 @@ export const emptyPane: PaneState = {
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-function hasParentRow(place: Place | null) {
+export function hasParentRow(place: Place | null) {
   // The KSwitcher drive list is a source chooser, outside the drive itself.
   return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
 }

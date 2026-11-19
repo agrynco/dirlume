@@ -3,6 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { close, withServer } from "./server-smoke.mjs";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 export async function testMcp({ page, root, startDesktop, exitDesktop, pid }) {
   const source = join(root, "mcp-source");
@@ -13,7 +14,7 @@ export async function testMcp({ page, root, startDesktop, exitDesktop, pid }) {
     const address = page.getByLabel(side + " path", { exact: true });
     await address.fill(path);
     await address.press("Enter");
-    await page.getByRole("heading", { name: `mcp-${side === "left" ? "source" : "target"}`, exact: true }).waitFor();
+    await page.getByRole("heading", { name: `mcp-${side === "left" ? "source" : "target"}`, exact: true }).waitFor({ state: "attached" });
   }
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
@@ -131,8 +132,8 @@ if ([McpFixtureWindow]::IsIconic($fixture) -ne (${state} -eq 6)) { throw 'Test w
   await button(controls, "Close").click();
   await exitDesktop(page);
   page = await startDesktop();
-  await page.getByRole("button", { name: "Options", exact: true }).click();
-  const options = dialog("Options");
+  const optionsWindow = await openOptionsWindow(page);
+  const options = optionsWindow.getByRole("dialog", { name: "Options", exact: true });
   if (!await options.getByRole("button", { name: "Window", exact: true }).isVisible()) {
     await options.getByRole("button", { name: "Appearance", exact: true }).click();
   }
@@ -140,8 +141,8 @@ if ([McpFixtureWindow]::IsIconic($fixture) -ne (${state} -eq 6)) { throw 'Test w
   const selector = options.getByLabel("Color scheme", { exact: true });
   await selector.getByRole("option", { name: "MCP smoke scheme", exact: true }).waitFor({ state: "attached" });
   await selector.selectOption({ label: "MCP smoke scheme" });
-  await button(options, "Done").click();
-  assert.equal(await page.locator("html").evaluate((root) => root.style.getPropertyValue("--panel-bg")), "#13263a");
+  await closeToolWindow(optionsWindow, () => button(options, "Done").click());
+  await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--panel-bg") === "#13263a");
   console.log("Verified local MCP connection, file and remote operations, approval, refusal, unavailable confirmation, and saved color schemes.");
   return page;
 }

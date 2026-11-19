@@ -171,7 +171,7 @@ export interface ProcessInfo extends ProcessId {
 
 export type McpConnection = { endpoint: string; token: string };
 
-export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
+export type AppUpdate = { kind: "install"; version: string } | { kind: "debian" | "release"; version: string; url: string };
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {
@@ -181,7 +181,9 @@ export const api = {
   mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
   mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
-  checkForUpdate: (manual: boolean) => invoke<AppUpdate | null>("check_for_update", { manual }),
+  checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
+  openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile }) =>
+    invoke<void>("open_tool_window", { title, ...size, comparison }),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
@@ -256,6 +258,8 @@ export const api = {
     invoke<BytePage>("read_server_bytes", { id, segments, offset }),
   saveText: (directory: string, name: string, original: string, text: string) =>
     invoke<void>("save_text", { directory, name, original, text }),
+  saveTextAs: (path: string, encoding: TextEncoding, text: string) =>
+    invoke<void>("save_text_as", { path, encoding, text }),
   openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
   hasKSwitcherBridge: (directory: string) => invoke<boolean>("has_kswitcher_bridge", { directory }),
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),

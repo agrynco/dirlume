@@ -1,3 +1,4 @@
+import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -100,6 +101,10 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   const remotePath = page.getByLabel("right path", { exact: true });
   const copy = page.getByRole("dialog", { name: "Copy", exact: true });
   const complete = page.getByRole("dialog", { name: "Transfer complete" });
+  async function transferred(timeout = 8000) {
+    await page.locator("dialog[open]").first().waitFor({ state: "hidden", timeout });
+    await page.locator(".statusbar").getByText("Transfer complete", { exact: true }).waitFor();
+  }
 
   try {
     await new Promise((ready, fail) => {
@@ -222,10 +227,9 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     assert.equal(await uploadPath.inputValue(), "/start/saved-folder");
     await uploadPath.fill("/start");
     await button(copy, "Copy").click();
-    await button(page.getByRole("dialog", { name: "Folder already exists" }), "Merge").click();
+    await button(page.getByRole("dialog", { name: "Folder already exists" }), "Overwrite").click();
     await button(page.getByRole("dialog", { name: "File already exists" }), "Overwrite").click();
-    await complete.getByText("1 completed.", { exact: true }).waitFor();
-    await button(complete, "Done").click();
+    await transferred();
     assert.equal(await readFile(join(remoteCopy, "existing.txt"), "utf8"), "local upload");
     assert.equal(await readFile(join(remoteCopy, "файл.txt"), "utf8"), "Unicode name");
 
@@ -236,7 +240,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("F5");
     await copy.getByLabel("Destination", { exact: true }).fill(destination);
     await button(copy, "Copy").click();
-    await button(page.getByRole("dialog", { name: "Folder already exists" }), "Merge").click();
+    await button(page.getByRole("dialog", { name: "Folder already exists" }), "Overwrite").click();
     await button(page.getByRole("dialog", { name: "File already exists" }), "Skip").click();
     await complete.getByText("0 completed, 1 skipped.", { exact: true }).waitFor();
     await button(complete, "Done").click();
@@ -264,7 +268,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
       await copy.getByLabel("Destination", { exact: true }).fill(destination);
       const before = ftpLog.length;
       await button(copy, "Copy").click();
-      await complete.getByText("1 completed.", { exact: true }).waitFor({ timeout: 90_000 });
+      await transferred(90_000);
       // Pane refreshes use other control connections and are not part of the download.
       const transferLog = ftpLog.slice(before);
       const transferSessions = new Set(Array.from(transferLog.matchAll(/^RETR-SESSION (\d+)\r?$/gm), ([, session]) => session));
@@ -273,7 +277,6 @@ export async function testFtp(page, temp, source, destination, config, restartDe
         .filter((session) => transferSessions.has(session)).length;
       assert.ok(commands <= 5, `Expected at most five directory listings for ${count} files, got ${commands}.`);
       assert.equal((await readdir(join(destination, folder))).length, count);
-      await button(complete, "Done").click();
       console.log(`FTP downloaded ${count} small files with ${commands} directory listings.`);
     }
 
@@ -294,17 +297,16 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await remoteRow("renamed.md").waitFor();
     await left.getByRole("option", { name: /^notes.txt/ }).click();
     await remoteRow("renamed.md").click();
-    await page.keyboard.press("Shift+F11");
-    const comparison = page.getByRole("dialog", { name: "Compare files" });
+    const window = await openToolWindow(page, () => page.keyboard.press("Shift+F11"), "Compare files");
+    const comparison = window.getByRole("dialog", { name: "Compare files", exact: true });
     await comparison.getByText("# Changed externally", { exact: true }).waitFor();
-    await button(comparison, "Close dialog").click();
+    await closeToolWindow(window);
 
     await remoteRow("renamed.md").click();
     await page.keyboard.press("F5");
     await copy.getByLabel("Destination", { exact: true }).fill("ftp-alias.md");
     await button(copy, "Copy").click();
-    await complete.getByText("1 completed.", { exact: true }).waitFor();
-    await button(complete, "Done").click();
+    await transferred();
     assert.equal(await readFile(join(source, "ftp-alias.md"), "utf8"), "# Changed externally\n");
 
     await remoteRow("ftp-copy").click();

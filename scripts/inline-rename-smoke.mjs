@@ -13,7 +13,7 @@ export async function testInlineRename(page, root) {
     const address = page.getByLabel(`${side} path`, { exact: true });
     await address.fill(path);
     await address.press("Enter");
-    await page.getByRole("heading", { name: `rename-${side}`, exact: true }).waitFor();
+    await page.getByRole("heading", { name: `rename-${side}`, exact: true }).waitFor({ state: "attached" });
   }
   const pane = (side) => page.locator(`#${side}-files`);
   const row = (side, name) => pane(side).getByRole("option").and(page.getByTitle(name, { exact: true }));

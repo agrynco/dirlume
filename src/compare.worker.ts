@@ -10,7 +10,10 @@ export interface CompareRequest {
 export type DiffFragment = { text: string; changed: boolean };
 export type DiffLine = { number: number; text: string; fragments?: DiffFragment[] };
 export type DiffRow = { left: DiffLine | null; right: DiffLine | null };
-export type DiffBlock = { group: number | null; rows: DiffRow[] };
+export type DiffRange = { start: number; length: number };
+export type DiffBlock =
+  | { group: null; rows: DiffRow[]; ranges?: undefined }
+  | { group: number; rows: DiffRow[]; ranges: Record<"left" | "right", DiffRange> };
 export type DiffResult = { blocks: DiffBlock[]; groups: number } | { error: string };
 
 function highlight(left: DiffLine, right: DiffLine, deadline: number) {
@@ -56,6 +59,8 @@ function compare(left: string, right: string, whitespace: boolean): DiffResult {
   let groups = 0;
   let removed: DiffLine[] = [];
   let added: DiffLine[] = [];
+  let leftIndex = 0;
+  let rightIndex = 0;
   function flush() {
     if (!removed.length && !added.length) return;
     const rows: DiffRow[] = [];
@@ -65,13 +70,14 @@ function compare(left: string, right: string, whitespace: boolean): DiffResult {
       if (left && right) highlight(left, right, deadline);
       rows.push({ left, right });
     }
-    blocks.push({ group: ++groups, rows });
+    blocks.push({ group: ++groups, rows, ranges: {
+      left: { start: leftIndex - removed.length, length: removed.length },
+      right: { start: rightIndex - added.length, length: added.length },
+    } });
     removed = [];
     added = [];
   }
   // Keep original whitespace on both sides of unchanged lines.
-  let leftIndex = 0;
-  let rightIndex = 0;
   for (const change of changes) {
     const count = change.count ?? 0;
     if (change.added) {

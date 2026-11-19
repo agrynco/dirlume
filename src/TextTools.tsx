@@ -2,8 +2,9 @@ import { errorText, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
-import { describeError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Save, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { api, describeError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { HexViewer } from "./HexViewer";
 import { isMarkdownFile, MarkdownPreview, type MarkdownAnchor, type OpenMarkdownLink, type TaskMarker } from "./MarkdownPreview";
@@ -14,6 +15,7 @@ import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFont
 import { normalized } from "./textFormat";
 import type { CompareRequest, DiffBlock, DiffLine, DiffResult } from "./compare.worker";
 import { SplitDivider } from "./SplitDivider";
+import { PathField } from "./PathField";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
 
@@ -201,6 +203,9 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
 type CompareLayout = "unified" | "side-by-side";
 const compareLayoutKey = "dirlume.compare-layout";
 const compareConnectorsKey = "dirlume.compare-connectors";
+const compareCollapseKey = "dirlume.compare-collapse";
+const compareSides = ["left", "right"] as const;
+type CompareSide = typeof compareSides[number];
 
 function compareOption(key: string, fallback: string) {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
@@ -285,19 +290,30 @@ function DiffRows({ block, current, split, connectors, ratio }: {
   </div>;
 }
 
-export function CompareDialog({ left, right, previousShortcut, nextShortcut, onClose }: {
+export function CompareDialog({ left, right, previousShortcut, nextShortcut, onClose, onDirtyChange, standalone = false }: {
   left: NamedFile;
   right: NamedFile;
   previousShortcut: string;
   nextShortcut: string;
   onClose: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  standalone?: boolean;
 }) {
-  const [documents, setDocuments] = useState<{ left: string; right: string } | null>(null);
+  const [documents, setDocuments] = useState<Record<CompareSide, string> | null>(null);
+  const [originals, setOriginals] = useState<Record<CompareSide, TextDocument> | null>(null);
   const [error, setError] = useState("");
   const [whitespace, setWhitespace] = useState(false);
   const [layout, setLayout] = useState<CompareLayout>(() => compareOption(compareLayoutKey, "side-by-side") === "unified"
     ? "unified" : "side-by-side");
   const [connectors, setConnectors] = useState(() => compareOption(compareConnectorsKey, "true") === "true");
+  const [collapse, setCollapse] = useState(() => compareOption(compareCollapseKey, "false") === "true");
+  const [expanded, setExpanded] = useState<number[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [destinations, setDestinations] = useState<Record<CompareSide, string | null>>({ left: null, right: null });
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const writing = useRef(false);
   const [ratio, setRatio] = useState(50);
   const [current, setCurrent] = useState(0);
   const [comparison, setComparison] = useState<{ documents: { left: string; right: string }; whitespace: boolean; result: DiffResult } | null>(null);
@@ -305,17 +321,90 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const result = comparison?.documents === documents && comparison.whitespace === whitespace ? comparison.result : null;
   const computed = result && "blocks" in result ? result : null;
   const groups = computed?.groups ?? 0;
+  const files = { left, right };
+  const dirty = compareSides.filter((side) => originals && documents && normalized(originals[side].text) !== documents[side]);
+  const hasChanges = dirty.length > 0;
+  const reportDirty = useRef(onDirtyChange);
+  reportDirty.current = onDirtyChange;
+  useEffect(() => { reportDirty.current?.(hasChanges); }, [hasChanges]);
 
   useEffect(() => {
     let cancelled = false;
     setError("");
     setDocuments(null);
+    setOriginals(null);
     setCurrent(0);
     Promise.all([readPlaceText(left), readPlaceText(right)])
-      .then(([left, right]) => { if (!cancelled) setDocuments({ left: left.text, right: right.text }); },
+      .then(([left, right]) => {
+        if (cancelled) return;
+        setOriginals({ left, right });
+        setDocuments({ left: normalized(left.text), right: normalized(right.text) });
+        setDestinations({
+          left: writableTextPlace(files.left.place) ? null : "",
+          right: writableTextPlace(files.right.place) ? null : "",
+        });
+      },
         (error: unknown) => { if (!cancelled) setError(describeError(error)); });
     return () => { cancelled = true; };
   }, [left, right]);
+
+  function requestClose() {
+    if (writing.current) return;
+    if (dirty.length) { setSaveError(""); setConfirm(true); }
+    else onClose();
+  }
+
+  const closeRequest = useRef(requestClose);
+  closeRequest.current = requestClose;
+  useEffect(() => {
+    if (!standalone) return;
+    const listener = getCurrentWindow().onCloseRequested((event) => {
+      event.preventDefault();
+      closeRequest.current();
+    });
+    return () => { void listener.then((unlisten) => unlisten()).catch(() => {}); };
+  }, [standalone]);
+
+  async function saveAndClose() {
+    if (!documents || !originals || writing.current) return;
+    writing.current = true;
+    setSaving(true);
+    setSaveError("");
+    try {
+      for (const side of dirty) {
+        const original = originals[side];
+        const eol = original.text.includes("\r\n") ? "\r\n" : original.text.includes("\r") ? "\r" : "\n";
+        const text = documents[side].replaceAll("\n", eol);
+        const destination = destinations[side];
+        let saved: TextDocument;
+        if (destination === null) saved = await savePlaceText(files[side], original, text);
+        else {
+          await api.saveTextAs(destination.trim(), original.encoding, text);
+          saved = { ...original, text };
+        }
+        setOriginals((previous) => previous && { ...previous, [side]: saved });
+      }
+      onClose();
+    } catch (failure) {
+      setSaveError(describeError(failure));
+    } finally {
+      writing.current = false;
+      setSaving(false);
+    }
+  }
+
+  const activeGroup = computed?.blocks.find(({ group }) => group === (current || 1));
+  function merge(source: CompareSide, destination: CompareSide) {
+    if (!documents || !activeGroup?.ranges) return;
+    const sourceRange = activeGroup.ranges[source];
+    const destinationRange = activeGroup.ranges[destination];
+    const sourceLines = documents[source].match(/[^\n]*\n|[^\n]+$/g) ?? [];
+    const destinationLines = documents[destination].match(/[^\n]*\n|[^\n]+$/g) ?? [];
+    const contents = sourceLines.slice(sourceRange.start, sourceRange.start + sourceRange.length);
+    destinationLines.splice(destinationRange.start, destinationRange.length, ...contents);
+    setDocuments({ ...documents, [destination]: destinationLines.join("") });
+    setCurrent(0);
+  }
 
   useEffect(() => {
     if (!documents) return;
@@ -359,8 +448,8 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const split = layout === "side-by-side";
   const columns = { "--comparison-columns": `minmax(0, ${ratio}fr) var(--comparison-gutter) minmax(0, ${100 - ratio}fr)` } as CSSProperties;
   const failure = error || (result && "error" in result ? result.error : "");
-  return (
-    <Dialog title={t("Compare files")} wide onClose={onClose} onKeyDown={(event) => {
+  return <>
+    <Dialog title={t("Compare files")} wide standalone={standalone} onClose={requestClose} onKeyDown={(event) => {
       const shortcut = eventShortcut(event);
       if (shortcut && (shortcut === previousShortcut || shortcut === nextShortcut)) {
         event.preventDefault();
@@ -371,6 +460,9 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
         <Button disabled={!groups} shortcut={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
         <Button disabled={!groups} shortcut={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
         <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
+        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge("right", "left")}><ArrowLeft /> {t("Apply to left")}</Button>
+        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge("left", "right")}>{t("Apply to right")} <ArrowRight /></Button>
+        <label><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => setEditing(event.target.checked)} /> {t("Edit files")}</label>
         <label className="comparison-layout">{t("Layout")}
           <select aria-label={t("Layout")} value={layout} onChange={(event) => {
             const next = event.target.value as CompareLayout;
@@ -388,11 +480,27 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
         <label><input type="checkbox" checked={whitespace} onChange={(event) => {
           setWhitespace(event.target.checked); setCurrent(0);
         }} /> {t("Show whitespace changes")}</label>
+        <label><input type="checkbox" checked={collapse} onChange={(event) => {
+          setCollapse(event.target.checked); setExpanded([]); saveCompareOption(compareCollapseKey, String(event.target.checked));
+        }} /> {t("Collapse unchanged sections")}</label>
       </div>
       {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}
       {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
       {documents && !result && !failure && <div className="dialog-body" role="status">{t("Comparing…")}</div>}
-      {computed && (
+      {documents && <div className="comparison-editors" hidden={!editing}>
+        {compareSides.map((side) => <section key={side} className="comparison-editor text-window" data-editing="true"
+          aria-label={t(side === "left" ? "Left file" : "Right file")}>
+          <div className="comparison-editor-name" title={placePath(files[side].place)}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
+          <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
+            <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === "left"}
+              value={documents[side]} onChange={(text) => {
+                setDocuments((previous) => previous && { ...previous, [side]: text });
+                setCurrent(0);
+              }} />
+          </Suspense>
+        </section>)}
+      </div>}
+      {computed && !editing && (
         <div className="comparison" data-layout={layout} style={columns} ref={output} tabIndex={0} aria-label={t("File differences")}>
           <div className={`comparison-head${split ? " comparison-head-split" : ""}`}>
             <span title={left.name}>{left.name}</span>
@@ -400,10 +508,37 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
               : <span aria-hidden="true">→</span>}
             <span title={right.name}>{right.name}</span>
           </div>
-          {computed.blocks.map((block, index) =>
-            <DiffRows key={index} block={block} current={current} split={split} connectors={connectors} ratio={ratio} />)}
+          {computed.blocks.map((block, index) => collapse && block.group === null && block.rows.length > 6 && !expanded.includes(index)
+            ? <Button key={index} type="button" className="diff-unchanged" onClick={() => setExpanded((items) => [...items, index])}>
+              {t("Show {0} unchanged lines", block.rows.length)}
+            </Button>
+            : <DiffRows key={index} block={block} current={current} split={split} connectors={connectors} ratio={ratio} />)}
         </div>
       )}
     </Dialog>
-  );
+    {confirm && <Dialog title={t("Unsaved changes")} onClose={() => { if (!saving) setConfirm(false); }}>
+      <div className="dialog-body transfer-body">
+        {dirty.map((side) => <fieldset className="comparison-save" key={side} disabled={saving}>
+          <legend>{t(side === "left" ? "Left file" : "Right file")} · {files[side].name}</legend>
+          <label className="field">{t("Save changes")}
+            <select value={destinations[side] === null ? "original" : "copy"}
+              onChange={(event) => setDestinations({ ...destinations, [side]: event.target.value === "original" ? null : "" })}>
+              <option value="original" disabled={!writableTextPlace(files[side].place)}>{t("Overwrite original")}</option>
+              <option value="copy">{t("Save as")}</option>
+            </select>
+          </label>
+          {destinations[side] !== null && <PathField id={`compare-save-${side}`} label={t("Save as")} value={destinations[side]}
+            onChange={(path) => setDestinations({ ...destinations, [side]: path })}
+            browse="save" browsePath={files[side].name} includeFiles />}
+        </fieldset>)}
+        {saveError && <p role="alert" className="dialog-error">{errorText(saveError)}</p>}
+      </div>
+      <footer className="dialog-footer">
+        <Button type="button" data-initial-focus disabled={saving} onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
+        <Button type="button" disabled={saving} onClick={onClose}>{t("Discard changes")}</Button>
+        <Button type="button" className="primary" disabled={saving || dirty.some((side) => destinations[side]?.trim() === "")}
+          onClick={() => { void saveAndClose(); }}>{t(saving ? "Saving…" : "Save and close")}</Button>
+      </footer>
+    </Dialog>}
+  </>;
 }

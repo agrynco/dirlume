@@ -1,5 +1,6 @@
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { AppearanceSettings, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
@@ -8,8 +9,9 @@ import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { api, windowsClient } from "./api";
 import {
-  commandLabel, commandNames, commands, defaultBindings, eventShortcut, panelLayouts, shortcutScopesOverlap, showShortcut, wheelBindings,
-  type Command, type PanelLayout, type Preferences, type Provider,
+  actionButtonWidths, commandLabel, commandNames, commands, defaultBindings, eventShortcut, menuPositions, panelLayouts,
+  shortcutScopesOverlap, showShortcut, wheelBindings, type ActionButtonWidth, type Command, type MenuPosition,
+  type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
@@ -44,10 +46,11 @@ function readOptionsLocation(): OptionsLocation {
   } catch { return defaults; }
 }
 
-export function Settings({ preferences: saved, onChange: applyPreferences, onClose }: {
+export function Settings({ preferences: saved, onChange: applyPreferences, onClose, standalone = false }: {
   preferences: Preferences;
-  onChange: (value: Preferences) => void;
+  onChange: (value: Preferences) => Preferences;
   onClose: () => void;
+  standalone?: boolean;
 }) {
   const [initialLocation] = useState(readOptionsLocation);
   const [page, setPage] = useState(initialLocation.page);
@@ -65,10 +68,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     const text = [...labels, ...labels.map((label) => t(label))].join(" ").toLocaleLowerCase();
     return terms.every((term) => text.includes(term));
   };
-  const showGeneral = matches("General", "Language", ...Object.values(languages), "Remote connection", "Dirlume server", "KSwitcher installation folder", "Version");
+  const showGeneral = matches("General", "Language", ...Object.values(languages), "Main menu position",
+    ...Object.values(menuPositions), "Remote connection", "Dirlume server", "KSwitcher installation folder", "Version");
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
-    const terms = feature === "filePanels" ? ["Show hidden files", "Panel layout", ...Object.values(panelLayouts), ...Object.values(colorGroups.panels.colors)] :
+    const terms = feature === "filePanels" ? [
+      "Show hidden files", "Panel layout", "Action button width",
+      ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
+    ] :
       feature === "terminal" && windowsClient ? ["Automatically refresh environment variables"] : [];
     return matches(label, fontGroups[font].label, "Font family", "Size (px)", "font size", ...views.map((view) => viewFonts[view].label), ...terms);
   });
@@ -100,12 +107,24 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   function apply() {
-    if (hasChanges) applyPreferences(preferences);
+    if (hasChanges) onChange(applyPreferences(preferences));
   }
 
-  function close() {
+  function saveLocation() {
     const location: OptionsLocation = { page, query, expanded, scrollTop: pageBody.current?.scrollTop ?? 0 };
     try { localStorage.setItem(optionsLocationKey, JSON.stringify(location)); } catch { /* Options can still close. */ }
+  }
+
+  const saveLocationRef = useRef(saveLocation);
+  saveLocationRef.current = saveLocation;
+  useEffect(() => {
+    if (!standalone) return;
+    const listener = getCurrentWindow().onCloseRequested(() => saveLocationRef.current());
+    return () => { void listener.then((unlisten) => unlisten()).catch(() => {}); };
+  }, [standalone]);
+
+  function close() {
+    saveLocation();
     onClose();
   }
 
@@ -127,7 +146,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   return (
-    <Dialog title={t("Options")} onClose={close} wide resizeKey="options">
+    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <label className="settings-search"><Search aria-hidden="true" />
@@ -181,6 +200,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               {Object.entries(languages).map(([code, label]) => <option key={code} value={code} lang={code}>{label}</option>)}
             </select>
           </label>
+          <label className="setting"><span>{t("Main menu position")}</span>
+            <select value={preferences.menuPosition}
+              onChange={(event) => onChange({ ...preferences, menuPosition: event.target.value as MenuPosition })}>
+              {Object.entries(menuPositions).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+            </select>
+          </label>
           <label className="setting"><span>{t("Remote connection")}</span>
             <select value={preferences.provider} onChange={(event) => onChange({ ...preferences, provider: event.target.value as Provider })}>
               <option value="server">{t("Dirlume server")}</option>
@@ -213,6 +238,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 {Object.entries(panelLayouts).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
               </select>
             </label>
+            <label className="setting"><span>{t("Action button width")}</span>
+              <select value={preferences.actionButtonWidth}
+                onChange={(event) => onChange({ ...preferences, actionButtonWidth: event.target.value as ActionButtonWidth })}>
+                {Object.entries(actionButtonWidths).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+              </select>
+            </label>
           </div>}
           <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}
             views={featureOptions[page].views} preferences={preferences} onChange={onChange} />
@@ -237,6 +268,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 ) : capture === command ? (
                   <input aria-label={t("New shortcut for {0}", commandLabel(command))} readOnly autoFocus data-shortcut-capture
                     placeholder={t("Press a shortcut")} onKeyDown={(event) => assign(event, command)}
+                    onKeyUp={(event) => {
+                      if (command === "menuAlternate" && event.key === "Alt" && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+                        const existing = commandNames.find((item) => item !== command && preferences.shortcuts[item] === "Alt");
+                        if (existing) return;
+                        onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: "Alt" } });
+                        setCapture(null);
+                      }
+                    }}
                     onBlur={() => { setCapture(null); setConflict(""); }} />
                 ) : (
                   <Button type="button" className="shortcut-key" aria-label={t("Change shortcut for {0}", commandLabel(command))}
@@ -265,6 +304,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             <RotateCcw /> {t("Restore defaults")}
           </Button>
         )}
+        {standalone && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
         <Button type="button" disabled={!hasChanges} onClick={apply}>{t("Apply")}</Button>
         <Button type="button" className="primary" onClick={() => { apply(); close(); }}>{t("Done")}</Button>
       </footer>
