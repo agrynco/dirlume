@@ -97,6 +97,8 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows NSIS, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
+Install the first signed release manually to enable in-app updates for later releases.
+
 [GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64, Ubuntu x64, macOS Apple Silicon, and macOS Intel. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
 
 The installer and server filenames include both numbers, for example `Dirlume-0.1.1-build.42001-windows-x64.setup.exe`. In the installed app, open **Options → General → Version** to see `0.1.1+42001`. The server reports the same value with `dirlume-server --version`.
