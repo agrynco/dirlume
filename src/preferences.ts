@@ -1,4 +1,4 @@
-import { readSchemes, type Scheme, type Theme } from "./appearance";
+import { readSchemes, readTheme, type Scheme, type Theme } from "./appearance";
 import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, type Language } from "./i18n";
 
@@ -147,7 +147,7 @@ export function readPreferences(): Preferences {
     }
     return {
       language: readLanguage(saved.language),
-      theme: saved.theme === "dark" || saved.theme === "light" || saved.theme === "slate" ? saved.theme : "system",
+      theme: readTheme(saved.theme),
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",

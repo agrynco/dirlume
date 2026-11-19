@@ -1265,6 +1265,68 @@ try {
     await updateAction.waitFor();
     await page.keyboard.press("Escape");
   }
+  async function openAppearance() {
+    await page.getByRole("button", { name: "Options", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Options", exact: true });
+    await settings.getByRole("searchbox", { name: "Search settings" }).fill("");
+    await settings.getByRole("button", { name: "Appearance", exact: true }).click();
+    return settings;
+  }
+  const themeRoot = () => page.locator("html[data-theme=classic-blue]");
+  const appearance = await openAppearance();
+  await appearance.getByLabel("Color scheme", { exact: true }).selectOption("classic-blue");
+  await appearance.locator(".preview-frame[data-theme=classic-blue]").waitFor();
+  assert.equal(await themeRoot().count(), 0);
+  await appearance.getByRole("button", { name: "Apply", exact: true }).click();
+  await themeRoot().waitFor();
+  const pairs = await themeRoot().evaluate((root) => {
+    const style = getComputedStyle(root);
+    const value = (name) => style.getPropertyValue(`--${name}`).trim();
+    const files = ["panel-ink", "panel-muted", "file-source", "file-text", "file-document", "file-image", "file-media",
+      "file-archive", "file-config", "file-executable", "file-hidden", "file-system"];
+    return [
+      ...files.flatMap((color) => ["panel-bg", "panel-selection", "panel-inactive-selection"].map((background) =>
+        [value(color), value(background)])),
+      [value("dialog-ink"), value("dialog-bg")], [value("text-ink"), value("text-bg")], [value("ink"), value("surface")],
+    ];
+  });
+  const luminance = (hex) => [1, 3, 5].map((offset) => {
+    const channel = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  for (const [foreground, background] of pairs) {
+    const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+    assert.ok((light + 0.05) / (dark + 0.05) >= 4.5, `${foreground} on ${background} must be readable`);
+  }
+  await appearance.getByRole("button", { name: "Done", exact: true }).click();
+  await navigate("left", attributes);
+  const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
+  if (await showHidden.getAttribute("aria-pressed") === "false") await showHidden.click();
+  const attributeList = page.getByRole("listbox", { name: "left files", exact: true });
+  for (const name of [/^hidden\.rs/, /^system-hidden\.dll/]) {
+    const row = attributeList.getByRole("option", { name });
+    const color = () => row.locator(".file-name").evaluate((element) => getComputedStyle(element).color);
+    const originalColor = await color();
+    await row.click();
+    assert.equal(await color(), originalColor);
+    await row.click({ modifiers: ["Control"] });
+    assert.equal(await color(), originalColor);
+  }
+  if (process.env.DIRLUME_CLASSIC_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CLASSIC_SCREENSHOT, scale: "css" });
+  await exitDesktop(page);
+  page = await startDesktop();
+  await themeRoot().waitFor();
+  const customAppearance = await openAppearance();
+  await customAppearance.getByRole("button", { name: "New scheme", exact: true }).click();
+  assert.equal(await customAppearance.getByLabel("Base theme", { exact: true }).inputValue(), "classic-blue");
+  await customAppearance.getByLabel("Scheme name", { exact: true }).fill("Classic blue custom");
+  await customAppearance.getByLabel("Panel background hex", { exact: true }).fill("#142560");
+  await customAppearance.getByRole("button", { name: "Done", exact: true }).click();
+  await exitDesktop(page);
+  page = await startDesktop();
+  await themeRoot().waitFor();
+  assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
+  console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
   await exitDesktop(page);
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {

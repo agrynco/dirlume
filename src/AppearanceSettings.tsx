@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  basePalette, builtInThemes, colorGroups, fontGroups, isHexColor,
+  basePalette, baseThemes, builtInThemes, colorGroups, fontGroups, isHexColor,
   maxFontSize, maxSchemeNameLength, minFontSize, systemTheme,
   type Color, type Font, type FontGroup, type Palette, type Scheme, type Theme,
 } from "./appearance";
@@ -14,7 +14,6 @@ import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
 import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFont } from "./viewFonts";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
-const baseThemes = ["dark", "light", "slate"] as const;
 const sharedFonts = ["ui", "panel", "dialog", "mono"] as const;
 
 export function ViewFontSettings({ preferences, onChange, views = viewFontKeys }: {
@@ -125,7 +124,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     <div className="dialog-body appearance-settings">
       <div className="appearance-header">
         <label className="field">{t("Color scheme")}
-          <select value={active ? `custom:${active.id}` : preferences.theme} onChange={(event) => select(event.target.value)}>
+          <select aria-label={t("Color scheme")} value={active ? `custom:${active.id}` : preferences.theme} onChange={(event) => select(event.target.value)}>
             <optgroup label={t("Built in")}>
               {Object.entries(builtInThemes).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </optgroup>
@@ -143,7 +142,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
               onChange={(event) => update({ ...active, name: event.target.value })} />
           </label>
           <label className="field">{t("Base theme")}
-            <select value={active.base} onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
+            <select aria-label={t("Base theme")} value={active.base} onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
               {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
             </select>
           </label>

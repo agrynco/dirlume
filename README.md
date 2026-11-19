@@ -4,6 +4,8 @@ Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri
 
 Choose English, Ukrainian, or Russian in **Options → General → Language**. Apply changes to switch the interface immediately. Dirlume remembers your choice after restart and uses it for dates and numbers. Native system menus and terminal output use their own language settings.
 
+Choose **Classic blue** under **Options → Appearance → Color scheme** for deep blue file panes with cyan focus indicators. You can use it as the base for a custom scheme.
+
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
 Pane addresses, transfer destinations, and the KSwitcher installation folder suggest matching paths as you type. Use the arrow keys and **Enter** or click a suggestion to choose it. Press **Tab** to complete a folder and continue the path. The browse button opens the system folder picker for local folder paths or a Save As dialog for a single-file destination. FTP suggestions come from the connected server.
