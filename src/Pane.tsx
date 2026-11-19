@@ -1,7 +1,7 @@
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
@@ -61,6 +61,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const quickSearchInput = useRef<HTMLInputElement>(null);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [draggedRow, setDraggedRow] = useState<string | null>(null);
   const locationsBox = useRef<HTMLDivElement>(null);
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -79,13 +80,23 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   }, [entries, matches, quickSearch]);
   const currentQuickMatch = quickMatches.find(({ name }) => name === pane.selected);
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
-  const start = search ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
-  const end = search ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
-  const displayed = entries.slice(start, end);
+  const virtual = search || entries.length > 100;
+  const start = virtual ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
+  const end = virtual ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
+  const indices = Array.from({ length: end - start }, (_, offset) => start + offset);
+  if (virtual) {
+    // Keep the active descendant and the source of an ongoing drag mounted.
+    const dragged = draggedRow === null ? -1 : entries.findIndex((entry) => entry.name === draggedRow);
+    for (const index of new Set([selected, dragged])) {
+      if (index >= 0 && (index < start || index >= end)) indices.push(index);
+    }
+    indices.sort((left, right) => left - right);
+  }
   const fileIcons = new Map<string, { directory: string; name: string }>();
   const byName = new Map<string, string>();
   if (windowsClient && !processView) {
-    for (const item of displayed) {
+    for (const index of indices) {
+      const item = entries[index];
       if (item.directory) continue;
       const source = paneItem(pane, item);
       if (source?.place.kind !== "local") continue;
@@ -116,25 +127,32 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
     const measure = () => setViewport({
       top: element.scrollTop, height: element.clientHeight, rowHeight: probe.getBoundingClientRect().height || 29,
     });
-    element.scrollTop = 0;
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     observer.observe(probe);
     return () => observer.disconnect();
-  }, [matches]);
+  }, [virtual, processView]);
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    element.scrollTop = 0;
+    if (columnHeader.current) columnHeader.current.scrollLeft = element.scrollLeft;
+    setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
+  }, [path, matches, processView]);
   useLayoutEffect(() => {
     const element = list.current;
     if (!active || selected < 0 || !element) return;
-    if (search) {
+    if (virtual) {
       const top = selected * viewport.rowHeight;
       const bottom = top + viewport.rowHeight + 8;
       if (top < element.scrollTop) element.scrollTop = top;
       else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
+      setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
     } else {
       element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
     }
-  }, [selected, path, active, search, matches, viewport.rowHeight]);
+  }, [selected, path, active, virtual, matches, viewport.rowHeight, processView]);
   useEffect(() => {
     if (!locationsOpen) return;
     locationsBox.current?.querySelector<HTMLButtonElement>(".location-popup button")?.focus();
@@ -297,32 +315,35 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           setColumnLayout(next);
           saveColumnLayout(side, next);
         }} />
-      <div id={`${side}-files`} ref={list} className={search ? "file-list result-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
+      <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
         onScroll={(event) => {
           if (columnHeader.current) columnHeader.current.scrollLeft = event.currentTarget.scrollLeft;
-          if (!search) return;
+          if (!virtual) return;
           const top = event.currentTarget.scrollTop;
           setViewport((previous) => ({ ...previous, top }));
         }}
         aria-multiselectable="true" aria-busy={pane.loading}
-        aria-activedescendant={selected >= start && selected < end ? `${side}-file-${selected}` : undefined} tabIndex={0}>
-        {search && <>
-          <div ref={rowProbe} className="result-row-probe" aria-hidden="true" />
-          <div aria-hidden="true" style={{ height: start * viewport.rowHeight }} />
-        </>}
-        {displayed.map((entry, offset) => {
-          const index = start + offset;
+        aria-activedescendant={selected >= 0 ? `${side}-file-${selected}` : undefined} tabIndex={0}>
+        {virtual && <div ref={rowProbe} className="file-row-probe" aria-hidden="true" />}
+        {indices.map((index, offset) => {
+          const gap = index - (indices[offset - 1] ?? -1) - 1;
+          const entry = entries[index];
           const icon = icons.get(byName.get(entry.name) ?? "");
           const size = folderMeasurement(pane, entry);
           const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
-          return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
-            key={entry.name} role="option" aria-setsize={search ? entries.length : undefined} aria-posinset={search ? index + 1 : undefined}
+          return <Fragment key={entry.name}>
+          {gap > 0 && <div aria-hidden="true" style={{ height: gap * viewport.rowHeight }} />}
+          <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
+            role="option" aria-setsize={virtual ? entries.length : undefined} aria-posinset={virtual ? index + 1 : undefined}
             data-file-color={fileColor(entry)}
             aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
             onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (entry.name !== "..") onContext(entry); }}
-            draggable={entry.name !== ".."} onDragStart={(event) => { if (!onStartDrag(entry, event.dataTransfer)) event.preventDefault(); }}
-            onDragEnd={onEndDrag}
+            draggable={entry.name !== ".."} onDragStart={(event) => {
+              if (onStartDrag(entry, event.dataTransfer)) setDraggedRow(entry.name);
+              else event.preventDefault();
+            }}
+            onDragEnd={() => { setDraggedRow(null); onEndDrag(); }}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
               icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
@@ -330,9 +351,11 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
             <span className="file-date">{formatDate(entry.modified)}</span>
-          </div>;
+          </div>
+          </Fragment>;
         })}
-        {search && <div aria-hidden="true" style={{ height: (entries.length - end) * viewport.rowHeight }} />}
+        {virtual && (indices.at(-1) ?? -1) < entries.length - 1 &&
+          <div aria-hidden="true" style={{ height: (entries.length - (indices.at(-1) ?? -1) - 1) * viewport.rowHeight }} />}
         {!entries.length && (
           <div className="pane-empty">
             {pane.loading ? t("Loading…") : pane.error ? t("Open another location to continue.") :
