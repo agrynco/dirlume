@@ -1374,6 +1374,7 @@ pub fn run() {
         crate::windows_shell::file_icons,
         installed_fonts,
         list_directory,
+        crate::timestamps::format_timestamps,
         file_attributes,
         update_file_attributes,
         operate,

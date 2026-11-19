@@ -2,7 +2,7 @@
 
 Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri 2, Rust, React, TypeScript, and Vite. The window layout takes its cues from Revqora. The [migration checklist](docs/migration.md) tracks feature parity with KSwitcher Files.
 
-Choose English, Ukrainian, or Russian in **Options → General → Language**. Apply changes to switch the interface immediately. Dirlume remembers your choice after restart and uses it for dates and numbers. Native system menus and terminal output use their own language settings.
+Choose English, Ukrainian, or Russian in **Options → General → Language**. Apply changes to switch the interface immediately. Dirlume remembers your choice after restart and uses it for numbers. Dates and times follow the operating system's regional settings. Native system menus and terminal output use their own language settings.
 
 Choose **Classic blue** under **Options → Appearance → Color scheme** for deep blue file panes with cyan focus indicators. You can use it as the base for a custom scheme.
 

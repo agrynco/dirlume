@@ -7,12 +7,13 @@ import {
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
-import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { folderMeasurement, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { eventShortcut, showShortcut } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
+import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
 import { columnWidthsStyle, FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
 
@@ -93,6 +94,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
     indices.sort((left, right) => left - right);
   }
   const fileIcons = new Map<string, { directory: string; name: string }>();
+  const dateLabel = useTimestamps(processView ? [] : indices.map((index) => entries[index].modified));
   const byName = new Map<string, string>();
   if (windowsClient && !processView) {
     for (const index of indices) {
@@ -352,7 +354,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
               <span className="file-name-text">{entry.name.normalize("NFC")}</span>{entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
-            <span className="file-date">{formatDate(entry.modified)}</span>
+            <span className="file-date">{dateLabel(entry.modified) ?? "–"}</span>
           </div>
           </Fragment>;
         })}

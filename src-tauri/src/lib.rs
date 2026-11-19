@@ -33,6 +33,8 @@ pub mod server;
 #[cfg(feature = "desktop")]
 mod terminal;
 #[cfg(feature = "desktop")]
+mod timestamps;
+#[cfg(feature = "desktop")]
 mod updates;
 #[cfg(feature = "desktop")]
 mod watch;

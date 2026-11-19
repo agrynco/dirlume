@@ -3,7 +3,7 @@ import { api, describeError, placePath, type Entry, type FileAttributes, type Fi
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { errorText, t } from "./i18n";
-import { formatDate } from "./panes";
+import { useTimestamps } from "./useTimestamps";
 
 const labels: Record<FileFlag, string> = {
   readOnly: "Read-only",
@@ -44,6 +44,7 @@ export function AttributesDialog({ item, onClose, onApplied }: {
     return () => { open = false; };
   }, [directory, name]);
   const loading = Boolean(directory && !attributes && !error);
+  const dateLabel = useTimestamps([attributes?.created, attributes?.accessed, attributes?.modified]);
 
   const changes = (attributes?.flags ?? []).flatMap(({ flag, enabled, writable }) => {
     const next = draft[flag];
@@ -70,9 +71,9 @@ export function AttributesDialog({ item, onClose, onApplied }: {
   }
 
   const metadata: [string, string | null][] = attributes ? [
-    ["Created", attributes.created === null ? null : formatDate(attributes.created)],
-    ["Last accessed", attributes.accessed === null ? null : formatDate(attributes.accessed)],
-    ["Modified", attributes.modified === null ? null : formatDate(attributes.modified)],
+    ["Created", dateLabel(attributes.created)],
+    ["Last accessed", dateLabel(attributes.accessed)],
+    ["Modified", dateLabel(attributes.modified)],
     ["Owner", attributes.owner],
   ] : [];
   if (attributes?.mode) metadata.push(["Permissions", attributes.mode]);

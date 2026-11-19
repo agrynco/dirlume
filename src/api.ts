@@ -183,6 +183,8 @@ export const api = {
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
+  formatTimestamps: (timestamps: number[], style: "date" | "time" | "date_time") =>
+    invoke<(string | null)[]>("format_timestamps", { timestamps, style }),
   createFolders: (directory: string, request: { name: string; multiple: boolean; linkType: FolderLinkType; target: string }) =>
     invoke<FolderCreation>("create_folders", { directory, request }),
   archiveCapabilities: () => invoke<{ formats: string[]; sfx: boolean }>("archive_capabilities"),

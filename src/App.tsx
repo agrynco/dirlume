@@ -1,5 +1,6 @@
 import { Button } from "./Button";
 import { CommandField } from "./CommandField";
+import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
@@ -1372,7 +1373,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           }} />
       )}
       {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
-      {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} language={preferences.language} onClose={() => setModal(null)}
+      {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
         <Dialog title={t("File actions")} onClose={() => setModal(null)}>
@@ -1466,14 +1467,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   );
 }
 
-function CommandHistory({ commands, language, onChoose, onClose }: {
+function CommandHistory({ commands, onChoose, onClose }: {
   commands: CommandEntry[];
-  language: string;
   onChoose: (command: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const groups = commandHistoryGroups(commands, query, language, t("Unknown date"));
+  const dateLabel = useTimestamps(commands.map(({ date }) => timestampSeconds(date)), "date");
+  const groups = commandHistoryGroups(commands, query, dateLabel, t("Unknown date"));
   return (
     <Dialog title={t("Command history")} onClose={onClose}>
       <div className="dialog-body command-menu">
