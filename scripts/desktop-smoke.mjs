@@ -15,6 +15,7 @@ import { testCompareWorker } from "./compare-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
+import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 
@@ -1581,6 +1582,7 @@ try {
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
   await testProcessColumns(page);
+  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await testLockingProcessPane(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);

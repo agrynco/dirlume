@@ -121,6 +121,24 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
 
+## MCP server
+
+Open **Commands → MCP server** and choose **Start server**. Copy the displayed Streamable HTTP configuration into a trusted MCP client on the same computer. The server listens on a loopback address and requires the displayed session bearer token. **Stop server** closes that endpoint and revokes the token. Starting the app again requires starting the server again.
+
+Use the client's tool list for argument schemas. The server works with the locations and credentials already available to the desktop app.
+
+| Area | Available tools |
+| --- | --- |
+| Panes | Inspect the workspace, open a path in the current source, mark items, and list directories. |
+| Files | Search, read properties and text, save text using a revision, create local items, and rename local or FTP items. |
+| Transfers | Copy from supported sources into a local pane, copy from local to FTP, or move between local panes. Existing targets are skipped. |
+| Connections | Connect a saved FTP profile or a Dirlume Server invitation. An open paired KSwitcher pane supports browsing and downloads. |
+| Settings | List and add folder shortcuts, and list or create named color schemes with validated overrides. |
+| Processes | List processes and inspect Windows locking processes. |
+| Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
+
+For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
+
 ## Desktop diagnostics
 
 Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
