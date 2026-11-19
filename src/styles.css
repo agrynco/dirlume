@@ -640,6 +640,10 @@ button.dialog-resize-grip {
 .conflict-details :is(th, td) { padding: 5px 8px; border-block: 1px solid var(--line); text-align: left; }
 .conflict-details td { color: var(--muted); }
 .delete-warning { padding: 10px; background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); }
+.permanent-delete-message { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; padding-block: 4px; }
+.permanent-delete-message > svg { width: 32px; height: 32px; margin-top: 2px; color: var(--danger); }
+.permanent-delete-message p { margin: 0; overflow-wrap: anywhere; }
+.permanent-delete-message .permanent-delete-note { margin-top: 4px; color: var(--muted); }
 .command-menu button { justify-content: space-between; border-color: var(--line); white-space: normal; overflow-wrap: anywhere; }
 .folder-shortcut-editor, .folder-shortcut-picker { display: grid; gap: 8px; }
 .folder-shortcut-list {
@@ -661,6 +665,8 @@ button.dialog-resize-grip {
 button.primary, button.primary:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-fill); border-color: var(--accent-fill); }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.negative, button.negative:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
+.dialog-footer button.permanent-delete-button { color: var(--danger); background: var(--canvas); white-space: normal; }
+.dialog-footer button.permanent-delete-button:hover:not(:disabled) { background: var(--hover); }
 .field { display: grid; gap: 5px; }
 .new-file-encoding { margin-top: 12px; }
 .folder-name-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
