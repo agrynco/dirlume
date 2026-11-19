@@ -46,7 +46,7 @@ interface PaneProps {
   onEndDrag: () => void;
   canDrop: (data: DataTransfer) => boolean;
   onDrop: () => void;
-  processView: boolean;
+  processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
   onContext: (entry?: Entry) => void;
 }
@@ -330,7 +330,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, renam
           )}
         </div>
       </div>
-      {processView ? <ProcessBrowser side={side} /> : <>
+      {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
       {(filterOpen || pane.filter) && (
         <label className="pane-filter">
           <Search />

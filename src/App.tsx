@@ -108,7 +108,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const [rowRename, setRowRename] = useState<RowRename | null>(null);
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
-  const [processPanels, setProcessPanels] = useState({ left: false, right: false });
+  const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
   const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
   const theme = scheme?.base ?? preferences.theme;
@@ -630,9 +630,15 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (place) void load(side, place, position);
   }
 
-  function showProcesses(side: Side, visible: boolean) {
-    setProcessPanels((panels) => ({ ...panels, [side]: visible }));
+  function showProcesses(side: Side, visible: boolean, path?: string) {
+    setProcessPanels((panels) => ({ ...panels, [side]: visible ? { path } : null }));
     requestAnimationFrame(() => focus(side));
+  }
+
+  function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
+    if (!windowsClient || item?.place.kind !== "local") return;
+    const { place, entry } = item;
+    showProcesses(opposite(side), true, placePath(childPlace(place, entry.name)));
   }
 
   function closeResults(side: Side) {
@@ -1040,6 +1046,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
       case "copyClipboard": if (current) void copyClipboard(active, current); break;
+      case "lockingProcesses": if (current) showLockingProcesses(active, currentItem); break;
       case "pasteClipboard": void pasteClipboard(active); break;
       case "search":
         if (pane.place && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
@@ -1201,7 +1208,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && (!target.place || !parentPlace(target.place))),
-        inPane("refresh", processPanels[side] || !target.place),
+        inPane("refresh", !!processPanels[side] || !target.place),
       ],
     };
   }
@@ -1212,6 +1219,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       ...fileActions.map(({ command, label, disabled }) => menuCommand(command, !filesAvailable || disabled, label)),
       menuCommand("createArchive", !filesAvailable || !local || !current || !!pane.search, "Create archive"),
       menuCommand("attributes", !filesAvailable || !currentItem || busy),
+      ...(windowsClient ? [menuCommand("lockingProcesses", !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
       ...(ftp || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
@@ -1238,7 +1246,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
         <div className="top-actions">
           <Button className="toolbar-button" shortcut={keyLabel("connect")} onClick={() => perform("connect")}><Server /> {t("Connect")}</Button>
-          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
+          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || !!processPanels[active] || !pane.place || pane.loading}
             onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
           <Button className="icon-button" aria-label={t("Swap panes")} shortcut={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
@@ -1438,6 +1446,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           <div className="dialog-body command-menu">
             {modal.entry && <Button type="button" disabled={paneItem(panes[modal.side], modal.entry)?.place.kind !== "local"}
               onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>{t("Copy files to clipboard")}</Button>}
+            {windowsClient && modal.entry && paneItem(panes[modal.side], modal.entry)?.place.kind === "local" &&
+              <Button type="button" onClick={() => {
+                setModal(null);
+                showLockingProcesses(modal.side, paneItem(panes[modal.side], modal.entry));
+              }}>{t("Find locking processes")}</Button>}
             <Button type="button" disabled={panes[modal.side].place?.kind !== "local" || Boolean(panes[modal.side].search)}
               onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>{t("Paste files")}</Button>
           </div>

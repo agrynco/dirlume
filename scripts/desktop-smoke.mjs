@@ -19,6 +19,7 @@ import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
 import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -1599,6 +1600,7 @@ try {
   await testInlineRename(page, temp);
   await testPermanentDelete(page, temp);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
+  await testLockingProcessPane(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
