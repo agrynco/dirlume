@@ -416,9 +416,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-columns, .file-list { scrollbar-width: thin; scrollbar-gutter: stable; }
 .file-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 5px; }
 .file-list:focus-visible { outline-offset: -2px; outline-width: 1px; }
-.result-list { position: relative; overflow-anchor: none; }
-.result-list .file-row, .result-row-probe { height: max(29px, calc(1.45em + 6px)); }
-.result-row-probe { position: absolute; width: 0; pointer-events: none; }
+.virtual-file-list { position: relative; overflow-anchor: none; }
+.virtual-file-list .file-row, .file-row-probe { height: max(29px, calc(1.45em + 6px)); }
+.file-row-probe { position: absolute; width: 0; pointer-events: none; }
 .file-row {
   min-height: 29px;
   padding: 2px 4px;

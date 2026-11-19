@@ -379,9 +379,31 @@ try {
   await page.getByRole("option", { name: /^data.bin/, selected: true }).waitFor();
   const bulk = join(temp, "bulk");
   await mkdir(bulk);
-  await Promise.all(Array.from({ length: 1005 }, (_, index) => writeFile(join(bulk, `file-${index}.tmp`), "")));
+  for (let start = 0; start < 10_000; start += 100) {
+    await Promise.all(Array.from({ length: 100 }, (_, offset) => {
+      const index = start + offset;
+      const name = index < 1005 ? `file-${index}.tmp` : `unmatched-${index}.dat`;
+      return writeFile(join(bulk, name), "");
+    }));
+  }
+  const openBulk = performance.now();
   await navigate("left", bulk);
+  await left.getByRole("option", { name: /^file-0.tmp/ }).waitFor();
+  const mountedRows = await left.getByRole("option").count();
+  assert.ok(mountedRows < 100, `Mounted ${mountedRows} rows for 10,000 entries.`);
   await left.focus();
+  await left.press("ArrowRight");
+  const tail = left.getByRole("option", { name: /^unmatched-9999.dat/, selected: true });
+  await tail.waitFor();
+  assert.equal(await tail.getAttribute("aria-posinset"), "10001");
+  assert.equal(await left.getAttribute("aria-activedescendant"), await tail.getAttribute("id"));
+  await left.evaluate((list) => { list.scrollTop = list.scrollHeight / 2; });
+  await left.getByRole("option", { name: /^unmatched-5000.dat/ }).waitFor();
+  assert.ok(await left.getByRole("option").count() < 100);
+  assert.equal(await left.getAttribute("aria-activedescendant"), await tail.getAttribute("id"));
+  await left.press("ArrowLeft");
+  await left.getByRole("option", { name: /^\.\./, selected: true }).waitFor();
+  console.log(`Mounted ${mountedRows} rows for 10,000 files in ${Math.round(performance.now() - openBulk)} ms including keyboard jumps and scrolling.`);
   await page.keyboard.press("Alt+F7");
   await mask.fill("*.tmp");
   await mask.press("Enter");
