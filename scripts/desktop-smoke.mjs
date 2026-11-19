@@ -13,6 +13,8 @@ const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
 const dst = join(temp, "to");
+const diagnostics = join(temp, "diagnostics");
+const diagnosticsFile = join(diagnostics, "diagnostics.jsonl");
 const attributes = join(temp, "attributes");
 await mkdir(src);
 await mkdir(dst);
@@ -65,6 +67,7 @@ async function startDesktop() {
         : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
       WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
       DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
+      DIRLUME_TEST_DIAGNOSTICS_DIR: diagnostics,
     },
   });
   let startupError = "";
@@ -136,6 +139,37 @@ try {
     } catch (error) {
       throw new Error(`Could not navigate the ${side} pane: ${await page.getByRole("alert").allTextContents()}`, { cause: error });
     }
+  }
+  let diagnosticsBeforeRestart;
+  if (process.env.DIRLUME_INTERNAL_CDP === "1") {
+    const secret = "dirlume-private-fixture-data";
+    await page.evaluate(async (path) => {
+      for (let action = 0; action < 34; action++) {
+        await window.__TAURI_INTERNALS__.invoke("list_directory", { path });
+      }
+    }, src);
+    const address = page.getByLabel("left path", { exact: true });
+    await address.fill(join(src, secret));
+    await address.press("Enter");
+    await page.locator("#left-pane").getByRole("alert").waitFor();
+    await page.evaluate((secret) => {
+      const error = new TypeError(secret);
+      window.dispatchEvent(new ErrorEvent("error", { error, message: secret }));
+      window.dispatchEvent(new ErrorEvent("error", { error, message: secret }));
+    }, secret);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      diagnosticsBeforeRestart = await readFile(diagnosticsFile, "utf8").catch(() => "");
+      if (diagnosticsBeforeRestart.includes('"code":"type_error"') &&
+          diagnosticsBeforeRestart.includes('"operation":"list_directory","code":')) break;
+      await setTimeout(100);
+    }
+    const records = diagnosticsBeforeRestart.trim().split("\n").map((line) => JSON.parse(line));
+    const nativeErrors = records.filter(({ operation }) => operation === "list_directory");
+    assert.equal(nativeErrors.length, 1, "The IPC failure and UI error use one log entry.");
+    assert.equal(nativeErrors[0].recentActions.length, 32);
+    assert.ok(nativeErrors[0].recentActions.every(({ operation }) => operation === "list_directory"));
+    assert.equal(records.filter(({ code }) => code === "type_error").length, 1);
+    assert.ok(!diagnosticsBeforeRestart.includes(secret), "Diagnostic records contain safe codes and operation names only.");
   }
   const fontSize = (selector) => page.locator(selector).evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
   async function wheelFont(selector, deltaY, modifier = "Control") {
@@ -1056,6 +1090,10 @@ try {
   assert.equal(await rightHeader().getByRole("button", { name: "Name", exact: true }).evaluate((button) => button === document.activeElement), true);
   await exitDesktop(page);
   page = await startDesktop();
+  if (diagnosticsBeforeRestart !== undefined) {
+    assert.ok((await readFile(diagnosticsFile, "utf8")).startsWith(diagnosticsBeforeRestart));
+    console.log("Verified diagnostic log context, redaction, deduplication, and persistence after restart.");
+  }
   await page.getByRole("button", { name: "View guide.md" }).click();
   await page.getByRole("img", { name: "Mermaid diagram" }).waitFor();
   assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");

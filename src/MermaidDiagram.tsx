@@ -1,5 +1,6 @@
 import { errorText, t } from "./i18n";
 import { useEffect, useState } from "react";
+import { reportFrontendError } from "./diagnostics";
 
 let nextDiagram = 0;
 
@@ -19,6 +20,7 @@ export function MermaidDiagram({ source, light }: { source: string; light: boole
         const { svg } = await mermaid.render(`dirlume-diagram-${++nextDiagram}`, source);
         if (!canceled) setResult({ image: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` });
       } catch (failure) {
+        reportFrontendError("render_mermaid", failure);
         if (!canceled) setResult({ error: failure instanceof Error ? failure.message : "Invalid Mermaid diagram." });
       }
     }

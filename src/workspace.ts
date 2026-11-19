@@ -1,4 +1,5 @@
 import type { FtpPlace, NamedFile, Place } from "./api";
+import { reportFrontendError } from "./diagnostics";
 import { closeSearchResults, emptyPane, type PaneState, type Side } from "./panes";
 
 export type DocumentWindow = { id: number; file: NamedFile; editing: boolean };
@@ -37,7 +38,8 @@ export function readWorkspace(): Workspace | null {
       typeof document.file?.name === "string" && isLocal(document.file.place));
     if (!value.documents.some(({ id }) => id === value.activeDocument)) value.activeDocument = null;
     return value;
-  } catch {
+  } catch (error) {
+    reportFrontendError("load_workspace", error);
     return null;
   }
 }
@@ -75,5 +77,6 @@ export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, spli
     panels: { left: savePane(panes.left, failedFtp.left), right: savePane(panes.right, failedFtp.right) }, active, split,
     documents: documents.filter(({ file }) => isLocal(file.place)), activeDocument,
   };
-  try { localStorage.setItem(storageKey, JSON.stringify(workspace)); } catch { /* The workspace can still run without storage. */ }
+  try { localStorage.setItem(storageKey, JSON.stringify(workspace)); }
+  catch (error) { reportFrontendError("save_workspace", error); }
 }

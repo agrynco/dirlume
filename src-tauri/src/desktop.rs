@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
 
 use crate::{
-    ftp, ftp_transfer, kswitcher, local, local_transfer,
+    diagnostics, ftp, ftp_transfer, kswitcher, local, local_transfer,
     protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
     terminal, watch,
 };
@@ -36,7 +36,13 @@ pub(crate) async fn blocking<T: Send + 'static>(
 ) -> Result<T> {
     tauri::async_runtime::spawn_blocking(task)
         .await
-        .map_err(message)?
+        .map_err(|error| {
+            if matches!(&error, tauri::Error::JoinError(join) if join.is_panic()) {
+                diagnostics::PANIC_REJECTION.to_owned()
+            } else {
+                message(error)
+            }
+        })?
 }
 
 #[tauri::command]
@@ -1090,6 +1096,7 @@ pub fn run() {
         }
     }
     let context = tauri::generate_context!();
+    diagnostics::setup(&context.config().identifier);
     #[cfg(all(windows, feature = "ui-automation"))]
     let context = {
         let mut context = context;
@@ -1129,72 +1136,77 @@ pub fn run() {
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
     #[cfg(feature = "ui-automation")]
     let builder = builder.on_page_load(crate::updates::fixture::page_loaded);
+    let dispatch: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        diagnostics::report_diagnostic,
+        build_version,
+        crate::updates::check_for_update,
+        crate::updates::install_update,
+        #[cfg(feature = "ui-automation")]
+        crate::updates::fixture::updater_fixture_result,
+        locations,
+        requested_location,
+        crate::processes::list_processes,
+        #[cfg(windows)]
+        crate::processes::process_icons,
+        crate::processes::terminate_processes,
+        crate::file_clipboard::copy_file_references,
+        crate::file_clipboard::clipboard_files,
+        #[cfg(windows)]
+        crate::windows_shell::windows_item_menu,
+        #[cfg(windows)]
+        crate::windows_shell::open_elevated,
+        #[cfg(windows)]
+        crate::windows_shell::locking_processes,
+        #[cfg(windows)]
+        crate::windows_shell::file_icons,
+        installed_fonts,
+        list_directory,
+        operate,
+        connect_server,
+        list_server,
+        disconnect_server,
+        ftp::ftp_profiles,
+        ftp::ftp_windows_code_page,
+        ftp::save_ftp_profile,
+        ftp::remove_ftp_profile,
+        ftp::connect_ftp,
+        ftp::disconnect_ftp,
+        ftp::list_ftp,
+        ftp::rename_ftp,
+        ftp::delete_ftp,
+        read_ftp_text,
+        read_ftp_bytes,
+        save_ftp_text,
+        read_text,
+        resolve_text_link,
+        open_web_link,
+        read_server_text,
+        read_bytes,
+        read_server_bytes,
+        save_text,
+        open_kswitcher,
+        has_kswitcher_bridge,
+        kswitcher_peers,
+        list_kswitcher,
+        begin_transfer,
+        cancel_transfer,
+        finish_transfer,
+        resolve_transfer,
+        transfer_item,
+        terminal::open_terminal,
+        terminal::write_terminal,
+        terminal::resize_terminal,
+        terminal::close_terminal,
+        watch::watch_directory,
+        watch::unwatch_directory,
+        watch::measure_folders,
+        watch::cancel_measurement
+    ];
     builder
-        .invoke_handler(tauri::generate_handler![
-            build_version,
-            crate::updates::check_for_update,
-            crate::updates::install_update,
-            #[cfg(feature = "ui-automation")]
-            crate::updates::fixture::updater_fixture_result,
-            locations,
-            requested_location,
-            crate::processes::list_processes,
-            #[cfg(windows)]
-            crate::processes::process_icons,
-            crate::processes::terminate_processes,
-            crate::file_clipboard::copy_file_references,
-            crate::file_clipboard::clipboard_files,
-            #[cfg(windows)]
-            crate::windows_shell::windows_item_menu,
-            #[cfg(windows)]
-            crate::windows_shell::open_elevated,
-            #[cfg(windows)]
-            crate::windows_shell::locking_processes,
-            #[cfg(windows)]
-            crate::windows_shell::file_icons,
-            installed_fonts,
-            list_directory,
-            operate,
-            connect_server,
-            list_server,
-            disconnect_server,
-            ftp::ftp_profiles,
-            ftp::ftp_windows_code_page,
-            ftp::save_ftp_profile,
-            ftp::remove_ftp_profile,
-            ftp::connect_ftp,
-            ftp::disconnect_ftp,
-            ftp::list_ftp,
-            ftp::rename_ftp,
-            ftp::delete_ftp,
-            read_ftp_text,
-            read_ftp_bytes,
-            save_ftp_text,
-            read_text,
-            resolve_text_link,
-            open_web_link,
-            read_server_text,
-            read_bytes,
-            read_server_bytes,
-            save_text,
-            open_kswitcher,
-            has_kswitcher_bridge,
-            kswitcher_peers,
-            list_kswitcher,
-            begin_transfer,
-            cancel_transfer,
-            finish_transfer,
-            resolve_transfer,
-            transfer_item,
-            terminal::open_terminal,
-            terminal::write_terminal,
-            terminal::resize_terminal,
-            terminal::close_terminal,
-            watch::watch_directory,
-            watch::unwatch_directory,
-            watch::measure_folders,
-            watch::cancel_measurement
-        ])
+        .invoke_handler(move |invoke| {
+            diagnostics::remember_command(&invoke.message);
+            dispatch(invoke)
+        })
         .run(context)
         .expect("cannot start Dirlume");
 }

@@ -93,6 +93,16 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
 
+## Desktop diagnostics
+
+Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
+
+- Windows: `%LOCALAPPDATA%\io.github.agrynco.dirlume\logs\diagnostics.jsonl`
+- Linux: `$XDG_DATA_HOME/io.github.agrynco.dirlume/logs/diagnostics.jsonl` (defaults to `~/.local/share`)
+- macOS: `~/Library/Application Support/io.github.agrynco.dirlume/logs/diagnostics.jsonl`
+
+Each entry records the failed operation, an error code, a timestamp in Unix milliseconds, and up to 32 recent actions in chronological order. Successful actions remain in memory. The log persists between sessions and records only allowlisted operation names and error codes, along with numeric OS error codes when available. It omits paths, command input, credentials, URLs, raw error text, and file contents.
+
 ## CI and releases
 
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows NSIS, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.

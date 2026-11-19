@@ -1,6 +1,8 @@
 #[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
+mod diagnostics;
+#[cfg(feature = "desktop")]
 mod file_clipboard;
 #[cfg(feature = "desktop")]
 mod ftp;

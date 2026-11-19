@@ -545,7 +545,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       try {
         await action(name);
       } catch (error) {
-        throw new Error(`${name} · ${errorText(describeError(error))}${index > 0 ? ` (${t("{0} of {1} completed", index, items.length)})` : ""}`);
+        throw new Error(`${name} · ${errorText(describeError(error))}${index > 0 ? ` (${t("{0} of {1} completed", index, items.length)})` : ""}`, { cause: error });
       }
     }
   }
