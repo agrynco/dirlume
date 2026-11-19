@@ -11,6 +11,8 @@ import type { AppUpdate, UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
+import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
+import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { Pane } from "./Pane";
@@ -26,7 +28,8 @@ import {
   readPlace, selectableRange, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, eventShortcut, persistPreferences, quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
+import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
+  quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -51,6 +54,7 @@ type Modal =
   | { kind: "search"; side: Side; place: Place }
   | { kind: "fileActions"; side: Side; entry?: Entry }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
+  | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
   | { kind: "about" | "commandHistory" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
@@ -120,6 +124,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
+  const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
   const listingPending = useRef({ left: false, right: false });
   const nextSession = useRef(0);
@@ -512,6 +517,47 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (target) void load(side, target);
   }
 
+  function currentFolderShortcut(side: Side) {
+    const target = panes[side];
+    if (panelsHidden || processPanels[side] || target.loading || target.search) return;
+    return shortcutFromPlace(target.place);
+  }
+
+  function addFolderShortcut(group: FolderGroup) {
+    const entry = currentFolderShortcut(active);
+    if (entry) setModal({ kind: "folderShortcuts", side: active, screen: { kind: "edit", group, entry } });
+  }
+
+  function closeFolderShortcuts(side: Side) {
+    setModal(null);
+    requestAnimationFrame(() => {
+      if (!document.activeElement?.closest(".pane")) focus(side);
+    });
+  }
+
+  async function openFolderShortcut(side: Side, entry: FolderShortcut) {
+    let place: Place = localPath(entry.path);
+    if (entry.peer) {
+      const navigation = request.current[side];
+      try {
+        const peers = await api.kswitcherPeers(preferences.kswitcher);
+        if (navigation !== request.current[side]) return;
+        const peer = peers.find(({ id }) => id === entry.peer?.id);
+        if (!peer) {
+          setStatus({ text: t("Paired computer is unavailable: {0}", entry.peer.name), error: true });
+          return;
+        }
+        place = { kind: "kswitcher", directory: preferences.kswitcher, address: peer.name, peer: peer.id, path: entry.path, parent: null };
+      } catch (error) {
+        setStatus({ text: describeError(error), error: true });
+        return;
+      }
+    }
+    if (processPanels[side]) showProcesses(side, false);
+    else focus(side);
+    await load(side, place);
+  }
+
   function history(side: Side, offset: number) {
     if (processPanels[side]) {
       showProcesses(side, false);
@@ -781,6 +827,25 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function perform(command: Command) {
+    const bookmark = folderGroupCommand(command);
+    if (bookmark) {
+      if (bookmark.add) addFolderShortcut(bookmark.group);
+      else if (!panelsHidden) {
+        const group = folderShortcuts[bookmark.group];
+        if (!group.length) setStatus({ text: t("No folder shortcuts in group {0}.", bookmark.group) });
+        else if (group.length === 1) void openFolderShortcut(active, group[0]);
+        else setModal({ kind: "folderShortcuts", side: active, screen: { kind: "picker", group: bookmark.group, selection: 0 } });
+      }
+      return;
+    }
+    if (command === "addFolderShortcut") {
+      addFolderShortcut(8);
+      return;
+    }
+    if (command === "folderShortcuts") {
+      if (!panelsHidden) setModal({ kind: "folderShortcuts", side: active, screen: { kind: "groups" } });
+      return;
+    }
     if (processPanels[active]) {
       if (command === "recycle") {
         document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-end-processes"));
@@ -953,7 +1018,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       ? eventShortcut(event, event.code.slice(3)) : "";
     const command = commandNames.find((command) => shortcut && commandScope(command) === "main" &&
       preferences.shortcuts[command] === shortcut) ?? (["settings", "hidden", "attributes"] as const).find((command) =>
-      commands[command].key === physical && preferences.shortcuts[command] === physical);
+      commands[command].key === physical && preferences.shortcuts[command] === physical) ??
+      physicalFolderBinding(event.nativeEvent, preferences.shortcuts);
     if (target.closest(".terminal-card")) return;
     if (command === "settings") {
       event.preventDefault();
@@ -982,7 +1048,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || ["mark", "copy", "move", "recycle", "delete"].includes(command))) return;
     event.preventDefault();
-    if ((command !== "hidden" && command !== "attributes") || !event.repeat) perform(command);
+    if ((!["hidden", "attributes", "addFolderShortcut", "folderShortcuts"].includes(command) && !folderGroupCommand(command)) || !event.repeat) {
+      perform(command);
+    }
   }
 
   function keyLabel(command: Command) {
@@ -1049,6 +1117,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       menuCommand("connect", activeDocument !== null, "Connect"),
       menuCommand("swap", !panesAvailable || panes.left.loading || panes.right.loading || busy),
       menuCommand("commandHistory", activeDocument !== null),
+      menuCommand("folderShortcuts", !panesAvailable),
       { label: "Toggle terminal", disabled: activeDocument !== null, run: toggleTerminal },
       ...(isTauri() ? [{ label: "Check for updates", run: () => { void checkUpdates(true); } }] : []),
     ] },
@@ -1272,6 +1341,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       )}
       {modal?.kind === "attributes" && <AttributesDialog item={modal.item} onClose={() => setModal(null)}
         onApplied={() => { refresh("left"); refresh("right"); }} />}
+      {modal?.kind === "folderShortcuts" && <FolderShortcutsDialog screen={modal.screen} shortcuts={folderShortcuts}
+        currentFolder={currentFolderShortcut(modal.side)} bridgeDirectory={preferences.kswitcher} bindings={preferences.shortcuts}
+        onScreen={(screen) => setModal({ ...modal, screen })}
+        onSave={(next) => { persistFolderShortcuts(next); setFolderShortcuts(next); }}
+        onAssigned={(group) => setStatus({ text: t("Folder shortcut saved in group {0}.", group) })}
+        onOpen={(entry) => {
+          closeFolderShortcuts(modal.side);
+          void openFolderShortcut(modal.side, entry);
+        }}
+        onClose={() => closeFolderShortcuts(modal.side)} />}
       {modal?.kind === "ftp" && (
         <FtpDialog shortcuts={preferences.shortcuts} onClose={() => setModal(null)}
           onConnect={(place, listing) => {

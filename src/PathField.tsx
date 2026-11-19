@@ -20,7 +20,7 @@ function splitPath(value: string, windows: boolean) {
 }
 
 export function PathField({ id, label, suggestionLabel, value, onChange, onCommit, onEscape,
-  ftp, includeFiles = false, showHidden = false, readOnly = false, required = false,
+  ftp, kswitcher, includeFiles = false, showHidden = false, readOnly = false, required = false,
   initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value }: {
   id: string;
   label: string;
@@ -30,6 +30,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   onCommit?: (path: string) => void;
   onEscape?: () => void;
   ftp?: number;
+  kswitcher?: { directory: string; peer: string };
   includeFiles?: boolean;
   showHidden?: boolean;
   readOnly?: boolean;
@@ -43,31 +44,35 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   const input = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState(false);
   const [selection, setSelection] = useState(-1);
-  const [lookup, setLookup] = useState<{ parent: string; ftp?: number; entries: Entry[] } | null>(null);
+  const [lookup, setLookup] = useState<{ parent: string; source: string; entries: Entry[] } | null>(null);
   const [position, setPosition] = useState<CSSProperties>();
   const [browsing, setBrowsing] = useState(false);
   const [browseFailed, setBrowseFailed] = useState(false);
-  const parts = !readOnly && editing ? splitPath(value, ftp === undefined && windowsClient) : null;
+  const peer = kswitcher?.peer;
+  const directory = kswitcher?.directory;
+  const source = kswitcher ? JSON.stringify(kswitcher) : ftp === undefined ? "local" : `ftp:${ftp}`;
+  const parts = !readOnly && editing ? splitPath(value, ftp === undefined && (windowsClient || !!peer)) : null;
   const parent = parts?.parent;
   const popup = id + "-suggestions";
-  const entries = lookup?.parent === parent && lookup?.ftp === ftp ? lookup?.entries : undefined;
+  const entries = lookup?.parent === parent && lookup?.source === source ? lookup.entries : undefined;
 
   useEffect(() => {
     if (!parent) return;
     let current = true;
     const timer = window.setTimeout(() => {
-      const listing = ftp === undefined ? api.listLocal(parent) : api.listFtp(ftp, parent.split("/").filter(Boolean));
+      const listing = ftp !== undefined ? api.listFtp(ftp, parent.split("/").filter(Boolean)) :
+        peer && directory !== undefined ? api.listKSwitcher(directory, peer, parent) : api.listLocal(parent);
       void listing.then(({ entries }) => {
-        if (current) setLookup({ parent, ftp, entries });
+        if (current) setLookup({ parent, source, entries });
       }, () => {
-        if (current) setLookup({ parent, ftp, entries: [] });
+        if (current) setLookup({ parent, source, entries: [] });
       });
     }, 140);
     return () => {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [parent, ftp]);
+  }, [parent, source, ftp, peer, directory]);
 
   const fragment = parts?.fragment;
   const suggestions = useMemo(() => {
