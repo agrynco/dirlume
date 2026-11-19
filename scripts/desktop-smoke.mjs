@@ -1204,7 +1204,8 @@ try {
   const help = page.getByRole("dialog", { name: "Help", exact: true });
   await page.context().setOffline(true);
   try {
-    await page.locator("#left-pane .file-list").press("F1");
+    await page.evaluate(() => document.activeElement.blur());
+    await page.keyboard.press("F1");
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
@@ -1232,7 +1233,8 @@ try {
 
   await page.getByRole("button", { name: "Options", exact: true }).click();
   const shortcutOptions = page.getByRole("dialog", { name: "Options", exact: true });
-  await shortcutOptions.getByRole("searchbox", { name: "Search settings" }).fill("help");
+  const shortcutSearch = shortcutOptions.getByRole("searchbox", { name: "Search settings" });
+  await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   const binding = shortcutOptions.getByRole("button", { name: "Change shortcut for Help", exact: true });
   await binding.click();
@@ -1241,9 +1243,11 @@ try {
   await shortcutOptions.getByText("F4 is assigned to Edit text.", { exact: true }).waitFor();
   await captureHelp.press("Control+Shift+F1");
   await shortcutOptions.getByRole("button", { name: "Apply", exact: true }).click();
-  await page.keyboard.press("F1");
+  assert.equal(await binding.innerText(), "Ctrl+Shift+F1");
+  // Verify Dirlume no longer handles F1 without invoking the WebView's native help accelerator.
+  await shortcutSearch.dispatchEvent("keydown", { key: "F1", code: "F1", bubbles: true });
   assert.equal(await help.count(), 0);
-  await page.keyboard.press("Control+Shift+F1");
+  await shortcutSearch.press("Control+Shift+F1");
   await help.waitFor();
   await page.keyboard.press("Escape");
   await shortcutOptions.getByRole("button", { name: "Clear shortcut for Help", exact: true }).click();

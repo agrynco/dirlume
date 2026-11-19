@@ -125,6 +125,27 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const otherFtp = !other.search && other.place?.kind === "ftp";
   const canTransfer = Boolean(current && pane.place);
+  const helpShortcut = preferences.shortcuts.help;
+  const modalKind = modal?.kind;
+  const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
+
+  useLayoutEffect(() => {
+    if (!helpShortcut) return;
+    function openHelp(event: WindowEventMap["keydown"]) {
+      if (event.defaultPrevented || event.isComposing || eventShortcut(event) !== helpShortcut) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-shortcut-capture]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      const topic = modalKind === "settings" ? "general" : modalKind === "search" ? "search" :
+        target?.closest(".terminal-card, .command-bar") ? "terminal" :
+        editingDocument === undefined ? "files" : editingDocument ? "editor" : "viewer";
+      setHelpTopic((current) => current ?? topic);
+    }
+    document.addEventListener("keydown", openHelp, true);
+    return () => document.removeEventListener("keydown", openHelp, true);
+  }, [helpShortcut, modalKind, editingDocument]);
 
   const updatePane = useCallback((side: Side, updater: (pane: PaneState) => PaneState) => {
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
@@ -354,23 +375,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (activeDocument === id) selectDocument(documents[index - 1]?.id ?? null);
   }
 
-  function captureKeys(event: KeyboardEvent) {
-    if (event.nativeEvent.isComposing) return;
-    const target = event.target as HTMLElement;
+  function documentKeys(event: KeyboardEvent) {
+    if (modal || !documents.length || event.nativeEvent.isComposing) return;
+    if ((event.target as HTMLElement).closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
-    if (shortcut === preferences.shortcuts.help && !target.closest("[data-shortcut-capture]")) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!event.repeat && helpTopic === null) {
-        const activeFile = documents.find(({ id }) => id === activeDocument);
-        setHelpTopic(modal?.kind === "settings" ? "general" : modal?.kind === "search" ? "search" :
-          target.closest(".terminal-card, .command-bar") ? "terminal" :
-          activeFile ? (activeFile.editing ? "editor" : "viewer") : "files");
-      }
-      return;
-    }
-    if (modal || !documents.length || target.closest("dialog[open]")) return;
     const direction = shortcut === preferences.shortcuts.nextDocument ? 1 : shortcut === preferences.shortcuts.previousDocument ? -1 : 0;
     if (!direction) return;
     event.preventDefault();
@@ -902,7 +911,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   return (
     <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
-      onKeyDown={keyDown} onKeyDownCapture={captureKeys}>
+      onKeyDown={keyDown} onKeyDownCapture={documentKeys}>
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <div className="top-actions">
