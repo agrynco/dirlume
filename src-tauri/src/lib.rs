@@ -1,11 +1,23 @@
 #[cfg(feature = "desktop")]
+mod archive_create;
+#[cfg(feature = "desktop")]
+mod archive_engine;
+#[cfg(feature = "desktop")]
+mod archives;
+#[cfg(feature = "desktop")]
+mod completion;
+#[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
 mod diagnostics;
 #[cfg(feature = "desktop")]
+mod disk_space;
+#[cfg(feature = "desktop")]
 mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;
+#[cfg(feature = "desktop")]
+mod folders;
 #[cfg(feature = "desktop")]
 mod ftp;
 #[cfg(feature = "desktop")]
@@ -16,12 +28,16 @@ mod local;
 #[cfg(feature = "desktop")]
 mod local_transfer;
 #[cfg(feature = "desktop")]
+mod mcp;
+#[cfg(feature = "desktop")]
 mod processes;
 mod protocol;
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "desktop")]
 mod terminal;
+#[cfg(feature = "desktop")]
+mod timestamps;
 #[cfg(feature = "desktop")]
 mod updates;
 #[cfg(feature = "desktop")]

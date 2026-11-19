@@ -28,16 +28,18 @@ export const commands = {
   forward: { label: "Forward", key: "Alt+ArrowRight" },
   address: { label: "Go to path", key: "Ctrl+L" },
   refresh: { label: "Refresh", key: "Ctrl+R" },
-  refreshAlternate: { label: "Refresh (alternate)", key: "F2" },
+  refreshAlternate: { label: "Refresh (alternate)", key: "" },
   filter: { label: "Filter folder", key: "" },
   attributes: { label: "File attributes", key: "Ctrl+A" },
   quickSearch: { label: "Quick search by name prefix", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
-  rename: { label: "Rename", key: "" },
+  rename: { label: "Rename", key: "F2" },
+  lockingProcesses: { label: "Find locking processes", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
   cancelMeasure: { label: "Clear command line or cancel folder size scan", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
+  createArchive: { label: "Create archive", key: "Shift+F1" },
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
   mkdir: { label: "New folder", key: "F7" },
@@ -71,6 +73,7 @@ export const commands = {
   cancelText: { label: "Exit the viewer or editor", key: "Escape" },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
+  folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
   ftpSources: { label: "Select FTP in the sources menu", key: "1" },
   addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
@@ -106,6 +109,7 @@ export function commandScope(command: Command) {
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
+  if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
   return "main";
 }
@@ -117,9 +121,13 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
     (leftScope !== "wheel" && rightScope !== "wheel" && (leftScope === "global" || rightScope === "global"));
 }
 
+export const panelLayouts = { standard: "Standard", twin: "Twin panels", classic: "Classic commander" } as const;
+export type PanelLayout = keyof typeof panelLayouts;
+
 export interface Preferences {
   language: Language;
   theme: Theme;
+  layout: PanelLayout;
   activeScheme: string | null;
   schemes: Scheme[];
   hidden: boolean;
@@ -142,7 +150,7 @@ export const defaultBindings = Object.fromEntries(
 
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
-    theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
+    theme: "system", layout: "standard", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
     viewFontSizes: {}, language: "en",
   };
   try {
@@ -159,6 +167,8 @@ export function readPreferences(): Preferences {
       const value = saved.shortcuts?.[command];
       if (typeof value !== "string" || (!saved.bindingDefaults && value === oldDefaults[command])) continue;
       if (command === "settings" && (saved.bindingDefaults ?? 0) < 3 && value === (mac ? "Meta+," : "Ctrl+,")) continue;
+      if ((saved.bindingDefaults ?? 0) < 4 && (command === "refreshAlternate" && value === "F2" ||
+        command === "rename" && !value && saved.shortcuts?.refreshAlternate === "F2")) continue;
       shortcuts[command] = value;
       configured.add(command);
     }
@@ -178,6 +188,7 @@ export function readPreferences(): Preferences {
     return {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
+      layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
@@ -194,7 +205,7 @@ export function readPreferences(): Preferences {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 3 }));
+  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 4 }));
 }
 
 export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {
@@ -229,7 +240,15 @@ export function wheelShortcut(event: WheelEvent) {
   return eventShortcut({ key: "Wheel", ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey });
 }
 
+const arrows: Record<string, string> = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+
 export function showShortcut(shortcut: string) {
-  if (mac) return shortcut.replaceAll("Meta+", "⌘").replaceAll("Ctrl+", "⌃").replaceAll("Alt+", "⌥").replaceAll("Shift+", "⇧");
-  return shortcut;
+  const readable = shortcut.replace(/\bArrow(?:Left|Right|Up|Down)\b/g, (key) => arrows[key]);
+  if (mac) return readable.replaceAll("Meta+", "⌘").replaceAll("Ctrl+", "⌃").replaceAll("Alt+", "⌥").replaceAll("Shift+", "⇧");
+  return readable;
+}
+
+/** A narrow label for the function-key bar, where every cell has the same width. */
+export function compactShortcut(shortcut: string) {
+  return showShortcut(shortcut).replace(/^Shift\+/, "⇧").replace(/\bInsert\b/, "Ins").replace(/\bDelete\b/, "Del");
 }

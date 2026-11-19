@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
@@ -17,6 +17,7 @@ const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: tags.invalid, class: "syntax-invalid" },
 ]));
 const languageChoices = [...languages].sort((a, b) => a.name.localeCompare(b.name));
+const externalEdit = Annotation.define<boolean>();
 
 export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, onChange }: {
   fileName: string;
@@ -52,7 +53,10 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
           EditorView.lineWrapping,
           ...(editing ? [history(), keymap.of([...defaultKeymap, ...historyKeymap]),
             EditorView.updateListener.of((update) => {
-              if (update.docChanged) latest.current.onChange(update.state.doc.toString());
+              if (update.docChanged && update.transactions.some((transaction) =>
+                transaction.docChanged && !transaction.annotation(externalEdit))) {
+                latest.current.onChange(update.state.doc.toString());
+              }
             })] : []),
         ],
       }),
@@ -60,6 +64,26 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
     editor.current = view;
     return () => { editor.current = null; view.destroy(); };
   }, [editing, fileName, languageSlot, editSlot, labelSlot]);
+
+  useEffect(() => {
+    const view = editor.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    if (current === value) return;
+
+    let from = 0;
+    let oldEnd = current.length;
+    let newEnd = value.length;
+    while (from < oldEnd && from < newEnd && current[from] === value[from]) from++;
+    while (oldEnd > from && newEnd > from && current[oldEnd - 1] === value[newEnd - 1]) {
+      oldEnd--;
+      newEnd--;
+    }
+    view.dispatch({
+      changes: { from, to: oldEnd, insert: value.slice(from, newEnd) },
+      annotations: [externalEdit.of(true), Transaction.addToHistory.of(false)],
+    });
+  }, [value]);
 
   useEffect(() => {
     editor.current?.dispatch({ effects: labelSlot.reconfigure(EditorView.contentAttributes.of({ "aria-label": label, spellcheck: "false" })) });

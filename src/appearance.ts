@@ -48,6 +48,7 @@ export const colorGroups = {
       "panel-selection": "Active selection background",
       "panel-selected-ink": "Active selection text",
       "panel-inactive-selection": "Inactive selection background",
+      "panel-marked": "Marked items",
     },
   },
   files: {
@@ -129,8 +130,8 @@ const colors = Object.values(colorGroups).flatMap(({ colors }) => Object.keys(co
 export const bundledFontFamily = "GoMono Nerd Font Mono";
 
 export const fontGroups = {
-  ui: { label: "Main window", fallback: "var(--bundled-font), system-ui" },
-  panel: { label: "File panels", fallback: "var(--ui-font)" },
+  ui: { label: "Main window", fallback: "var(--system-font)" },
+  panel: { label: "File panels", fallback: "var(--bundled-font), monospace" },
   dialog: { label: "Dialogs", fallback: "var(--ui-font)" },
   mono: { label: "Editor, viewer, and terminal", fallback: "var(--bundled-font), monospace" },
   viewer: { label: "Viewer", fallback: "var(--mono)" },

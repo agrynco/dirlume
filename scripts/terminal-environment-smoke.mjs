@@ -39,7 +39,7 @@ export async function testTerminalEnvironment(page) {
   const variable = `DIRLUME_SMOKE_ENV_${randomBytes(8).toString("hex").toUpperCase()}`;
   const change = (value, kind = "String") => userEnvironment({ name: variable, value, kind });
   const options = page.getByRole("dialog", { name: "Options", exact: true });
-  const field = page.getByRole("textbox", { name: "Command line", exact: true });
+  const field = page.getByRole("combobox", { name: "Command line", exact: true });
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const notice = terminal.getByText(/Windows environment changed/);
   const oldPath = process.env.CI ? userEnvironment({ name: "Path", read: true }) : null;
@@ -48,9 +48,11 @@ export async function testTerminalEnvironment(page) {
 
   async function setting(enabled) {
     await page.getByRole("button", { name: "Options", exact: true }).click();
-    await options.getByRole("searchbox", { name: "Search settings" }).fill("refresh environment variables");
+    const search = options.getByRole("searchbox", { name: "Search settings" });
+    await search.fill("refresh environment variables");
     await options.getByRole("button", { name: "Terminal", exact: true }).click();
     await options.getByRole("checkbox", { name: "Automatically refresh environment variables", exact: true }).setChecked(enabled);
+    await search.fill("");
     await options.getByRole("button", { name: "Done", exact: true }).click();
   }
 

@@ -4,7 +4,7 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { toString } from "mdast-util-to-string";
-import type { Root } from "mdast";
+import type { Parent, PhrasingContent, Root } from "mdast";
 import { visit } from "unist-util-visit";
 import { api, describeError, type NamedFile } from "./api";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -23,6 +23,58 @@ const PreviewContext = createContext<{
 } | null>(null);
 const documentOrigin = "https://markdown.dirlume.invalid";
 const scheme = /^[a-z][a-z\d+.-]*:/i;
+
+interface TableNoWrap extends Parent {
+  type: "tableNoWrap";
+  children: PhrasingContent[];
+}
+
+declare module "mdast" {
+  interface RootContentMap {
+    tableNoWrap: TableNoWrap;
+  }
+  interface PhrasingContentMap {
+    tableNoWrap: TableNoWrap;
+  }
+}
+
+const openingSpan = /^<span(?=\s|>)/i;
+const closingSpan = /^<\/span\s*>$/i;
+const htmlAttribute = /\s+([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+)))?/g;
+
+function hasNoWrapStyle(tag: string) {
+  for (const [, name, doubleQuoted, singleQuoted, unquoted] of tag.matchAll(htmlAttribute)) {
+    if (name.toLowerCase() !== "style") continue;
+    const style = doubleQuoted ?? singleQuoted ?? unquoted ?? "";
+    const whiteSpace = style.split(";").reverse().find((rule) => /^\s*white-space\s*:/i.test(rule));
+    return whiteSpace !== undefined && /^\s*white-space\s*:\s*nowrap\s*$/i.test(whiteSpace);
+  }
+  return false;
+}
+
+function remarkTableNoWrap() {
+  return (tree: Root) => visit(tree, "tableCell", (cell) => {
+    const open: { index: number; noWrap: boolean }[] = [];
+    const parsed: PhrasingContent[] = [];
+    for (const child of cell.children) {
+      if (child.type === "html") {
+        if (openingSpan.test(child.value)) {
+          open.push({ index: parsed.length, noWrap: hasNoWrapStyle(child.value) });
+        } else if (closingSpan.test(child.value)) {
+          const span = open.pop();
+          if (span?.noWrap) {
+            const [, ...children] = parsed.splice(span.index);
+            // Render a fixed span without passing any source HTML attributes to the browser.
+            parsed.push({ type: "tableNoWrap", children, data: { hName: "span", hProperties: { className: ["markdown-nowrap"] } } });
+            continue;
+          }
+        }
+      }
+      parsed.push(child);
+    }
+    cell.children = parsed;
+  });
+}
 
 function remarkTaskMarkers() {
   return (tree: Root, file: { toString(): string }) => {
@@ -118,7 +170,7 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
   return { place: { ...place, segments }, name };
 }
 
-export function MarkdownPreview({ file, source, active, anchor, light, writable, saving, onToggleTask, onOpenDocument, onError }: {
+export function MarkdownPreview({ file, source, active, anchor, light, writable, saving, htmlFormatting, onToggleTask, onOpenDocument, onError }: {
   file: NamedFile;
   source: string;
   active: boolean;
@@ -126,6 +178,7 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
   light: boolean;
   writable: boolean;
   saving: boolean;
+  htmlFormatting: boolean;
   onToggleTask: (marker: TaskMarker, checked: boolean) => void;
   onOpenDocument: OpenMarkdownLink;
   onError: (message: string) => void;
@@ -178,7 +231,7 @@ export function MarkdownPreview({ file, source, active, anchor, light, writable,
   return (
     <div ref={preview} className="markdown">
       <PreviewContext.Provider value={{ writable, saving, light, onToggleTask, followLink }}>
-        <Markdown remarkPlugins={[remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
+        <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
           skipHtml components={components}>{source}</Markdown>
       </PreviewContext.Provider>
     </div>

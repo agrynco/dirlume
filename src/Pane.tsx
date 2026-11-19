@@ -1,28 +1,32 @@
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, ChevronDown, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
-import { formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { api, describeError, folderLabel, placePath, windowsClient, type DiskSpace, type Entry, type QuickLocation } from "./api";
+import { folderMeasurement, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
-import { eventShortcut, showShortcut } from "./preferences";
+import { eventShortcut, showShortcut, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
+import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
 import { columnWidthsStyle, FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
+import { QuickSearch, useQuickSearch } from "./QuickSearch";
 
 interface PaneProps {
   side: Side;
   active: boolean;
+  layout: PanelLayout;
   showHidden: boolean;
   pane: PaneState;
   entries: Entry[];
   locations: QuickLocation[];
+  rename?: { name: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
   activate: () => void;
   onRow: (entry: Entry, range: boolean, mark: boolean) => void;
   onQuickMatch: (name: string) => void;
@@ -45,22 +49,60 @@ interface PaneProps {
   onEndDrag: () => void;
   canDrop: (data: DataTransfer) => boolean;
   onDrop: () => void;
-  processView: boolean;
+  processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
   onContext: (entry?: Entry) => void;
 }
 
-export function Pane({ side, active, showHidden, pane, entries, locations, activate, onRow, onQuickMatch, onOpen, onPath,
+function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["rename"]>) {
+  const input = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  const [draft, setDraft] = useState(name);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  useLayoutEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+
+  async function save() {
+    if (!draft.trim() || saving) return;
+    setError("");
+    setSaving(true);
+    try { await onSave(draft); }
+    catch (failure) {
+      setSaving(false);
+      setError(describeError(failure));
+      requestAnimationFrame(() => input.current?.focus());
+    }
+  }
+
+  return <span className="inline-rename" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+    <input ref={input} type="text" aria-label={t("New name for {0}", name)} value={draft}
+      readOnly={saving} aria-invalid={!!error} aria-describedby={error ? errorId : undefined}
+      onChange={(event) => { setDraft(event.target.value); setError(""); }}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || !["Enter", "Escape"].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "Enter") void save();
+        else if (!saving) onCancel();
+      }} />
+    {error && <span id={errorId} className="inline-rename-error" role="alert">{errorText(error)}</span>}
+  </span>;
+}
+
+export function Pane({ side, active, layout, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, ftpShortcut, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, onEndDrag, canDrop, onDrop, processView, onProcesses, onContext }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
   const [filterOpen, setFilterOpen] = useState(false);
-  const [quickSearch, setQuickSearch] = useState<string | null>(null);
-  const quickSearchInput = useRef<HTMLInputElement>(null);
+  const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [draggedRow, setDraggedRow] = useState<string | null>(null);
   const locationsBox = useRef<HTMLDivElement>(null);
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -71,21 +113,25 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const selected = paneCursorIndex(pane, entries);
   const search = Boolean(pane.search);
   const matches = pane.search?.matches;
-  const quickMatches = useMemo(() => {
-    if (!quickSearch) return [];
-    const prefix = quickSearch.normalize("NFC").toLocaleLowerCase();
-    return entries.filter((entry) => entry.name !== ".." &&
-      (matches?.get(entry.name)?.entry.name ?? entry.name).normalize("NFC").toLocaleLowerCase().startsWith(prefix));
-  }, [entries, matches, quickSearch]);
-  const currentQuickMatch = quickMatches.find(({ name }) => name === pane.selected);
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
-  const start = search ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
-  const end = search ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
-  const displayed = entries.slice(start, end);
+  const virtual = search || entries.length > 100;
+  const start = virtual ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
+  const end = virtual ? Math.min(entries.length, Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : entries.length;
+  const indices = Array.from({ length: end - start }, (_, offset) => start + offset);
+  if (virtual) {
+    // Keep the active descendant and the source of an ongoing drag mounted.
+    const dragged = draggedRow === null ? -1 : entries.findIndex((entry) => entry.name === draggedRow);
+    for (const index of new Set([selected, dragged])) {
+      if (index >= 0 && (index < start || index >= end)) indices.push(index);
+    }
+    indices.sort((left, right) => left - right);
+  }
   const fileIcons = new Map<string, { directory: string; name: string }>();
+  const dateLabel = useTimestamps(processView ? [] : indices.map((index) => entries[index].modified));
   const byName = new Map<string, string>();
   if (windowsClient && !processView) {
-    for (const item of displayed) {
+    for (const index of indices) {
+      const item = entries[index];
       if (item.directory) continue;
       const source = paneItem(pane, item);
       if (source?.place.kind !== "local") continue;
@@ -97,18 +143,21 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
     }
   }
   const icons = useWindowsIcons(fileIcons, api.fileIcons);
+  const localFolder = pane.place?.kind === "local" ? pane.place.path : null;
+  const [space, setSpace] = useState<{ folder: string; value: DiskSpace } | null>(null);
+  useEffect(() => {
+    if (!localFolder || pane.loading) return;
+    let cancelled = false;
+    api.diskSpace(localFolder).then((value) => {
+      if (!cancelled) setSpace(value ? { folder: localFolder, value } : null);
+    }, () => {
+      if (!cancelled) setSpace(null);
+    });
+    return () => { cancelled = true; };
+  }, [localFolder, pane.loading, pane.entries]);
+  const free = localFolder && space?.folder === localFolder ? space.value : null;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
-  const quickSearchOpen = quickSearch !== null;
-  useLayoutEffect(() => {
-    if (!quickSearchOpen) return;
-    const input = quickSearchInput.current;
-    input?.focus();
-    if (input) input.setSelectionRange(input.value.length, input.value.length);
-  }, [quickSearchOpen]);
-  useEffect(() => {
-    if (!currentQuickMatch && quickMatches[0]) onQuickMatch(quickMatches[0].name);
-  }, [currentQuickMatch, onQuickMatch, quickMatches]);
   useLayoutEffect(() => {
     const element = list.current;
     const probe = rowProbe.current;
@@ -116,25 +165,32 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
     const measure = () => setViewport({
       top: element.scrollTop, height: element.clientHeight, rowHeight: probe.getBoundingClientRect().height || 29,
     });
-    element.scrollTop = 0;
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     observer.observe(probe);
     return () => observer.disconnect();
-  }, [matches]);
+  }, [virtual, processView]);
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    element.scrollTop = 0;
+    if (columnHeader.current) columnHeader.current.scrollLeft = element.scrollLeft;
+    setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
+  }, [path, matches, processView]);
   useLayoutEffect(() => {
     const element = list.current;
     if (!active || selected < 0 || !element) return;
-    if (search) {
+    if (virtual) {
       const top = selected * viewport.rowHeight;
       const bottom = top + viewport.rowHeight + 8;
       if (top < element.scrollTop) element.scrollTop = top;
       else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
+      setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
     } else {
       element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
     }
-  }, [selected, path, active, search, matches, viewport.rowHeight]);
+  }, [selected, path, active, virtual, matches, viewport.rowHeight, processView]);
   useEffect(() => {
     if (!locationsOpen) return;
     locationsBox.current?.querySelector<HTMLButtonElement>(".location-popup button")?.focus();
@@ -154,14 +210,11 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
       setLocationsOpen((open) => !open);
       locationsButton.current?.focus();
     };
-    const showQuickSearch = (event: Event) => setQuickSearch((event as CustomEvent<string>).detail);
     target?.addEventListener("dirlume-filter", show);
     target?.addEventListener("dirlume-locations", showLocations);
-    target?.addEventListener("dirlume-quick-search", showQuickSearch);
     return () => {
       target?.removeEventListener("dirlume-filter", show);
       target?.removeEventListener("dirlume-locations", showLocations);
-      target?.removeEventListener("dirlume-quick-search", showQuickSearch);
     };
   }, [side]);
 
@@ -171,12 +224,27 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
   const marked = entries.filter(({ name }) => markedSet.has(name));
-  const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
-  const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
+  const complete = marked.every((entry) => entry.directory ? folderMeasurement(pane, entry)?.incomplete === false : entry.size !== null);
+  const markedBytes = marked.reduce((bytes, entry) => bytes + (folderMeasurement(pane, entry)?.bytes ?? entry.size ?? 0), 0);
+  const classic = layout === "classic";
+  const twin = layout === "twin";
+  const current = selected >= 0 ? entries[selected] : undefined;
+  const currentSize = current && folderMeasurement(pane, current);
+  const usedShare = free && free.total > 0 ? Math.min(100, Math.max(0, 100 - free.available / free.total * 100)) : 0;
+  // The drive bar highlights the most specific quick location that contains the current folder.
+  const comparablePath = (value: string) => windowsClient ? value.replace(/[\\/]+$/, "").toLocaleLowerCase() : value.replace(/\/+$/, "");
+  const currentLocation = localFolder ? locations.reduce<QuickLocation | undefined>((best, location) => {
+    const base = comparablePath(location.path);
+    const folder = comparablePath(localFolder);
+    const separator = windowsClient ? /[\\/]/ : /\//;
+    const inside = folder === base || (folder.startsWith(base) &&
+      (base === "" || base.endsWith(":") || separator.test(folder.charAt(base.length))));
+    return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
+  }, undefined) : undefined;
   return (
     <section ref={section} id={`${side}-pane`} style={{ ...viewFontStyle(fontSize), ...columnWidthsStyle(columnLayout.widths) }}
       data-size-column={columnLayout.visibility.size} data-modified-column={columnLayout.visibility.modified}
-      className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={t(side === "left" ? "left pane" : "right pane")}
+      data-layout={layout} className={`pane${active ? " active" : ""}${dragOver ? " drop-target" : ""}`} aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate} onContextMenu={(event) => {
         if (processView || !(event.target instanceof HTMLElement) || event.target.closest("input, select, textarea, dialog")) return;
         event.preventDefault();
@@ -195,10 +263,20 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
         onDrop();
       }}>
       <header className="pane-heading">
+        {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
+          {locations.map((location) => (
+            <Button key={location.path} type="button" title={location.path} aria-pressed={location === currentLocation}
+              onClick={() => { onPath(location.path); list.current?.focus(); }}>
+              {twin && (/^[a-z]:$/i.test(location.label) ? <HardDrive aria-hidden="true" /> : <Folder aria-hidden="true" />)}{t(location.label)}
+            </Button>
+          ))}
+        </nav>}
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
           <h2 title={pane.search?.mask ?? title}>{title}</h2>
-          {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name" title={pane.place.address}>{t("Remote")}</span>}
+          {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name"
+            title={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
+            {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
         </div>
         <div className="pane-tools">
           {processView && <Button className="icon-button" aria-label={t("Close processes")} title={t("Close processes")}
@@ -225,6 +303,12 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           </Button>}
         </div>
       </header>
+      {twin && free && !search && !processView && <div className="pane-volume" title={t("Free space on this drive")}>
+        <HardDrive aria-hidden="true" />
+        <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span>
+        <span className="pane-volume-free">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+        <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
+      </div>}
       <div className="navigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
@@ -271,7 +355,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           )}
         </div>
       </div>
-      {processView ? <ProcessBrowser side={side} /> : <>
+      {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
       {(filterOpen || pane.filter) && (
         <label className="pane-filter">
           <Search />
@@ -297,42 +381,48 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           setColumnLayout(next);
           saveColumnLayout(side, next);
         }} />
-      <div id={`${side}-files`} ref={list} className={search ? "file-list result-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
+      <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
         onScroll={(event) => {
           if (columnHeader.current) columnHeader.current.scrollLeft = event.currentTarget.scrollLeft;
-          if (!search) return;
+          if (!virtual) return;
           const top = event.currentTarget.scrollTop;
           setViewport((previous) => ({ ...previous, top }));
         }}
         aria-multiselectable="true" aria-busy={pane.loading}
-        aria-activedescendant={selected >= start && selected < end ? `${side}-file-${selected}` : undefined} tabIndex={0}>
-        {search && <>
-          <div ref={rowProbe} className="result-row-probe" aria-hidden="true" />
-          <div aria-hidden="true" style={{ height: start * viewport.rowHeight }} />
-        </>}
-        {displayed.map((entry, offset) => {
-          const index = start + offset;
+        aria-activedescendant={selected >= 0 ? `${side}-file-${selected}` : undefined} tabIndex={0}>
+        {virtual && <div ref={rowProbe} className="file-row-probe" aria-hidden="true" />}
+        {indices.map((index, offset) => {
+          const gap = index - (indices[offset - 1] ?? -1) - 1;
+          const entry = entries[index];
           const icon = icons.get(byName.get(entry.name) ?? "");
-          const size = pane.sizes.get(entry.name);
-          const measuring = pane.measuring.includes(entry.name);
-          return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
-            key={entry.name} role="option" aria-setsize={search ? entries.length : undefined} aria-posinset={search ? index + 1 : undefined}
+          const size = folderMeasurement(pane, entry);
+          const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
+          return <Fragment key={entry.name}>
+          {gap > 0 && <div aria-hidden="true" style={{ height: gap * viewport.rowHeight }} />}
+          <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
+            role="option" aria-setsize={virtual ? entries.length : undefined} aria-posinset={virtual ? index + 1 : undefined}
             data-file-color={fileColor(entry)}
             aria-selected={markedSet.size ? markedSet.has(entry.name) : index === selected} data-current={index === selected} title={entry.name}
             onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
             onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (entry.name !== "..") onContext(entry); }}
-            draggable={entry.name !== ".."} onDragStart={(event) => { if (!onStartDrag(entry, event.dataTransfer)) event.preventDefault(); }}
-            onDragEnd={onEndDrag}
+            draggable={entry.name !== ".." && rename?.name !== entry.name} onDragStart={(event) => {
+              if (onStartDrag(entry, event.dataTransfer)) setDraggedRow(entry.name);
+              else event.preventDefault();
+            }}
+            onDragEnd={() => { setDraggedRow(null); onEndDrag(); }}
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
               icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
-              <span>{entry.name}</span>{entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
+              {rename?.name === entry.name ? <InlineRenameField {...rename} /> : <span className="file-name-text">{entry.name.normalize("NFC")}</span>}
+              {entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
-            <span className="file-date">{formatDate(entry.modified)}</span>
-          </div>;
+            <span className="file-date">{dateLabel(entry.modified) ?? "–"}</span>
+          </div>
+          </Fragment>;
         })}
-        {search && <div aria-hidden="true" style={{ height: (entries.length - end) * viewport.rowHeight }} />}
+        {virtual && (indices.at(-1) ?? -1) < entries.length - 1 &&
+          <div aria-hidden="true" style={{ height: (entries.length - (indices.at(-1) ?? -1) - 1) * viewport.rowHeight }} />}
         {!entries.length && (
           <div className="pane-empty">
             {pane.loading ? t("Loading…") : pane.error ? t("Open another location to continue.") :
@@ -340,39 +430,29 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
           </div>
         )}
       </div>
-      {quickSearch !== null && <div className="quick-search">
-        <label htmlFor={side + "-quick-search"}>{t("Quick search")}</label>
-        <input id={side + "-quick-search"} ref={quickSearchInput} type="text" value={quickSearch} spellCheck={false}
-          autoComplete="off" onChange={(event) => setQuickSearch(event.target.value)} onBlur={() => setQuickSearch(null)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
-            if (event.key === "Escape" || event.key === "Enter") {
-              event.preventDefault();
-              event.stopPropagation();
-              const match = currentQuickMatch ?? quickMatches[0];
-              if (event.key === "Enter" && !match) return;
-              setQuickSearch(null);
-              list.current?.focus({ preventScroll: true });
-              if (event.key === "Enter" && match) onOpen(match);
-            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault();
-              event.stopPropagation();
-              if (!quickMatches.length) return;
-              const index = currentQuickMatch ? quickMatches.indexOf(currentQuickMatch) : 0;
-              const offset = event.key === "ArrowDown" ? 1 : -1;
-              const next = (index + offset + quickMatches.length) % quickMatches.length;
-              onQuickMatch(quickMatches[next].name);
-            }
-          }} />
-        <span role="status">{quickSearch ? (quickMatches.length ? countText(quickMatches.length, "match") : t("No match")) : ""}</span>
-      </div>}
+      {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={pane.selected}
+        items={folderItems.map(({ name }) => ({ id: name, name: matches?.get(name)?.entry.name ?? name }))}
+        onChange={setQuickSearch} onMatch={onQuickMatch}
+        onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
+        onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
       {pane.error && <p className="pane-error" role="alert">{errorText(pane.error)}</p>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
+      {classic && <div className="pane-details" aria-live="off">
+        <span className="pane-details-name">{current ? matches?.get(current.name)?.entry.name ?? current.name : ""}</span>
+        <span>{current && current.name !== ".." && (current.directory && !currentSize ? t("<DIR>") :
+          currentSize ? formatSize(currentSize.bytes) : formatSize(current.size))}</span>
+        <span>{current && current.name !== ".." ? (dateLabel(current.modified) ?? "–") : ""}</span>
+      </div>}
       <footer className="pane-footer">
-        <span>{search ? countText(entries.length, "match") :
+        <span className="pane-counts">{search ? countText(entries.length, "match") :
           <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
-        <span>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
+        <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
           search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>
+        {free && !search && !twin && <span className="pane-free" title={t("Free space on this drive")}>
+          <span className="pane-free-full">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+          <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
+          <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
+        </span>}
       </footer>
       </>}
     </section>

@@ -48,6 +48,10 @@ function hasParentRow(place: Place | null) {
   return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
 }
 
+export function folderMeasurement(pane: PaneState, entry: Entry) {
+  return entry.directory && !entry.link && !pane.search ? pane.sizes.get(entry.name) : undefined;
+}
+
 export function visibleEntries(pane: PaneState, hidden: boolean) {
   const filter = pane.filter.toLocaleLowerCase();
   const { column, asc } = pane.sort;
@@ -59,7 +63,7 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
     .sort((a, b) => {
       if (a.directory !== b.directory) return a.directory ? -1 : 1;
       const byName = collator.compare(a.name, b.name);
-      const metric = (entry: Entry) => column === "size" ? (pane.sizes.get(entry.name)?.bytes ?? entry.size) : entry.modified;
+      const metric = (entry: Entry) => column === "size" ? (folderMeasurement(pane, entry)?.bytes ?? entry.size) : entry.modified;
       const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
       return asc ? order : -order;
     });
@@ -127,12 +131,12 @@ export function paneItem(pane: PaneState, entry?: Entry): { place: Place; entry:
 
 export const opposite = (side: Side): Side => side === "left" ? "right" : "left";
 
-export function localPath(path: string): Place {
+export function localPath(path: string): Extract<Place, { kind: "local" }> {
   return { kind: "local", path, parent: null };
 }
 
 export function childPlace(place: Place, name: string): Place {
-  if (place.kind === "server" || place.kind === "ftp") return { ...place, segments: [...place.segments, name] };
+  if (place.kind === "server" || place.kind === "ftp" || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
     return { ...place, path, parent: null };
@@ -142,6 +146,8 @@ export function childPlace(place: Place, name: string): Place {
 }
 
 export function parentPlace(place: Place): Place | null {
+  if (place.kind === "archive") return place.segments.length
+    ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || place.kind === "ftp") {
     return place.segments.length ? { ...place, segments: place.segments.slice(0, -1) } : null;
   }
@@ -150,6 +156,7 @@ export function parentPlace(place: Place): Place | null {
 }
 
 export async function readPlace(place: Place): Promise<{ place: Place; listing: Listing }> {
+  if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
@@ -160,15 +167,21 @@ export async function readPlace(place: Place): Promise<{ place: Place; listing: 
   return { place: { kind: "local", path: listing.path, parent: listing.parent }, listing };
 }
 
-export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | number): PaneState {
-  if (action === "refresh" && pane.search) {
+export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number): PaneState {
+  if ((action === "refresh" || action === "background") && pane.search) {
     const updated = applyListing(closeSearchResults(pane), place, listing, action);
     return { ...updated, selected: pane.selected, marked: pane.marked, keyboardRange: pane.keyboardRange, filter: pane.filter,
       search: { ...pane.search, previous: { selected: updated.selected, marked: updated.marked, filter: updated.filter } } };
   }
   pane = closeSearchResults(pane);
   const samePlace = JSON.stringify(pane.place) === JSON.stringify(place);
-  const retained = new Set(listing.entries.map((entry) => entry.name));
+  const current = new Map(listing.entries.map((entry) => [entry.name, entry]));
+  const keepMeasurements = samePlace && action === "background";
+  const unchangedFolders = new Set(keepMeasurements ? pane.entries.flatMap((entry) => {
+    const next = current.get(entry.name);
+    return entry.directory && !entry.link && next?.directory && !next.link && next.modified === entry.modified
+      ? [entry.name] : [];
+  }) : []);
   const keyboardRange = pane.keyboardRange;
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
@@ -179,11 +192,11 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     entries: listing.entries,
     omitted: listing.omitted,
     selected: samePlace && pane.selected &&
-      (pane.selected === ".." ? hasParentRow(place) : retained.has(pane.selected)) ? pane.selected : null,
-    marked: samePlace ? pane.marked.filter((name) => retained.has(name)) : [],
-    keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => retained.has(name)) } : undefined,
-    sizes: samePlace ? new Map([...pane.sizes].filter(([name]) => retained.has(name))) : new Map(),
-    measuring: samePlace ? pane.measuring : [],
+      (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : null,
+    marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
+    keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => current.has(name)) } : undefined,
+    sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
+    measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),
     filter: samePlace ? pane.filter : "",
     history,
     position: typeof action === "number" ? action : history === pane.history ? pane.position : history.length - 1,
@@ -193,16 +206,13 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   };
 }
 
-const formats = new Map<string, { number: Intl.NumberFormat; time: Intl.DateTimeFormat }>();
+const formats = new Map<string, Intl.NumberFormat>();
 
 function currentFormats() {
   const language = locale();
   let format = formats.get(language);
   if (!format) {
-    format = {
-      number: new Intl.NumberFormat(language, { maximumFractionDigits: 1 }),
-      time: new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }),
-    };
+    format = new Intl.NumberFormat(language, { maximumFractionDigits: 1 });
     formats.set(language, format);
   }
   return format;
@@ -216,9 +226,5 @@ export function formatSize(size: number | null) {
     size /= 1024;
     unit++;
   }
-  return `${currentFormats().number.format(size)} ${units[unit]}`;
-}
-
-export function formatDate(time: number | null) {
-  return time === null ? "–" : currentFormats().time.format(new Date(time * 1000));
+  return `${currentFormats().format(size)} ${units[unit]}`;
 }

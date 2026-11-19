@@ -1,15 +1,32 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
+import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testCommandCompletion } from "./command-completion-smoke.mjs";
+import { testCompareWorker } from "./compare-smoke.mjs";
+import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
+import { testNewFolder } from "./new-folder-smoke.mjs";
+import { testShortcutFields } from "./shortcut-field-smoke.mjs";
+import { testTerminalHistory } from "./terminal-history-smoke.mjs";
+import { testArchives } from "./archive-smoke.mjs";
+import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
+import { testInlineRename } from "./inline-rename-smoke.mjs";
+import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testMcp } from "./mcp-smoke.mjs";
+import { testProcessColumns } from "./process-columns-smoke.mjs";
+import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
+import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
+import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
+import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -133,13 +150,17 @@ try {
     const groups = ["ui", "panel", "dialog", "viewer", "editor", "terminal"];
     return {
       faces: loaded.map((faces) => faces.length > 0 && faces.every((face) => face.status === "loaded")),
-      families: groups.map((group) => root.getPropertyValue(`--${group}-font`).startsWith(`"${family}"`)),
-      sizes: groups.map((group) => root.getPropertyValue(`--${group}-size`)),
+      bundled: groups.map((group) => root.getPropertyValue(`--${group}-font`).trim().startsWith(`"${family}"`)),
+      system: groups.map((group) => root.getPropertyValue(`--${group}-font`).trim()
+        .startsWith(root.getPropertyValue("--system-font").trim())),
+      sizes: groups.map((group) => root.getPropertyValue(`--${group}-size`).trim()),
     };
   }, bundledFamily);
   assert.deepEqual(defaultFonts.faces, [true, true, true, true]);
-  assert.ok(defaultFonts.families.every(Boolean));
-  assert.deepEqual(defaultFonts.sizes, Array(6).fill("18px"));
+  // The window and dialogs use the system font; file panels and text tools use the bundled monospace font.
+  assert.deepEqual(defaultFonts.bundled, [false, true, false, true, true, true]);
+  assert.deepEqual(defaultFonts.system, [true, false, true, false, false, false]);
+  assert.deepEqual(defaultFonts.sizes, ["14px", "15px", "14px", "18px", "18px", "18px"]);
   assert.equal(await page.getByRole("button", { name: "Find files" }).getAttribute("title"), "Find files (Alt+F7)");
   assert.equal(await page.getByRole("region", { name: "right pane" }).getByRole("button", { name: "Refresh folder" }).getAttribute("title"), "Refresh folder");
   assert.deepEqual(await page.locator("button:visible").evaluateAll((buttons) =>
@@ -160,6 +181,7 @@ try {
     }
   }
   let diagnosticsBeforeRestart;
+  await testFilenameRendering(page, temp);
   if (process.env.DIRLUME_INTERNAL_CDP === "1") {
     const secret = "dirlume-private-fixture-data";
     await page.evaluate(async (path) => {
@@ -232,7 +254,9 @@ try {
     await list.press("ArrowLeft");
     assert.equal(await list.locator(parentRow).getAttribute("data-current"), "true");
     assert.equal(await list.locator(parentRow).getAttribute("draggable"), "false");
-    assert.equal(await page.getByRole("button", { name: /^Copy F5$/ }).isEnabled(), false);
+    const copyAction = page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Copy", exact: true });
+    assert.equal(await copyAction.getAttribute("aria-keyshortcuts"), "F5");
+    assert.equal(await copyAction.isEnabled(), false);
     await list.press("Enter");
     await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
     assert.equal(await other.inputValue(), otherPath);
@@ -241,6 +265,23 @@ try {
     assert.equal(await up.isEnabled(), false);
     await navigate(side, side === "left" ? src : dst);
   }
+  await leftList.getByRole("option", { name: /^notes\.txt/ }).click();
+  await page.keyboard.press("Control+a");
+  assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
+    "Ctrl+A in a file pane must not highlight the workspace text.");
+  const selectAllAttributes = page.getByRole("dialog", { name: "Attributes", exact: true });
+  await selectAllAttributes.waitFor();
+  await page.keyboard.press("Escape");
+  await selectAllAttributes.waitFor({ state: "hidden" });
+  await leftList.evaluate((list) => list.blur());
+  await page.keyboard.press("Control+a");
+  assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
+    "Ctrl+A with focus on the workspace background must not highlight the interface.");
+  const pathField = page.getByLabel("left path", { exact: true });
+  await pathField.press("Control+a");
+  assert.deepEqual(await pathField.evaluate((field) => [field.selectionStart, field.selectionEnd]),
+    [0, src.length], "Ctrl+A must still select the text in the address field.");
+
   const hiddenFile = leftList.getByRole("option", { name: /^\.hidden-file/ });
   const hiddenFolder = rightList.getByRole("option", { name: /^\.hidden-folder/ });
   const hiddenToggle = page.getByRole("button", { name: "Show hidden files", exact: true });
@@ -378,9 +419,31 @@ try {
   await page.getByRole("option", { name: /^data.bin/, selected: true }).waitFor();
   const bulk = join(temp, "bulk");
   await mkdir(bulk);
-  await Promise.all(Array.from({ length: 1005 }, (_, index) => writeFile(join(bulk, `file-${index}.tmp`), "")));
+  for (let start = 0; start < 10_000; start += 100) {
+    await Promise.all(Array.from({ length: 100 }, (_, offset) => {
+      const index = start + offset;
+      const name = index < 1005 ? `file-${index}.tmp` : `unmatched-${index}.dat`;
+      return writeFile(join(bulk, name), "");
+    }));
+  }
+  const openBulk = performance.now();
   await navigate("left", bulk);
+  await left.getByRole("option", { name: /^file-0.tmp/ }).waitFor();
+  const mountedRows = await left.getByRole("option").count();
+  assert.ok(mountedRows < 100, `Mounted ${mountedRows} rows for 10,000 entries.`);
   await left.focus();
+  await left.press("ArrowRight");
+  const tail = left.getByRole("option", { name: /^unmatched-9999.dat/, selected: true });
+  await tail.waitFor();
+  assert.equal(await tail.getAttribute("aria-posinset"), "10001");
+  assert.equal(await left.getAttribute("aria-activedescendant"), await tail.getAttribute("id"));
+  await left.evaluate((list) => { list.scrollTop = list.scrollHeight / 2; });
+  await left.getByRole("option", { name: /^unmatched-5000.dat/ }).waitFor();
+  assert.ok(await left.getByRole("option").count() < 100);
+  assert.equal(await left.getAttribute("aria-activedescendant"), await tail.getAttribute("id"));
+  await left.press("ArrowLeft");
+  await left.getByRole("option", { name: /^\.\./, selected: true }).waitFor();
+  console.log(`Mounted ${mountedRows} rows for 10,000 files in ${Math.round(performance.now() - openBulk)} ms including keyboard jumps and scrolling.`);
   await page.keyboard.press("Alt+F7");
   await mask.fill("*.tmp");
   await mask.press("Enter");
@@ -456,10 +519,39 @@ try {
   await page.getByRole("option", { name: /^measured/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("option", { name: /^measured/ }).getByText("12 B", { exact: true }).waitFor();
+  const sizeFixture = join(temp, "size-refresh");
+  const measuredPath = join(sizeFixture, "measured-item");
+  await mkdir(measuredPath, { recursive: true });
+  const measuredData = join(measuredPath, "initial.txt");
+  await writeFile(measuredData, Buffer.alloc(2048));
+  await writeFile(join(sizeFixture, "other.txt"), Buffer.alloc(16));
+  await navigate("left", sizeFixture);
+  const measuredItem = left.getByRole("option", { name: /^measured-item/ });
+  await measuredItem.click();
+  await page.keyboard.press("F3");
+  await measuredItem.getByText("2 KiB", { exact: true }).waitFor();
+  await writeFile(measuredData, Buffer.alloc(64));
+  const refreshSizeFixture = leftPane.getByRole("button", { name: "Refresh folder", exact: true });
+  await refreshSizeFixture.click();
+  await measuredItem.getByText("2 KiB", { exact: true }).waitFor({ state: "hidden" });
+  await measuredItem.click();
+  await page.keyboard.press("F3");
+  await measuredItem.getByText("64 B", { exact: true }).waitFor();
+  await rm(measuredData);
+  await rmdir(measuredPath);
+  await writeFile(measuredPath, "x");
+  await refreshSizeFixture.click();
+  await measuredItem.getByText("1 B", { exact: true }).waitFor();
+  const sizeSort = leftPane.getByRole("button", { name: /^Size\b/ });
+  await sizeSort.click();
+  assert.deepEqual(await left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.title)),
+    ["..", "measured-item", "other.txt"]);
+  await leftPane.getByRole("button", { name: /^Name\b/ }).click();
+  await navigate("left", src);
   await page.getByRole("option", { name: /^notes.txt/ }).click();
   await page.keyboard.press("Insert");
   await left.getByRole("option", { name: /^second.txt/ }).click({ modifiers: ["Control"] });
-  await page.getByRole("textbox", { name: "Command line" }).press("F5");
+  await page.getByRole("combobox", { name: "Command line" }).press("F5");
   await finishTransfer("Copy", 2);
   await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^notes.txt/ }).waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
@@ -678,7 +770,7 @@ try {
   await optionsDialog.getByRole("button", { name: "Reset file panels font", exact: true }).click();
   assert.equal(await panelFont.inputValue(), "");
   assert.equal(await optionsDialog.locator(".preview-frame").evaluate((element) =>
-    getComputedStyle(element).getPropertyValue("--panel-size")), "18px");
+    getComputedStyle(element).getPropertyValue("--panel-size").trim()), "15px");
   await panelFont.fill("aRiAl");
   const arial = panelSuggestions.getByRole("option", { name: "Arial", exact: true });
   await arial.waitFor();
@@ -789,7 +881,7 @@ try {
   await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
   await page.keyboard.press("F12");
-  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name").fill("verified");
+  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name", { exact: true }).fill("verified");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
 
@@ -849,7 +941,6 @@ try {
   assert.deepEqual(pids.map(Number), pids.map(Number).sort((a, b) => a - b));
   await pidHeader.getByRole("button").click();
   assert.equal(await pidHeader.getAttribute("aria-sort"), "descending");
-  await leftPane.getByRole("searchbox", { name: "Find process" }).fill(String(lockedBy.pid));
   const task = taskList.getByRole("row").filter({ has: page.getByRole("gridcell", { name: String(lockedBy.pid), exact: true }) });
   await task.locator(".process-icon").waitFor();
   await task.click();
@@ -858,7 +949,6 @@ try {
   await endProcesses.getByText(new RegExp(`PID ${lockedBy.pid}\\)`)).waitFor();
   await endProcesses.getByRole("button", { name: "Cancel", exact: true }).click();
   if (process.env.DIRLUME_PROCESSES_SCREENSHOT) {
-    await leftPane.getByRole("searchbox", { name: "Find process" }).fill("");
     await page.screenshot({ path: process.env.DIRLUME_PROCESSES_SCREENSHOT, scale: "css" });
   }
   await leftPane.getByRole("button", { name: "Close processes" }).click();
@@ -918,6 +1008,7 @@ try {
   }
 
   const linkedMarkdownFont = await testMarkdown(page, src, wheelFont);
+  await testMarkdownNoWrap(page, temp);
   await page.getByRole("option", { name: /^guide.md/ }).click();
   await page.keyboard.press("F3");
   await page.getByRole("heading", { name: "Getting started" }).waitFor();
@@ -1007,7 +1098,7 @@ try {
   await page.keyboard.press("Escape");
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 
-  const commandLine = page.getByRole("textbox", { name: "Command line" });
+  const commandLine = page.getByRole("combobox", { name: "Command line" });
   await commandLine.press("Control+ArrowRight");
   assert.equal(await page.getByRole("separator", { name: "Pane divider" }).getAttribute("aria-valuenow"), "51");
   await commandLine.press("Control+o");
@@ -1156,6 +1247,11 @@ try {
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
   const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
+  // Default tracks use em units and can start at fractional pixels, while dragged widths are stored as whole pixels.
+  const assertColumnWidth = async (side, column, expected) => {
+    const actual = await columnWidth(side, column);
+    assert.ok(Math.abs(actual - expected) <= 1, `${side} ${column} column is ${actual}px, expected about ${expected}px.`);
+  };
   const columnHandle = (side, name) => page.getByRole("region", { name: `${side} pane`, exact: true })
     .getByRole("separator", { name: `Resize ${name} column`, exact: true });
   async function dragColumn(side, name, delta) {
@@ -1175,7 +1271,7 @@ try {
   await dragColumn("left", "Name", 56);
   assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
   await dragColumn("left", "Size", 32);
-  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  await assertColumnWidth("left", "size", leftSize + 32);
   assert.equal(await columnWidth("right", "size"), rightSize);
   await page.locator("#left-files").evaluate((list) => { list.scrollLeft = 60; });
   await page.waitForFunction(() => {
@@ -1186,7 +1282,7 @@ try {
         list.querySelector(".file-size").getBoundingClientRect().left) <= 1;
   });
   await dragColumn("right", "Modified", -28);
-  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await assertColumnWidth("right", "modified", rightModified - 28);
   await columnHandle("right", "Modified").dblclick();
   assert.equal(await columnWidth("right", "modified"), rightModified);
   await dragColumn("right", "Modified", -28);
@@ -1198,10 +1294,10 @@ try {
   await columnMenu().getByRole("menuitemcheckbox", { name: "Size", exact: true, checked: true }).click();
   await rightHeader().getByRole("button", { name: "Size", exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.locator("#right-files .file-size:visible").count(), 0);
-  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await assertColumnWidth("right", "modified", rightModified - 28);
   const newModifiedPosition = await rightHeader().locator(".col-modified").evaluate((column) => column.getBoundingClientRect().left);
   assert.ok(Math.abs(newModifiedPosition - (modifiedPosition - rightSize)) <= 1);
-  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  await assertColumnWidth("left", "size", leftSize + 32);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Modified", exact: true, checked: false }).waitFor();
@@ -1224,14 +1320,14 @@ try {
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
   assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
-  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  await assertColumnWidth("left", "size", leftSize + 32);
   assert.equal(await columnWidth("right", "size"), rightSize);
   await rightHeader().getByRole("button", { name: "Modified", exact: true }).waitFor({ state: "hidden" });
   await rightHeader().getByRole("button", { name: "Name", exact: true }).press("Shift+F10");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Modified", exact: true, checked: false }).click();
   await page.keyboard.press("Escape");
   await columnMenu().waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await assertColumnWidth("right", "modified", rightModified - 28);
   assert.equal(await page.getByLabel("left path").inputValue(), src);
   assert.equal(await page.getByLabel("right path").inputValue(), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
@@ -1278,7 +1374,7 @@ try {
   page = await startDesktop();
   await page.getByRole("button", { name: "Знайти файли", exact: true }).waitFor();
   assert.equal(await page.locator("html").getAttribute("lang"), "uk");
-  assert.equal(await page.locator("#left-pane .col-name button").innerText(), "Назва");
+  assert.equal(await page.locator("#left-pane .col-name button").textContent(), "Назва");
   await rightHeader().getByRole("button", { name: "Назва", exact: true }).click({ button: "right" });
   const ukrainianColumns = page.getByRole("menu", { name: "Колонки", exact: true });
   await ukrainianColumns.getByRole("menuitemcheckbox", { name: "Розмір", exact: true }).waitFor();
@@ -1290,7 +1386,7 @@ try {
   await reopenedOptions.getByLabel("Мова", { exact: true }).selectOption("ru");
   await reopenedOptions.getByRole("button", { name: "Готово", exact: true }).click();
   assert.equal(await page.locator("html").getAttribute("lang"), "ru");
-  assert.equal(await page.locator("#left-pane .col-name button").innerText(), "Имя");
+  assert.equal(await page.locator("#left-pane .col-name button").textContent(), "Имя");
   await page.locator("#left-pane .file-list").press("F1");
   const russianHelp = page.getByRole("dialog", { name: "Справка", exact: true });
   await russianHelp.getByRole("heading", { name: "Основные файловые панели", exact: true }).waitFor();
@@ -1327,6 +1423,20 @@ try {
   await featureSearch.press("Enter");
   await featureDialog.getByRole("heading", { name: "Main File Panels", exact: true }).waitFor();
   await featureDialog.getByRole("checkbox", { name: "Show hidden files" }).waitFor();
+  const layoutSelect = featureDialog.getByRole("combobox", { name: "Panel layout" });
+  assert.deepEqual(await layoutSelect.locator("option").evaluateAll((options) => options.map((option) => option.value)),
+    ["standard", "twin", "classic"]);
+  const leftDrives = page.getByRole("navigation", { name: "Drives and places for left pane", exact: true });
+  for (const layout of ["twin", "classic"]) {
+    await layoutSelect.selectOption(layout);
+    await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
+    assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
+    assert.ok(await leftDrives.getByRole("button").count() > 0);
+  }
+  await layoutSelect.selectOption("standard");
+  await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
+  assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
+  assert.equal(await leftDrives.count(), 0);
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
   const featureFonts = [["Viewer", "Consolas", "21"], ["Editor", "Courier New", "19"], ["Terminal", "Arial", "17"]];
@@ -1360,8 +1470,15 @@ try {
     await page.keyboard.press("Escape");
     await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
+    await sampleSurface.waitFor({ state: "hidden" });
+    const filesPane = page.getByRole("listbox", { name: "left files", exact: true });
+    if (!await filesPane.isVisible()) {
+      const documents = page.getByRole("navigation", { name: "Open documents" });
+      await documents.getByRole("button", { name: "Files", exact: true }).click();
+    }
+    await filesPane.waitFor();
   }
-  assert.equal(await page.getByRole("textbox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
+  assert.equal(await page.getByRole("combobox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
   console.log("Verified feature settings search, independent font overrides, and persistence after restart.");
   const help = page.getByRole("dialog", { name: "Help", exact: true });
   await page.context().setOffline(true);
@@ -1371,7 +1488,7 @@ try {
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
-    assert.equal(topicLinks.length, 19);
+    assert.ok(topicLinks.includes("#help-archives"));
     assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
     if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
     for (const href of topicLinks) {
@@ -1518,6 +1635,21 @@ try {
   console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
+  await testCompareWorker(page, src, dst);
+  await testCompareLayouts(page, temp);
+  await testCommandCompletion(page, temp);
+  page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
+  await testShortcutFields(page);
+  page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
+  await testOsTimestamps(page, temp);
+  await testPermanentDelete(page, temp);
+  await testInlineRename(page, temp);
+  await testLockingProcessPane(page, temp);
+  await testProcessColumns(page);
+  await testProcessQuickSearch(page, temp);
+  await testProcessExecutablePath(page, child.pid);
+  if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
+  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

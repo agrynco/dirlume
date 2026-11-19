@@ -47,6 +47,18 @@ impl EntryDetails {
             directory: metadata.is_dir() && !local::is_link(metadata),
         }
     }
+
+    fn from_ftp(entry: &suppaftp::list::File) -> Self {
+        Self {
+            size: entry.size() as u64,
+            modified: entry
+                .modified()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .map(|time| time.as_secs()),
+            directory: entry.is_directory(),
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -75,15 +87,7 @@ impl Conflict {
             replaceable,
             allow_remember: replaceable,
             incoming: Some(EntryDetails::from(incoming)),
-            existing: EntryDetails {
-                size: existing.size() as u64,
-                modified: existing
-                    .modified()
-                    .duration_since(UNIX_EPOCH)
-                    .ok()
-                    .map(|time| time.as_secs()),
-                directory: existing.is_directory(),
-            },
+            existing: EntryDetails::from_ftp(existing),
         }
     }
 
@@ -105,6 +109,115 @@ pub struct Options {
     pub moving: bool,
     pub policy: Policy,
     pub ask_read_only: bool,
+}
+
+pub(crate) struct Incoming {
+    details: EntryDetails,
+    regular: bool,
+    modified: io::Result<SystemTime>,
+}
+
+impl Incoming {
+    fn local(metadata: &fs::Metadata) -> Self {
+        Self {
+            details: EntryDetails::from(metadata),
+            regular: metadata.is_file() && !local::is_link(metadata),
+            modified: metadata.modified(),
+        }
+    }
+
+    pub(crate) fn ftp(entry: &suppaftp::list::File) -> Self {
+        Self {
+            details: EntryDetails::from_ftp(entry),
+            regular: entry.is_file(),
+            modified: Ok(entry.modified()),
+        }
+    }
+}
+
+pub(crate) struct PlannedTarget {
+    pub path: PathBuf,
+    pub replace: Option<FileRevision>,
+    pub merge: Option<same_file::Handle>,
+}
+
+pub(crate) fn plan_target(
+    target: &Path,
+    incoming: Incoming,
+    source: Option<&Path>,
+    options: &Options,
+    ask: &mut (impl FnMut(Conflict) -> io::Result<Decision> + ?Sized),
+) -> io::Result<Option<PlannedTarget>> {
+    let mut plan = PlannedTarget {
+        path: target.to_owned(),
+        replace: None,
+        merge: None,
+    };
+    let existing = match fs::symlink_metadata(target) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Some(plan)),
+        Err(error) => return Err(error),
+    };
+    if source.is_some_and(|source| same_file::is_same_file(source, target).unwrap_or(false)) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Source and destination are the same item.",
+        ));
+    }
+    let read_only = existing.permissions().readonly();
+    let existing_directory = existing.is_dir() && !local::is_link(&existing);
+    let regular = existing.is_file() && !local::is_link(&existing) && incoming.regular;
+    let merge = incoming.details.directory && existing_directory;
+    let replaceable = merge || regular;
+    let force_ask = read_only
+        && options.ask_read_only
+        && !matches!(options.policy, Policy::Skip | Policy::Rename);
+    let policy = if force_ask {
+        Policy::Ask
+    } else {
+        options.policy
+    };
+    match policy {
+        Policy::Skip => return Ok(None),
+        Policy::Rename => {
+            plan.path = available_name(target)?;
+            return Ok(Some(plan));
+        }
+        Policy::Newer
+            if !incoming.details.directory && incoming.modified? <= existing.modified()? =>
+        {
+            return Ok(None);
+        }
+        _ => {}
+    }
+    if regular {
+        plan.replace = Some(FileRevision::capture(target, &existing)?);
+    }
+    if merge {
+        plan.merge = Some(same_file::Handle::from_path(target)?);
+    }
+    if policy == Policy::Ask || !replaceable {
+        let conflict = Conflict {
+            path: local::display_path(target)
+                .unwrap_or_else(|_| target.to_string_lossy().into_owned()),
+            directory: existing_directory,
+            read_only,
+            replaceable,
+            allow_remember: !force_ask && replaceable,
+            incoming: Some(incoming.details),
+            existing: EntryDetails::from(&existing),
+        };
+        if matches!(ask(conflict)?, Decision::Skip) {
+            return Ok(None);
+        }
+    }
+    if !replaceable {
+        return Err(io::Error::new(
+            ErrorKind::AlreadyExists,
+            "The destination cannot be replaced.",
+        ));
+    }
+    Ok(Some(plan))
 }
 
 pub fn transfer(
@@ -129,73 +242,20 @@ fn transfer_entry(
 ) -> io::Result<bool> {
     progress(source, 0, None)?;
     let incoming = fs::symlink_metadata(source)?;
-    let mut target = target.to_owned();
-    let mut replace = None;
-    let mut merge = None;
-    match fs::symlink_metadata(&target) {
-        Ok(existing) => {
-            if same_file::is_same_file(source, &target).unwrap_or(false) {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "Source and destination are the same item.",
-                ));
-            }
-            let read_only = existing.permissions().readonly();
-            let directory = incoming.is_dir() && !local::is_link(&incoming);
-            let existing_directory = existing.is_dir() && !local::is_link(&existing);
-            let regular = existing.is_file()
-                && incoming.is_file()
-                && !local::is_link(&existing)
-                && !local::is_link(&incoming);
-            let replaceable = (directory && existing_directory) || regular;
-            let force_ask = read_only
-                && options.ask_read_only
-                && !matches!(options.policy, Policy::Skip | Policy::Rename);
-            let policy = if force_ask {
-                Policy::Ask
-            } else {
-                options.policy
-            };
-            match policy {
-                Policy::Skip => return Ok(false),
-                Policy::Rename => target = available_name(&target)?,
-                Policy::Newer if !directory && incoming.modified()? <= existing.modified()? => {
-                    return Ok(false)
-                }
-                _ => {
-                    if regular {
-                        replace = Some(FileRevision::capture(&target, &existing)?);
-                    }
-                    if directory && existing_directory {
-                        merge = Some(same_file::Handle::from_path(&target)?);
-                    }
-                    if policy == Policy::Ask || !replaceable {
-                        let decision = ask(Conflict {
-                            path: local::display_path(&target)
-                                .unwrap_or_else(|_| target.to_string_lossy().into_owned()),
-                            directory: existing_directory,
-                            read_only,
-                            replaceable,
-                            allow_remember: !force_ask && replaceable,
-                            incoming: Some(EntryDetails::from(&incoming)),
-                            existing: EntryDetails::from(&existing),
-                        })?;
-                        if matches!(decision, Decision::Skip) {
-                            return Ok(false);
-                        }
-                    }
-                    if !replaceable {
-                        return Err(io::Error::new(
-                            ErrorKind::AlreadyExists,
-                            "The destination cannot be replaced.",
-                        ));
-                    }
-                }
-            }
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
+    let Some(PlannedTarget {
+        path: target,
+        replace,
+        merge,
+    }) = plan_target(
+        target,
+        Incoming::local(&incoming),
+        Some(source),
+        options,
+        ask,
+    )?
+    else {
+        return Ok(false);
+    };
 
     if options.moving && merge.is_none() {
         progress(source, 0, None)?;

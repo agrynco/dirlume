@@ -19,29 +19,73 @@ use crate::{
 const POWERSHELL_PROMPT: &str = r#"
 $global:DirlumeOriginalPrompt = (Get-Item Function:prompt).ScriptBlock
 $global:DirlumePromptCount = 0
+$global:DirlumeLastHistoryId = 0
+$global:DirlumeCommandCount = 0
+$global:DirlumeLatestCommand = ''
+Import-Module PSReadLine -ErrorAction SilentlyContinue
+$dirlumeReadLine = Get-Item Function:PSConsoleHostReadLine -ErrorAction SilentlyContinue
+$global:DirlumeTracksSubmissions = [bool]$dirlumeReadLine
+function global:Send-DirlumeCommand([string]$line) {
+    if ($line.Trim()) {
+        $global:DirlumeCommandCount++
+        $global:DirlumeLatestCommand = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($line))
+        [Console]::Title = '{0}:command:{1}:{2}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumeCommandCount, $global:DirlumeLatestCommand
+    }
+}
+if ($dirlumeReadLine) {
+    $global:DirlumeOriginalReadLine = $dirlumeReadLine.ScriptBlock
+    function global:PSConsoleHostReadLine {
+        $line = & $global:DirlumeOriginalReadLine
+        if ($line -is [string]) { Send-DirlumeCommand $line }
+        $line
+    }
+}
 function global:prompt {
     $text = & $global:DirlumeOriginalPrompt
+    if (-not $global:DirlumeTracksSubmissions) {
+        $previous = Microsoft.PowerShell.Core\Get-History -Count 1
+        if ($previous -and $previous.Id -gt $global:DirlumeLastHistoryId) {
+            $global:DirlumeLastHistoryId = $previous.Id
+            # The first prompt can see the encoded startup script in PowerShell history.
+            if ($global:DirlumePromptCount -gt 0) {
+                Send-DirlumeCommand $previous.CommandLine
+            }
+        }
+    }
     $location = Get-Location
     $path = if ($location.Provider.Name -eq 'FileSystem') {
         [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($location.ProviderPath))
     }
     $global:DirlumePromptCount++
-    [Console]::Title = '{0}:{1}:{2}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path
+    [Console]::Title = '{0}:{1}:{2}:{3}:{4}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path, $global:DirlumeCommandCount, $global:DirlumeLatestCommand
     $text
 }
 "#;
 
 #[cfg(not(windows))]
-fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<()> {
+fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<bool> {
     let marker = r#"printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')""#;
     let init = match std::path::Path::new(shell).file_name().and_then(std::ffi::OsStr::to_str) {
-        Some("bash") => format!("__dirlume_prompt() {{ local status=$?; {marker}; return \"$status\"; }}; PROMPT_COMMAND+=(__dirlume_prompt)"),
-        Some("zsh") => format!("__dirlume_prompt() {{ {marker}; }}; precmd_functions+=(__dirlume_prompt)"),
+        Some("bash") => [
+            r#"__dirlume_history() { local command id pattern='^[[:blank:]]*([0-9]+)[ *] (.*)$';"#,
+            r#"command=$(HISTTIMEFORMAT= builtin history 1; printf .); command=${command%.}; command=${command%$'\n'};"#,
+            r#"if [[ ! $command =~ $pattern || -z ${BASH_REMATCH[2]} ]]; then return; fi;"#,
+            r#"id=${BASH_REMATCH[1]}; command=${BASH_REMATCH[2]};"#,
+            r#"if [[ $1 == prompt ]]; then local previous=${__dirlume_history_id-}; __dirlume_history_id=$id; [[ -n $previous && $previous != "$id" ]] || return; fi;"#,
+            r#"printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$command" | base64 | tr -d '\n')"; };"#,
+            r#"__dirlume_prompt() { local status=$?; if [[ ${__dirlume_prompt_history-} ]]; then __dirlume_history prompt; fi;"#,
+            marker,
+            r#"; return "$status"; }; HISTCONTROL=; HISTIGNORE=; shopt -s cmdhist lithist; set -o history;"#,
+            r#"if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then PS0='$(__dirlume_history submitted)'"${PS0-}"; else __dirlume_prompt_history=1; fi;"#,
+            r#"if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a '* ]]; then PROMPT_COMMAND+=(__dirlume_prompt); else PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__dirlume_prompt"; fi"#,
+        ].join(" "),
+        Some("zsh") => r#"__dirlume_prompt() { printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')"; }; __dirlume_history() { printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$1" | base64 | tr -d '\n')"; }; precmd_functions+=(__dirlume_prompt); preexec_functions+=(__dirlume_history)"#.to_owned(),
         Some("sh" | "dash" | "ksh") => format!("PS1='$(__dirlume_prompt)'\"$PS1\"; __dirlume_prompt() {{ {marker}; }}"),
-        _ => return Ok(()),
+        _ => return Ok(false),
     };
     writeln!(writer, "{init}")?;
-    writer.flush()
+    writer.flush()?;
+    Ok(true)
 }
 
 struct Terminal {
@@ -99,21 +143,31 @@ pub struct OpenTerminal {
     refresh_environment: bool,
 }
 
-fn create(request: OpenTerminal, output: Channel<Output>) -> Result<SharedTerminal> {
+pub fn shell_program() -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        "powershell.exe".into()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into())
+    }
+}
+
+fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(SharedTerminal, bool)> {
     let cwd = local::absolute(&request.directory).map_err(message)?;
     let pair = native_pty_system()
         .openpty(size(request.rows, request.cols))
         .map_err(message)?;
+    let shell = shell_program();
     #[cfg(windows)]
     let mut command = {
-        let mut command = CommandBuilder::new("powershell.exe");
+        let mut command = CommandBuilder::new(&shell);
         crate::windows_environment::apply(&mut command, request.refresh_environment)
             .map_err(message)?;
         command.args(["-NoLogo", "-NoExit", "-Command", POWERSHELL_PROMPT]);
         command
     };
-    #[cfg(not(windows))]
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(&shell);
     #[cfg(not(windows))]
@@ -166,8 +220,11 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<SharedTermin
         })
         .map_err(message)?;
     #[cfg(not(windows))]
-    install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer).map_err(message)?;
-    Ok(terminal)
+    let tracks_prompt =
+        install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer).map_err(message)?;
+    #[cfg(windows)]
+    let tracks_prompt = true;
+    Ok((terminal, tracks_prompt))
 }
 
 #[tauri::command]
@@ -175,11 +232,11 @@ pub async fn open_terminal(
     request: OpenTerminal,
     output: Channel<Output>,
     state: State<'_, Terminals>,
-) -> Result<()> {
+) -> Result<bool> {
     let id = request.id;
-    let terminal = blocking(move || create(request, output)).await?;
+    let (terminal, tracks_prompt) = blocking(move || create(request, output)).await?;
     state.0.lock().map_err(message)?.insert(id, terminal);
-    Ok(())
+    Ok(tracks_prompt)
 }
 
 #[tauri::command]
@@ -223,4 +280,87 @@ pub async fn close_terminal(id: u32, state: State<'_, Terminals>) -> Result<()> 
         Ok(())
     })
     .await
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    use tauri::ipc::InvokeResponseBody;
+
+    #[test]
+    fn reports_powershell_submission_from_the_real_pty() {
+        let (send, receive) = mpsc::channel();
+        let output = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(body) = body {
+                let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+                if let Some(encoded) = value["data"].as_str() {
+                    let _ = send.send(STANDARD.decode(encoded).unwrap());
+                }
+            }
+            Ok(())
+        });
+        let fixture = tempfile::tempdir().unwrap();
+        let (terminal, _) = create(
+            OpenTerminal {
+                id: 1,
+                directory: local::display_path(fixture.path()).unwrap(),
+                prompt_token: "Dirlume-terminal-fixture".to_owned(),
+                rows: 25,
+                cols: 120,
+                refresh_environment: false,
+            },
+            output,
+        )
+        .unwrap();
+        let read_until = |marker: &str, found: &dyn Fn(&str) -> bool| {
+            let expires = Instant::now() + Duration::from_secs(12);
+            let mut bytes = Vec::new();
+            let mut answered = 0;
+            while let Ok(chunk) =
+                receive.recv_timeout(expires.saturating_duration_since(Instant::now()))
+            {
+                bytes.extend(chunk);
+                let output = String::from_utf8_lossy(&bytes);
+                let reports = output.matches("\x1b[6n").count();
+                if reports > answered {
+                    let mut terminal = terminal.lock().unwrap();
+                    for _ in answered..reports {
+                        terminal.writer.write_all(b"\x1b[1;1R").unwrap();
+                    }
+                    terminal.writer.flush().unwrap();
+                    answered = reports;
+                }
+                if found(&output) {
+                    return;
+                }
+            }
+            panic!(
+                "Prompt or history marker missing: {marker}; received: {:?}",
+                String::from_utf8_lossy(&bytes[..bytes.len().min(2200)])
+            );
+        };
+        read_until("initial prompt", &|output| {
+            output.contains("Dirlume-terminal-fixture:1:")
+        });
+        let submitted = "Write-Output 'terminal-history-fixture'";
+        {
+            let mut terminal = terminal.lock().unwrap();
+            write!(terminal.writer, "{submitted}\r").unwrap();
+            terminal.writer.flush().unwrap();
+        }
+        let command = STANDARD.encode(submitted);
+        let submitted_marker = format!("Dirlume-terminal-fixture:command:1:{command}\x07");
+        let prompt_marker = format!(":1:{command}\x07");
+        // ConPTY can coalesce the submission and prompt title updates for a fast command.
+        read_until("submitted command", &|output| {
+            output.contains(&submitted_marker)
+                || output.split("\x1b]").any(|title| {
+                    title.contains("Dirlume-terminal-fixture:2:") && title.contains(&prompt_marker)
+                })
+        });
+    }
 }

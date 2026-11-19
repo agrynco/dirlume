@@ -32,9 +32,19 @@ export interface Listing {
   omitted: number;
 }
 
+export type FtpSearchEvent =
+  | { kind: "batch"; segments: string[]; prefix: string; entries: Entry[] }
+  | { kind: "done"; omitted: number };
+
 export interface LocalListing extends Listing {
   path: string;
   parent: string | null;
+}
+
+export type FolderLinkType = "none" | "junction" | "symbolic";
+export interface FolderCreation {
+  last: string | null;
+  failure: { name: string; error: string } | null;
 }
 
 export interface QuickLocation {
@@ -46,11 +56,24 @@ export type Place =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "server"; id: number; address: string; segments: string[] }
   | { kind: "ftp"; id: number; profileId: string; address: string; segments: string[] }
+  | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; address: string }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
-export type RemotePlace = Exclude<Place, { kind: "local" }>;
+export type RemotePlace = Exclude<Place, { kind: "local" | "archive" }>;
 export type FtpPlace = Extract<Place, { kind: "ftp" }>;
-export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" }>;
+export type ArchivePlace = Extract<Place, { kind: "archive" }>;
+export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" | "archive" }>;
+
+export type ArchiveSettings = {
+  format: string; appendExtension: boolean; level: number; method: string; solid: boolean; encrypted: boolean;
+  encryptHeaders: boolean; volumeBytes: number | null; selfExtracting: boolean; exclude: string;
+  openForWriting: boolean; keepWarnings: boolean;
+};
+
+export type CreateArchive = Omit<ArchiveSettings, "encrypted"> & {
+  directory: string; names: string[]; destination: string; password: string | null;
+  deleteSources: boolean; overwrite: boolean;
+};
 
 export interface FtpProfile {
   id: string;
@@ -79,8 +102,15 @@ export const textEncodingLabels = {
 } as const;
 export type TextEncoding = keyof typeof textEncodingLabels;
 
+export interface DiskSpace {
+  available: number;
+  total: number;
+}
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
+export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean };
+export type CommandCompletion = { index: number; length: number; matches: { label: string; text: string; directory: boolean }[] };
 export interface SizeResult {
   name: string;
   bytes: number;
@@ -96,6 +126,7 @@ export type TransferSource =
   | { kind: "local"; directory: string; name: string }
   | { kind: "server"; connection: number; segments: string[]; folder: boolean }
   | { kind: "ftp"; connection: number; segments: string[] }
+  | { kind: "archive"; archive: number; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string };
 
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
@@ -134,13 +165,21 @@ export interface ProcessInfo extends ProcessId {
   name: string;
   cpu: number;
   memory: number;
+  executable: string | null;
   canTerminate: boolean;
 }
+
+export type McpConnection = { endpoint: string; token: string };
 
 export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {
+  startMcp: () => invoke<McpConnection>("start_mcp"),
+  stopMcp: () => invoke<void>("stop_mcp"),
+  mcpConnection: () => invoke<McpConnection | null>("mcp_connection"),
+  mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
+  mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
   checkForUpdate: (manual: boolean) => invoke<AppUpdate | null>("check_for_update", { manual }),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
@@ -157,6 +196,23 @@ export const api = {
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
+  formatTimestamps: (timestamps: number[], style: "date" | "time" | "date_time") =>
+    invoke<(string | null)[]>("format_timestamps", { timestamps, style }),
+  createFolders: (directory: string, request: { name: string; multiple: boolean; linkType: FolderLinkType; target: string }) =>
+    invoke<FolderCreation>("create_folders", { directory, request }),
+  archiveCapabilities: () => invoke<{ formats: string[]; sfx: boolean }>("archive_capabilities"),
+  createArchive: (id: number, request: CreateArchive, output: Channel<number>) =>
+    invoke<{ paths: string[]; warning: string }>("create_archive", { id, request, output }),
+  cancelArchive: (id: number) => invoke<void>("cancel_archive", { id }),
+  openArchive: (path: string, password?: string) =>
+    invoke<{ id: number; path: string; parent: string; writable: boolean; listing: Listing }>("open_archive", { path, password: password ?? null }),
+  listArchive: (id: number, segments: string[]) => invoke<Listing>("list_archive", { id, segments }),
+  readArchiveText: (id: number, segments: string[]) => invoke<TextDocument>("read_archive_text", { id, segments }),
+  readArchiveBytes: (id: number, segments: string[], offset: number) => invoke<BytePage>("read_archive_bytes", { id, segments, offset }),
+  saveArchiveText: (id: number, segments: string[], revision: string, text: string, encoding: TextEncoding) =>
+    invoke<TextDocument>("save_archive_text", { id, segments, revision, text, encoding }),
+  deleteArchiveEntries: (id: number, paths: string[][]) => invoke<void>("delete_archive_entries", { id, paths }),
+  diskSpace: (path: string) => invoke<DiskSpace>("disk_space", { path }),
   fileAttributes: (directory: string, name: string) =>
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
@@ -174,6 +230,9 @@ export const api = {
     invoke<Connection & { segments: string[] }>("connect_ftp", { id, segments }),
   disconnectFtp: (id: number) => invoke<void>("disconnect_ftp", { id }),
   listFtp: (id: number, segments: string[]) => invoke<Listing>("list_ftp", { id, segments }),
+  searchFtp: (id: number, request: { connection: number; segments: string[]; mask: string; showHidden: boolean },
+    output: Channel<FtpSearchEvent>) => invoke<void>("search_ftp", { id, request, output }),
+  cancelFtpSearch: (id: number) => invoke<void>("cancel_ftp_search", { id }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
   deleteFtp: (id: number, segments: string[], recursive: boolean) =>
     invoke<void>("delete_ftp", { id, segments, recursive }),
@@ -204,7 +263,9 @@ export const api = {
     invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
   openTerminal: ({ id, path: directory, refreshEnvironment }: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
-    invoke<void>("open_terminal", { request: { id, directory, promptToken, rows, cols, refreshEnvironment }, output }),
+    invoke<boolean>("open_terminal", { request: { id, directory, promptToken, rows, cols, refreshEnvironment }, output }),
+  completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean) =>
+    invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment } }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),
@@ -228,6 +289,7 @@ export const api = {
 
 export function placePath(place: Place) {
   if (place.kind === "server" || place.kind === "ftp") return "/" + place.segments.join("/");
+  if (place.kind === "archive") return place.path + "!/" + place.segments.join("/");
   return place.path;
 }
 
@@ -241,10 +303,15 @@ export function readPlaceText(file: NamedFile) {
   const { place, name } = file;
   if (place.kind === "local") return api.readText(place.path, name);
   const segments = [...place.segments, name];
+  if (place.kind === "archive") return api.readArchiveText(place.id, segments);
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
 }
 
 export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string): Promise<TextDocument> {
+  if (place.kind === "archive") {
+    if (!place.writable || !document.revision) throw new Error("The archive is read-only.");
+    return api.saveArchiveText(place.id, [...place.segments, name], document.revision, text, document.encoding);
+  }
   if (place.kind === "ftp") {
     if (!document.revision) throw new Error("Reopen the FTP file before saving again.");
     return api.saveFtpText(place.id, [...place.segments, name], document.revision, text);
@@ -257,7 +324,12 @@ export async function savePlaceText({ place, name }: NamedFile, document: TextDo
 export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
   if (place.kind === "local") return api.readBytes(place.path, name, offset);
   const segments = [...place.segments, name];
+  if (place.kind === "archive") return api.readArchiveBytes(place.id, segments, offset);
   return place.kind === "ftp" ? api.readFtpBytes(place.id, segments, offset) : api.readServerBytes(place.id, segments, offset);
+}
+
+export function writableTextPlace(place: TextPlace) {
+  return place.kind !== "server" && (place.kind !== "archive" || place.writable);
 }
 
 export function isPermissionError(error: string) {
@@ -270,6 +342,7 @@ export function isLockError(error: string) {
 
 export function folderLabel(place: Place) {
   if (place.kind === "server" || place.kind === "ftp") return place.segments.at(-1) ?? place.address;
+  if (place.kind === "archive" && place.segments.length) return place.segments.at(-1)!;
   if (place.kind === "kswitcher" && !place.path) return place.address;
   return place.path.split(windowsClient ? /[\\/]/ : "/").filter(Boolean).at(-1) ?? place.path;
 }
