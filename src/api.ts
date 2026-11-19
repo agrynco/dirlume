@@ -111,6 +111,7 @@ export interface ProcessInfo extends ProcessId {
 }
 
 export const api = {
+  buildVersion: () => invoke<string>("build_version"),
   locations: () => invoke<QuickLocation[]>("locations"),
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),

@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    version,
+    version = dirlume_lib::BUILD_VERSION,
     about = "Share a folder with Dirlume desktop clients over TLS"
 )]
 struct Cli {

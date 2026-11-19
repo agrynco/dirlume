@@ -165,6 +165,10 @@ try {
   await hiddenFolder.waitFor();
   assert.equal(await hiddenToggle.getAttribute("aria-pressed"), "true");
   await optionsButton.click();
+  await options.getByRole("button", { name: "General", exact: true }).click();
+  const productVersion = JSON.parse(await readFile("package.json", "utf8")).version;
+  const buildNumber = process.env.DIRLUME_BUILD_NUMBER;
+  await options.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
   await options.getByRole("button", { name: "Main File Panels", exact: true }).click();
   assert.equal(await options.getByRole("checkbox", { name: "Show hidden files" }).isChecked(), true);
   await options.getByRole("button", { name: "Done" }).click();

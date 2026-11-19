@@ -1,12 +1,12 @@
 import { Button } from "./Button";
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { AppearanceSettings, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
 import { PathField } from "./PathField";
 import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
-import { windowsClient } from "./api";
+import { api, windowsClient } from "./api";
 import {
   commandNames, commands, commandScope, defaultBindings, eventShortcut, showShortcut, wheelBindings,
   type Command, type Preferences, type Provider,
@@ -57,6 +57,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [preferences, onChange] = useState(saved);
   const [capture, setCapture] = useState<Command | null>(null);
   const [conflict, setConflict] = useState("");
+  const [buildVersion, setBuildVersion] = useState("");
   const hasChanges = JSON.stringify(preferences) !== JSON.stringify(saved);
   const searching = Boolean(query.trim());
   const terms = query.trim().toLocaleLowerCase().split(/\s+/);
@@ -64,7 +65,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     const text = [...labels, ...labels.map((label) => t(label))].join(" ").toLocaleLowerCase();
     return terms.every((term) => text.includes(term));
   };
-  const showGeneral = matches("General", "Language", ...Object.values(languages), "Remote connection", "Dirlume server", "KSwitcher installation folder");
+  const showGeneral = matches("General", "Language", ...Object.values(languages), "Remote connection", "Dirlume server", "KSwitcher installation folder", "Version");
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
     const panelTerms = feature === "filePanels" ? ["Show hidden files", ...Object.values(colorGroups.panels.colors)] : [];
@@ -82,6 +83,13 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
   }, [initialLocation]);
+
+  useEffect(() => {
+    if (page !== "general" || buildVersion) return;
+    let current = true;
+    void api.buildVersion().then((version) => { if (current) setBuildVersion(version); }).catch(() => {});
+    return () => { current = false; };
+  }, [page, buildVersion]);
 
   function select(next: Page) {
     if (next !== page && pageBody.current) pageBody.current.scrollTop = 0;
@@ -185,6 +193,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 browse="folder" showHidden={preferences.hidden} onChange={(path) => onChange({ ...preferences, kswitcher: path })} />
             </div>
           )}
+          {buildVersion && <div className="setting"><span>{t("Version")}</span><code>{buildVersion}</code></div>}
         </div>
       ) : isFeaturePage(page) ? (
         <>

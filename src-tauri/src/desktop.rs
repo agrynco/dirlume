@@ -40,6 +40,11 @@ pub(crate) async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
+fn build_version() -> &'static str {
+    crate::BUILD_VERSION
+}
+
+#[tauri::command]
 async fn locations() -> Result<Vec<local::Location>> {
     blocking(|| Ok(local::locations())).await
 }
@@ -1121,6 +1126,7 @@ pub fn run() {
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
     builder
         .invoke_handler(tauri::generate_handler![
+            build_version,
             locations,
             requested_location,
             crate::processes::list_processes,
