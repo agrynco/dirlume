@@ -1,23 +1,21 @@
 use std::{
     collections::HashMap,
     fs,
+    future::Future,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicU32, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use reqwest::{
-    blocking::{Client, Response},
-    redirect::Policy,
-    Certificate,
-};
+use reqwest::{redirect::Policy, Certificate, Client, Response};
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     diagnostics, ftp, ftp_transfer, kswitcher, local, local_transfer,
@@ -192,7 +190,7 @@ impl Connection {
         Ok(Self { client, invitation })
     }
 
-    fn request(
+    async fn request(
         &self,
         action: &str,
         payload: impl Serialize,
@@ -206,6 +204,7 @@ impl Connection {
             .timeout(timeout)
             .json(&payload)
             .send()
+            .await
             .map_err(message)?;
         if !response.status().is_success() {
             return Err(format!(
@@ -216,15 +215,13 @@ impl Connection {
         Ok(response)
     }
 
-    fn list(&self, segments: Vec<String>) -> Result<RemoteListing> {
-        let response = self.request("v1/list", RemotePath { segments }, Duration::from_secs(20))?;
-        let mut bytes = Vec::new();
-        const MAX_LISTING: u64 = 32 * 1024 * 1024;
-        response
-            .take(MAX_LISTING + 1)
-            .read_to_end(&mut bytes)
-            .map_err(message)?;
-        if bytes.len() as u64 > MAX_LISTING {
+    async fn list(&self, segments: Vec<String>) -> Result<RemoteListing> {
+        let response = self
+            .request("v1/list", RemotePath { segments }, Duration::from_secs(20))
+            .await?;
+        const MAX_LISTING: usize = 32 * 1024 * 1024;
+        let bytes = collect_response(response, MAX_LISTING + 1).await?;
+        if bytes.len() > MAX_LISTING {
             return Err("The server returned too many directory entries.".to_owned());
         }
         serde_json::from_slice(&bytes).map_err(message)
@@ -234,31 +231,50 @@ impl Connection {
         &self,
         segments: Vec<String>,
         file: &mut fs::File,
+        session: &TransferSession,
         mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ) -> Result<()> {
         let name = PathBuf::from(segments.last().cloned().unwrap_or_default());
-        let response = self.request(
-            "v1/download",
-            RemotePath { segments },
-            Duration::from_secs(60 * 60),
-        )?;
-        let length = response.content_length();
-        local::copy_stream(response, file, length, |bytes, total| {
-            progress(&name, bytes, total)
-        })
-        .map_err(message)
+        tauri::async_runtime::block_on(session.interrupt(async {
+            let mut response = self
+                .request(
+                    "v1/download",
+                    RemotePath { segments },
+                    Duration::from_secs(60 * 60),
+                )
+                .await?;
+            let length = response.content_length();
+            let mut written = 0;
+            let mut last_display = Instant::now();
+            progress(&name, 0, length).map_err(message)?;
+            while let Some(chunk) = response.chunk().await.map_err(message)? {
+                session.ensure_running().map_err(message)?;
+                file.write_all(&chunk).map_err(message)?;
+                written += chunk.len() as u64;
+                if last_display.elapsed() >= Duration::from_millis(50) {
+                    progress(&name, written, length).map_err(message)?;
+                    last_display = Instant::now();
+                }
+            }
+            if length.is_some_and(|expected| expected != written) {
+                return Err("The source changed or the transfer was incomplete.".to_owned());
+            }
+            progress(&name, written, length).map_err(message)
+        }))
     }
 
     fn download_tree(
         &self,
         segments: Vec<String>,
         target: &Path,
+        session: &TransferSession,
         progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ) -> Result<()> {
         if let Some(name) = segments.last() {
             progress(Path::new(name), 0, None).map_err(message)?;
         }
-        let listing = self.list(segments.clone())?;
+        let listing =
+            tauri::async_runtime::block_on(session.interrupt(self.list(segments.clone())))?;
         if listing.omitted > 0 {
             return Err("The server could not list every item in this folder.".to_owned());
         }
@@ -271,10 +287,10 @@ impl Connection {
             let mut path = segments.clone();
             path.push(item.name);
             if item.directory {
-                self.download_tree(path, &destination, progress)?;
+                self.download_tree(path, &destination, session, progress)?;
             } else {
                 let mut file = fs::File::create_new(destination).map_err(message)?;
-                self.download_file(path, &mut file, &mut *progress)?;
+                self.download_file(path, &mut file, session, &mut *progress)?;
                 file.sync_all().map_err(message)?;
             }
         }
@@ -282,12 +298,23 @@ impl Connection {
     }
 }
 
+async fn collect_response(mut response: Response, limit: usize) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    while bytes.len() < limit {
+        let Some(chunk) = response.chunk().await.map_err(message)? else {
+            break;
+        };
+        bytes.extend_from_slice(&chunk[..chunk.len().min(limit - bytes.len())]);
+    }
+    Ok(bytes)
+}
+
 #[derive(Default)]
 struct TransferSessions(Mutex<HashMap<u32, Arc<TransferSession>>>);
 
 #[derive(Default)]
 struct TransferSession {
-    cancelled: AtomicBool,
+    cancelled: CancellationToken,
     pending: Mutex<Option<PendingConflict>>,
     remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
 }
@@ -299,8 +326,25 @@ struct PendingConflict {
 }
 
 impl TransferSession {
+    fn ensure_running(&self) -> io::Result<()> {
+        if self.cancelled.is_cancelled() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Transfer canceled.",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn interrupt<T>(&self, operation: impl Future<Output = Result<T>>) -> Result<T> {
+        self.cancelled
+            .run_until_cancelled(operation)
+            .await
+            .unwrap_or_else(|| Err("Transfer canceled.".to_owned()))
+    }
+
     fn cancel(&self) -> Result<()> {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.cancelled.cancel();
         self.pending.lock().map_err(message)?.take();
         Ok(())
     }
@@ -328,12 +372,7 @@ impl TransferSession {
                 .pending
                 .lock()
                 .map_err(|error| io::Error::other(message(error)))?;
-            if self.cancelled.load(Ordering::Relaxed) {
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "Transfer canceled.",
-                ));
-            }
+            self.ensure_running()?;
             *pending = Some(PendingConflict {
                 reply,
                 remember_index: index,
@@ -571,12 +610,7 @@ async fn transfer_item(
             TransferSource::Kswitcher { name, .. } => (name.as_str(), None),
         };
         let mut progress = |path: &Path, bytes, total| {
-            if session.cancelled.load(Ordering::Relaxed) {
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "Transfer canceled.",
-                ));
-            }
+            session.ensure_running()?;
             let file = path
                 .file_name()
                 .unwrap_or(path.as_os_str())
@@ -678,12 +712,12 @@ async fn transfer_item(
                         .ok_or("Choose a local destination folder.")?;
                     let workspace = tempfile::tempdir_in(parent).map_err(message)?;
                     let staged = workspace.path().join("download");
-                    connection.download_tree(segments, &staged, &mut progress)?;
+                    connection.download_tree(segments, &staged, &session, &mut progress)?;
                     progress(&target, 0, None).map_err(message)?;
                     renamest::rename_exclusive(staged, target).map_err(message)?;
                 } else {
-                    download_to(&target, |file| {
-                        connection.download_file(segments, file, &mut progress)
+                    download_to(&target, &session, |file| {
+                        connection.download_file(segments, file, &session, &mut progress)
                     })?;
                 }
             }
@@ -727,12 +761,8 @@ struct Connected {
 
 #[tauri::command]
 async fn connect_server(invitation: String, state: State<'_, Connections>) -> Result<Connected> {
-    let (connection, listing) = blocking(move || {
-        let connection = Connection::connect(&invitation)?;
-        let listing = connection.list(Vec::new())?;
-        Ok((connection, listing))
-    })
-    .await?;
+    let connection = Connection::connect(&invitation)?;
+    let listing = connection.list(Vec::new()).await?;
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     let address = connection
         .invitation
@@ -759,21 +789,20 @@ async fn list_server(
     state: State<'_, Connections>,
 ) -> Result<RemoteListing> {
     let connection = state.get(id)?;
-    blocking(move || connection.list(segments)).await
+    connection.list(segments).await
 }
 
 #[tauri::command]
 async fn disconnect_server(id: u32, state: State<'_, Connections>) -> Result<()> {
-    let connection = state.connections.lock().map_err(message)?.remove(&id);
-    // reqwest's blocking client owns a runtime and must also be dropped outside an async context.
-    blocking(move || {
-        drop(connection);
-        Ok(())
-    })
-    .await
+    state.connections.lock().map_err(message)?.remove(&id);
+    Ok(())
 }
 
-fn download_to(path: &Path, write: impl FnOnce(&mut fs::File) -> Result<()>) -> Result<()> {
+fn download_to(
+    path: &Path,
+    session: &TransferSession,
+    write: impl FnOnce(&mut fs::File) -> Result<()>,
+) -> Result<()> {
     local::ensure_absent(path).map_err(message)?;
     let directory = path
         .parent()
@@ -781,8 +810,92 @@ fn download_to(path: &Path, write: impl FnOnce(&mut fs::File) -> Result<()>) -> 
     let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(message)?;
     write(staged.as_file_mut())?;
     staged.as_file().sync_all().map_err(message)?;
+    session.ensure_running().map_err(message)?;
     staged.persist_noclobber(path).map_err(message)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod server_download_tests {
+    use super::*;
+    use std::{net::TcpListener, thread};
+
+    #[test]
+    fn cancel_interrupts_stalled_server_headers_and_body_without_publishing() {
+        for send_headers in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = format!("http://{}/", listener.local_addr().unwrap());
+            let (started, stalled) = mpsc::sync_channel(1);
+            let (release, released) = mpsc::channel::<()>();
+            let (received_headers, response) = mpsc::sync_channel(1);
+            let (received_chunk, partial) = mpsc::sync_channel(1);
+            let peer = thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = [0; 1024];
+                assert_ne!(socket.read(&mut request).unwrap(), 0);
+                if send_headers {
+                    socket
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 128\r\n\r\n")
+                        .unwrap();
+                    response.recv_timeout(Duration::from_secs(5)).unwrap();
+                    // Send the partial body after the progress reporting interval.
+                    thread::sleep(Duration::from_millis(75));
+                    socket.write_all(b"partial").unwrap();
+                }
+                started.send(()).unwrap();
+                released.recv_timeout(Duration::from_secs(10)).ok();
+            });
+            let temp = tempfile::tempdir().unwrap();
+            let destination = temp.path().join("download.bin");
+            let (result, done) = mpsc::sync_channel(1);
+            let session = Arc::new(TransferSession::default());
+            let transfer = thread::spawn({
+                let destination = destination.clone();
+                let session = Arc::clone(&session);
+                move || {
+                    let connection = Connection {
+                        client: Client::builder().no_proxy().build().unwrap(),
+                        invitation: Invitation {
+                            address: address.parse().unwrap(),
+                            certificate: String::new(),
+                            token: String::new(),
+                        },
+                    };
+                    let downloaded = download_to(&destination, &session, |file| {
+                        connection.download_file(
+                            vec!["download.bin".to_owned()],
+                            file,
+                            &session,
+                            |_, bytes, _| {
+                                if bytes == 0 {
+                                    let _ = received_headers.try_send(());
+                                } else {
+                                    let _ = received_chunk.try_send(bytes);
+                                }
+                                Ok(())
+                            },
+                        )
+                    });
+                    result.send(downloaded).unwrap();
+                }
+            });
+            stalled.recv_timeout(Duration::from_secs(5)).unwrap();
+            if send_headers {
+                assert_eq!(partial.recv_timeout(Duration::from_secs(5)).unwrap(), 7);
+            }
+            session.cancel().unwrap();
+            let cancelled = done.recv_timeout(Duration::from_secs(2));
+            drop(release);
+            peer.join().unwrap();
+            assert_eq!(cancelled.unwrap().unwrap_err(), "Transfer canceled.");
+            transfer.join().unwrap();
+            assert!(!destination.exists());
+            assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+        }
+    }
 }
 
 const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
@@ -922,14 +1035,15 @@ async fn read_server_text(
     state: State<'_, Connections>,
 ) -> Result<TextDocument> {
     let connection = state.get(id)?;
-    blocking(move || {
-        decode_text(connection.request(
+    let response = connection
+        .request(
             "v1/download",
             RemotePath { segments },
             Duration::from_secs(45),
-        )?)
-    })
-    .await
+        )
+        .await?;
+    let bytes = collect_response(response, TEXT_LIMIT as usize + 1).await?;
+    decode_text(bytes.as_slice())
 }
 
 #[tauri::command]
@@ -949,16 +1063,16 @@ async fn read_server_bytes(
     state: State<'_, Connections>,
 ) -> Result<BytePage> {
     let connection = state.get(id)?;
-    blocking(move || {
-        let response = connection.request(
+    let response = connection
+        .request(
             "v1/bytes",
             ByteRequest { segments, offset },
             Duration::from_secs(20),
-        )?;
-        let max_response = crate::protocol::BYTE_PAGE_SIZE * 4 + 128;
-        serde_json::from_reader(response.take(max_response)).map_err(message)
-    })
-    .await
+        )
+        .await?;
+    let max_response = crate::protocol::BYTE_PAGE_SIZE as usize * 4 + 128;
+    let bytes = collect_response(response, max_response).await?;
+    serde_json::from_slice(&bytes).map_err(message)
 }
 
 fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
