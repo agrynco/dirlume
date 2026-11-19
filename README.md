@@ -23,6 +23,7 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Default keys | Action |
 | --- | --- |
 | F1 | Open the offline Help guide in the current interface language. |
+| F9 | Open the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Mark a range from the current row, or unmark it when the first row you move onto is already marked. Reverse direction to shrink the range. |
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
@@ -59,6 +60,8 @@ Drag marked files and folders into the other local pane to open the transfer dia
 Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort the table, or search by name or PID. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
 
 Press **Ctrl+A** while focused on a file list to inspect the current item’s attributes, owner, and timestamps. **Apply** saves supported flags and refreshes the file panes. Windows supports Archive, Hidden, System, Not indexed, and Read-only on files. On Linux and macOS you can change the owner’s write bit. Remote item details are read-only and depend on what the source reports.
+
+In the main menu, **Help → Help** opens the offline guide and **Help → About** shows the running version. **Commands → Check for updates** checks for a desktop update.
 
 ## Build
 

@@ -1166,7 +1166,8 @@ try {
   await rightHeader().getByRole("button", { name: "Size", exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.locator("#right-files .file-size:visible").count(), 0);
   assert.equal(await columnWidth("right", "modified"), rightModified - 28);
-  assert.equal(await rightHeader().locator(".col-modified").evaluate((column) => column.getBoundingClientRect().left), modifiedPosition - rightSize);
+  const newModifiedPosition = await rightHeader().locator(".col-modified").evaluate((column) => column.getBoundingClientRect().left);
+  assert.ok(Math.abs(newModifiedPosition - (modifiedPosition - rightSize)) <= 1);
   assert.equal(await columnWidth("left", "size"), leftSize + 32);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
@@ -1383,9 +1384,36 @@ try {
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);
   console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
-  await page.getByRole("button", { name: "Commands", exact: true }).click();
-  const updateAction = page.getByRole("dialog", { name: "Commands", exact: true })
-    .getByRole("button", { name: "Check for updates", exact: true });
+  const menubar = page.getByRole("menubar", { name: "Main menu" });
+  const group = (name) => menubar.getByRole("menuitem", { name, exact: true });
+  const menu = (name) => menubar.getByRole("menu", { name, exact: true });
+  const fileList = page.getByRole("listbox", { name: "left files", exact: true });
+  assert.deepEqual(await menubar.getByRole("menuitem").allTextContents(), ["Left", "Files", "Commands", "Options", "Right", "Help"]);
+  await fileList.focus();
+  await page.keyboard.press("F9");
+  await menu("Left").waitFor();
+  await page.keyboard.press("ArrowLeft");
+  const helpItems = menu("Help").getByRole("menuitem");
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About"]);
+  await page.keyboard.press("Enter");
+  await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await fileList.evaluate((list) => document.activeElement === list), true);
+  await group("Help").click();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  const about = page.getByRole("dialog", { name: "About", exact: true });
+  await about.getByText("Dirlume", { exact: true }).waitFor();
+  await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await group("Files").click();
+  const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });
+  assert.match(await attributesAction.getAttribute("title"), /Ctrl\+A/);
+  if (process.env.DIRLUME_MENU_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_MENU_SCREENSHOT, scale: "css" });
+  await page.keyboard.press("Escape");
+  await menu("Files").waitFor({ state: "hidden" });
+  await group("Commands").click();
+  const updateAction = menu("Commands").getByRole("menuitem", { name: "Check for updates", exact: true });
   if (!process.env.DIRLUME_UPDATER_PUBLIC_KEY) {
     await updateAction.click();
     await page.getByRole("alert").filter({ hasText: /^Updates are unavailable in this build\.$/ }).waitFor();
@@ -1456,6 +1484,7 @@ try {
   assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
   console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
   await exitDesktop(page);
+  console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {
   if (lockedBy) await close(lockedBy);

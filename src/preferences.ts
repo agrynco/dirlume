@@ -39,7 +39,7 @@ export const commands = {
   pasteClipboard: { label: "Paste files from clipboard", key: "Ctrl+V" },
   recycle: { label: "Move to Trash", key: "F8" },
   delete: { label: "Delete permanently", key: "Shift+Delete" },
-  menu: { label: "Open commands menu", key: "F9" },
+  menu: { label: "Open main menu", key: "F9" },
   close: { label: "Close main window", key: "F10" },
   leftLocations: { label: "Left pane sources", key: "Alt+F1" },
   rightLocations: { label: "Right pane sources", key: "Alt+F2" },
@@ -74,7 +74,7 @@ export type Bindings = Record<Command, string>;
 export type Provider = "server" | "kswitcher";
 
 export function commandScope(command: Command) {
-  if (command === "help") return "global";
+  if (command === "help" || command === "menu") return "global";
   if (command === "zoomFont") return "wheel";
   if (command === "ftpSources") return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
