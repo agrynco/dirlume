@@ -48,9 +48,11 @@ export async function testTerminalEnvironment(page) {
 
   async function setting(enabled) {
     await page.getByRole("button", { name: "Options", exact: true }).click();
-    await options.getByRole("searchbox", { name: "Search settings" }).fill("refresh environment variables");
+    const search = options.getByRole("searchbox", { name: "Search settings" });
+    await search.fill("refresh environment variables");
     await options.getByRole("button", { name: "Terminal", exact: true }).click();
     await options.getByRole("checkbox", { name: "Automatically refresh environment variables", exact: true }).setChecked(enabled);
+    await search.fill("");
     await options.getByRole("button", { name: "Done", exact: true }).click();
   }
 

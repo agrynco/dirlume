@@ -32,7 +32,14 @@ export async function testFilenameRendering(page, root) {
   }, selected);
   await page.evaluate(() => document.fonts.ready.then(() => {}));
   const resize = pane.getByRole("separator", { name: "Resize Name column", exact: true });
-  for (let index = 0; index < 36; index++) await resize.press("ArrowRight");
+  async function resizeNameTo(targetWidth) {
+    const width = await resize.evaluate((handle) => handle.parentElement.getBoundingClientRect().width);
+    const key = width < targetWidth ? "ArrowRight" : "ArrowLeft";
+    // Keyboard resizing moves eight CSS pixels per press. The automatic width depends on the viewport.
+    const steps = Math.round(Math.abs(targetWidth - width) / 8);
+    for (let index = 0; index < steps; index++) await resize.press(key);
+  }
+  await resizeNameTo(600);
   for (let index = 0; index < forms.length; index++) {
     await rows.and(pane.getByTitle(forms[index], { exact: true })).click();
     const values = await Promise.all(forms.map((form, other) => dimensions(form, other === index)));
@@ -43,7 +50,7 @@ export async function testFilenameRendering(page, root) {
       assert.equal(value.content, sample);
       assert.equal(value.textOverflow, "ellipsis");
       assert.equal(value.direction, "ltr");
-      assert.equal(value.overflowing, false);
+      assert.equal(value.overflowing, false, `The ${value.width}px filename should fit in ${value.visibleWidth}px.`);
     }
     assert.ok(Math.abs(values[0].width - values[1].width) < 0.5);
     if (process.env.DIRLUME_FILENAME_SCREENSHOTS) {
@@ -53,7 +60,7 @@ export async function testFilenameRendering(page, root) {
       }
     }
   }
-  for (let index = 0; index < 55; index++) await resize.press("ArrowLeft");
+  await resizeNameTo(220);
   assert.equal((await dimensions(forms[1], true)).overflowing, true);
   if (process.env.DIRLUME_FILENAME_SCREENSHOTS) {
     await nameField(forms[1]).screenshot({ path: join(process.env.DIRLUME_FILENAME_SCREENSHOTS, "filename-ellipsis.png"), scale: "css" });

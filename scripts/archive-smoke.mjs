@@ -122,5 +122,10 @@ export async function testArchives(page, root) {
   await document.getByText("archived text", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await document.waitFor({ state: "hidden" });
+  // Closing a viewer can return to a document opened by an earlier smoke test.
+  const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true })
+    .getByRole("button", { name: "Files", exact: true });
+  if (await filesTab.isVisible()) await filesTab.click();
+  await left.waitFor();
   console.log("Verified ZIP creation, overwrite cancellation, copying, editing, removal, and encrypted 7z browsing with the Windows desktop app.");
 }
