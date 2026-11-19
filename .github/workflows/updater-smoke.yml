@@ -2,13 +2,6 @@ name: Install signed desktop updates
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/updater-smoke.yml'
-      - 'scripts/updater-smoke*'
-      - 'scripts/package.mjs'
-      - 'src-tauri/src/updates.rs'
-      - 'src-tauri/src/updates/**'
-      - 'src-tauri/Cargo.lock'
   workflow_dispatch:
 
 permissions:
