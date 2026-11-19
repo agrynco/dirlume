@@ -7,7 +7,7 @@ import {
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
-import { formatDate, formatSize, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
@@ -68,7 +68,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const [columnLayout, setColumnLayout] = useState(() => readColumnLayout(side));
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
-  const selected = entries.length ? Math.max(0, entries.findIndex((entry) => entry.name === pane.selected)) : -1;
+  const selected = paneCursorIndex(pane, entries);
   const search = Boolean(pane.search);
   const matches = pane.search?.matches;
   const quickMatches = useMemo(() => {

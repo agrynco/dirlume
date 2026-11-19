@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
@@ -131,7 +131,7 @@ try {
     await input.press("Enter");
     try {
       await page.getByRole("region", { name: `${side} pane`, exact: true })
-        .getByRole("heading", { name: path.split(/[\\/]/).at(-1), exact: true }).waitFor();
+        .getByRole("heading", { name: path.split(/[\\/]/).filter(Boolean).at(-1), exact: true }).waitFor();
       await page.waitForFunction((side) => document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false", side);
     } catch (error) {
       throw new Error(`Could not navigate the ${side} pane: ${await page.getByRole("alert").allTextContents()}`, { cause: error });
@@ -152,6 +152,41 @@ try {
   await navigate("right", dst);
   const leftList = page.getByRole("listbox", { name: "left files", exact: true });
   const rightList = page.getByRole("listbox", { name: "right files", exact: true });
+  const parentRow = '[role="option"][title=".."]';
+  const emptyFolder = join(temp, "empty");
+  await mkdir(emptyFolder);
+  for (const [side, list] of [["left", leftList], ["right", rightList]]) {
+    const pane = page.getByRole("region", { name: `${side} pane`, exact: true });
+    const other = page.getByLabel(`${side === "left" ? "right" : "left"} path`, { exact: true });
+    const otherPath = await other.inputValue();
+    const up = pane.getByRole("button", { name: "Parent folder", exact: true });
+    await navigate(side, emptyFolder);
+    await list.locator(parentRow).waitFor();
+    assert.equal(await list.getByRole("option").count(), 1);
+    await up.click();
+    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
+    const column = pane.getByRole("button", { name: /^Name/ });
+    await column.click();
+    await pane.getByRole("button", { name: "Filter folder", exact: true }).click();
+    await pane.getByRole("textbox", { name: `Filter ${side} folder`, exact: true }).fill("no match");
+    assert.equal(await list.getByRole("option").count(), 1);
+    assert.equal(await list.getByRole("option").first().getAttribute("title"), "..");
+    await pane.getByRole("button", { name: "Close filter", exact: true }).click();
+    assert.equal(await list.getByRole("option").first().getAttribute("title"), "..");
+    await column.click();
+    await navigate(side, emptyFolder);
+    await list.press("ArrowLeft");
+    assert.equal(await list.locator(parentRow).getAttribute("data-current"), "true");
+    assert.equal(await list.locator(parentRow).getAttribute("draggable"), "false");
+    assert.equal(await page.getByRole("button", { name: /^Copy F5$/ }).isEnabled(), false);
+    await list.press("Enter");
+    await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
+    assert.equal(await other.inputValue(), otherPath);
+    await navigate(side, parse(temp).root);
+    assert.equal(await list.locator(parentRow).count(), 0);
+    assert.equal(await up.isEnabled(), false);
+    await navigate(side, side === "left" ? src : dst);
+  }
   const hiddenFile = leftList.getByRole("option", { name: /^\.hidden-file/ });
   const hiddenFolder = rightList.getByRole("option", { name: /^\.hidden-folder/ });
   const hiddenToggle = page.getByRole("button", { name: "Show hidden files", exact: true });
@@ -278,6 +313,7 @@ try {
   const left = leftPane.getByRole("listbox", { name: "left files", exact: true });
   const right = page.getByRole("listbox", { name: "right files", exact: true });
   await leftPane.getByRole("heading", { name: "Search results", exact: true }).waitFor();
+  assert.equal(await left.locator(parentRow).count(), 0);
   await left.getByRole("option", { name: /measured\/data\.bin/, selected: true }).waitFor();
   await left.getByRole("option", { name: /overlap\/data\.bin/ }).waitFor();
   await page.keyboard.press("F5");
@@ -337,10 +373,11 @@ try {
   await distantRow.click();
   await distantRow.click({ modifiers: ["Control"] });
   await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Shift+ArrowDown");
-  assert.deepEqual(await markedRows(), [...orderedRows.slice(0, 2), "second.txt"]);
+  assert.deepEqual(await markedRows(), [...orderedRows.slice(1, 3), "second.txt"]);
   await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), [orderedRows[0], "second.txt"]);
+  assert.deepEqual(await markedRows(), [orderedRows[1], "second.txt"]);
 
   await guideRow.click();
   await left.locator(".file-row").nth(guideIndex + 1).click({ modifiers: ["Control"] });

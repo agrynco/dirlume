@@ -43,6 +43,11 @@ export const emptyPane: PaneState = {
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
+function hasParentRow(place: Place | null) {
+  // The KSwitcher drive list is a source chooser, outside the drive itself.
+  return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
+}
+
 export function visibleEntries(pane: PaneState, hidden: boolean) {
   const filter = pane.filter.toLocaleLowerCase();
   const { column, asc } = pane.sort;
@@ -58,10 +63,17 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
       const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
       return asc ? order : -order;
     });
-  if (!pane.search && pane.place?.kind === "ftp" && pane.place.segments.length) {
+  if (!pane.search && hasParentRow(pane.place)) {
     visible.unshift({ name: "..", directory: true, link: false, hidden: false, size: null, modified: null });
   }
   return visible;
+}
+
+export function paneCursorIndex(pane: PaneState, entries: readonly Entry[]) {
+  const selected = entries.findIndex((entry) => entry.name === pane.selected);
+  if (selected >= 0 || !entries.length) return selected;
+  // Keep the initial cursor on the first item in existing non-FTP listings.
+  return entries[0].name === ".." && entries.length > 1 && pane.place?.kind !== "ftp" ? 1 : 0;
 }
 
 export function selectableRange(entries: readonly Entry[], first: number, last: number) {
@@ -157,7 +169,6 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   pane = closeSearchResults(pane);
   const samePlace = JSON.stringify(pane.place) === JSON.stringify(place);
   const retained = new Set(listing.entries.map((entry) => entry.name));
-  if (place.kind === "ftp" && place.segments.length) retained.add("..");
   const keyboardRange = pane.keyboardRange;
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
@@ -167,7 +178,8 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     place,
     entries: listing.entries,
     omitted: listing.omitted,
-    selected: samePlace && pane.selected && retained.has(pane.selected) ? pane.selected : null,
+    selected: samePlace && pane.selected &&
+      (pane.selected === ".." ? hasParentRow(place) : retained.has(pane.selected)) ? pane.selected : null,
     marked: samePlace ? pane.marked.filter((name) => retained.has(name)) : [],
     keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => retained.has(name)) } : undefined,
     sizes: samePlace ? new Map([...pane.sizes].filter(([name]) => retained.has(name))) : new Map(),
