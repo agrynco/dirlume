@@ -406,7 +406,7 @@ try {
   assert.equal(await options.getByRole("checkbox", { name: "Show hidden files" }).isChecked(), false);
   const shortcuts = options.getByRole("button", { name: "Keyboard shortcuts", exact: true });
   await shortcuts.click();
-  await options.getByRole("button", { name: "Clear shortcut for Show or hide hidden files" }).click();
+  await options.getByRole("button", { name: "Remove Ctrl+H from Show or hide hidden files", exact: true }).click();
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
   await rightList.focus();
   await rightList.dispatchEvent("keydown", ukrainianCtrlH);
@@ -415,7 +415,7 @@ try {
 
   optionsPage = await openOptionsWindow(page, () => optionsButton.click());
   options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
-  await options.getByRole("button", { name: "Change shortcut for Show or hide hidden files" }).click();
+  await options.getByRole("button", { name: "Add shortcut for Show or hide hidden files", exact: true }).click();
   await options.getByRole("textbox", { name: "New shortcut for Show or hide hidden files" }).press("Control+Shift+h");
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
   await leftList.press("Control+Shift+h");
@@ -425,9 +425,58 @@ try {
   await hiddenFile.waitFor({ state: "detached" });
   optionsPage = await openOptionsWindow(page, () => optionsButton.click());
   options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
+  await options.getByRole("button", { name: "Add shortcut for Show or hide hidden files", exact: true }).click();
+  await options.getByRole("textbox", { name: "New shortcut for Show or hide hidden files" }).press("Home");
+  const shortcutConflict = () => optionsPage.getByRole("dialog", { name: "Shortcut conflict" });
+  await shortcutConflict().getByText("Home is assigned to First item.", { exact: true }).waitFor();
+  await shortcutConflict().getByRole("button", { name: "Reassign shortcut", exact: true }).click();
+  await options.getByRole("button", { name: "Change ← for First item", exact: true }).waitFor();
+  await options.getByRole("button", { name: "Change F2 for Save text", exact: true }).waitFor();
+  assert.equal(await options.getByRole("button", { name: "Change Home for First item", exact: true }).count(), 0);
+  await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await leftList.press("Home");
+  await hiddenFile.waitFor();
+  await leftList.press("Control+Shift+h");
+  await hiddenFile.waitFor({ state: "detached" });
+  optionsPage = await openOptionsWindow(page, () => optionsButton.click());
+  options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
+  const shortcutScheme = () => options.getByRole("combobox", { name: "Shortcut scheme", exact: true });
+  assert.equal(await shortcutScheme().locator("option:checked").textContent(), "My shortcuts");
+  await options.getByRole("button", { name: "New scheme", exact: true }).click();
+  const newShortcutScheme = optionsPage.getByRole("dialog", { name: "New shortcut scheme", exact: true });
+  const schemeName = newShortcutScheme.getByRole("textbox", { name: "Scheme name", exact: true });
+  await schemeName.fill("My shortcuts");
+  await newShortcutScheme.getByRole("alert").waitFor();
+  await schemeName.fill("Smoke shortcuts");
+  await newShortcutScheme.getByRole("button", { name: "Create", exact: true }).click();
+  assert.equal(await shortcutScheme().locator("option:checked").textContent(), "Smoke shortcuts");
+  await options.getByRole("button", { name: "Remove Home from Show or hide hidden files", exact: true }).click();
+  await shortcutScheme().selectOption({ label: "My shortcuts" });
+  await options.getByRole("button", { name: "Change Home for Show or hide hidden files", exact: true }).waitFor();
+  await shortcutScheme().selectOption({ label: "Smoke shortcuts" });
+  assert.equal(await options.getByRole("button", { name: "Change Home for Show or hide hidden files", exact: true }).count(), 0);
+  await options.getByRole("button", { name: "Rename shortcut scheme", exact: true }).click();
+  const renameShortcutScheme = optionsPage.getByRole("dialog", { name: "Rename shortcut scheme", exact: true });
+  await renameShortcutScheme.getByRole("textbox", { name: "Scheme name", exact: true }).fill("Renamed shortcuts");
+  await renameShortcutScheme.getByRole("button", { name: "Save", exact: true }).click();
+  assert.equal(await shortcutScheme().locator("option:checked").textContent(), "Renamed shortcuts");
+  await options.getByRole("button", { name: "Delete shortcut scheme", exact: true }).click();
+  await optionsPage.getByRole("dialog", { name: "Delete shortcut scheme", exact: true }).getByRole("button", { name: "Delete scheme", exact: true }).click();
+  assert.equal(await shortcutScheme().inputValue(), "");
+  await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await leftList.press("Control+h");
+  await hiddenFile.waitFor();
+  await leftList.press("Control+h");
+  await hiddenFile.waitFor({ state: "detached" });
+  optionsPage = await openOptionsWindow(page, () => optionsButton.click());
+  options = optionsPage.getByRole("dialog", { name: "Options", exact: true });
+  assert.equal(await shortcutScheme().inputValue(), "");
+  await shortcutScheme().selectOption({ label: "My shortcuts" });
+  await options.getByRole("button", { name: "Change Home for Show or hide hidden files", exact: true }).waitFor();
   await options.getByRole("button", { name: "Restore defaults" }).click();
   await options.getByRole("button", { name: "General", exact: true }).click();
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  console.log("Verified independent shortcut schemes, switching, duplicate-name validation, renaming, and deletion.");
 
   const leftFont = await fontSize("#left-pane");
   const rightFont = await fontSize("#right-pane");
@@ -467,6 +516,36 @@ try {
   const destination = copySetup.getByRole("combobox", { name: "Destination", exact: true });
   const destinationSuggestions = copySetup.getByRole("listbox", { name: "Destination suggestions", exact: true });
   await filePane.getByRole("option", { name: /^notes\.txt/ }).click();
+  const commandsMenu = page.getByRole("menubar").getByRole("menuitem", { name: "Commands", exact: true });
+  await commandsMenu.click();
+  const copyPath = page.getByRole("menuitem", { name: "Copy full path", exact: true });
+  assert.equal(await copyPath.getAttribute("aria-disabled"), null);
+  assert.equal(await copyPath.locator("kbd").textContent(), "Ctrl+Shift+C");
+  await page.keyboard.press("Escape");
+  if (process.env.CI) {
+    const clipboardText = () => execFileSync("powershell.exe", ["-NoProfile", "-Command",
+      "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Write((Get-Clipboard -Raw))"],
+    { encoding: "utf8", windowsHide: true });
+    async function expectClipboard(path) {
+      let text;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        text = clipboardText();
+        if (text === path) return;
+        await setTimeout(100);
+      }
+      assert.equal(text, path);
+    }
+    await leftList.press("Control+Shift+c");
+    await page.locator(".statusbar").getByText("Path copied to the clipboard.", { exact: true }).waitFor();
+    await expectClipboard(join(src, "notes.txt"));
+    await filePane.getByRole("option", { name: /^drag-folder/ }).click();
+    await commandsMenu.click();
+    await copyPath.click();
+    await expectClipboard(join(src, "drag-folder"));
+    await filePane.getByRole("option", { name: /^notes\.txt/ }).click();
+  }
+  await page.getByRole("menubar").getByRole("menuitem", { name: "Left", exact: true }).focus();
+  await leftList.focus();
   await page.keyboard.press("F5");
   await copySetup.getByRole("button", { name: "Choose a file destination", exact: true }).waitFor();
   await destination.fill(join(temp, "t"));
@@ -902,10 +981,13 @@ try {
     assert.equal(await optionsPage.getByLabel("File panels font size").inputValue(), "17");
   }
   await optionsPage.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  await optionsPage.getByRole("button", { name: "Change shortcut for New folder" }).click();
-  await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("F5");
-  await optionsPage.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
-  await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("Control+F12");
+  await optionsPage.getByRole("button", { name: "Change F7 for New folder", exact: true }).click();
+  const captureNewFolder = optionsPage.getByRole("textbox", { name: "New shortcut to replace F7 for New folder", exact: true });
+  await captureNewFolder.press("F5");
+  await page.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
+  await shortcutConflict().getByRole("button", { name: "Choose another shortcut", exact: true }).click();
+  await captureNewFolder.press("Control+F12");
+  await optionsDialog.getByRole("button", { name: "Change F5 for Copy", exact: true }).waitFor();
   await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await navigate("left", attributes);
   const attributeRow = (name) => left.locator(`.file-row[data-tooltip="${name}"]`);
@@ -1624,6 +1706,8 @@ try {
   });
   assert.deepEqual(featureValues.map(([, size]) => size), featureFonts.map(([, , size]) => `${size}px`));
   featureFonts.forEach(([, family], index) => assert.ok(featureValues[index][0].replaceAll("\\", "").startsWith(family)));
+  const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: "Files", exact: true });
+  if (await filesTab.isVisible()) await filesTab.click();
   const sampleForFonts = page.getByRole("option", { name: /^sample\.rs/ }).first();
   const sampleSurface = page.getByRole("region", { name: "sample.rs", exact: true }).locator(".code-surface");
   for (const [shortcut, expected] of [["F3", "21px"], ["F4", "19px"]]) {
@@ -1684,21 +1768,21 @@ try {
   const shortcutSearch = shortcutOptions.getByRole("searchbox", { name: "Search settings" });
   await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  const binding = shortcutOptions.getByRole("button", { name: "Change shortcut for Help", exact: true });
-  await binding.click();
-  const captureHelp = shortcutOptions.getByRole("textbox", { name: "New shortcut for Help", exact: true });
+  await shortcutOptions.getByRole("button", { name: "Change F1 for Help", exact: true }).click();
+  const captureHelp = shortcutOptions.getByRole("textbox", { name: "New shortcut to replace F1 for Help", exact: true });
   await captureHelp.press("F4");
-  await shortcutOptions.getByText("F4 is assigned to Edit text.", { exact: true }).waitFor();
+  await shortcutConflict().getByText(/F4 is assigned to .*Edit text/).waitFor();
+  await shortcutConflict().getByRole("button", { name: "Choose another shortcut", exact: true }).click();
   await captureHelp.press("Control+Shift+F1");
   await shortcutOptions.getByRole("button", { name: "Apply", exact: true }).click();
-  assert.equal(await binding.innerText(), "Ctrl+Shift+F1");
+  await shortcutOptions.getByRole("button", { name: "Change Ctrl+Shift+F1 for Help", exact: true }).waitFor();
   // Verify Dirlume no longer handles F1 without invoking the WebView's native help accelerator.
   await shortcutSearch.dispatchEvent("keydown", { key: "F1", code: "F1", bubbles: true });
   assert.equal(await help.count(), 0);
   await shortcutSearch.press("Control+Shift+F1");
   await optionsPage.getByRole("dialog", { name: "Help", exact: true }).waitFor();
   await optionsPage.keyboard.press("Escape");
-  await shortcutOptions.getByRole("button", { name: "Clear shortcut for Help", exact: true }).click();
+  await shortcutOptions.getByRole("button", { name: "Remove Ctrl+Shift+F1 from Help", exact: true }).click();
   await closeToolWindow(optionsPage, () => shortcutOptions.getByRole("button", { name: "Done", exact: true }).click());
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);

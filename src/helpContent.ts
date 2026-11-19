@@ -11,7 +11,7 @@ export const helpTopics = {
   archives: { title: "Archives", keys: ["createArchive", "open", "parent", "copy", "view", "edit", "recycle"] },
   search: { title: "Find files", keys: ["quickSearch", "search"] },
   viewer: { title: viewer.label, keys: ["view", "viewAsHex", "nextDocument", "previousDocument", "cancelText", "zoomFont"] },
-  editor: { title: editor.label, keys: ["edit", "newFile", "saveTextAlternate", "saveText", "cancelText", "closeText", "zoomFont"] },
+  editor: { title: editor.label, keys: ["edit", "newFile", "saveText", "cancelText", "closeText", "zoomFont"] },
   terminal: { title: terminal.label, keys: ["toggleTerminal", "expandTerminal", "collapseTerminal", "terminal", "commandPath", "commandName", "previousCommand", "commandHistory"] },
   compare: { title: "Compare files", keys: ["compare", "previousChange", "nextChange"] },
   remote: { title: "Remote connection", keys: ["leftLocations", "rightLocations", "ftpSources", "addFtpProfile", "editFtpProfile", "connect"] },
@@ -56,7 +56,7 @@ export const helpText: Record<Language, Record<HelpTopic, string>> = {
     textTools: "Set the shared background and text colors for the editor, viewer, and terminal. Syntax colors cover tokens such as strings, comments, and keywords. The code sample shows those colors together.",
     fonts: "Choose font families and sizes for the main window, file panels, dialogs, and shared text tools. Type in a family field to filter installed fonts, or open the dropdown and choose one. Feature pages can override shared fonts for the Viewer, Editor, and Terminal.",
     viewFonts: "Adjust the saved font size for each pane, the text viewer, the Markdown preview, and the editor. Changes made with the mouse-wheel shortcut appear here and persist across restarts. Clear an override to inherit the corresponding font size.",
-    shortcuts: "Click a binding, then press the new key combination. The clear button disables it. Restore defaults restores all standard bindings. The keys listed in Help are the defaults. Options displays your current bindings.",
+    shortcuts: "Choose a shortcut scheme in Options. New scheme copies the selected scheme. Use Add shortcut to add a binding, click a binding to replace it, or click its × to remove it. Restore defaults resets the selected personal scheme. The keys listed in Help are the defaults.",
   },
   uk: {
     archives: "Встановіть інструменти командного рядка 7-Zip. Виберіть локальні файли або папки й натисніть Shift+F1, потім укажіть формат, шлях призначення та параметри стиснення. Натисніть Enter на архіві, щоб відкрити його у файловій панелі. F5 розпаковує позначені елементи. В архівах із доступом на запис F4 редагує текстові файли, а F8 видаляє елементи. Зашифровані та багатотомні архіви відкриваються лише для читання. Профілі зберігають параметри архівації без паролів.",
@@ -78,7 +78,7 @@ export const helpText: Record<Language, Record<HelpTopic, string>> = {
     textTools: "Задайте спільні кольори тла й тексту для редактора, переглядача й термінала. Підсвічування синтаксису має окремі кольори для рядків, коментарів, ключових слів та інших елементів. Зразок коду показує поєднання цих кольорів.",
     fonts: "Виберіть гарнітуру й розмір шрифту головного вікна, файлових панелей, діалогів і текстових інструментів. Введіть частину назви для пошуку серед встановлених шрифтів або виберіть гарнітуру зі списку. На сторінках Переглядач, Редактор і Термінал можна перевизначити спільний шрифт.",
     viewFonts: "Задайте збережений розмір шрифту для кожної панелі, текстового переглядача, попереднього перегляду Markdown і редактора. Тут відображаються зміни, зроблені скороченням із коліщатком миші. Вони зберігаються після перезапуску. Скиньте окремий розмір, щоб успадкувати його з налаштувань відповідного шрифту.",
-    shortcuts: "Клацніть прив’язку й натисніть нову комбінацію клавіш. Кнопка очищення вимикає скорочення. Відновити стандартні повертає всі стандартні комбінації. Довідка наводить типові клавіші. Поточні прив’язки відображаються в налаштуваннях.",
+    shortcuts: "Виберіть схему клавіатурних скорочень у налаштуваннях. Кнопка Нова схема копіює вибрану схему. Щоб додати прив’язку, натисніть Додати скорочення. Щоб замінити її, клацніть саму прив’язку, а щоб видалити, натисніть ×. Кнопка Відновити стандартні скидає вибрану користувацьку схему. У довідці наведено стандартні комбінації.",
   },
   ru: {
     archives: "Установите инструменты командной строки 7-Zip. Выберите локальные файлы или папки и нажмите Shift+F1, затем укажите формат, путь назначения и параметры сжатия. Нажмите Enter на архиве, чтобы открыть его в файловой панели. F5 распаковывает отмеченные элементы. В архивах с доступом на запись F4 редактирует текстовые файлы, а F8 удаляет элементы. Зашифрованные и многотомные архивы открываются только для чтения. Профили сохраняют настройки архивации без паролей.",
@@ -100,6 +100,6 @@ export const helpText: Record<Language, Record<HelpTopic, string>> = {
     textTools: "Задайте общие цвета фона и текста для редактора, просмотрщика и терминала. Подсветка синтаксиса имеет отдельные цвета для строк, комментариев, ключевых слов и других элементов. Образец кода показывает их сочетание.",
     fonts: "Выберите гарнитуру и размер шрифта главного окна, файловых панелей, диалогов и текстовых инструментов. Введите часть названия для поиска среди установленных шрифтов или выберите гарнитуру из списка. На страницах Просмотрщик, Редактор и Терминал можно переопределить общий шрифт.",
     viewFonts: "Задайте сохранённый размер шрифта для каждой панели, текстового просмотрщика, предварительного просмотра Markdown и редактора. Здесь отображаются изменения, сделанные сочетанием с колёсиком мыши. Они сохраняются после перезапуска. Сбросьте отдельный размер, чтобы унаследовать его из настроек соответствующего шрифта.",
-    shortcuts: "Щёлкните по назначению и нажмите новое сочетание клавиш. Кнопка очистки отключает сочетание. Восстановить значения по умолчанию возвращает все стандартные сочетания. В справке указаны клавиши по умолчанию. Текущие назначения отображаются в настройках.",
+    shortcuts: "Выберите схему сочетаний клавиш в настройках. Кнопка Новая схема копирует выбранную схему. Чтобы добавить сочетание, нажмите Добавить сочетание. Чтобы заменить его, щёлкните по самому сочетанию, а чтобы удалить, нажмите ×. Кнопка Восстановить значения по умолчанию сбрасывает выбранную пользовательскую схему. В справке указаны стандартные сочетания.",
   },
 };

@@ -36,6 +36,10 @@ Use **Options → Appearance → Window → New scheme** to save your own colors
 
 Use **Search settings** above the Options tree to find a setting or shortcut. **Main File Panels** contains hidden-file visibility, pane fonts and sizes, and panel colors. **Viewer**, **Editor**, and **Terminal** each have their own font settings. They inherit the scheme's shared text font and size until you set their own values. **General** contains the interface language and remote connection settings, and **Appearance** contains shared themes and styles.
 
+In **Options → Keyboard shortcuts**, use **Add shortcut** to give a command another binding. Click an existing binding to replace it or its **×** to remove it. If the shortcut is already assigned in the same context, choose **Reassign shortcut** to move just that binding, or **Choose another shortcut** to keep entering a different combination. Commands in separate contexts can share a shortcut.
+
+Choose a **Shortcut scheme** to switch the full set of bindings. **New scheme** copies the selected scheme. Editing **Default** creates a personal scheme, and existing custom shortcuts move to **My shortcuts** on upgrade. **Restore defaults** resets the selected personal scheme. Choose **Apply** or **Done** to use the selected scheme and save your changes.
+
 Use **Settings** in the viewer or editor toolbar to open its section directly. The controls show the inherited font family and pixel size when no override is set. New installations use **GoMono Nerd Font Mono** at **18 px**.
 
 **Viewer → Reading area** controls the background and maximum width of text, hex, and Markdown. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
@@ -64,6 +68,7 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
+| Ctrl+Shift+C (⌘⇧C on macOS) in a file list | Copy the current file or folder's full path as text. Also available under Commands → Copy full path. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |

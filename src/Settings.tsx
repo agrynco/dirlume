@@ -1,7 +1,7 @@
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { AppearanceSettings, OptionalNumberInput, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
 import { PathField } from "./PathField";
@@ -10,16 +10,18 @@ import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups, mermaidColors, viewerColors } from "./appearance";
 import { api, windowsClient } from "./api";
 import {
-  actionButtonWidths, commandLabel, commandNames, commands, defaultBindings, eventShortcut, menuPositions, maxTerminalResizeRows, panelLayouts,
-  shortcutScopesOverlap, showShortcut, wheelBindings, type ActionButtonWidth, type Command, type MenuPosition,
-  type PanelLayout, type Preferences, type Provider,
+  actionButtonWidths, assignShortcut, commandLabel, commandNames, commands, defaultBindings, eventShortcut, menuPositions, maxTerminalResizeRows,
+  panelLayouts, shortcutBindings, shortcutConflicts, showShortcut, wheelBindings, type ActionButtonWidth, type Bindings, type Command,
+  type MenuPosition, type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
-import { languages, readLanguage, t } from "./i18n";
+import { languages, locale, readLanguage, t } from "./i18n";
 
 type Page = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
+type ShortcutCapture = { command: Command; replacing?: string };
+type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
 const optionsLocationKey = "dirlume.options-location";
 const featurePages = Object.keys(featureOptions) as FeaturePage[];
 const appearancePages = [
@@ -62,10 +64,15 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [query, setQuery] = useState(initialLocation.query);
   const [expanded, setExpanded] = useState(initialLocation.expanded);
   const pageBody = useRef<HTMLDivElement>(null);
+  const schemeSelect = useRef<HTMLSelectElement>(null);
   const [preferences, onChange] = useState(saved);
-  const [capture, setCapture] = useState<Command | null>(null);
-  const [conflict, setConflict] = useState("");
+  const [capture, setCapture] = useState<ShortcutCapture | null>(null);
+  const [conflict, setConflict] = useState<{ key: string; owners: Command[] } | null>(null);
+  const [schemeDialog, setSchemeDialog] = useState<ShortcutSchemeDialog | null>(null);
   const [buildVersion, setBuildVersion] = useState("");
+  const { shortcutSchemes, activeShortcutScheme } = preferences;
+  const activeScheme = shortcutSchemes.find(({ id }) => id === activeShortcutScheme);
+  const shortcuts = shortcutBindings(preferences);
   const hasChanges = JSON.stringify(preferences) !== JSON.stringify(saved);
   const searching = Boolean(query.trim());
   const terms = query.trim().toLocaleLowerCase().split(/\s+/);
@@ -89,9 +96,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
       "Main menu alignment", "Align left", "Align center", "Align right", "System"] : [])));
-  const allShortcuts = matches("Keyboard shortcuts", "keymap bindings");
+  const allShortcuts = matches("Keyboard shortcuts", "keymap bindings", "Shortcut scheme");
   const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
-    matches(commands[command].label, commandLabel(command), preferences.shortcuts[command], showShortcut(preferences.shortcuts[command])));
+    matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut)));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
   const isAppearance = !feature && page !== "general" && page !== "shortcuts";
@@ -112,7 +119,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     if (next !== page && pageBody.current) pageBody.current.scrollTop = 0;
     setPage(next);
     setCapture(null);
-    setConflict("");
+    setConflict(null);
   }
 
   function apply() {
@@ -137,27 +144,68 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     onClose();
   }
 
-  function assign(event: KeyboardEvent, command: Command) {
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.key === "Escape") return setCapture(null);
-    const shortcut = eventShortcut(event);
-    if (!shortcut) return;
-    const existing = commandNames.find((item) => item !== command && shortcutScopesOverlap(item, command) &&
-      preferences.shortcuts[item] === shortcut);
-    if (existing) {
-      setConflict(t("{0} is assigned to {1}.", showShortcut(shortcut), commandLabel(existing)));
-      return;
-    }
-    onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: shortcut } });
+  function finishCapture(command: Command) {
     setCapture(null);
-    setConflict("");
+    setConflict(null);
+    requestAnimationFrame(() => pageBody.current?.querySelector<HTMLButtonElement>(`[data-add-shortcut="${command}"]`)?.focus());
   }
 
-  return (
+  function schemeNameTaken(name: string, except?: string) {
+    const normalized = name.toLocaleLowerCase();
+    return normalized === "default" || normalized === t("Default").toLocaleLowerCase() ||
+      shortcutSchemes.some((scheme) => scheme.id !== except && scheme.name.toLocaleLowerCase() === normalized);
+  }
+
+  function createShortcutScheme(name: string, bindings: Bindings) {
+    let number = 1;
+    while (shortcutSchemes.some(({ id }) => id === `shortcut-scheme-${number}`)) number++;
+    const scheme = { id: `shortcut-scheme-${number}`, name, bindings };
+    onChange({ ...preferences, activeShortcutScheme: scheme.id, shortcutSchemes: [...shortcutSchemes, scheme] });
+  }
+
+  function updateShortcuts(bindings: Bindings) {
+    if (activeScheme) {
+      onChange({ ...preferences, shortcutSchemes: shortcutSchemes.map((scheme) =>
+        scheme.id === activeScheme.id ? { ...scheme, bindings } : scheme) });
+      return;
+    }
+    let name = "My shortcuts";
+    for (let number = 2; schemeNameTaken(name); number++) name = `My shortcuts ${number}`;
+    createShortcutScheme(name, bindings);
+  }
+
+  function openSchemeDialog(dialog: ShortcutSchemeDialog) {
+    setCapture(null);
+    setSchemeDialog(dialog);
+  }
+
+  function saveShortcut(key: string, { command, replacing }: ShortcutCapture) {
+    updateShortcuts(assignShortcut(shortcuts, command, key, replacing));
+    finishCapture(command);
+  }
+
+  function captureKey(event: KeyboardEvent, current: ShortcutCapture) {
+    event.preventDefault();
+    event.stopPropagation();
+    const { command } = current;
+    if (event.key === "Escape") return finishCapture(command);
+    if (event.repeat || event.nativeEvent.isComposing) return;
+    const shortcut = command === "menuAlternate" && event.key === "Alt" && !event.ctrlKey && !event.metaKey && !event.shiftKey ? "Alt" : eventShortcut(event);
+    if (!shortcut) return;
+    if (shortcuts[command].includes(shortcut)) return finishCapture(command);
+    const owners = shortcutConflicts(shortcuts, command, shortcut);
+    if (owners.length) setConflict({ key: shortcut, owners });
+    else saveShortcut(shortcut, current);
+  }
+
+  const schemeName = schemeDialog && "name" in schemeDialog ? schemeDialog.name.trim() : "";
+  const renameScheme = schemeDialog?.kind === "rename";
+  const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
+
+  return <>
     <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} footer={<>
       {page === "shortcuts" && (
-        <Button type="button" onClick={() => { onChange({ ...preferences, shortcuts: defaultBindings }); setCapture(null); setConflict(""); }}>
+        <Button type="button" disabled={!activeScheme} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
           <RotateCcw /> {t("Restore defaults")}
         </Button>
       )}
@@ -169,7 +217,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         <aside className="settings-sidebar">
           <label className="settings-search"><Search aria-hidden="true" />
             <HistoryField historyKey="settings-search" type="search" aria-label={t("Search settings")} placeholder={t("Search settings")} value={query}
-              data-initial-focus onValueChange={setQuery}
+              data-initial-focus onValueChange={(value) => { setQuery(value); setCapture(null); }}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || !searching) return;
                 event.preventDefault();
@@ -209,6 +257,22 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             {isAppearance && <><span>{t("Appearance")}</span><ChevronRight aria-hidden="true" /></>}
             <h3>{t(title ?? "General")}</h3>
           </header>
+          {page === "shortcuts" && <div className="shortcut-scheme-bar">
+            <label>{t("Shortcut scheme")}
+              <select ref={schemeSelect} value={activeShortcutScheme ?? ""} onChange={(event) => {
+                setCapture(null);
+                onChange({ ...preferences, activeShortcutScheme: event.target.value || null });
+              }}>
+                <option value="">{t("Default")}</option>
+                {shortcutSchemes.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+              </select>
+            </label>
+            <Button type="button" onClick={() => openSchemeDialog({ kind: "new", name: "" })}><Plus aria-hidden="true" /> {t("New scheme")}</Button>
+            <Button type="button" className="icon-button" aria-label={t("Rename shortcut scheme")} disabled={!activeScheme}
+              onClick={() => activeScheme && openSchemeDialog({ kind: "rename", name: activeScheme.name })}><Pencil aria-hidden="true" /></Button>
+            <Button type="button" className="icon-button" aria-label={t("Delete shortcut scheme")} disabled={!activeScheme}
+              onClick={() => openSchemeDialog({ kind: "delete" })}><Trash2 aria-hidden="true" /></Button>
+          </div>}
           <div className="settings-page-body" ref={pageBody}>
       {page === "general" ? (
         <div className="dialog-body settings-general">
@@ -278,43 +342,37 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       ) : (
         <>
           <div className="shortcut-list">
-            {visibleCommands.map((command) => (
-              <div key={command} className="shortcut-setting">
-                <span>{commandLabel(command)}</span>
-                {command === "zoomFont" ? (
-                  <select className="shortcut-key" aria-label={t("Change shortcut for {0}", commandLabel(command))}
-                    value={preferences.shortcuts[command]}
-                    onChange={(event) => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: event.target.value } })}>
-                    <option value="">{t("Unassigned")}</option>
-                    {wheelBindings.map((binding) => <option key={binding} value={binding}>{showShortcut(binding)}</option>)}
-                  </select>
-                ) : capture === command ? (
-                  <input aria-label={t("New shortcut for {0}", commandLabel(command))} readOnly autoFocus data-shortcut-capture
-                    placeholder={t("Press a shortcut")} onKeyDown={(event) => assign(event, command)}
-                    onKeyUp={(event) => {
-                      if (command === "menuAlternate" && event.key === "Alt" && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-                        const existing = commandNames.find((item) => item !== command && preferences.shortcuts[item] === "Alt");
-                        if (existing) return;
-                        onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: "Alt" } });
-                        setCapture(null);
-                      }
-                    }}
-                    onBlur={() => { setCapture(null); setConflict(""); }} />
-                ) : (
-                  <Button type="button" className="shortcut-key" aria-label={t("Change shortcut for {0}", commandLabel(command))}
-                    onClick={() => { setCapture(command); setConflict(""); }}>
-                    <span>{showShortcut(preferences.shortcuts[command]) || t("Unassigned")}</span>
-                  </Button>
-                )}
-                <Button type="button" className="icon-button" aria-label={t("Clear shortcut for {0}", commandLabel(command))}
-                  disabled={!preferences.shortcuts[command]}
-                  onClick={() => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: "" } })}>
-                  <Delete />
-                </Button>
-              </div>
-            ))}
+            {visibleCommands.map((command) => {
+              const label = commandLabel(command);
+              const bindings = shortcuts[command];
+              return <div key={command} className="shortcut-setting">
+                <span>{label}</span>
+                {command === "zoomFont" ? <select className="shortcut-key" aria-label={t("Change shortcut for {0}", label)}
+                  value={bindings[0] ?? ""} onChange={(event) => {
+                    const key = event.target.value;
+                    updateShortcuts({ ...shortcuts, [command]: key ? [key] : [] });
+                  }}>
+                  <option value="">{t("Unassigned")}</option>
+                  {wheelBindings.map((binding) => <option key={binding} value={binding}>{showShortcut(binding)}</option>)}
+                </select> : <div className="shortcut-bindings">
+                  {bindings.map((binding) => <div key={binding} className="shortcut-binding">
+                    <Button type="button" className="shortcut-key" aria-label={t("Change {0} for {1}", showShortcut(binding), label)}
+                      onClick={() => setCapture({ command, replacing: binding })}><span>{showShortcut(binding)}</span></Button>
+                    <Button type="button" className="icon-button shortcut-remove" aria-label={t("Remove {0} from {1}", showShortcut(binding), label)} onClick={() => {
+                      updateShortcuts({ ...shortcuts, [command]: bindings.filter((key) => key !== binding) });
+                      finishCapture(command);
+                    }}><X aria-hidden="true" /></Button>
+                  </div>)}
+                  <Button type="button" className="shortcut-add" data-add-shortcut={command} aria-label={t("Add shortcut for {0}", label)}
+                    onClick={() => setCapture({ command })}><Plus aria-hidden="true" /> {t("Add shortcut")}</Button>
+                  {capture?.command === command && <input key={capture.replacing ?? "add"}
+                    aria-label={capture.replacing ? t("New shortcut to replace {0} for {1}", showShortcut(capture.replacing), label) : t("New shortcut for {0}", label)}
+                    readOnly autoFocus data-shortcut-capture placeholder={t("Press a shortcut")}
+                    onKeyDown={(event) => captureKey(event, capture)} />}
+                </div>}
+              </div>;
+            })}
           </div>
-          {conflict && <p className="dialog-error" role="alert">{conflict}</p>}
         </>
       )}
           </div>
@@ -322,5 +380,49 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </div>
       </div>
     </Dialog>
-  );
+    {schemeDialog && "name" in schemeDialog && <Dialog title={t(renameScheme ? "Rename shortcut scheme" : "New shortcut scheme")}
+      onClose={() => setSchemeDialog(null)} footer={<>
+        <Button type="button" onClick={() => setSchemeDialog(null)}>{t("Cancel")}</Button>
+        <Button type="submit" className="primary" form="shortcut-scheme-form" disabled={!schemeName || duplicateSchemeName}>
+          {t(renameScheme ? "Save" : "Create")}
+        </Button>
+      </>}>
+      <form id="shortcut-scheme-form" className="dialog-body" onSubmit={(event) => {
+        event.preventDefault();
+        if (!schemeName || duplicateSchemeName) return;
+        if (renameScheme) {
+          onChange({ ...preferences, shortcutSchemes: shortcutSchemes.map((scheme) =>
+            scheme.id === activeShortcutScheme ? { ...scheme, name: schemeName } : scheme) });
+        } else createShortcutScheme(schemeName, shortcuts);
+        setSchemeDialog(null);
+      }}>
+        <label className="field">{t("Scheme name")}
+          <input data-initial-focus maxLength={64} required value={schemeDialog.name} aria-invalid={duplicateSchemeName || undefined}
+            aria-describedby={duplicateSchemeName ? "shortcut-scheme-name-error" : undefined}
+            onChange={(event) => setSchemeDialog({ ...schemeDialog, name: event.target.value })} />
+        </label>
+        {duplicateSchemeName && <p id="shortcut-scheme-name-error" role="alert" className="dialog-error">{t("A shortcut scheme with this name already exists.")}</p>}
+      </form>
+    </Dialog>}
+    {schemeDialog?.kind === "delete" && activeScheme && <Dialog title={t("Delete shortcut scheme")} tone="warning"
+      onClose={() => setSchemeDialog(null)} footer={<>
+        <Button type="button" data-initial-focus onClick={() => setSchemeDialog(null)}>{t("Cancel")}</Button>
+        <Button type="button" className="negative" onClick={() => {
+          onChange({ ...preferences, activeShortcutScheme: null, shortcutSchemes: shortcutSchemes.filter(({ id }) => id !== activeScheme.id) });
+          setSchemeDialog(null);
+          requestAnimationFrame(() => schemeSelect.current?.focus());
+        }}>{t("Delete scheme")}</Button>
+      </>}>
+      <div className="dialog-body"><p>{t("Delete the shortcut scheme {0}?", activeScheme.name)}</p></div>
+    </Dialog>}
+    {capture && conflict && <Dialog title={t("Shortcut conflict")} onClose={() => setConflict(null)} footer={<>
+      <Button type="button" data-initial-focus onClick={() => setConflict(null)}>{t("Choose another shortcut")}</Button>
+      <Button type="button" className="primary" onClick={() => saveShortcut(conflict.key, capture)}>{t("Reassign shortcut")}</Button>
+    </>}>
+      <div className="dialog-body">
+        <p>{t("{0} is assigned to {1}.", showShortcut(conflict.key), new Intl.ListFormat(locale()).format(conflict.owners.map(commandLabel)))}</p>
+        <p>{t("Move this shortcut to {0}?", commandLabel(capture.command))}</p>
+      </div>
+    </Dialog>}
+  </>;
 }

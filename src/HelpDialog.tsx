@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { helpGroups, helpText, helpTopics, type HelpTopic } from "./helpContent";
 import { t, type Language } from "./i18n";
-import { commandLabel, defaultBindings, showShortcut } from "./preferences";
+import { commandLabel, defaultBindings, showShortcuts } from "./preferences";
 
 export type { HelpTopic } from "./helpContent";
 
@@ -50,7 +50,7 @@ export function HelpDialog({ initialTopic, language, onClose }: {
                   <dl className="help-keys">
                     {helpTopics[id].keys.map((command) => (
                       <div key={command}>
-                        <dt><kbd>{showShortcut(defaultBindings[command])}</kbd></dt>
+                        <dt><kbd>{showShortcuts(defaultBindings[command])}</kbd></dt>
                         <dd>{commandLabel(command)}</dd>
                       </div>
                     ))}

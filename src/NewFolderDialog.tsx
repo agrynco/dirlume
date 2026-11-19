@@ -26,7 +26,7 @@ function folderHistory(): HistoryEntry[] {
 export function NewFolderDialog({ directory, showHidden, historyShortcut, onCreated, onClose }: {
   directory: string;
   showHidden: boolean;
-  historyShortcut: string;
+  historyShortcut: readonly string[];
   onCreated: (name: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -93,7 +93,7 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
       event.preventDefault();
       event.stopPropagation();
       closeHistory();
-    } else if (!waiting && history.length && historyShortcut && eventShortcut(event) === historyShortcut) {
+    } else if (!waiting && history.length && historyShortcut.includes(eventShortcut(event))) {
       event.preventDefault();
       event.stopPropagation();
       if (historyOpen) closeHistory();
@@ -107,7 +107,7 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
           <div className="folder-name-field">
             <input id={nameId} ref={input} data-initial-focus type="text" required autoComplete="off" value={name}
               disabled={waiting} onChange={(event) => setName(event.target.value)} />
-            <Button type="button" className="icon-button" aria-label={t("Folder name history")} shortcut={showShortcut(historyShortcut)}
+            <Button type="button" className="icon-button" aria-label={t("Folder name history")} shortcut={showShortcut(historyShortcut[0])}
               aria-expanded={historyOpen} aria-controls={historyOpen ? historyId : undefined} aria-haspopup="listbox"
               disabled={waiting || !history.length} onClick={() => {
                 if (historyOpen) closeHistory();

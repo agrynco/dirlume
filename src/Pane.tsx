@@ -39,14 +39,14 @@ interface PaneProps {
   onParent: () => void;
   onRefresh: () => void;
   onCancelFolderOperation: () => void;
-  cancelFolderShortcut: string;
+  cancelFolderShortcut: readonly string[];
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
   onRemote: () => void;
   onFtp: () => void;
   onSmb: () => void;
   sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "smbSources" | "remoteSources">;
-  zoomShortcut: string;
+  zoomShortcut: readonly string[];
   fontSize?: number;
   onZoom: ZoomViewFont;
   onCloseResults: () => void;
@@ -220,7 +220,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   }, [side]);
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
-  const cancelKey = cancelFolderShortcut === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut);
+  const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
   const operationLabel = t(pane.loading ? "Opening folder…" : "Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
@@ -315,7 +315,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
           if (!locationsOpen) return;
           const shortcut = eventShortcut(event);
-          const source = shortcut && sources.find(({ key }) => key === shortcut);
+          const source = shortcut && sources.find(({ key }) => key.includes(shortcut));
           if (source) {
             event.preventDefault();
             event.stopPropagation();
@@ -349,8 +349,8 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
               ))}
               <div className="location-source-group" role="group" aria-label={t("Sources")}>
                 {sources.map(({ label, key, Icon, open }) => (
-                  <Button key={label} shortcut={showShortcut(key)} onClick={() => { setLocationsOpen(false); open(); }}>
-                    <Icon /> {label}{key && <kbd aria-hidden="true">{showShortcut(key)}</kbd>}
+                  <Button key={label} shortcut={showShortcut(key[0])} onClick={() => { setLocationsOpen(false); open(); }}>
+                    <Icon /> {label}{key.length > 0 && <kbd aria-hidden="true">{showShortcut(key[0])}</kbd>}
                   </Button>
                 ))}
               </div>

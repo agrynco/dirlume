@@ -71,9 +71,9 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
       if (working || loading || editing !== undefined || removing) return;
       const key = eventShortcut(event);
       if (!key) return;
-      if (key === shortcuts.addFtpProfile) setEditing(null);
-      else if (key === shortcuts.editFtpProfile && profile) setEditing(profile);
-      else if (key === shortcuts.open && event.target instanceof HTMLSelectElement) void connect();
+      if (shortcuts.addFtpProfile.includes(key)) setEditing(null);
+      else if (shortcuts.editFtpProfile.includes(key) && profile) setEditing(profile);
+      else if (shortcuts.open.includes(key) && event.target instanceof HTMLSelectElement) void connect();
       else return;
       event.preventDefault();
     }}>
@@ -89,13 +89,13 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
         {error && !removing && <p className="dialog-error" role="alert">{errorText(error)}</p>}
       </div>
       <footer className="dialog-footer">
-        <Button type="button" disabled={working || loading} shortcut={showShortcut(shortcuts.addFtpProfile)}
+        <Button type="button" disabled={working || loading} shortcut={showShortcut(shortcuts.addFtpProfile[0])}
           onClick={() => setEditing(null)}>{t("Add")}</Button>
-        <Button type="button" disabled={!profile || working} shortcut={showShortcut(shortcuts.editFtpProfile)}
+        <Button type="button" disabled={!profile || working} shortcut={showShortcut(shortcuts.editFtpProfile[0])}
           onClick={() => setEditing(profile)}>{t("Edit")}</Button>
         <Button type="button" disabled={!profile || working} onClick={() => { setError(""); setRemoving(true); }}>{t("Remove")}</Button>
         <Button type="button" disabled={working} onClick={onClose}>{t("Cancel")}</Button>
-        <Button type="button" className="primary" disabled={!profile || working} shortcut={showShortcut(shortcuts.open)}
+        <Button type="button" className="primary" disabled={!profile || working} shortcut={showShortcut(shortcuts.open[0])}
           onClick={() => { void connect(); }}>{working && !removing ? t("Connecting…") : t("Connect")}</Button>
       </footer>
     </Dialog>

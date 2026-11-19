@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef } from "react";
 import { File, Folder, FolderTree } from "lucide-react";
 import { applyAppearance, fileColor, resolveAppearance, useSystemTheme } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
-import { showShortcut, type Preferences } from "./preferences";
+import { shortcutBindings, showShortcut, type Preferences } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
 import { featureOptions, type FeaturePage } from "./featureOptions";
 
@@ -42,6 +42,7 @@ function CodeSample() {
 export function SettingsPreview({ page, preferences }: { page: PreviewPage; preferences: Preferences }) {
   const preview = useRef<HTMLDivElement>(null);
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
+  const shortcuts = shortcutBindings(preferences);
   const fontViews = page === "viewFonts" ? viewFontKeys : page === "viewer" || page === "editor" ? featureOptions[page].views : null;
   useLayoutEffect(() => {
     if (preview.current) applyAppearance(theme, scheme, preview.current);
@@ -74,7 +75,7 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
           page === "shortcuts" ? (
             <div className="preview-shortcuts">
               {([["View", "view"], ["Edit", "edit"], ["Find files", "search"], ["Copy", "copy"]] as const).map(([label, command]) => (
-                <span key={command}>{t(label)}<kbd>{showShortcut(preferences.shortcuts[command]) || t("Unassigned")}</kbd></span>
+                <span key={command}>{t(label)}<kbd>{showShortcut(shortcuts[command][0]) || t("Unassigned")}</kbd></span>
               ))}
             </div>
           ) : (
