@@ -10,18 +10,25 @@ import { t } from "./i18n";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-function splitPath(value: string, windows: boolean) {
+function splitPath(value: string, windows: boolean, baseDirectory?: string) {
   if (windows && /^[a-z]:$/i.test(value)) {
-    return { parent: value + "\\", fragment: "", separator: "\\" };
+    const parent = value + "\\";
+    return { parent, lookup: parent, fragment: "", separator: "\\" };
   }
-  if (windows ? !/^(?:[a-z]:[\\/]|[\\/]{2})/i.test(value) : !value.startsWith("/")) return null;
+  const absolute = windows ? /^(?:[a-z]:[\\/]|[\\/]{2})/i.test(value) : value.startsWith("/");
+  if (!absolute && !baseDirectory) return null;
   const end = Math.max(value.lastIndexOf("/"), windows ? value.lastIndexOf("\\") : -1);
-  return { parent: value.slice(0, end + 1), fragment: value.slice(end + 1), separator: value[end] };
+  const parent = value.slice(0, end + 1);
+  const separator = end >= 0 ? value[end] : windows ? "\\" : "/";
+  const base = baseDirectory ?? "";
+  const join = base.endsWith("/") || (windows && base.endsWith("\\")) ? "" : separator;
+  const lookup = absolute ? parent : base + join + parent;
+  return { parent, lookup, fragment: value.slice(end + 1), separator };
 }
 
 export function PathField({ id, label, suggestionLabel, value, onChange, onCommit, onEscape,
   ftp, kswitcher, includeFiles = false, showHidden = false, readOnly = false, required = false,
-  initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value }: {
+  initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value, baseDirectory }: {
   id: string;
   label: string;
   suggestionLabel?: string;
@@ -40,6 +47,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   suggestOnFocus?: boolean;
   browse?: "folder" | "save";
   browsePath?: string;
+  baseDirectory?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState(false);
@@ -51,8 +59,8 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   const peer = kswitcher?.peer;
   const directory = kswitcher?.directory;
   const source = kswitcher ? JSON.stringify(kswitcher) : ftp === undefined ? "local" : `ftp:${ftp}`;
-  const parts = !readOnly && editing ? splitPath(value, ftp === undefined && (windowsClient || !!peer)) : null;
-  const parent = parts?.parent;
+  const parts = !readOnly && editing ? splitPath(value, ftp === undefined && (windowsClient || !!peer), baseDirectory) : null;
+  const parent = parts?.lookup;
   const popup = id + "-suggestions";
   const entries = lookup?.parent === parent && lookup?.source === source ? lookup.entries : undefined;
 

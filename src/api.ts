@@ -41,6 +41,12 @@ export interface LocalListing extends Listing {
   parent: string | null;
 }
 
+export type FolderLinkType = "none" | "junction" | "symbolic";
+export interface FolderCreation {
+  last: string | null;
+  failure: { name: string; error: string } | null;
+}
+
 export interface QuickLocation {
   label: string;
   path: string;
@@ -162,6 +168,8 @@ export const api = {
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
+  createFolders: (directory: string, request: { name: string; multiple: boolean; linkType: FolderLinkType; target: string }) =>
+    invoke<FolderCreation>("create_folders", { directory, request }),
   fileAttributes: (directory: string, name: string) =>
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>

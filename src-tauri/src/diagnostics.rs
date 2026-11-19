@@ -15,6 +15,7 @@ const ACTIONS: &[&str] = &[
     "file_attributes",
     "update_file_attributes",
     "operate",
+    "create_folders",
     "open_file",
     "rename_item",
     "create_file",

@@ -17,6 +17,7 @@ import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type Fo
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { Pane } from "./Pane";
+import { NewFolderDialog } from "./NewFolderDialog";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
@@ -43,7 +44,7 @@ const fileDrag = "application/x-dirlume-files";
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" }>;
 
 type ActionModal = (
-  | { kind: "mkdir" | "rename" | "newFile"; path: string; name: string }
+  | { kind: "rename" | "newFile"; path: string; name: string }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[] }
 ) & { ftp?: FtpPlace };
 
@@ -53,6 +54,7 @@ type Modal =
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
   | { kind: "fileActions"; side: Side; entry?: Entry }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
@@ -972,9 +974,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "search":
         if (pane.place && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
         break;
+      case "mkdir":
+        if (local && !pane.search && !busy && !pane.loading) setModal({ kind: "mkdir", side: active, place: local });
+        break;
       case "rename":
-      case "newFile":
-      case "mkdir": {
+      case "newFile": {
         const writable = local ?? (command === "rename" ? ftp : undefined);
         if (writable && !pane.search && !busy && !pane.loading && (command !== "rename" || current)) {
           setModal({ kind: command, path: placePath(writable), name: command === "rename" ? current?.name ?? "" : "", ftp });
@@ -1379,7 +1383,13 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange} onClose={() => setModal(null)} />}
-      {(modal?.kind === "mkdir" || modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
+      {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
+        historyShortcut={preferences.shortcuts.folderNameHistory} onClose={() => setModal(null)}
+        onCreated={async (name) => {
+          await load(modal.side, modal.place, "refresh", name);
+          refresh(opposite(modal.side));
+        }} />}
+      {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
           hasNonemptyFolders={modal.ftp && "names" in modal ? async () => {
             const ftp = modal.ftp!;
@@ -1450,7 +1460,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
-  const titles = { mkdir: "New folder", newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
+  const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const title = t(titles[modal.kind]);
   const removing = "names" in modal;
 
@@ -1464,8 +1474,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         setRecursive(true);
         return;
       }
-      await onSubmit(modal.kind === "mkdir" ? { kind: "create_folder", name } :
-        modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
+      await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
     } catch (error) {
       setError(describeError(error));
@@ -1504,7 +1513,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
           <Button type="submit" className={removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
-            {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "mkdir" || modal.kind === "newFile" ? t("Create") : title}
+            {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}
           </Button>
         </div>
       </form>

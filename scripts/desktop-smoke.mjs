@@ -12,6 +12,7 @@ import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
+import { testNewFolder } from "./new-folder-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -855,7 +856,7 @@ try {
   await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
   await page.keyboard.press("F12");
-  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name").fill("verified");
+  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name", { exact: true }).fill("verified");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
 
@@ -1586,6 +1587,7 @@ try {
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
   await testCommandCompletion(page, temp);
+  page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
