@@ -1,11 +1,43 @@
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { describeError, placePath, type Place } from "./api";
+import { Channel } from "@tauri-apps/api/core";
+import { api, describeError, placePath, type FtpSearchEvent, type Place } from "./api";
 import { Dialog } from "./Dialog";
 import { childPlace, readPlace, type SearchMatch } from "./panes";
 
 const previewLimit = 1000;
+let nextFtpSearchId = 0;
+
+async function findFtp(
+  root: Extract<Place, { kind: "ftp" }>, mask: string, showHidden: boolean, signal: AbortSignal,
+  append: (matches: SearchMatch[]) => void,
+) {
+  const id = ++nextFtpSearchId;
+  const output = new Channel<FtpSearchEvent>();
+  let stop: () => void = () => {};
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      stop = () => {
+        void api.cancelFtpSearch(id).catch(() => {});
+        resolve(0);
+      };
+      signal.addEventListener("abort", stop, { once: true });
+      output.onmessage = (event) => {
+        if (signal.aborted) return;
+        if (event.kind === "done") resolve(event.omitted);
+        else {
+          const directory = { ...root, segments: event.segments };
+          append(event.entries.map((entry) => ({ directory, entry, relativePath: event.prefix + entry.name })));
+        }
+      };
+      void api.searchFtp(id, { connection: root.id, segments: root.segments, mask, showHidden }, output).catch(reject);
+    });
+  } finally {
+    signal.removeEventListener("abort", stop);
+    output.onmessage = () => {};
+  }
+}
 
 function fileMask(mask: string) {
   const pattern = [...mask.toLowerCase()];
@@ -80,7 +112,13 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
     snapshot.current = { mask, matches: found, incomplete: false };
     let skipped = 0;
     try {
-      while (pending.length && !controller.signal.aborted) {
+      if (root.kind === "ftp") {
+        skipped = await findFtp(root, mask, showHidden, controller.signal, (matches) => {
+          const count = found.length;
+          found.push(...matches);
+          if (count < previewLimit) setResults(found.slice(0, previewLimit));
+        });
+      } else while (pending.length && !controller.signal.aborted) {
         const folder = pending.pop()!;
         const result = await readPlace(folder.place).catch((failure: unknown) => {
           if (folder.prefix === "") throw failure;

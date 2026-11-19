@@ -32,6 +32,10 @@ export interface Listing {
   omitted: number;
 }
 
+export type FtpSearchEvent =
+  | { kind: "batch"; segments: string[]; prefix: string; entries: Entry[] }
+  | { kind: "done"; omitted: number };
+
 export interface LocalListing extends Listing {
   path: string;
   parent: string | null;
@@ -175,6 +179,9 @@ export const api = {
     invoke<Connection & { segments: string[] }>("connect_ftp", { id, segments }),
   disconnectFtp: (id: number) => invoke<void>("disconnect_ftp", { id }),
   listFtp: (id: number, segments: string[]) => invoke<Listing>("list_ftp", { id, segments }),
+  searchFtp: (id: number, request: { connection: number; segments: string[]; mask: string; showHidden: boolean },
+    output: Channel<FtpSearchEvent>) => invoke<void>("search_ftp", { id, request, output }),
+  cancelFtpSearch: (id: number) => invoke<void>("cancel_ftp_search", { id }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
   deleteFtp: (id: number, segments: string[], recursive: boolean) =>
     invoke<void>("delete_ftp", { id, segments, recursive }),

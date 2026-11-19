@@ -25,6 +25,8 @@ const ACTIONS: &[&str] = &[
     "list_server",
     "connect_ftp",
     "list_ftp",
+    "search_ftp",
+    "cancel_ftp_search",
     "save_ftp_profile",
     "remove_ftp_profile",
     "rename_ftp",

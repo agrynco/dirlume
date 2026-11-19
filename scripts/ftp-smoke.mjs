@@ -18,6 +18,7 @@ const server = [
   "    abstracted_fs = FixtureFS",
   "    def on_login(self, username):",
   "        self.fs.cwd = '/start'",
+  "        print('LOGIN', flush=True)",
   "    def ftp_RETR(self, path):",
   "        print('RETR ' + os.path.basename(path), flush=True)",
   "        return super().ftp_RETR(path)",
@@ -45,6 +46,14 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   await mkdir(remoteCopy, { recursive: true });
   await mkdir(downloadedFolder);
   await mkdir(lastFolder);
+  const searchRoot = join(remoteFolder, "search-fixture");
+  const nestedSearch = join(searchRoot, "branch", "nested");
+  await mkdir(nestedSearch, { recursive: true });
+  await writeFile(join(searchRoot, "root.find.txt"), "");
+  await writeFile(join(searchRoot, ".hidden.find.txt"), "");
+  await writeFile(join(searchRoot, "unrelated.txt"), "");
+  await writeFile(join(searchRoot, "branch", "middle.find.txt"), "");
+  await writeFile(join(nestedSearch, "deep.FIND.TXT"), "");
   await writeFile(join(localFolder, "existing.txt"), "local upload");
   await writeFile(join(localFolder, "файл.txt"), "Unicode name");
   await writeFile(join(remoteCopy, "existing.txt"), "remote original");
@@ -60,6 +69,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   let ftpLog = "";
   child.stdout.setEncoding("utf8").on("data", (data) => { ftpLog += data; });
   const retrieves = () => ftpLog.split(/\r?\n/).filter((line) => line.startsWith("RETR "));
+  const logins = () => (ftpLog.match(/^LOGIN$/gm) ?? []).length;
   const profiles = join(config, "ftp-profiles.json");
   const rightPane = page.getByRole("region", { name: "right pane" });
   const right = rightPane.getByRole("listbox", { name: "right files" });
@@ -120,6 +130,26 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await right.getByRole("option", { name: /^start/ }).waitFor();
     assert.equal(await remotePath.inputValue(), "/");
     await right.getByRole("option", { name: /^start/ }).dblclick();
+
+    await remoteRow("search-fixture").dblclick();
+    await remoteRow("root.find.txt").waitFor();
+    const beforeSearch = logins();
+    await page.keyboard.press("Alt+F7");
+    const search = page.getByRole("dialog", { name: "Find files", exact: true });
+    await search.getByLabel("File mask").fill("*.find.txt");
+    const searchStart = performance.now();
+    await button(search, "Search").click();
+    const matches = search.getByRole("listbox", { name: "Search results", exact: true });
+    await matches.getByRole("option", { name: "root.find.txt", exact: true }).waitFor();
+    const firstMatch = performance.now() - searchStart;
+    await search.getByRole("status").filter({ hasText: "3 matches." }).waitFor();
+    const totalSearch = performance.now() - searchStart;
+    assert.deepEqual((await matches.getByRole("option").allTextContents()).sort(),
+      ["branch/middle.find.txt", "branch/nested/deep.FIND.TXT", "root.find.txt"]);
+    assert.equal(logins() - beforeSearch, 1, "One FTP login for the entire recursive search.");
+    await button(search, "Close").click();
+    await right.getByRole("option", { name: /^\.\./ }).dblclick();
+    console.log(`FTP search used one login across three folders. First match ${Math.round(firstMatch)} ms, total ${Math.round(totalSearch)} ms.`);
 
     await remoteRow("guide.md").dblclick();
     await page.getByRole("heading", { name: "FTP Markdown", exact: true }).waitFor();
