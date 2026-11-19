@@ -1,6 +1,7 @@
 import { readSchemes, type Scheme, type Theme } from "./appearance";
 import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, type Language } from "./i18n";
+import { reportFrontendError } from "./diagnostics";
 
 export const commands = {
   switchPane: { label: "Switch pane", key: "Tab" },
@@ -156,7 +157,8 @@ export function readPreferences(): Preferences {
       shortcuts,
       viewFontSizes,
     };
-  } catch {
+  } catch (error) {
+    reportFrontendError("load_preferences", error);
     return defaults;
   }
 }

@@ -5,6 +5,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { File, Folder, FolderOpen } from "lucide-react";
 import { api, windowsClient, type Entry } from "./api";
 import { Button } from "./Button";
+import { reportFrontendError } from "./diagnostics";
 import { t } from "./i18n";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -163,7 +164,8 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
         if (!onCommit) input.current.focus();
         choose(selected);
       }
-    } catch {
+    } catch (error) {
+      reportFrontendError("folder_picker", error);
       setBrowseFailed(true);
     } finally {
       setBrowsing(false);

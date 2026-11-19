@@ -1,4 +1,5 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
 
 export interface Entry {
   name: string;
@@ -131,7 +132,7 @@ export const api = {
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
   operate: (directory: string, operation: Operation) =>
-    invoke<void>("operate", { directory, operation }),
+    invoke<void>("operate", { directory, operation }, operation.kind),
   connect: (invitation: string) => invoke<Connection>("connect_server", { invitation }),
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
   ftpProfiles: () => invoke<FtpProfile[]>("ftp_profiles"),
@@ -246,5 +247,6 @@ export function folderLabel(place: Place) {
 export const windowsClient = /Windows/i.test(navigator.userAgent);
 
 export function describeError(error: unknown) {
+  reportFrontendError("desktop_action", error);
   return error instanceof Error ? error.message : String(error);
 }

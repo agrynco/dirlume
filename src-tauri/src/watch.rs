@@ -12,6 +12,7 @@ use tauri::{ipc::Channel, State};
 
 use crate::{
     desktop::{blocking, message, Result},
+    diagnostics::{failure, FailureCode},
     ftp, local,
 };
 
@@ -91,10 +92,15 @@ fn report_sizes(
     output: &Channel<SizeResult>,
     mut measure: impl FnMut(&str) -> Option<(u64, bool)>,
 ) {
+    let mut reported_incomplete = false;
     for name in names {
         let Some((bytes, incomplete)) = measure(&name) else {
             break;
         };
+        if incomplete && !reported_incomplete {
+            failure("measure_sizes", FailureCode::Incomplete, None);
+            reported_incomplete = true;
+        }
         let _ = output.send(SizeResult {
             name,
             bytes,
@@ -119,12 +125,15 @@ pub async fn watch_directory(
     state: State<'_, Watches>,
 ) -> Result<()> {
     let watcher = blocking(move || {
-        let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
-            if event.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_))) {
-                let _ = changes.send(());
-            }
-        })
-        .map_err(message)?;
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<Event>| match event {
+                Ok(event) if !matches!(event.kind, EventKind::Access(_)) => {
+                    let _ = changes.send(());
+                }
+                Err(_) => failure("watch_events", FailureCode::Io, None),
+                _ => {}
+            })
+            .map_err(message)?;
         watcher
             .watch(
                 local::absolute(&path).map_err(message)?,

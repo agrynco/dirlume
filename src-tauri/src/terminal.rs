@@ -11,6 +11,7 @@ use tauri::{ipc::Channel, State};
 
 use crate::{
     desktop::{blocking, message, Result},
+    diagnostics::{failure, FailureCode},
     local,
 };
 
@@ -124,7 +125,21 @@ fn create(
         .name("dirlume-terminal".into())
         .spawn(move || {
             let mut bytes = [0; 8192];
-            while let Ok(length) = reader.read(&mut bytes) {
+            loop {
+                let length = match reader.read(&mut bytes) {
+                    Ok(length) => length,
+                    Err(error) => {
+                        // Unplugging the child side of a PTY commonly returns EIO on Linux.
+                        let closed = matches!(
+                            error.kind(),
+                            std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::UnexpectedEof
+                        ) || (cfg!(unix) && error.raw_os_error() == Some(5));
+                        if !closed {
+                            failure("read_terminal", FailureCode::Io, error.raw_os_error());
+                        }
+                        break;
+                    }
+                };
                 if length == 0
                     || output
                         .send(Output::Data {
@@ -136,7 +151,9 @@ fn create(
                 }
             }
             let _ = output.send(Output::Closed);
-            let _ = child.wait();
+            if let Err(error) = child.wait() {
+                failure("wait_terminal", FailureCode::Io, error.raw_os_error());
+            }
         })
         .map_err(message)?;
     #[cfg(not(windows))]
