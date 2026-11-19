@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { artifactVersion, manifestVersion } from "./build-version.mjs";
 
 async function version() {
@@ -23,6 +23,13 @@ const formats = {
   "macos-x64": [["dmg", ".dmg", "dmg"]],
 };
 
+const platformLabels = {
+  "windows-x64": "Windows x64",
+  "linux-x64": "Ubuntu / Linux x64",
+  "macos-arm64": "macOS Apple Silicon",
+  "macos-x64": "macOS Intel",
+};
+
 const updaterFormats = {
   "windows-x64": { target: "windows-x86_64", bundle: "nsis", suffix: "-setup.exe", extension: "setup.exe" },
   "linux-x64": { target: "linux-x86_64", bundle: "appimage", suffix: ".AppImage", extension: "AppImage" },
@@ -41,7 +48,50 @@ function artifactNames(platform, label, signed) {
   return [
     ...bundleFormats(platform, signed).map(([, , extension]) => `Dirlume-${label}-${platform}.${extension}`),
     `Dirlume-Server-${label}-${platform}.tar.gz`,
+    `Dirlume-${label}-${platform}-portable.zip`,
   ];
+}
+
+async function findBundle(target, kind, suffix) {
+  const directory = join(target, "bundle", kind);
+  const matches = (await readdir(directory)).filter((file) => file.endsWith(suffix));
+  if (matches.length !== 1) throw new Error(`Expected exactly one ${kind} bundle ending with ${suffix}, got ${matches.length}.`);
+  return join(directory, matches[0]);
+}
+
+async function collectPortable(platform, target, serverBinary, output) {
+  const stage = await mkdtemp(join(await realpath(target), "portable-"));
+  try {
+    const server = join(stage, "server");
+    await mkdir(server);
+    await copyFile(serverBinary, join(server, platform === "windows-x64" ? "dirlume-server.exe" : "dirlume-server"));
+    await copyFile("LICENSE", join(stage, "LICENSE"));
+
+    if (platform === "windows-x64") {
+      await copyFile(join(target, "dirlume.exe"), join(stage, "Dirlume.exe"));
+      const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
+      for (const [source, destination] of Object.entries(config.bundle.resources ?? {})) {
+        const path = join(stage, destination);
+        await mkdir(dirname(path), { recursive: true });
+        await cp(join("src-tauri", source), path, { recursive: true, verbatimSymlinks: true });
+      }
+    } else if (platform === "linux-x64") {
+      await copyFile(await findBundle(target, "appimage", ".AppImage"), join(stage, "Dirlume.AppImage"));
+    } else {
+      await cp(await findBundle(target, "macos", ".app"), join(stage, "Dirlume.app"), {
+        recursive: true, verbatimSymlinks: true,
+      });
+    }
+
+    const files = await readdir(stage);
+    const path = resolve(output);
+    const archive = process.platform === "win32"
+      ? spawnSync("tar", ["--format", "zip", "-cf", path, ...files], { cwd: stage, stdio: "inherit" })
+      : spawnSync("zip", ["-q", "-r", "-y", path, ...files], { cwd: stage, stdio: "inherit" });
+    if (archive.status !== 0) throw archive.error ?? new Error(`Could not archive the portable package for ${platform}.`);
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
 }
 
 async function collect(platform) {
@@ -53,10 +103,7 @@ async function collect(platform) {
   const target = "src-tauri/target/release";
   await mkdir("release", { recursive: true });
   for (const [index, [kind, suffix]] of bundleFormats(platform, signed).entries()) {
-    const directory = join(target, "bundle", kind);
-    const matches = (await readdir(directory)).filter((file) => file.endsWith(suffix));
-    if (matches.length !== 1) throw new Error(`Expected exactly one ${kind} bundle, got ${matches.length}.`);
-    await copyFile(join(directory, matches[0]), join("release", outputs[index]));
+    await copyFile(await findBundle(target, kind, suffix), join("release", outputs[index]));
   }
   const stage = join("src-tauri", "target", "server-package");
   await mkdir(stage, { recursive: true });
@@ -69,9 +116,10 @@ async function collect(platform) {
   }
   await copyFile(binary, join(stage, executable));
   await copyFile("LICENSE", join(stage, "LICENSE"));
-  const server = outputs.at(-1);
+  const [server, portable] = outputs.slice(-2);
   const archive = spawnSync("tar", ["-czf", join("release", server), "-C", stage, executable, "LICENSE"], { stdio: "inherit" });
   if (archive.status !== 0) throw archive.error ?? new Error("Could not archive the server binary.");
+  await collectPortable(platform, target, binary, join("release", portable));
   for (const file of outputs) {
     const path = join("release", file);
     if (!(await stat(path)).size) throw new Error(`Empty artifact ${file}.`);
@@ -105,14 +153,26 @@ async function verifyRelease() {
   const actual = (await readdir("release")).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("The release artifact set does not match the resolved version.");
   if (!GITHUB_REPOSITORY) throw new Error("The release repository is missing.");
+  const download = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}`;
   const platforms = {};
   for (const [platform, { target, extension }] of Object.entries(updaterFormats)) {
     const name = `Dirlume-${label}-${platform}.${extension}`;
     const signature = (await readFile(join("release", `${name}.sig`), "utf8")).trim();
     if (!signature) throw new Error(`Missing updater signature for ${target}.`);
-    platforms[target] = { signature, url: `https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${name}` };
+    platforms[target] = { signature, url: `${download}/${name}` };
   }
   await writeFile(join("release", "latest.json"), JSON.stringify({ version: DIRLUME_PRODUCT_VERSION, platforms }, null, 2) + "\n");
+  const downloads = Object.entries(platformLabels).map(([platform, name]) => {
+    const names = artifactNames(platform, label, true);
+    return `| ${name} | [Installer](${download}/${names[0]}) | [ZIP](${download}/${names.at(-1)}) |`;
+  });
+  console.log([
+    "## Downloads", "",
+    "| Platform | Installer | Portable ZIP |", "| --- | --- | --- |",
+    ...downloads, "",
+    "Extract the ZIP and open the desktop app. The optional standalone server is in the `server/` folder.",
+    "On Windows, download and extract a newer ZIP to update without an installer.",
+  ].join("\n"));
 }
 
 if (process.argv[2] === "check") {

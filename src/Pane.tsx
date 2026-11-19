@@ -388,7 +388,7 @@ export function Pane({ side, active, showHidden, pane, entries, locations, renam
             onDoubleClick={() => onOpen(entry)}>
             <span className="file-name">{entry.directory ? <Folder className="folder-icon" /> :
               icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
-              {rename?.name === entry.name ? <InlineRenameField {...rename} /> : <span>{entry.name}</span>}
+              {rename?.name === entry.name ? <InlineRenameField {...rename} /> : <span className="file-name-text">{entry.name.normalize("NFC")}</span>}
               {entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
