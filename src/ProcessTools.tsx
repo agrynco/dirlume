@@ -1,7 +1,10 @@
 import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
+import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
+import { ColumnResizeHandle, clampColumnWidth } from "./ColumnResizeHandle";
+import { QuickSearch, useQuickSearch } from "./QuickSearch";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Cpu, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Cpu } from "lucide-react";
 import { api, describeError, type ProcessInfo } from "./api";
 import { Dialog } from "./Dialog";
 import { formatSize, type Side } from "./panes";
@@ -40,10 +43,11 @@ function Processes({ items, selected, onChange }: {
   );
 }
 
-function EndProcesses({ items, onClose, onFinished }: {
+function EndProcesses({ items, onClose, onFinished, onAttempted }: {
   items: ProcessInfo[];
   onClose: () => void;
   onFinished: () => void;
+  onAttempted?: () => void;
 }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -59,6 +63,7 @@ function EndProcesses({ items, onClose, onFinished }: {
     } catch (failure) {
       setError(describeError(failure));
     } finally {
+      onAttempted?.();
       setWorking(false);
     }
   }
@@ -81,36 +86,110 @@ function EndProcesses({ items, onClose, onFinished }: {
 }
 
 const processColumns = [
-  { key: "name", label: "Process" }, { key: "pid", label: "PID" },
-  { key: "cpu", label: "CPU" }, { key: "memory", label: "Memory" },
+  { key: "name", label: "Process", min: 82, width: 156 },
+  { key: "pid", label: "PID", min: 52, width: 76 },
+  { key: "cpu", label: "CPU", min: 53, width: 77 },
+  { key: "memory", label: "Memory", min: 64, width: 104 },
+  { key: "executable", label: "Executable path", min: 115, width: 230 },
 ] as const;
 type ProcessColumn = (typeof processColumns)[number]["key"];
+type ProcessWidths = Partial<Record<ProcessColumn, number>>;
 
-export function ProcessBrowser({ side }: { side: Side }) {
+function processColumnsKey(side: Side) {
+  return `dirlume.process-columns.${side}`;
+}
+
+function hiddenProcessColumns(side: Side): ProcessColumn[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(processColumnsKey(side)) ?? "[]");
+    const hidden = Array.isArray(value) ? processColumns.filter(({ key }) => value.includes(key)).map(({ key }) => key) : [];
+    return hidden.length < processColumns.length ? hidden : [];
+  } catch { return []; }
+}
+
+function readProcessWidths(side: Side): ProcessWidths {
+  const widths: ProcessWidths = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(`dirlume.process-widths.${side}`) ?? "null") as ProcessWidths | null;
+    for (const { key, min } of processColumns) {
+      const value = saved?.[key];
+      if (typeof value === "number" && Number.isFinite(value)) widths[key] = clampColumnWidth(value, min);
+    }
+  } catch { /* Use the default widths. */ }
+  return widths;
+}
+
+function processCpu(cpu: number) {
+  return cpu.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+}
+
+function ProcessProperties({ process, onClose, onEnd }: {
+  process: ProcessInfo;
+  onClose: () => void;
+  onEnd: () => void;
+}) {
+  return <Dialog title={t("Process properties")} onClose={onClose}>
+    <div className="dialog-body">
+      <dl className="process-properties">
+        <dt>{t("Process")}</dt><dd>{process.name || t("Process")}</dd>
+        <dt>{t("PID")}</dt><dd>{process.pid}</dd>
+        <dt>{t("CPU")}</dt><dd>{processCpu(process.cpu)}</dd>
+        <dt>{t("Memory")}</dt><dd>{formatSize(process.memory)}</dd>
+        <dt>{t("Executable path")}</dt><dd>{process.executable ?? "—"}</dd>
+      </dl>
+    </div>
+    <footer className="dialog-footer">
+      <Button type="button" data-initial-focus onClick={onClose}>{t("Close")}</Button>
+      <Button type="button" className="negative" disabled={!process.canTerminate} onClick={onEnd}>{t("End process")}</Button>
+    </footer>
+  </Dialog>;
+}
+
+export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; lockingPath?: string; onClose: () => void }) {
   const [items, setItems] = useState<ProcessInfo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [ending, setEnding] = useState<ProcessInfo[]>([]);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [partial, setPartial] = useState(false);
+  const [properties, setProperties] = useState<ProcessInfo | null>(null);
   const [revision, setRevision] = useState(0);
-  const [filter, setFilter] = useState("");
+  const [quickSearch, setQuickSearch] = useQuickSearch(side);
   const [sort, setSort] = useState<{ column: ProcessColumn; asc: boolean }>({ column: "name", asc: true });
   const [focused, setFocused] = useState("");
+  const [hidden, setHidden] = useState(() => hiddenProcessColumns(side));
+  const [widths, setWidths] = useState(() => readProcessWidths(side));
+  const [columnsAnchor, setColumnsAnchor] = useState<ColumnMenuAnchor | null>(null);
+  const displayed = processColumns.filter(({ key }) => !hidden.includes(key));
+  const fillName = widths.name === undefined && !hidden.includes("name");
+  const tableWidth = displayed.reduce((sum, column) => sum + (widths[column.key] ?? column.width), 0);
   const anchor = useRef("");
   const table = useRef<HTMLTableElement>(null);
   const visible = useMemo(() => {
-    const query = filter.trim().toLowerCase();
     const { column, asc } = sort;
-    return items.filter((process) => !query || process.name.toLowerCase().includes(query) || String(process.pid).includes(query))
-      .sort((a, b) => {
-        const order = column === "name" ? byProcessName.compare(a.name, b.name) : a[column] - b[column];
+    return [...items].sort((a, b) => {
+        const order = column === "name" ? byProcessName.compare(a.name, b.name) :
+          column === "executable" ? byProcessName.compare(a.executable ?? "", b.executable ?? "") : a[column] - b[column];
         return (asc ? order : -order) || a.pid - b.pid;
       });
-  }, [filter, items, sort]);
+  }, [items, sort]);
   const processIcons = useMemo(() => new Map(visible.map((item) => [processKey(item), { pid: item.pid, started: item.started }])), [visible]);
   const icons = useWindowsIcons(processIcons, api.processIcons);
   const marked = visible.filter((process) => process.canTerminate && selected.includes(processKey(process)));
+  const focusedProcess = visible.find((process) => processKey(process) === focused);
   const endRequest = useRef(() => {});
   endRequest.current = () => { if (marked.length) setEnding(marked); };
+
+  useEffect(() => {
+    setItems([]);
+    setLoaded(false);
+    setPartial(false);
+    setError("");
+    setSelected([]);
+    setFocused("");
+    setProperties(null);
+    setQuickSearch(null);
+  }, [lockingPath]);
 
   useEffect(() => {
     let closed = false;
@@ -119,9 +198,12 @@ export function ProcessBrowser({ side }: { side: Side }) {
       if (pending) return;
       pending = true;
       try {
-        const processes = await api.listProcesses();
+        const { processes, incomplete } = lockingPath
+          ? await api.lockingProcesses([lockingPath]) : { processes: await api.listProcesses(), incomplete: false };
         if (!closed) {
           setItems(processes);
+          setLoaded(true);
+          setPartial(incomplete);
           setError("");
         }
       } catch (failure) {
@@ -131,9 +213,9 @@ export function ProcessBrowser({ side }: { side: Side }) {
       }
     }
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 2000);
+    const timer = lockingPath ? undefined : window.setInterval(() => { void refresh(); }, 2000);
     return () => { closed = true; window.clearInterval(timer); };
-  }, [revision]);
+  }, [lockingPath, revision]);
 
   useEffect(() => {
     const element = document.getElementById(`${side}-pane`);
@@ -160,19 +242,38 @@ export function ProcessBrowser({ side }: { side: Side }) {
     }
   }
 
+  function toggleColumn(key: ProcessColumn) {
+    const showing = hidden.includes(key);
+    if (!showing && displayed.length < 2) return;
+    const next = showing ? hidden.filter((column) => column !== key) : [...hidden, key];
+    setHidden(next);
+    try { localStorage.setItem(processColumnsKey(side), JSON.stringify(next)); } catch { /* Keep the current layout. */ }
+  }
+
+  function resizeColumn(key: ProcessColumn, width: number | undefined, persist: boolean) {
+    const next = { ...widths };
+    if (width === undefined) delete next[key];
+    else {
+      const currentNameWidth = table.current?.querySelector(".process-col-name")?.getBoundingClientRect().width;
+      if (key !== "name" && fillName && currentNameWidth) next.name = clampColumnWidth(currentNameWidth, processColumns[0].min);
+      next[key] = width;
+    }
+    setWidths(next);
+    if (persist) {
+      try { localStorage.setItem(`dirlume.process-widths.${side}`, JSON.stringify(next)); } catch { /* Keep the current layout. */ }
+    }
+  }
+
   return (
     <div className="process-browser">
-      <label className="process-search">
-        <Search aria-hidden="true" />
-        <input type="search" aria-label={t("Find process")} placeholder={t("Find by name or PID")} value={filter} onChange={(event) => {
-          setFilter(event.target.value);
-          setFocused("");
-          setSelected([]);
-          anchor.current = "";
-        }} />
-      </label>
+      {lockingPath && <div className="locking-process-target">
+        <span title={lockingPath}>{t("Locking processes for {0}", lockingPath)}</span>
+        <Button type="button" onClick={() => setRevision((previous) => previous + 1)}>{t("Refresh")}</Button>
+        <Button type="button" onClick={onClose}>{t("Back to files")}</Button>
+      </div>}
       <div className="process-scroll">
         <table ref={table} id={`${side}-files`} className="process-table file-list" tabIndex={0}
+          style={{ width: fillName ? `max(100%, ${tableWidth}px)` : tableWidth }}
           role="grid" aria-label={t("Running processes")} aria-multiselectable="true"
           aria-activedescendant={focused && visible.some((item) => processKey(item) === focused) ? `${side}-process-${focused}` : undefined}
           onKeyDown={(event) => {
@@ -187,40 +288,69 @@ export function ProcessBrowser({ side }: { side: Side }) {
             changeSelection(next, event.shiftKey, event.key === " ");
             document.getElementById(`${side}-process-${processKey(visible[next])}`)?.scrollIntoView({ block: "nearest" });
           }}>
-          <thead><tr>{processColumns.map(({ key, label }) => (
+          <colgroup>{displayed.map(({ key, width }) =>
+            <col key={key} style={{ width: key === "name" && fillName ? undefined : widths[key] ?? width }} />)}</colgroup>
+          <thead {...columnMenuBindings<HTMLTableSectionElement>((_header, anchor) => setColumnsAnchor(anchor))}><tr>{displayed.map(({ key, label, min }) => (
             <th key={key} scope="col" className={`process-col-${key}`}
               aria-sort={sort.column === key ? sort.asc ? "ascending" : "descending" : undefined}>
-              <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : key === "name" || key === "pid" })}>
+              <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : ["name", "pid", "executable"].includes(key) })}>
                 {t(label)}{sort.column === key && (sort.asc ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
               </Button>
+              <ColumnResizeHandle label={label} min={min} width={widths[key]}
+                onResize={(width, persist) => resizeColumn(key, width, persist)} onReset={() => resizeColumn(key, undefined, true)} />
             </th>
           ))}</tr></thead>
           <tbody>{visible.map((process, index) => {
             const key = processKey(process);
             const icon = icons.get(key);
+            const values = {
+              name: <span>
+                {icon ? <img className="process-icon" src={`data:image/png;base64,${icon}`} alt="" /> : <Cpu aria-hidden="true" />}
+                <span>{process.name || t("Process")}</span>
+              </span>,
+              pid: process.pid,
+              cpu: processCpu(process.cpu),
+              memory: formatSize(process.memory),
+              executable: process.executable ?? "—",
+            };
             return <tr key={key} id={`${side}-process-${key}`} aria-selected={selected.includes(key)}
               data-current={focused === key} onClick={(event) => {
                 changeSelection(index, event.shiftKey, event.ctrlKey || event.metaKey);
                 table.current?.focus({ preventScroll: true });
               }}>
-              <td className="process-cell-name" title={process.name}><span>
-                {icon ? <img className="process-icon" src={`data:image/png;base64,${icon}`} alt="" /> : <Cpu aria-hidden="true" />}
-                <span>{process.name || t("Process")}</span>
-              </span></td>
-              <td>{process.pid}</td><td>{process.cpu.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td><td>{formatSize(process.memory)}</td>
+              {displayed.map(({ key }) => <td key={key} className={`process-cell-${key}`}
+                title={key === "name" ? process.name : key === "executable" ? process.executable ?? undefined : undefined}>{values[key]}</td>)}
             </tr>;
           })}</tbody>
         </table>
-        {!visible.length && <p className="pane-empty">{filter ? t("No processes match the search.") : t("Loading processes…")}</p>}
+        {!visible.length && <p className="pane-empty">{error ? t("Could not list processes.") :
+          loaded ? t(lockingPath ? "Windows found no processes using these files." : "No running processes.") :
+            t(lockingPath ? "Checking files…" : "Loading processes…")}</p>}
       </div>
+      {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={focused}
+        items={visible.map((process) => ({ id: processKey(process), name: process.name }))}
+        onChange={setQuickSearch} onMatch={(key) => {
+          setFocused(key);
+          document.getElementById(`${side}-process-${key}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }}
+        onAccept={(key) => changeSelection(visible.findIndex((process) => processKey(process) === key), false, false)}
+        onClose={() => setQuickSearch(null)} focusList={() => table.current?.focus({ preventScroll: true })} />}
+      {columnsAnchor && <ColumnMenu anchor={columnsAnchor} onClose={() => setColumnsAnchor(null)}
+        fallback={() => table.current?.querySelector("thead button")} choices={processColumns.map(({ key, label }) => ({
+          key, label, checked: !hidden.includes(key), disabled: displayed.length === 1 && !hidden.includes(key),
+          toggle: () => toggleColumn(key),
+        }))} />}
+      {partial && <p role="status" className="pane-error">{t("Only some files could be checked.")}</p>}
       {error && <p role="alert" className="pane-error">{errorText(error)}</p>}
-      <div className="pane-footer"><span>{filter ? t("{0} of {1}", visible.length, countText(items.length, "process")) : countText(items.length, "process")}</span>
+      <div className="pane-footer"><span>{countText(items.length, "process")}</span>
+        <Button type="button" disabled={!focusedProcess} onClick={() => setProperties(focusedProcess ?? null)}>{t("Properties")}</Button>
         <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>{t("End selected")}</Button></div>
+      {properties && <ProcessProperties process={properties} onClose={() => setProperties(null)} onEnd={() => setEnding([properties])} />}
       {ending.length > 0 && (
-        <EndProcesses items={ending} onClose={() => setEnding([])} onFinished={() => {
+        <EndProcesses items={ending} onClose={() => setEnding([])} onAttempted={() => setRevision((previous) => previous + 1)} onFinished={() => {
           setEnding([]);
+          setProperties(null);
           setSelected([]);
-          setRevision((previous) => previous + 1);
         }} />
       )}
     </div>

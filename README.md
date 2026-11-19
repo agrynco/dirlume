@@ -42,6 +42,7 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
+| F2 | Rename the selected file or folder in its row. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
@@ -70,7 +71,9 @@ Mouse-wheel font changes appear on the Options page for the affected feature and
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
-Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort the table, or search by name or PID. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
+Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a heading to sort or use **Alt+Letter** to start Quick search by process name. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
+
+On Windows, select a local file or folder and choose **Find locking processes** from the main menu. The opposite pane shows what Windows found and keeps the source selection. Choose **Properties** for executable details or **Back to files** to return to the previous location. Both **F8** and **End process** in Properties ask for confirmation.
 
 Press **Ctrl+A** while focused on a file list to inspect the current item’s attributes, owner, and timestamps. **Apply** saves supported flags and refreshes the file panes. Windows supports Archive, Hidden, System, Not indexed, and Read-only on files. On Linux and macOS you can change the owner’s write bit. Remote item details are read-only and depend on what the source reports.
 
@@ -119,6 +122,24 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
 
+## MCP server
+
+Open **Commands → MCP server** and choose **Start server**. Copy the displayed Streamable HTTP configuration into a trusted MCP client on the same computer. The server listens on a loopback address and requires the displayed session bearer token. **Stop server** closes that endpoint and revokes the token. Starting the app again requires starting the server again.
+
+Use the client's tool list for argument schemas. The server works with the locations and credentials already available to the desktop app.
+
+| Area | Available tools |
+| --- | --- |
+| Panes | Inspect the workspace, open a path in the current source, mark items, and list directories. |
+| Files | Search, read properties and text, save text using a revision, create local items, and rename local or FTP items. |
+| Transfers | Copy from supported sources into a local pane, copy from local to FTP, or move between local panes. Existing targets are skipped. |
+| Connections | Connect a saved FTP profile or a Dirlume Server invitation. An open paired KSwitcher pane supports browsing and downloads. |
+| Settings | List and add folder shortcuts, and list or create named color schemes with validated overrides. |
+| Processes | List processes and inspect Windows locking processes. |
+| Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
+
+For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
+
 ## Desktop diagnostics
 
 Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
@@ -141,7 +162,9 @@ The installer and server filenames include both numbers, for example `Dirlume-0.
 
 To publish the next stable [GitHub Release](https://github.com/agrynco/dirlume/releases), open **Actions → CI and releases → Run workflow**, leave the branch set to `main`, and click **Run workflow**. The workflow increments the published patch version, promotes a newer prerelease to its stable version, or uses a higher source version. After all platforms pass, it verifies the packages and creates the matching `vX.Y.Z` tag and release. Pull requests and branch pushes to `main` run CI checks only.
 
-For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop packages, server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
+For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
+
+The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime. To update the Windows ZIP edition without an installer, download and extract a newer ZIP.
 
 The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. Configure `DIRLUME_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. Store the matching encrypted key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. Generate the key outside the repository with `npm run tauri -- signer generate -w <key-file>` and keep the private key available to the release maintainers. Installed apps trust the key embedded at build time. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 

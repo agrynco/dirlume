@@ -26,6 +26,8 @@ mod local;
 #[cfg(feature = "desktop")]
 mod local_transfer;
 #[cfg(feature = "desktop")]
+mod mcp;
+#[cfg(feature = "desktop")]
 mod processes;
 mod protocol;
 #[cfg(feature = "server")]
