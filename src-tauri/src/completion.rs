@@ -318,6 +318,12 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
     let Some(context) = context(&request.line, request.caret) else {
         return CompletionBatch::default();
     };
+    let directory = context.words.first().is_some_and(|first| {
+        matches!(
+            first.to_ascii_lowercase().as_str(),
+            "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
+        )
+    });
     let shell = terminal::shell_program();
     // Shell completion hooks may expand expressions in a draft.
     let native = (!request.line.contains(['$', '`']))
@@ -327,18 +333,16 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
         if result.index <= request.caret
             && result.index.saturating_add(result.length) <= request.line.encode_utf16().count()
         {
+            if directory && !context.prefix.starts_with('-') {
+                // Providers can report ordinary files among directory completions.
+                result.matches.retain(|entry| entry.directory);
+            }
             result.matches.truncate(MAX_MATCHES);
             if !result.matches.is_empty() {
                 return result;
             }
         }
     }
-    let directory = context.words.first().is_some_and(|first| {
-        matches!(
-            first.to_ascii_lowercase().as_str(),
-            "cd" | "pushd" | "set-location" | "sl"
-        )
-    });
     let mut matches = if context.words.is_empty() && !context.prefix.contains(['/', '\\']) {
         executables(&context.prefix)
             .into_iter()
