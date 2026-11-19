@@ -122,5 +122,10 @@ export async function testArchives(page, root) {
   await document.getByText("archived text", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await document.waitFor({ state: "hidden" });
+  for (let depth = 0; depth < 2; depth++) {
+    await left.focus();
+    await page.keyboard.press("Backspace");
+    await row(depth ? "encrypted.7z" : "folder").waitFor();
+  }
   console.log("Verified ZIP creation, overwrite cancellation, copying, editing, removal, and encrypted 7z browsing with the Windows desktop app.");
 }
