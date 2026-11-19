@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 const HISTORY_SIZE: usize = 32;
 const ACTIONS: &[&str] = &[
     "list_directory",
+    "file_attributes",
+    "update_file_attributes",
     "operate",
     "open_file",
     "rename_item",

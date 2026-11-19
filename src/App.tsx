@@ -9,6 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
 import type { AppUpdate, UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
+import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { Pane } from "./Pane";
@@ -48,6 +49,7 @@ type Modal =
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
   | { kind: "fileActions"; side: Side; entry?: Entry }
+  | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "menu" | "commandHistory" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
@@ -813,6 +815,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         break;
       }
       case "open": if (currentRow) open(active, currentRow); break;
+      case "attributes":
+        if (currentItem && !pane.loading && !busy) setModal({ kind: "attributes", item: currentItem });
+        break;
       case "parent": parent(active); break;
       case "back": history(active, -1); break;
       case "forward": history(active, 1); break;
@@ -932,7 +937,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const physical = /^Key[A-Z]$/.test(event.code) && !event.getModifierState("AltGraph")
       ? eventShortcut(event, event.code.slice(3)) : "";
     const command = commandNames.find((command) => shortcut && commandScope(command) === "main" &&
-      preferences.shortcuts[command] === shortcut) ?? (["settings", "hidden"] as const).find((command) =>
+      preferences.shortcuts[command] === shortcut) ?? (["settings", "hidden", "attributes"] as const).find((command) =>
       commands[command].key === physical && preferences.shortcuts[command] === physical);
     if (target.closest(".terminal-card")) return;
     if (command === "settings") {
@@ -953,6 +958,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       return;
     }
     if (inField && (command === "copyClipboard" || command === "pasteClipboard")) return;
+    if (command === "attributes" && (!onFiles || inField || panelsHidden || processPanels[active])) return;
     if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
     const fileNavigation = command in rowCommands || command === "open";
     const fileKey = /^F\d{1,2}$/.test(event.key);
@@ -961,7 +967,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || ["mark", "copy", "move", "recycle", "delete"].includes(command))) return;
     event.preventDefault();
-    if (command !== "hidden" || !event.repeat) perform(command);
+    if ((command !== "hidden" && command !== "attributes") || !event.repeat) perform(command);
   }
 
   function keyLabel(command: Command) {
@@ -1204,6 +1210,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           onConnect={(place, listing) => { routeRemote(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}
+      {modal?.kind === "attributes" && <AttributesDialog item={modal.item} onClose={() => setModal(null)}
+        onApplied={() => { refresh("left"); refresh("right"); }} />}
       {modal?.kind === "ftp" && (
         <FtpDialog shortcuts={preferences.shortcuts} onClose={() => setModal(null)}
           onConnect={(place, listing) => {

@@ -476,6 +476,15 @@ button.dialog-resize-grip {
 .dialog-body { padding: 16px; overflow: auto; }
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
 .dialog-body .dialog-error { margin: 12px 0 0; }
+.attributes-body { display: grid; gap: 12px; overflow-wrap: anywhere; }
+.attributes-body fieldset { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.attribute-target p { color: var(--dialog-muted); font-family: var(--mono); }
+.attribute-flags { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.attribute-flag { display: flex; align-items: center; gap: 6px; }
+.attribute-flag small, .attribute-metadata dt { color: var(--dialog-muted); }
+.attribute-metadata { display: grid; gap: 4px; margin: 0; }
+.attribute-metadata > div { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
+.attribute-metadata dd { margin: 0; }
 .transfer-body, .command-menu { display: grid; gap: 10px; }
 .help-layout {
   display: grid; grid-template-columns: minmax(130px, 29%) minmax(0, 1fr); min-height: 0;
