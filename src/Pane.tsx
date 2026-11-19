@@ -7,7 +7,7 @@ import {
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, folderLabel, placePath, windowsClient, type Entry, type QuickLocation } from "./api";
-import { formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
@@ -171,8 +171,8 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
   const marked = entries.filter(({ name }) => markedSet.has(name));
-  const complete = marked.every((entry) => entry.directory ? pane.sizes.get(entry.name)?.incomplete === false : entry.size !== null);
-  const markedBytes = marked.reduce((bytes, entry) => bytes + (pane.sizes.get(entry.name)?.bytes ?? entry.size ?? 0), 0);
+  const complete = marked.every((entry) => entry.directory ? folderMeasurement(pane, entry)?.incomplete === false : entry.size !== null);
+  const markedBytes = marked.reduce((bytes, entry) => bytes + (folderMeasurement(pane, entry)?.bytes ?? entry.size ?? 0), 0);
   return (
     <section ref={section} id={`${side}-pane`} style={{ ...viewFontStyle(fontSize), ...columnWidthsStyle(columnLayout.widths) }}
       data-size-column={columnLayout.visibility.size} data-modified-column={columnLayout.visibility.modified}
@@ -313,8 +313,8 @@ export function Pane({ side, active, showHidden, pane, entries, locations, activ
         {displayed.map((entry, offset) => {
           const index = start + offset;
           const icon = icons.get(byName.get(entry.name) ?? "");
-          const size = pane.sizes.get(entry.name);
-          const measuring = pane.measuring.includes(entry.name);
+          const size = folderMeasurement(pane, entry);
+          const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
           return <div id={`${side}-file-${index}`} className={`file-row${markedSet.has(entry.name) ? " marked" : ""}`}
             key={entry.name} role="option" aria-setsize={search ? entries.length : undefined} aria-posinset={search ? index + 1 : undefined}
             data-file-color={fileColor(entry)}

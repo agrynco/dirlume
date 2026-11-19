@@ -215,7 +215,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | "background" | number = "push", reveal?: string) => {
     const background = action === "background";
     if (background && listingPending.current[side]) return false;
-    if (action !== "refresh" && !background) cancelScan(side);
+    if (!background) cancelScan(side);
     const ticket = ++request.current[side];
     listingPending.current[side] = true;
     if (!background) updatePane(side, (pane) => ({ ...pane, loading: true, error: "", elevationPath: undefined }));
@@ -226,7 +226,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       const found = reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
       if (reveal !== undefined && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
-        const listing = applyListing(pane, result.place, result.listing, background ? "refresh" : action);
+        const listing = applyListing(pane, result.place, result.listing, action);
         return found ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
       });
       return true;
@@ -809,10 +809,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const output = new Channel<SizeResult>();
     output.onmessage = (result) => {
       if (scans.current[active] !== id) return;
-      updatePane(active, (pane) => ({
+      updatePane(active, (pane) => pane.measuring.includes(result.name) ? ({
         ...pane, sizes: new Map(pane.sizes).set(result.name, result),
         measuring: pane.measuring.filter((name) => name !== result.name),
-      }));
+      }) : pane);
     };
     const source = ftp ? { kind: "ftp" as const, connection: ftp.id, segments: ftp.segments }
       : { kind: "local" as const, directory: local!.path };
