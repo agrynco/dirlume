@@ -16,6 +16,7 @@ import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
+import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -166,6 +167,7 @@ try {
     }
   }
   let diagnosticsBeforeRestart;
+  await testFilenameRendering(page, temp);
   if (process.env.DIRLUME_INTERNAL_CDP === "1") {
     const secret = "dirlume-private-fixture-data";
     await page.evaluate(async (path) => {
