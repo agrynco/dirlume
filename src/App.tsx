@@ -1,5 +1,6 @@
 import { Button } from "./Button";
 import { CommandField } from "./CommandField";
+import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
@@ -8,7 +9,7 @@ import {
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, folderLabel, isLockError, isPermissionError, placePath, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
-import { textEncodingLabels, type AppUpdate, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
+import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
@@ -37,7 +38,7 @@ import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
-import { changeShellDirectory, shellArgument } from "./shell";
+import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
@@ -119,14 +120,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const [panelsHidden, setPanelsHidden] = useState(false);
   const [split, setSplit] = useState(Number.isFinite(startup?.split) ? Math.max(20, Math.min(80, startup!.split)) : 50);
   const [commandLine, setCommandLine] = useState("");
-  const [pendingCommands, setPendingCommands] = useState<string[]>([]);
-  const commandInput = useRef<HTMLInputElement>(null);
-  const [historyItems, setHistoryItems] = useState<string[]>(() => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]");
-      return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 1000) : [];
-    } catch { return []; }
-  });
+  const [pendingCommands, setPendingCommands] = useState<TerminalCommand[]>([]);
+  const commandInput = useRef<HTMLTextAreaElement>(null);
+  const [historyItems, setHistoryItems] = useState(readCommandHistory);
+  const commandTexts = useMemo(() => historyItems.map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
@@ -363,7 +360,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("dirlume.command-history", JSON.stringify(historyItems));
+    saveCommandHistory(historyItems);
   }, [historyItems]);
 
   useLayoutEffect(() => {
@@ -793,18 +790,23 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     else openTerminal();
   }
 
+  function recordCommand(text: string) {
+    if (!text.trim()) return;
+    const date = Date.now();
+    setHistoryItems((history) => [{ text, date }, ...history].slice(0, historyLimit));
+    historyIndex.current = -1;
+  }
+
   function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (!commandLine.trim()) {
-      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, "\r"]);
+      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, null]);
       else if (currentRow) open(active, currentRow);
       return;
     }
     if (!local || !openTerminal()) return;
-    const prefix = changeShellDirectory(local.path) + (windowsClient ? "; " : " && ");
-    setPendingCommands((commands) => [...commands, `${prefix}${commandLine}\r`]);
-    setHistoryItems((items) => [commandLine, ...items].slice(0, 1000));
-    historyIndex.current = -1;
+    setPendingCommands((commands) => [...commands, { command: commandLine, directory: local.path }]);
+    recordCommand(commandLine);
     setCommandLine("");
   }
 
@@ -965,7 +967,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name);
         break;
       case "previousCommand": {
-        const previous = historyItems[historyIndex.current + 1];
+        const previous = commandTexts[historyIndex.current + 1];
         if (previous !== undefined) {
           historyIndex.current++;
           setCommandLine(previous);
@@ -1262,6 +1264,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal} historyShortcut={preferences.shortcuts.commandHistory}
             watchEnvironment={preferences.refreshEnvironment}
             pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
+            onCommandSubmitted={recordCommand}
             onShortcut={() => perform("terminal")} onHistory={() => setModal({ kind: "commandHistory" })} onClose={closeTerminal} />
         </Suspense>
       )}
@@ -1271,7 +1274,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         </Button>
         <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] ? null : local?.path ?? null}
-          history={historyItems} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
+          history={commandTexts} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
       <nav className="actionbar" aria-label={t("File actions")}>
@@ -1369,8 +1372,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           }} />
       )}
       {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
-      {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
-        onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
+      {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} language={preferences.language} onClose={() => setModal(null)}
+        onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
         <Dialog title={t("File actions")} onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
@@ -1463,20 +1466,24 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   );
 }
 
-function CommandHistory({ commands, onChoose, onClose }: {
-  commands: string[];
+function CommandHistory({ commands, language, onChoose, onClose }: {
+  commands: CommandEntry[];
+  language: string;
   onChoose: (command: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const matches = [...new Set(commands)].filter((command) => command.toLowerCase().includes(query.toLowerCase()));
+  const groups = commandHistoryGroups(commands, query, language, t("Unknown date"));
   return (
     <Dialog title={t("Command history")} onClose={onClose}>
       <div className="dialog-body command-menu">
         <label className="field">{t("Search commands")}
           <input data-initial-focus type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
-        {matches.length ? matches.map((command) => <Button key={command} title={command} onClick={() => onChoose(command)}>{command}</Button>) :
+        {groups.length ? groups.map(({ date, commands }, index) => <section className="command-history-group" key={date + index} aria-label={date}>
+          <h3>{date}</h3>
+          {commands.map((command) => <Button key={command} title={command} onClick={() => onChoose(command)}>{command}</Button>)}
+        </section>) :
           <p>{t("No commands found.")}</p>}
       </div>
     </Dialog>
