@@ -1094,6 +1094,16 @@ try {
   assert.equal(await page.locator("html").getAttribute("lang"), "uk");
   const ukrainianSearch = ukrainianOptions.getByRole("searchbox", { name: "Пошук налаштувань", exact: true });
   await ukrainianSearch.fill("Шрифти");
+  await ukrainianSearch.press("F1");
+  const ukrainianHelp = page.getByRole("dialog", { name: "Довідка", exact: true });
+  await ukrainianHelp.getByRole("heading", { name: "Загальні", exact: true }).waitFor();
+  const ukrainianTopics = ukrainianHelp.getByRole("navigation", { name: "Зміст" }).getByRole("link");
+  const topicLinks = await ukrainianTopics.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  await ukrainianHelp.getByRole("link", { name: "Термінал", exact: true }).click();
+  assert.match(await ukrainianHelp.locator("#help-terminal p").innerText(), /інтерактивну оболонку/);
+  await page.keyboard.press("Escape");
+  assert.equal(await ukrainianSearch.inputValue(), "Шрифти");
+  assert.equal(await ukrainianSearch.evaluate((field) => field === document.activeElement), true);
   await ukrainianSearch.press("Enter");
   await ukrainianOptions.getByRole("heading", { name: "Шрифти", exact: true }).waitFor();
   await ukrainianSearch.fill("");
@@ -1119,6 +1129,13 @@ try {
   await reopenedOptions.getByRole("button", { name: "Готово", exact: true }).click();
   assert.equal(await page.locator("html").getAttribute("lang"), "ru");
   assert.equal(await page.locator("#left-pane .col-name button").innerText(), "Имя");
+  await page.locator("#left-pane .file-list").press("F1");
+  const russianHelp = page.getByRole("dialog", { name: "Справка", exact: true });
+  await russianHelp.getByRole("heading", { name: "Основные файловые панели", exact: true }).waitFor();
+  assert.deepEqual(await russianHelp.getByRole("navigation", { name: "Оглавление" }).getByRole("link")
+    .evaluateAll((links) => links.map((link) => link.getAttribute("href"))), topicLinks);
+  assert.match(await russianHelp.locator("#help-files p").innerText(), /Введите путь/i);
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Найти файлы", exact: true }).click();
   const russianFind = page.getByRole("dialog", { name: "Найти файлы", exact: true });
   await russianFind.getByLabel("Маска файлов", { exact: true }).waitFor();
@@ -1175,10 +1192,65 @@ try {
     await sampleForFonts.click();
     await page.keyboard.press(shortcut);
     assert.equal(await sampleSurface.evaluate((surface) => getComputedStyle(surface).fontSize), expected);
+    await page.keyboard.press("F1");
+    await page.getByRole("dialog", { name: "Help", exact: true })
+      .getByRole("heading", { name: shortcut === "F3" ? "Viewer" : "Editor", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
   }
   assert.equal(await page.getByRole("textbox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
   console.log("Verified feature settings search, independent font overrides, and persistence after restart.");
+  const help = page.getByRole("dialog", { name: "Help", exact: true });
+  await page.context().setOffline(true);
+  try {
+    await page.locator("#left-pane .file-list").press("F1");
+    const contents = help.getByRole("navigation", { name: "Table of contents" });
+    await contents.waitFor();
+    const links = contents.getByRole("link");
+    assert.equal(topicLinks.length, 19);
+    assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
+    if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
+    for (const href of topicLinks) {
+      const link = contents.locator(`a[href="${href}"]`);
+      await link.click();
+      assert.equal(await help.locator(`${href} h3`).innerText(), await link.innerText());
+      assert.match(await help.locator(`${href} p`).innerText(), /\S/);
+    }
+    await page.keyboard.press("Escape");
+  } finally {
+    await page.context().setOffline(false);
+  }
+
+  const terminalButton = page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true });
+  if (await terminalButton.getAttribute("aria-pressed") === "false") await terminalButton.click();
+  const terminalInput = page.locator(".xterm-helper-textarea");
+  await terminalInput.press("F1");
+  await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await terminalInput.evaluate((field) => field === document.activeElement), true);
+
+  await page.getByRole("button", { name: "Options", exact: true }).click();
+  const shortcutOptions = page.getByRole("dialog", { name: "Options", exact: true });
+  await shortcutOptions.getByRole("searchbox", { name: "Search settings" }).fill("help");
+  await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  const binding = shortcutOptions.getByRole("button", { name: "Change shortcut for Help", exact: true });
+  await binding.click();
+  const captureHelp = shortcutOptions.getByRole("textbox", { name: "New shortcut for Help", exact: true });
+  await captureHelp.press("F4");
+  await shortcutOptions.getByText("F4 is assigned to Edit text.", { exact: true }).waitFor();
+  await captureHelp.press("Control+Shift+F1");
+  await shortcutOptions.getByRole("button", { name: "Apply", exact: true }).click();
+  await page.keyboard.press("F1");
+  assert.equal(await help.count(), 0);
+  await page.keyboard.press("Control+Shift+F1");
+  await help.waitFor();
+  await page.keyboard.press("Escape");
+  await shortcutOptions.getByRole("button", { name: "Clear shortcut for Help", exact: true }).click();
+  await shortcutOptions.getByRole("button", { name: "Done", exact: true }).click();
+  await page.keyboard.press("Control+Shift+F1");
+  assert.equal(await help.count(), 0);
+  console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
   await exitDesktop(page);
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
 } finally {
