@@ -34,7 +34,7 @@ export async function testInlineRename(page, root) {
   await field.press("Escape");
   await field.waitFor({ state: "hidden" });
   assert.ok((await stat(join(left, "SQL2025"))).isDirectory());
-  assert.equal(await pane("left").evaluate((element) => element === document.activeElement), true);
+  await page.locator("#left-files:focus").waitFor();
   field = await edit("left", "SQL2025");
   await field.fill("SQL2026");
   await field.press("Enter");
