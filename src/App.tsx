@@ -2,7 +2,7 @@ import { Button } from "./Button";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
-  Calculator, Menu, Pencil, Search, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
+  Calculator, Pencil, Search, Server, Settings2, Terminal as TerminalIcon, TextCursorInput, Trash2,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,6 +12,7 @@ import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
+import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { Pane } from "./Pane";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
@@ -50,7 +51,7 @@ type Modal =
   | { kind: "search"; side: Side; place: Place }
   | { kind: "fileActions"; side: Side; entry?: Entry }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
-  | { kind: "menu" | "commandHistory" }
+  | { kind: "about" | "commandHistory" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
   | { kind: "installUpdate"; version: string }
@@ -63,6 +64,13 @@ const rowCommands = {
 
 function isRangeCommand(command: Command) {
   return command === "selectUpRow" || command === "selectDownRow";
+}
+
+function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | null, editing: boolean | undefined): HelpTopic {
+  if (modal === "settings") return "general";
+  if (modal === "search") return "search";
+  if (target?.closest(".terminal-card, .command-bar")) return "terminal";
+  return editing === undefined ? "files" : editing ? "editor" : "viewer";
 }
 
 function sameConnection(left: Place | null, right: Place) {
@@ -120,6 +128,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
   const drag = useRef<{ side: Side; source: Place; items: Transfer["items"] } | null>(null);
   const latest = useRef(panes);
+  const mainMenu = useRef<MainMenuHandle>(null);
   latest.current = panes;
   const connected = useRef<Record<Side, NetworkPlace | null>>({ left: null, right: null });
   const failedFtp = useRef<Partial<Record<Side, SavedFtpLocation>>>({});
@@ -178,9 +187,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       event.preventDefault();
       event.stopPropagation();
       if (event.repeat) return;
-      const topic = modalKind === "settings" ? "general" : modalKind === "search" ? "search" :
-        target?.closest(".terminal-card, .command-bar") ? "terminal" :
-        editingDocument === undefined ? "files" : editingDocument ? "editor" : "viewer";
+      const topic = contextHelpTopic(modalKind, target, editingDocument);
       setHelpTopic((current) => current ?? topic);
     }
     document.addEventListener("keydown", openHelp, true);
@@ -437,10 +444,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function documentKeys(event: KeyboardEvent) {
-    if (modal || !documents.length || event.nativeEvent.isComposing) return;
+    if (modal || helpTopic || event.nativeEvent.isComposing) return;
     if ((event.target as HTMLElement).closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
+    if (shortcut === preferences.shortcuts.menu) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) perform("menu");
+      return;
+    }
+    if (!documents.length) return;
     const direction = shortcut === preferences.shortcuts.nextDocument ? 1 : shortcut === preferences.shortcuts.previousDocument ? -1 : 0;
     if (!direction) return;
     event.preventDefault();
@@ -826,8 +840,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": setModal({ kind: "settings" }); break;
-      case "help": setHelpTopic("files"); break;
-      case "menu": setModal({ kind: "menu" }); break;
+      case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
+      case "menu": mainMenu.current?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
@@ -974,11 +988,80 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return showShortcut(preferences.shortcuts[command]);
   }
 
+  const fileActions = ([
+    { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
+      disabled: !fileFor(active) && !measureEntries.length },
+    { command: "edit", label: "Edit", Icon: Pencil, disabled: !fileFor(active) || fileFor(active)?.place.kind === "server" },
+    { command: "copy", label: local || ftp ? "Copy" : "Download", Icon: local || ftp ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
+    { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
+    { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
+    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
+    { command: "recycle", label: ftp ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp) || !!pane.search || !current || busy },
+    { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
+    { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
+  ] as const).filter(({ command }) => !ftp || command !== "rename");
+  const panesAvailable = !panelsHidden && activeDocument === null;
+  const filesAvailable = panesAvailable && !processPanels[active] && !pane.loading;
+
+  function menuCommand(command: Command, disabled = false, label: string = commands[command].label) {
+    return { label, disabled, shortcut: keyLabel(command), run: () => perform(command) };
+  }
+
+  function paneMenu(side: Side): MenuGroup {
+    const target = panes[side];
+    const available = panesAvailable && !target.loading;
+    function inPane(command: "back" | "forward" | "parent" | "refresh", disabled: boolean) {
+      return {
+        ...menuCommand(command, !available || disabled),
+        run: () => {
+          focus(side);
+          if (command === "parent") parent(side);
+          else if (command === "refresh") refresh(side);
+          else history(side, command === "back" ? -1 : 1);
+        },
+      };
+    }
+    return {
+      label: side === "left" ? "Left" : "Right",
+      items: [
+        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
+        inPane("back", !processPanels[side] && !target.search && target.position <= 0),
+        inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
+        inPane("parent", !processPanels[side] && !target.search && (!target.place || !parentPlace(target.place))),
+        inPane("refresh", processPanels[side] || !target.place),
+      ],
+    };
+  }
+
+  const menuGroups: MenuGroup[] = [
+    paneMenu("left"),
+    { label: "Files", items: [
+      ...fileActions.map(({ command, label, disabled }) => menuCommand(command, !filesAvailable || disabled, label)),
+      menuCommand("attributes", !filesAvailable || !currentItem || busy),
+      menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
+      menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
+      ...(ftp ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
+    ] },
+    { label: "Commands", items: [
+      menuCommand("search", !filesAvailable || !pane.place),
+      menuCommand("connect", activeDocument !== null, "Connect"),
+      menuCommand("swap", !panesAvailable || panes.left.loading || panes.right.loading || busy),
+      menuCommand("commandHistory", activeDocument !== null),
+      { label: "Toggle terminal", disabled: activeDocument !== null, run: toggleTerminal },
+      ...(isTauri() ? [{ label: "Check for updates", run: () => { void checkUpdates(true); } }] : []),
+    ] },
+    { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
+    paneMenu("right"),
+    { label: "Help", items: [menuCommand("help"), { label: "About", run: () => setModal({ kind: "about" }) }] },
+  ];
+
   return (
     <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}>
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
+        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
         <div className="top-actions">
           <Button className="toolbar-button" shortcut={keyLabel("connect")} onClick={() => perform("connect")}><Server /> {t("Connect")}</Button>
           <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
@@ -989,7 +1072,6 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             shortcut={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
           <Button className="icon-button" aria-label={t("Toggle terminal")} aria-pressed={terminal !== null}
             onClick={toggleTerminal}><TerminalIcon /></Button>
-          <Button className="icon-button" aria-label={t("Commands")} shortcut={keyLabel("menu")} onClick={() => perform("menu")}><Menu /></Button>
           <Button className="icon-button" aria-label={t("Options")} shortcut={keyLabel("settings")} onClick={() => perform("settings")}><Settings2 /></Button>
         </div>
       </header>
@@ -1076,19 +1158,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           spellCheck={false} placeholder={t("Enter a command")} onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
       </form>
       <nav className="actionbar" aria-label={t("File actions")}>
-        {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> : ([
-          { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
-            disabled: !fileFor(active) && !measureEntries.length },
-          { command: "edit", label: "Edit", Icon: Pencil, disabled: !fileFor(active) || fileFor(active)?.place.kind === "server" },
-          { command: "copy", label: local || ftp ? "Copy" : "Download", Icon: local || ftp ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
-          { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
-          { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
-          { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
-          { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
-          { command: "recycle", label: ftp ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp) || !!pane.search || !current || busy },
-          { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
-          { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
-        ] as const).filter(({ command }) => !ftp || command !== "rename").map(({ command, label, Icon, disabled }) => (
+        {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
+          fileActions.map(({ command, label, Icon, disabled }) => (
           <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}>
             <Icon /><span>{t(label)}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}
           </Button>
@@ -1179,19 +1250,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             requestAnimationFrame(() => focus(side));
           }} />
       )}
-      {modal?.kind === "menu" && (
-        <Dialog title={t("Commands")} onClose={() => setModal(null)}>
-          <div className="dialog-body command-menu">
-            {(["view", "edit", "newFile", "copy", "move", "copyClipboard", "pasteClipboard", "mkdir", "search", "recycle", "delete", "compare", "settings", "commandHistory", "help"] as const)
-              .map((command) => <Button key={command} type="button" shortcut={keyLabel(command)} onClick={() => { setModal(null); perform(command); }}>
-                {t(commands[command].label)}<kbd>{keyLabel(command)}</kbd>
-              </Button>)}
-            {isTauri() && <Button type="button" onClick={() => { setModal(null); void checkUpdates(true); }}>
-              {t("Check for updates")}
-            </Button>}
-          </div>
-        </Dialog>
-      )}
+      {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
