@@ -18,6 +18,9 @@ const server = [
   "    abstracted_fs = FixtureFS",
   "    def on_login(self, username):",
   "        self.fs.cwd = '/start'",
+  "    def ftp_RETR(self, path):",
+  "        print('RETR ' + os.path.basename(path), flush=True)",
+  "        return super().ftp_RETR(path)",
   "logging.disable(logging.CRITICAL)",
   "auth = DummyAuthorizer()",
   "auth.add_user('dirlume', os.environ['DIRLUME_FIXTURE_PASSWORD'], sys.argv[1], perm='elradfmw')",
@@ -52,8 +55,11 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   await writeFile(join(lastFolder, "details.md"), "# Remote details\n");
   const ftpPort = await port();
   const child = spawn(process.env.DIRLUME_FTP_PYTHON, ["-u", "-c", server, root, String(ftpPort)], {
-    windowsHide: true, env: { ...process.env, DIRLUME_FIXTURE_PASSWORD: password },
+    windowsHide: true, env: { ...process.env, DIRLUME_FIXTURE_PASSWORD: password, PYTHONIOENCODING: "utf-8" },
   });
+  let ftpLog = "";
+  child.stdout.setEncoding("utf8").on("data", (data) => { ftpLog += data; });
+  const retrieves = () => ftpLog.split(/\r?\n/).filter((line) => line.startsWith("RETR "));
   const profiles = join(config, "ftp-profiles.json");
   const rightPane = page.getByRole("region", { name: "right pane" });
   const right = rightPane.getByRole("listbox", { name: "right files" });
@@ -176,6 +182,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await remoteRow("ftp-copy").click();
     await page.keyboard.press("F3");
     await remoteRow("ftp-copy").getByText("24 B", { exact: true }).waitFor();
+    const beforeMerge = retrieves().length;
     await page.keyboard.press("F5");
     await copy.getByLabel("Destination", { exact: true }).fill(destination);
     await button(copy, "Copy").click();
@@ -185,6 +192,20 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await button(complete, "Done").click();
     assert.equal(await readFile(join(downloadedFolder, "existing.txt"), "utf8"), "local original");
     assert.equal(await readFile(join(downloadedFolder, "файл.txt"), "utf8"), "Unicode name");
+    assert.deepEqual(retrieves().slice(beforeMerge), ["RETR файл.txt"]);
+
+    const beforeSkip = retrieves().length;
+    const existingLocal = join(destination, "bytes.bin");
+    await writeFile(existingLocal, "keep this");
+    await remoteRow("bytes.bin").click();
+    await page.keyboard.press("F5");
+    await copy.getByLabel("Destination", { exact: true }).fill(destination);
+    await copy.locator("label").filter({ hasText: "Existing files" }).locator("select").selectOption("skip");
+    await button(copy, "Copy").click();
+    await complete.getByText("0 completed, 1 skipped.", { exact: true }).waitFor();
+    await button(complete, "Done").click();
+    assert.equal(await readFile(existingLocal, "utf8"), "keep this");
+    assert.equal(retrieves().length, beforeSkip);
 
     await remoteRow("guide.md").click();
     await page.keyboard.press("F6");
