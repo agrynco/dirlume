@@ -15,6 +15,9 @@ export async function testProcessColumns(page) {
     await table(side).locator("tbody tr").first().waitFor();
   }
   const target = table("left").locator("tbody tr").filter({ hasText: "node.exe" }).first();
+  const originalColumns = await table("left").getByRole("columnheader").count();
+  const optionalColumns = (await table("left").getByRole("columnheader").getByRole("button").allTextContents())
+    .filter((name) => name !== "Process");
   await target.click();
   const row = target.and(table("left").locator("[data-current='true']"));
   await row.waitFor();
@@ -22,7 +25,7 @@ export async function testProcessColumns(page) {
   await choice("CPU").click();
   assert.equal(await choice("CPU").getAttribute("aria-checked"), "false");
   await header("left", "CPU").waitFor({ state: "detached" });
-  assert.equal(await row.getByRole("gridcell").count(), 3);
+  assert.equal(await row.getByRole("gridcell").count(), originalColumns - 1);
   assert.equal(await header("right", "CPU").count(), 1);
   await page.keyboard.press("Escape");
   await header("left", "PID").press("Shift+F10");
@@ -31,12 +34,12 @@ export async function testProcessColumns(page) {
   await page.keyboard.press("Escape");
   await header("left", "CPU").click();
   assert.equal(await table("left").getByRole("columnheader").filter({ hasText: "CPU" }).getAttribute("aria-sort"), "descending");
-  assert.equal(await row.getByRole("gridcell").count(), 4);
+  assert.equal(await row.getByRole("gridcell").count(), originalColumns);
   await header("left", "Process").click({ button: "right" });
-  for (const name of ["PID", "CPU", "Memory"]) await choice(name).click();
+  for (const name of optionalColumns) await choice(name).click();
   assert.equal(await choice("Process").isDisabled(), true);
   assert.equal(await table("left").getByRole("columnheader").count(), 1);
-  for (const name of ["PID", "CPU", "Memory"]) await choice(name).click();
+  for (const name of optionalColumns) await choice(name).click();
   await page.keyboard.press("Escape");
   const customized = new Map();
   for (const name of ["PID", "Memory"]) {

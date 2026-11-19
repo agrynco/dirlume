@@ -17,6 +17,7 @@ import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
+import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -1581,6 +1582,7 @@ try {
   await testShortcutFields(page);
   await testProcessColumns(page);
   await testProcessQuickSearch(page, temp);
+  await testProcessExecutablePath(page, child.pid);
   await testLockingProcessPane(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);

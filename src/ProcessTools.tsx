@@ -90,6 +90,7 @@ const processColumns = [
   { key: "pid", label: "PID", min: 52, width: 76 },
   { key: "cpu", label: "CPU", min: 53, width: 77 },
   { key: "memory", label: "Memory", min: 64, width: 104 },
+  { key: "executable", label: "Executable path", min: 115, width: 230 },
 ] as const;
 type ProcessColumn = (typeof processColumns)[number]["key"];
 type ProcessWidths = Partial<Record<ProcessColumn, number>>;
@@ -167,7 +168,8 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const visible = useMemo(() => {
     const { column, asc } = sort;
     return [...items].sort((a, b) => {
-        const order = column === "name" ? byProcessName.compare(a.name, b.name) : a[column] - b[column];
+        const order = column === "name" ? byProcessName.compare(a.name, b.name) :
+          column === "executable" ? byProcessName.compare(a.executable ?? "", b.executable ?? "") : a[column] - b[column];
         return (asc ? order : -order) || a.pid - b.pid;
       });
   }, [items, sort]);
@@ -291,7 +293,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
           <thead {...columnMenuBindings<HTMLTableSectionElement>((_header, anchor) => setColumnsAnchor(anchor))}><tr>{displayed.map(({ key, label, min }) => (
             <th key={key} scope="col" className={`process-col-${key}`}
               aria-sort={sort.column === key ? sort.asc ? "ascending" : "descending" : undefined}>
-              <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : key === "name" || key === "pid" })}>
+              <Button type="button" onClick={() => setSort({ column: key, asc: sort.column === key ? !sort.asc : ["name", "pid", "executable"].includes(key) })}>
                 {t(label)}{sort.column === key && (sort.asc ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
               </Button>
               <ColumnResizeHandle label={label} min={min} width={widths[key]}
@@ -309,6 +311,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
               pid: process.pid,
               cpu: processCpu(process.cpu),
               memory: formatSize(process.memory),
+              executable: process.executable ?? "—",
             };
             return <tr key={key} id={`${side}-process-${key}`} aria-selected={selected.includes(key)}
               data-current={focused === key} onClick={(event) => {
@@ -316,7 +319,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
                 table.current?.focus({ preventScroll: true });
               }}>
               {displayed.map(({ key }) => <td key={key} className={`process-cell-${key}`}
-                title={key === "name" ? process.name : undefined}>{values[key]}</td>)}
+                title={key === "name" ? process.name : key === "executable" ? process.executable ?? undefined : undefined}>{values[key]}</td>)}
             </tr>;
           })}</tbody>
         </table>
