@@ -81,6 +81,7 @@ export type TextEncoding = keyof typeof textEncodingLabels;
 
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean };
+export type CommandCompletion = { index: number; length: number; matches: { label: string; text: string; directory: boolean }[] };
 export interface SizeResult {
   name: string;
   bytes: number;
@@ -205,6 +206,8 @@ export const api = {
   installedFonts: () => invoke<string[]>("installed_fonts"),
   openTerminal: ({ id, path: directory, refreshEnvironment }: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<void>("open_terminal", { request: { id, directory, promptToken, rows, cols, refreshEnvironment }, output }),
+  completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean) =>
+    invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment } }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),

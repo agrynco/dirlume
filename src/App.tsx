@@ -1,4 +1,5 @@
 import { Button } from "./Button";
+import { CommandField } from "./CommandField";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
@@ -1225,8 +1226,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           <TerminalIcon /> {t("Terminal")}
         </Button>
         <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
-        <input ref={commandInput} aria-label={t("Command line")} type="text" value={commandLine} autoFocus autoComplete="off"
-          spellCheck={false} placeholder={t("Enter a command")} onChange={(event) => { historyIndex.current = -1; setCommandLine(event.target.value); }} />
+        <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] ? null : local?.path ?? null}
+          history={historyItems} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
+          onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
       <nav className="actionbar" aria-label={t("File actions")}>
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :

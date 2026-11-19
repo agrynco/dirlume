@@ -99,21 +99,31 @@ pub struct OpenTerminal {
     refresh_environment: bool,
 }
 
+pub fn shell_program() -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        "powershell.exe".into()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into())
+    }
+}
+
 fn create(request: OpenTerminal, output: Channel<Output>) -> Result<SharedTerminal> {
     let cwd = local::absolute(&request.directory).map_err(message)?;
     let pair = native_pty_system()
         .openpty(size(request.rows, request.cols))
         .map_err(message)?;
+    let shell = shell_program();
     #[cfg(windows)]
     let mut command = {
-        let mut command = CommandBuilder::new("powershell.exe");
+        let mut command = CommandBuilder::new(&shell);
         crate::windows_environment::apply(&mut command, request.refresh_environment)
             .map_err(message)?;
         command.args(["-NoLogo", "-NoExit", "-Command", POWERSHELL_PROMPT]);
         command
     };
-    #[cfg(not(windows))]
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(&shell);
     #[cfg(not(windows))]

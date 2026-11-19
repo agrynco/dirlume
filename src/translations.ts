@@ -68,6 +68,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Opening terminal…": ["Відкриття термінала…", "Открытие терминала…"],
   "Terminal": ["Термінал", "Терминал"],
   "Command line": ["Командний рядок", "Командная строка"],
+  "Command suggestions": ["Підказки команд", "Подсказки команд"],
+  "History": ["Історія", "История"],
   "Enter a command": ["Введіть команду", "Введите команду"],
   "File actions": ["Дії з файлами", "Действия с файлами"],
   "Back to files": ["Повернутися до файлів", "Вернуться к файлам"],

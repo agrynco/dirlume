@@ -1,0 +1,15 @@
+The PowerShell completion provider adapts KSwitcher Files
+(commit debd2b9, src/files_command_completion.h), © 2026 bitcodepro.
+See KS-Completion-LICENSE.txt for its MIT license.
+
+The Windows command catalog is extracted from KSwitcher Files
+(commit debd2b9, src/files_windows_command_catalog.h). KSwitcher generated
+the catalog of commands and arguments from Microsoft Learn Windows Commands
+documentation by Microsoft and contributors, licensed under CC BY 4.0.
+Dirlume packages the extracted catalog as tab-separated data.
+
+Source documentation:
+https://github.com/MicrosoftDocs/windowsserverdocs/tree/1b24b91e309bdcacbf20431cfbbd0a597a68a8bc/WindowsServerDocs/administration/windows-commands
+
+License:
+https://creativecommons.org/licenses/by/4.0/
