@@ -8,8 +8,8 @@ import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { api, windowsClient } from "./api";
 import {
-  commandLabel, commandNames, commands, defaultBindings, eventShortcut, shortcutScopesOverlap, showShortcut, wheelBindings,
-  type Command, type Preferences, type Provider,
+  commandLabel, commandNames, commands, defaultBindings, eventShortcut, panelLayouts, shortcutScopesOverlap, showShortcut, wheelBindings,
+  type Command, type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
@@ -68,7 +68,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const showGeneral = matches("General", "Language", ...Object.values(languages), "Remote connection", "Dirlume server", "KSwitcher installation folder", "Version");
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
-    const terms = feature === "filePanels" ? ["Show hidden files", ...Object.values(colorGroups.panels.colors)] :
+    const terms = feature === "filePanels" ? ["Show hidden files", "Panel layout", ...Object.values(panelLayouts), ...Object.values(colorGroups.panels.colors)] :
       feature === "terminal" && windowsClient ? ["Automatically refresh environment variables"] : [];
     return matches(label, fontGroups[font].label, "Font family", "Size (px)", "font size", ...views.map((view) => viewFonts[view].label), ...terms);
   });
@@ -207,6 +207,11 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           {page === "filePanels" && <div className="dialog-body settings-general">
             <label className="setting"><span>{t("Show hidden files")}</span>
               <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
+            </label>
+            <label className="setting"><span>{t("Panel layout")}</span>
+              <select value={preferences.layout} onChange={(event) => onChange({ ...preferences, layout: event.target.value as PanelLayout })}>
+                {Object.entries(panelLayouts).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+              </select>
             </label>
           </div>}
           <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}

@@ -3,6 +3,8 @@ mod desktop;
 #[cfg(feature = "desktop")]
 mod diagnostics;
 #[cfg(feature = "desktop")]
+mod disk_space;
+#[cfg(feature = "desktop")]
 mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;

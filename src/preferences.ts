@@ -117,9 +117,13 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
     (leftScope !== "wheel" && rightScope !== "wheel" && (leftScope === "global" || rightScope === "global"));
 }
 
+export const panelLayouts = { standard: "Standard", classic: "Classic commander" } as const;
+export type PanelLayout = keyof typeof panelLayouts;
+
 export interface Preferences {
   language: Language;
   theme: Theme;
+  layout: PanelLayout;
   activeScheme: string | null;
   schemes: Scheme[];
   hidden: boolean;
@@ -142,7 +146,7 @@ export const defaultBindings = Object.fromEntries(
 
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
-    theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
+    theme: "system", layout: "standard", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
     viewFontSizes: {}, language: "en",
   };
   try {
@@ -178,6 +182,7 @@ export function readPreferences(): Preferences {
     return {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
+      layout: saved.layout === "classic" ? "classic" : "standard",
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
@@ -229,7 +234,15 @@ export function wheelShortcut(event: WheelEvent) {
   return eventShortcut({ key: "Wheel", ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey });
 }
 
+const arrows: Record<string, string> = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+
 export function showShortcut(shortcut: string) {
-  if (mac) return shortcut.replaceAll("Meta+", "⌘").replaceAll("Ctrl+", "⌃").replaceAll("Alt+", "⌥").replaceAll("Shift+", "⇧");
-  return shortcut;
+  const readable = shortcut.replace(/\bArrow(?:Left|Right|Up|Down)\b/g, (key) => arrows[key]);
+  if (mac) return readable.replaceAll("Meta+", "⌘").replaceAll("Ctrl+", "⌃").replaceAll("Alt+", "⌥").replaceAll("Shift+", "⇧");
+  return readable;
+}
+
+/** A narrow label for the function-key bar, where every cell has the same width. */
+export function compactShortcut(shortcut: string) {
+  return showShortcut(shortcut).replace(/^Shift\+/, "⇧").replace(/\bInsert\b/, "Ins").replace(/\bDelete\b/, "Del");
 }

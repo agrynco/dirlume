@@ -79,6 +79,11 @@ export const textEncodingLabels = {
 } as const;
 export type TextEncoding = keyof typeof textEncodingLabels;
 
+export interface DiskSpace {
+  available: number;
+  total: number;
+}
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean };
 export interface SizeResult {
@@ -157,6 +162,7 @@ export const api = {
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
+  diskSpace: (path: string) => invoke<DiskSpace>("disk_space", { path }),
   fileAttributes: (directory: string, name: string) =>
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
