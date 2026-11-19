@@ -1,7 +1,7 @@
 import { errorText, t } from "./i18n";
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronDown } from "lucide-react";
-import { maxFontFamilyLength } from "./appearance";
+import { bundledFontFamily, maxFontFamilyLength } from "./appearance";
 import { Button } from "./Button";
 
 export type InstalledFonts = { families: string[]; error?: string } | null;
@@ -22,7 +22,9 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
   const [position, setPosition] = useState<CSSProperties>();
   const matches = useMemo(() => {
     const prefix = query?.trim().toLocaleLowerCase();
-    const families = installed?.families ?? [];
+    const families = [bundledFontFamily, ...(installed?.families ?? []).filter(
+      (family) => family.toLowerCase() !== bundledFontFamily.toLowerCase(),
+    )];
     if (!prefix) return families;
     const starts = [];
     const contains = [];

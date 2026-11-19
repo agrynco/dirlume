@@ -126,11 +126,13 @@ export type Color = {
 }[keyof typeof colorGroups];
 const colors = Object.values(colorGroups).flatMap(({ colors }) => Object.keys(colors)) as Color[];
 
+export const bundledFontFamily = "GoMono Nerd Font Mono";
+
 export const fontGroups = {
-  ui: { label: "Main window", fallback: "system-ui" },
-  panel: { label: "File panels", fallback: "system-ui" },
-  dialog: { label: "Dialogs", fallback: "system-ui" },
-  mono: { label: "Editor, viewer, and terminal", fallback: "monospace" },
+  ui: { label: "Main window", fallback: "var(--bundled-font), system-ui" },
+  panel: { label: "File panels", fallback: "var(--ui-font)" },
+  dialog: { label: "Dialogs", fallback: "var(--ui-font)" },
+  mono: { label: "Editor, viewer, and terminal", fallback: "var(--bundled-font), monospace" },
   viewer: { label: "Viewer", fallback: "var(--mono)" },
   editor: { label: "Editor", fallback: "var(--mono)" },
   terminal: { label: "Terminal", fallback: "var(--mono)" },

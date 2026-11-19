@@ -1,3 +1,29 @@
+@font-face {
+  font-family: "GoMono Nerd Font Mono";
+  src: url("./assets/fonts/GoMonoNerdFontMono-Regular.ttf") format("truetype");
+  font-weight: 100 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GoMono Nerd Font Mono";
+  src: url("./assets/fonts/GoMonoNerdFontMono-Bold.ttf") format("truetype");
+  font-weight: 501 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GoMono Nerd Font Mono";
+  src: url("./assets/fonts/GoMonoNerdFontMono-Italic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 100 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GoMono Nerd Font Mono";
+  src: url("./assets/fonts/GoMonoNerdFontMono-BoldItalic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 501 900;
+  font-display: swap;
+}
 :root, [data-theme] {
   color-scheme: dark;
   --canvas: #10161e;
@@ -50,14 +76,16 @@
   --syntax-type: #81dcca;
   --syntax-property: #9bbdff;
   --radius: 7px;
-  --ui-font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --ui-size: 13px;
+  --bundled-font: "GoMono Nerd Font Mono";
+  --default-font-size: 18px;
+  --ui-font: var(--bundled-font), "Segoe UI", system-ui, sans-serif;
+  --ui-size: var(--default-font-size);
   --panel-font: var(--ui-font);
   --panel-size: var(--ui-size);
   --dialog-font: var(--ui-font);
   --dialog-size: var(--ui-size);
-  --mono: "Cascadia Mono", "SFMono-Regular", "Liberation Mono", monospace;
-  --mono-size: 13px;
+  --mono: var(--bundled-font), "Cascadia Mono", "SFMono-Regular", "Liberation Mono", monospace;
+  --mono-size: var(--default-font-size);
   --viewer-font: var(--mono);
   --viewer-size: var(--mono-size);
   --editor-font: var(--mono);

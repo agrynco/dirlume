@@ -1,0 +1,12 @@
+GoMono Nerd Font Mono
+
+The four GoMono Nerd Font Mono faces are distributed as provided by Nerd Fonts
+v3.5.1 at https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1.
+
+The Go-Mono.zip release asset has SHA-256
+7b507440809cec7221aa455cf03a289cd8754c34f994ca1cf7a595e4d8cdc42a.
+
+Go Mono was created for the Go project by Bigelow & Holmes Inc.
+Nerd Fonts supplies the patched faces and documents the glyph sources at
+https://github.com/ryanoasis/nerd-fonts/blob/v3.5.1/license-audit.md.
+See GoMono-LICENSE.txt and Nerd-Fonts-LICENSE.txt for the upstream notices.
