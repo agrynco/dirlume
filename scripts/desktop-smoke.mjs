@@ -1338,6 +1338,20 @@ try {
   await featureSearch.press("Enter");
   await featureDialog.getByRole("heading", { name: "Main File Panels", exact: true }).waitFor();
   await featureDialog.getByRole("checkbox", { name: "Show hidden files" }).waitFor();
+  const layoutSelect = featureDialog.getByRole("combobox", { name: "Panel layout" });
+  assert.deepEqual(await layoutSelect.locator("option").evaluateAll((options) => options.map((option) => option.value)),
+    ["standard", "twin", "classic"]);
+  const leftDrives = page.getByRole("navigation", { name: "Drives and places for left pane", exact: true });
+  for (const layout of ["twin", "classic"]) {
+    await layoutSelect.selectOption(layout);
+    await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
+    assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
+    assert.ok(await leftDrives.getByRole("button").count() > 0);
+  }
+  await layoutSelect.selectOption("standard");
+  await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
+  assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
+  assert.equal(await leftDrives.count(), 0);
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
   const featureFonts = [["Viewer", "Consolas", "21"], ["Editor", "Courier New", "19"], ["Terminal", "Arial", "17"]];
