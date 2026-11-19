@@ -245,6 +245,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const complete = marked.every((entry) => entry.directory ? folderMeasurement(pane, entry)?.incomplete === false : entry.size !== null);
   const markedBytes = marked.reduce((bytes, entry) => bytes + (folderMeasurement(pane, entry)?.bytes ?? entry.size ?? 0), 0);
   const classic = layout === "classic";
+  const twin = layout === "twin";
   const current = selected >= 0 ? entries[selected] : undefined;
   const currentSize = current && folderMeasurement(pane, current);
   const usedShare = free && free.total > 0 ? Math.min(100, Math.max(0, 100 - free.available / free.total * 100)) : 0;
@@ -280,10 +281,12 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         onDrop();
       }}>
       <header className="pane-heading">
-        {classic && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
+        {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" title={location.path} aria-pressed={location === currentLocation}
-              onClick={() => { onPath(location.path); list.current?.focus(); }}>{t(location.label)}</Button>
+              onClick={() => { onPath(location.path); list.current?.focus(); }}>
+              {twin && (/^[a-z]:$/i.test(location.label) ? <HardDrive aria-hidden="true" /> : <Folder aria-hidden="true" />)}{t(location.label)}
+            </Button>
           ))}
         </nav>}
         <div className="pane-title">
@@ -318,6 +321,12 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           </Button>}
         </div>
       </header>
+      {twin && free && !search && !processView && <div className="pane-volume" title={t("Free space on this drive")}>
+        <HardDrive aria-hidden="true" />
+        <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span>
+        <span className="pane-volume-free">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+        <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
+      </div>}
       <div className="navigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
@@ -478,7 +487,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
         <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
           search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>
-        {free && !search && <span className="pane-free" title={t("Free space on this drive")}>
+        {free && !search && !twin && <span className="pane-free" title={t("Free space on this drive")}>
           <span className="pane-free-full">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
           <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
           <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>

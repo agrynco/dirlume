@@ -121,7 +121,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
     (leftScope !== "wheel" && rightScope !== "wheel" && (leftScope === "global" || rightScope === "global"));
 }
 
-export const panelLayouts = { standard: "Standard", classic: "Classic commander" } as const;
+export const panelLayouts = { standard: "Standard", twin: "Twin panels", classic: "Classic commander" } as const;
 export type PanelLayout = keyof typeof panelLayouts;
 
 export interface Preferences {
@@ -188,7 +188,7 @@ export function readPreferences(): Preferences {
     return {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
-      layout: saved.layout === "classic" ? "classic" : "standard",
+      layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
       activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
