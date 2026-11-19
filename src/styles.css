@@ -800,10 +800,12 @@ button.color-swatch {
 .view-font-setting { display: grid; grid-template-columns: minmax(0, 1fr) 94px; gap: 8px; align-items: center; }
 .view-font-setting input { width: 100%; }
 .shortcut-list { min-height: 0; overflow: auto; padding: 4px 14px; scrollbar-width: thin; }
-.shortcut-setting { display: grid; grid-template-columns: 1fr 138px 29px; gap: 8px; align-items: center; min-height: 40px; border-bottom: 1px solid var(--subtle); }
+.shortcut-setting { display: grid; grid-template-columns: minmax(0, 1fr) min(44%, 15em) 29px; gap: 8px; align-items: center; min-height: 40px; border-bottom: 1px solid var(--subtle); }
 .shortcut-setting:last-child { border-bottom: 0; }
-.shortcut-key { font-family: var(--mono); margin: 4px 0; border-color: var(--line); background: var(--canvas); }
-.shortcut-setting input { padding: 4px; text-align: center; }
+.shortcut-setting > span { overflow-wrap: anywhere; }
+.shortcut-key { min-width: 0; font-family: var(--mono); margin: 4px 0; border-color: var(--line); background: var(--canvas); }
+.shortcut-key span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.shortcut-setting input { min-width: 0; width: 100%; padding: 4px; text-align: center; }
 .text-toolbar, .comparison-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); }
 .text-toolbar span { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
 .text-view, .code-surface, .markdown { flex: 1; margin: 0 14px 12px; min-height: 0; overflow: auto; padding: 11px; border: 1px solid var(--line); background: var(--text-bg); color: var(--text-ink); border-radius: var(--radius); }
