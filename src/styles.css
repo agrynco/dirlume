@@ -448,6 +448,22 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-name, .file-size, .file-date { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .file-name { display: flex; align-items: center; gap: 8px; padding-left: 4px; }
 .file-name span { overflow: hidden; text-overflow: ellipsis; }
+.file-name:has(.inline-rename) { overflow: visible; }
+.file-name .inline-rename { position: relative; flex: 1; min-width: 0; overflow: visible; }
+.inline-rename input { width: 100%; padding: 1px 4px; font: inherit; }
+.inline-rename .inline-rename-error {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 3px);
+  inset-inline: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .file-name svg { color: var(--muted); }
 .file-name img { width: 15px; height: 15px; object-fit: contain; flex: none; }
 .pane .file-name .folder-icon { color: var(--folder); }
@@ -502,7 +518,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 12px; font: var(--terminal-size)/1.4 var(--terminal-font); }
 .command-bar span { max-width: 36%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
 .command-entry { flex: 1; min-width: 0; position: relative; }
-.command-entry > input { width: 100%; margin-block: 2px; padding-block: 4px; }
+.command-entry > textarea { display: block; width: 100%; margin-block: 2px; padding-block: 4px; resize: none; }
 .command-suggestions {
   position: absolute;
   z-index: 40;
@@ -624,7 +640,13 @@ button.dialog-resize-grip {
 .conflict-details :is(th, td) { padding: 5px 8px; border-block: 1px solid var(--line); text-align: left; }
 .conflict-details td { color: var(--muted); }
 .delete-warning { padding: 10px; background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); }
-.command-menu button { justify-content: space-between; border-color: var(--line); white-space: normal; overflow-wrap: anywhere; }
+.permanent-delete-message { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; padding-block: 4px; }
+.permanent-delete-message > svg { width: 32px; height: 32px; margin-top: 2px; color: var(--danger); }
+.permanent-delete-message p { margin: 0; overflow-wrap: anywhere; }
+.permanent-delete-message .permanent-delete-note { margin-top: 4px; color: var(--muted); }
+.command-history-group { display: grid; gap: 4px; min-width: 0; }
+.command-history-group h3 { margin: 0; font-size: inherit; color: var(--muted); }
+.command-menu button { justify-content: flex-start; text-align: left; border-color: var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
 .folder-shortcut-editor, .folder-shortcut-picker { display: grid; gap: 8px; }
 .folder-shortcut-list {
   max-height: min(40vh, 320px);
@@ -645,6 +667,8 @@ button.dialog-resize-grip {
 button.primary, button.primary:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-fill); border-color: var(--accent-fill); }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.negative, button.negative:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
+.dialog-footer button.permanent-delete-button { color: var(--danger); background: var(--canvas); white-space: normal; }
+.dialog-footer button.permanent-delete-button:hover:not(:disabled) { background: var(--hover); }
 .field { display: grid; gap: 5px; }
 .new-file-encoding { margin-top: 12px; }
 .folder-name-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }

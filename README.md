@@ -42,17 +42,18 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
+| F2 | Rename the selected file or folder in its row. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
-| Ctrl+E / Alt+F8 | Recall earlier commands or open command history. Alt+F8 also works from the terminal. |
+| Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. Alt+F8 also works from the terminal. |
 | Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
 
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
-Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The open terminal follows the active local panel in PowerShell, Bash, Zsh, and compatible Bourne shells. If a command is running or being edited, the directory changes when the shell returns to its prompt. The command line also sends commands to the shell from the active local folder. **Alt+F8** opens the command line history from either control. Terminal colors adapt to the background of the active color scheme.
+Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The open terminal follows the active local panel in PowerShell, Bash, Zsh, and compatible Bourne shells. If a command is running or being edited, the directory changes when the shell returns to its prompt. The command line also sends commands to the shell from the active local folder. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells after they return to the prompt. **Alt+F8** shows the history grouped by execution date. Search by command text, date, or topic, such as `DNS cache`. Select a result to edit or rerun it. Terminal colors adapt to the background of the active color scheme.
 
 Type in the command line to see matching history and completions for the active local folder. On Windows, PowerShell supplies completions, including options for Windows tools and installed Git and .NET commands. On macOS and Linux, Dirlume uses available Bash or Zsh completions and can also complete executable names and paths. Use **↑/↓** to choose a suggestion, **Tab** or **Enter** to insert it, and **Esc** to dismiss the list. **Enter** runs the draft when no suggestion is selected. **Shift+Enter** runs it with the list open.
 
@@ -121,6 +122,24 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
 
+## MCP server
+
+Open **Commands → MCP server** and choose **Start server**. Copy the displayed Streamable HTTP configuration into a trusted MCP client on the same computer. The server listens on a loopback address and requires the displayed session bearer token. **Stop server** closes that endpoint and revokes the token. Starting the app again requires starting the server again.
+
+Use the client's tool list for argument schemas. The server works with the locations and credentials already available to the desktop app.
+
+| Area | Available tools |
+| --- | --- |
+| Panes | Inspect the workspace, open a path in the current source, mark items, and list directories. |
+| Files | Search, read properties and text, save text using a revision, create local items, and rename local or FTP items. |
+| Transfers | Copy from supported sources into a local pane, copy from local to FTP, or move between local panes. Existing targets are skipped. |
+| Connections | Connect a saved FTP profile or a Dirlume Server invitation. An open paired KSwitcher pane supports browsing and downloads. |
+| Settings | List and add folder shortcuts, and list or create named color schemes with validated overrides. |
+| Processes | List processes and inspect Windows locking processes. |
+| Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
+
+For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
+
 ## Desktop diagnostics
 
 Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
@@ -143,7 +162,9 @@ The installer and server filenames include both numbers, for example `Dirlume-0.
 
 To publish the next stable [GitHub Release](https://github.com/agrynco/dirlume/releases), open **Actions → CI and releases → Run workflow**, leave the branch set to `main`, and click **Run workflow**. The workflow increments the published patch version, promotes a newer prerelease to its stable version, or uses a higher source version. After all platforms pass, it verifies the packages and creates the matching `vX.Y.Z` tag and release. Pull requests and branch pushes to `main` run CI checks only.
 
-For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop packages, server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
+For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
+
+The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime. To update the Windows ZIP edition without an installer, download and extract a newer ZIP.
 
 The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. Configure `DIRLUME_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. Store the matching encrypted key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. Generate the key outside the repository with `npm run tauri -- signer generate -w <key-file>` and keep the private key available to the release maintainers. Installed apps trust the key embedded at build time. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 

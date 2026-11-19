@@ -20,7 +20,9 @@ export interface Transfer {
 type Decision = "overwrite" | "skip";
 let nextSession = 0;
 
-function itemSource(place: Place, item: Entry): TransferSource {
+export const nextTransferId = () => ++nextSession;
+
+export function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (place.kind === "ftp") return { kind: "ftp", connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
@@ -104,7 +106,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (running.current !== null || phase !== "setup") return;
-    const id = ++nextSession;
+    const id = nextTransferId();
     running.current = id;
     setPhase("working");
     setError("");

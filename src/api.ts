@@ -103,6 +103,7 @@ export const textEncodingLabels = {
 export type TextEncoding = keyof typeof textEncodingLabels;
 
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
+export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean };
 export type CommandCompletion = { index: number; length: number; matches: { label: string; text: string; directory: boolean }[] };
 export interface SizeResult {
@@ -163,10 +164,17 @@ export interface ProcessInfo extends ProcessId {
   canTerminate: boolean;
 }
 
+export type McpConnection = { endpoint: string; token: string };
+
 export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {
+  startMcp: () => invoke<McpConnection>("start_mcp"),
+  stopMcp: () => invoke<void>("stop_mcp"),
+  mcpConnection: () => invoke<McpConnection | null>("mcp_connection"),
+  mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
+  mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
   checkForUpdate: (manual: boolean) => invoke<AppUpdate | null>("check_for_update", { manual }),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
@@ -247,7 +255,7 @@ export const api = {
     invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
   openTerminal: ({ id, path: directory, refreshEnvironment }: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
-    invoke<void>("open_terminal", { request: { id, directory, promptToken, rows, cols, refreshEnvironment }, output }),
+    invoke<boolean>("open_terminal", { request: { id, directory, promptToken, rows, cols, refreshEnvironment }, output }),
   completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean) =>
     invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment } }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
