@@ -19,25 +19,41 @@ use crate::{
 const POWERSHELL_PROMPT: &str = r#"
 $global:DirlumeOriginalPrompt = (Get-Item Function:prompt).ScriptBlock
 $global:DirlumePromptCount = 0
+$global:DirlumeLastHistoryId = 0
 function global:prompt {
     $text = & $global:DirlumeOriginalPrompt
+    $previous = Microsoft.PowerShell.Core\Get-History -Count 1
+    $command = ''
+    if ($previous -and $previous.Id -gt $global:DirlumeLastHistoryId) {
+        $global:DirlumeLastHistoryId = $previous.Id
+        $command = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($previous.CommandLine))
+    }
     $location = Get-Location
     $path = if ($location.Provider.Name -eq 'FileSystem') {
         [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($location.ProviderPath))
     }
     $global:DirlumePromptCount++
-    [Console]::Title = '{0}:{1}:{2}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path
+    [Console]::Title = '{0}:{1}:{2}:{3}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path, $command
     $text
 }
 "#;
 
 #[cfg(not(windows))]
 fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<()> {
-    let marker = r#"printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')""#;
-    let init = match std::path::Path::new(shell).file_name().and_then(std::ffi::OsStr::to_str) {
-        Some("bash") => format!("__dirlume_prompt() {{ local status=$?; {marker}; return \"$status\"; }}; PROMPT_COMMAND+=(__dirlume_prompt)"),
-        Some("zsh") => format!("__dirlume_prompt() {{ {marker}; }}; precmd_functions+=(__dirlume_prompt)"),
-        Some("sh" | "dash" | "ksh") => format!("PS1='$(__dirlume_prompt)'\"$PS1\"; __dirlume_prompt() {{ {marker}; }}"),
+    let marker = r#"printf '\033]2;%s:0:%s:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')" "$(printf '%s' "${__dirlume_command-}" | base64 | tr -d '\n')""#;
+    let init = match std::path::Path::new(shell)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+    {
+        Some("bash") => format!(
+            r#"__dirlume_history_pattern='^[[:space:]]*([0-9]+)[* ] (.*)$'; __dirlume_capture() {{ local entry; entry=$(HISTTIMEFORMAT= builtin history 1); if [[ $entry =~ $__dirlume_history_pattern ]]; then if [[ -n ${{__dirlume_last_history-}} && ${{BASH_REMATCH[1]}} != "$__dirlume_last_history" ]]; then __dirlume_command=${{BASH_REMATCH[2]}}; fi; __dirlume_last_history=${{BASH_REMATCH[1]}}; fi; }}; __dirlume_prompt() {{ local status=$? __dirlume_command=; __dirlume_capture; {marker}; return "$status"; }}; set -o history; HISTCONTROL=; HISTIGNORE=; shopt -s cmdhist; shopt -s lithist; if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a '* ]]; then PROMPT_COMMAND+=(__dirlume_prompt); else PROMPT_COMMAND="${{PROMPT_COMMAND:+$PROMPT_COMMAND; }}__dirlume_prompt"; fi"#
+        ),
+        Some("zsh") => format!(
+            r#"__dirlume_preexec() {{ __dirlume_command=$1; }}; __dirlume_prompt() {{ {marker}; unset __dirlume_command; }}; preexec_functions+=(__dirlume_preexec); precmd_functions+=(__dirlume_prompt)"#
+        ),
+        Some("sh" | "dash" | "ksh") => {
+            format!("PS1='$(__dirlume_prompt)'\"$PS1\"; __dirlume_prompt() {{ {marker}; }}")
+        }
         _ => return Ok(()),
     };
     writeln!(writer, "{init}")?;

@@ -12,3 +12,14 @@ export function changeShellDirectory(path: string) {
   const escaped = Array.from(new TextEncoder().encode(path), (byte) => "\\0" + byte.toString(8).padStart(3, "0")).join("");
   return `__dirlume_path=$(printf '%b.' '${escaped}') && cd -- "\${__dirlume_path%.}"`;
 }
+
+export function shellCommand(command: string) {
+  if (!/[\r\n]/.test(command)) return command;
+  const bytes = new TextEncoder().encode(command);
+  if (windowsClient) {
+    const encoded = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+    return `Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')))`;
+  }
+  const escaped = Array.from(bytes, (byte) => "\\0" + byte.toString(8).padStart(3, "0")).join("");
+  return `eval "$(printf '%b' '${escaped}')"`;
+}

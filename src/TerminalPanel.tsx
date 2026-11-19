@@ -52,7 +52,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, theme, scheme, shortcut, historyShortcut, pendingCommands, watchEnvironment,
-  onCommandsQueued, onShortcut, onHistory, onClose }: {
+  onCommandsQueued, onCommand, onShortcut, onHistory, onClose }: {
   session: TerminalSession;
   directory: string | null;
   theme: Theme;
@@ -62,6 +62,7 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
   pendingCommands: string[];
   watchEnvironment: boolean;
   onCommandsQueued: (count: number) => void;
+  onCommand: (command: string) => void;
   onShortcut: () => void;
   onHistory: () => void;
   onClose: () => void;
@@ -76,6 +77,8 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
   const moveTo = useRef<((path: string | null) => void) | null>(null);
   const acknowledge = useRef(onCommandsQueued);
   acknowledge.current = onCommandsQueued;
+  const record = useRef(onCommand);
+  record.current = onCommand;
 
   useEffect(() => {
     if (!windowsClient || !watchEnvironment) return;
@@ -121,19 +124,33 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
     const promptToken = `Dirlume-${crypto.getRandomValues(new Uint32Array(4)).join("-")}`;
     const promptPrefix = promptToken + ":";
     const decoder = new TextDecoder();
+    const generated: string[] = [];
+    function fromBase64(value: string) {
+      return decoder.decode(Uint8Array.from(atob(value), (byte) => byte.charCodeAt(0)));
+    }
+    function managed(data: string) {
+      if (data.trim()) generated.push(data.replace(/\r$/, ""));
+      send(data);
+    }
     function synchronize() {
       if (!atPrompt || draft || closed || stopped || nextDirectory === null) return;
       const next = nextDirectory;
       nextDirectory = null;
-      if (currentDirectory !== next) send(changeShellDirectory(next) + "\r");
+      if (currentDirectory !== next) managed(changeShellDirectory(next) + "\r");
     }
     function prompt(title: string) {
       if (!title.startsWith(promptPrefix)) return false;
       const separator = title.indexOf(":", promptPrefix.length);
       if (separator < 0) return false;
-      const path = title.slice(separator + 1);
+      const [path, submitted] = title.slice(separator + 1).split(":");
       try {
-        currentDirectory = path ? decoder.decode(Uint8Array.from(atob(path), (byte) => byte.charCodeAt(0))) : null;
+        currentDirectory = path ? fromBase64(path) : null;
+        if (submitted) {
+          const command = fromBase64(submitted);
+          const ignored = generated.indexOf(command);
+          if (ignored < 0) record.current(command);
+          else generated.splice(ignored, 1);
+        }
       } catch { return true; }
       setShellDirectory(currentDirectory ?? "");
       atPrompt = true;
@@ -165,7 +182,7 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
         if (!closed && !stopped) await api.writeTerminal(session.id, data);
       }).catch(() => {});
     }
-    enqueue.current = send;
+    enqueue.current = managed;
     const data = term.onData(send);
     const resized = term.onResize(({ rows, cols }) => {
       if (ready && !closed && !stopped) void api.resizeTerminal(session.id, rows, cols).catch(() => {});

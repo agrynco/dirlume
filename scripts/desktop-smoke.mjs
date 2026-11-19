@@ -14,6 +14,7 @@ import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
+import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
@@ -1597,6 +1598,7 @@ try {
   await testShortcutFields(page);
   await testInlineRename(page, temp);
   await testPermanentDelete(page, temp);
+  page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
