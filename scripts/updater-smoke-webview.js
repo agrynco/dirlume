@@ -13,6 +13,8 @@ async (upgraded, reject) => {
   try {
     if (upgraded) {
       await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
+      await waitFor(() => document.querySelector('.topbar[data-menu-position="right"]') &&
+        JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").mainMenuAlignment === "right");
       const updates = await waitFor(() => {
         const commands = [...document.querySelectorAll(".main-menu [data-menu-group]")].find((button) => button.textContent === "Commands");
         if (commands?.getAttribute("aria-expanded") === "false") commands.click();
@@ -27,6 +29,8 @@ async (upgraded, reject) => {
       .find((button) => button.textContent === "Install and restart"));
     const preferences = JSON.parse(localStorage.getItem(preferenceKey) ?? "{}");
     preferences.viewFontSizes = { ...preferences.viewFontSizes, left: 23 };
+    delete preferences.mainMenuAlignment;
+    preferences.menuPosition = "right";
     localStorage.setItem(preferenceKey, JSON.stringify(preferences));
     install.click();
     // The signed candidate restarts the app. A rejected candidate leaves the old version running.

@@ -219,8 +219,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             </select>
           </label>
           <label className="setting"><span>{t("Main menu position")}</span>
-            <select value={preferences.menuPosition}
-              onChange={(event) => onChange({ ...preferences, menuPosition: event.target.value as MenuPosition })}>
+            <select value={preferences.mainMenuAlignment}
+              onChange={(event) => onChange({ ...preferences, mainMenuAlignment: event.target.value as MenuPosition })}>
               {Object.entries(menuPositions).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </select>
           </label>

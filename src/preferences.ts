@@ -144,7 +144,7 @@ export interface Preferences {
   theme: Theme;
   layout: PanelLayout;
   actionButtonWidth: ActionButtonWidth;
-  menuPosition: MenuPosition;
+  mainMenuAlignment: MenuPosition;
   systemLightScheme: string;
   systemDarkScheme: string;
   showTitlebarScheme: boolean;
@@ -175,15 +175,20 @@ export const defaultBindings = Object.fromEntries(
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
 ) as Bindings;
 
+function readMenuAlignment(value: unknown): MenuPosition | undefined {
+  return value === "left" || value === "center" || value === "right" ? value : undefined;
+}
+
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
     theme: "system", layout: "standard", actionButtonWidth: "full", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
-    menuPosition: "center",
+    mainMenuAlignment: "center",
     viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
     terminalResizeRows: 1,
   };
   try {
-    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as (Partial<Preferences> & { bindingDefaults?: number }) | null;
+    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as
+      (Partial<Preferences> & { menuPosition?: unknown; bindingDefaults?: number }) | null;
     if (!saved) return defaults;
     const shortcuts = { ...defaultBindings };
     const oldDefaults: Partial<Bindings> = {
@@ -220,7 +225,7 @@ export function readPreferences(): Preferences {
       theme: readTheme(saved.theme),
       layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
       actionButtonWidth: saved.actionButtonWidth === "compact" ? "compact" : defaults.actionButtonWidth,
-      menuPosition: saved.menuPosition === "left" || saved.menuPosition === "right" ? saved.menuPosition : defaults.menuPosition,
+      mainMenuAlignment: readMenuAlignment(saved.mainMenuAlignment) ?? readMenuAlignment(saved.menuPosition) ?? defaults.mainMenuAlignment,
       systemLightScheme: readSystemScheme(saved.systemLightScheme, schemes, "light"),
       systemDarkScheme: readSystemScheme(saved.systemDarkScheme, schemes, "dark"),
       showTitlebarScheme: saved.showTitlebarScheme === true,
