@@ -5,7 +5,7 @@ import { t } from "./i18n";
 type Option = { label: string; text: string; index: number; length: number; history?: boolean };
 
 export function CommandField({ input, draft, directory, history, refreshEnvironment, onChange }: {
-  input: RefObject<HTMLInputElement | null>;
+  input: RefObject<HTMLTextAreaElement | null>;
   draft: string;
   directory: string | null;
   history: readonly string[];
@@ -78,7 +78,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     });
   }
 
-  function selectCaret(element: HTMLInputElement) {
+  function selectCaret(element: HTMLTextAreaElement) {
     const next = element.selectionStart ?? element.value.length;
     if (next !== position) {
       setPosition(next);
@@ -86,7 +86,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     }
   }
 
-  function keyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.shiftKey) {
       if (event.key === "Enter") {
@@ -95,6 +95,12 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
         dismiss();
         event.currentTarget.form?.requestSubmit();
       }
+      return;
+    }
+    if (event.key === "Enter" && (!open || !activeOption)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.form?.requestSubmit();
       return;
     }
     if (!open) return;
@@ -109,9 +115,9 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   }
 
   return <div className="command-entry">
-    <input ref={input} aria-label={t("Command line")} role="combobox" aria-autocomplete="list" aria-expanded={open}
+    <textarea ref={input} aria-label={t("Command line")} role="combobox" aria-autocomplete="list" aria-expanded={open}
       aria-controls={open ? id : undefined} aria-activedescendant={activeOption ? `${id}-${selected}` : undefined}
-      type="text" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
+      rows={1} wrap="off" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
       onFocus={(event) => { setFocused(true); setDismissed(""); selectCaret(event.currentTarget); }}
       onBlur={() => { setFocused(false); setSelected(-1); setNative(null); }}
       onSelect={(event) => selectCaret(event.currentTarget)}

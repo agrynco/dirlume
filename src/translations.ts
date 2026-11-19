@@ -83,6 +83,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Paste files": ["Вставити файли", "Вставить файлы"],
   "Close": ["Закрити", "Закрыть"],
   "Command history": ["Історія команд", "История команд"],
+  "Unknown date": ["Невідома дата", "Неизвестная дата"],
   "Search commands": ["Знайти команду", "Найти команду"],
   "No commands found.": ["Команд не знайдено.", "Команды не найдены."],
   "Permanently delete the selected FTP folders and all their contents?": ["Остаточно видалити вибрані папки FTP та весь їхній вміст?", "Удалить выбранные папки FTP и всё их содержимое без возможности восстановления?"],
