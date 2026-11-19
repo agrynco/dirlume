@@ -1,4 +1,7 @@
-use std::{ffi::OsStr, mem, os::windows::io::AsRawHandle, process::Child, ptr};
+use std::{
+    collections::HashMap, ffi::OsStr, mem, os::windows::io::AsRawHandle, process::Child, ptr,
+    sync::OnceLock,
+};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use windows_sys::Win32::{
@@ -17,10 +20,13 @@ const CATALOG: &str = include_str!("windows-command-catalog.tsv");
 
 pub(super) fn native(
     request: &CompletionRequest,
-    _: &Context,
+    context: &Context,
     cwd: &Path,
     shell: &OsStr,
 ) -> Option<CompletionBatch> {
+    if let Some(batch) = windows_options(context) {
+        return Some(batch);
+    }
     let script = STANDARD.encode(
         SCRIPT
             .encode_utf16()
@@ -52,6 +58,73 @@ pub(super) fn native(
     input.push(b'\n');
     let output = read_process(command, input)?;
     serde_json::from_slice(&output).ok()
+}
+
+fn windows_options(context: &Context) -> Option<CompletionBatch> {
+    static OPTIONS: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    let catalog = OPTIONS.get_or_init(|| {
+        CATALOG
+            .lines()
+            .map(|row| row.split_once('\t').unwrap_or((row, "")))
+            .collect()
+    });
+    let (command, arguments) = context.words.split_first()?;
+    let lower = command.to_ascii_lowercase();
+    let program = lower
+        .strip_suffix(".exe")
+        .or_else(|| lower.strip_suffix(".com"))
+        .unwrap_or(&lower);
+    let mut name = program.to_owned();
+    let mut options = *catalog.get(program)?;
+    let system = Path::new(&std::env::var_os("SystemRoot")?).join("System32");
+    if !system.join(format!("{program}.exe")).is_file()
+        && !system.join(format!("{program}.com")).is_file()
+    {
+        return None;
+    }
+    // Let PowerShell complete adapter names and commands passed to cmd.exe.
+    if (program == "ipconfig"
+        && arguments.first().is_some_and(|argument| {
+            matches!(
+                argument.to_ascii_lowercase().as_str(),
+                "/renew" | "/release"
+            )
+        }))
+        || (program == "cmd"
+            && arguments
+                .iter()
+                .any(|argument| matches!(argument.to_ascii_lowercase().as_str(), "/c" | "/k")))
+    {
+        return None;
+    }
+    for argument in arguments {
+        let child = format!("{name} {}", argument.to_ascii_lowercase());
+        let Some(next) = catalog.get(child.as_str()) else {
+            break;
+        };
+        name = child;
+        options = next;
+    }
+    let prefix = if context.prefix == "?" {
+        "/?"
+    } else {
+        &context.prefix
+    };
+    let matches: Vec<_> = options
+        .split_whitespace()
+        .filter(|value| starts_with(value, prefix))
+        .take(MAX_MATCHES)
+        .map(|value| Suggestion {
+            label: value.to_owned(),
+            text: value.to_owned(),
+            directory: false,
+        })
+        .collect();
+    (!matches.is_empty()).then_some(CompletionBatch {
+        index: context.index,
+        length: context.length,
+        matches,
+    })
 }
 
 pub(super) struct ProcessJob(HANDLE);
