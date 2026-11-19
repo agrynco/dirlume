@@ -48,10 +48,13 @@ pub fn query(path: &Path) -> io::Result<DiskSpace> {
     if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    let fragment = u64::from(stat.f_frsize);
+    fn bytes(blocks: impl Into<u64>, fragment: impl Into<u64>) -> u64 {
+        blocks.into().saturating_mul(fragment.into())
+    }
+
     Ok(DiskSpace {
-        available: u64::from(stat.f_bavail).saturating_mul(fragment),
-        total: u64::from(stat.f_blocks).saturating_mul(fragment),
+        available: bytes(stat.f_bavail, stat.f_frsize),
+        total: bytes(stat.f_blocks, stat.f_frsize),
     })
 }
 
