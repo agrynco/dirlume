@@ -34,6 +34,7 @@ export const commands = {
   quickSearch: { label: "Quick search by name prefix", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
   rename: { label: "Rename", key: "" },
+  lockingProcesses: { label: "Find locking processes", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
   cancelMeasure: { label: "Clear command line or cancel folder size scan", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },

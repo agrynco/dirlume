@@ -41,10 +41,11 @@ function Processes({ items, selected, onChange }: {
   );
 }
 
-function EndProcesses({ items, onClose, onFinished }: {
+function EndProcesses({ items, onClose, onFinished, onAttempted }: {
   items: ProcessInfo[];
   onClose: () => void;
   onFinished: () => void;
+  onAttempted?: () => void;
 }) {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -60,6 +61,7 @@ function EndProcesses({ items, onClose, onFinished }: {
     } catch (failure) {
       setError(describeError(failure));
     } finally {
+      onAttempted?.();
       setWorking(false);
     }
   }
@@ -99,11 +101,40 @@ function hiddenProcessColumns(side: Side): ProcessColumn[] {
   } catch { return []; }
 }
 
-export function ProcessBrowser({ side }: { side: Side }) {
+function processCpu(cpu: number) {
+  return cpu.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+}
+
+function ProcessProperties({ process, onClose, onEnd }: {
+  process: ProcessInfo;
+  onClose: () => void;
+  onEnd: () => void;
+}) {
+  return <Dialog title={t("Process properties")} onClose={onClose}>
+    <div className="dialog-body">
+      <dl className="process-properties">
+        <dt>{t("Process")}</dt><dd>{process.name || t("Process")}</dd>
+        <dt>{t("PID")}</dt><dd>{process.pid}</dd>
+        <dt>{t("CPU")}</dt><dd>{processCpu(process.cpu)}</dd>
+        <dt>{t("Memory")}</dt><dd>{formatSize(process.memory)}</dd>
+        <dt>{t("Executable path")}</dt><dd>{process.executable ?? "—"}</dd>
+      </dl>
+    </div>
+    <footer className="dialog-footer">
+      <Button type="button" data-initial-focus onClick={onClose}>{t("Close")}</Button>
+      <Button type="button" className="negative" disabled={!process.canTerminate} onClick={onEnd}>{t("End process")}</Button>
+    </footer>
+  </Dialog>;
+}
+
+export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; lockingPath?: string; onClose: () => void }) {
   const [items, setItems] = useState<ProcessInfo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [ending, setEnding] = useState<ProcessInfo[]>([]);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [partial, setPartial] = useState(false);
+  const [properties, setProperties] = useState<ProcessInfo | null>(null);
   const [revision, setRevision] = useState(0);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<{ column: ProcessColumn; asc: boolean }>({ column: "name", asc: true });
@@ -125,8 +156,19 @@ export function ProcessBrowser({ side }: { side: Side }) {
   const processIcons = useMemo(() => new Map(visible.map((item) => [processKey(item), { pid: item.pid, started: item.started }])), [visible]);
   const icons = useWindowsIcons(processIcons, api.processIcons);
   const marked = visible.filter((process) => process.canTerminate && selected.includes(processKey(process)));
+  const focusedProcess = visible.find((process) => processKey(process) === focused);
   const endRequest = useRef(() => {});
   endRequest.current = () => { if (marked.length) setEnding(marked); };
+
+  useEffect(() => {
+    setItems([]);
+    setLoaded(false);
+    setPartial(false);
+    setError("");
+    setSelected([]);
+    setFocused("");
+    setProperties(null);
+  }, [lockingPath]);
 
   useEffect(() => {
     let closed = false;
@@ -135,9 +177,12 @@ export function ProcessBrowser({ side }: { side: Side }) {
       if (pending) return;
       pending = true;
       try {
-        const processes = await api.listProcesses();
+        const { processes, incomplete } = lockingPath
+          ? await api.lockingProcesses([lockingPath]) : { processes: await api.listProcesses(), incomplete: false };
         if (!closed) {
           setItems(processes);
+          setLoaded(true);
+          setPartial(incomplete);
           setError("");
         }
       } catch (failure) {
@@ -147,9 +192,9 @@ export function ProcessBrowser({ side }: { side: Side }) {
       }
     }
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 2000);
+    const timer = lockingPath ? undefined : window.setInterval(() => { void refresh(); }, 2000);
     return () => { closed = true; window.clearInterval(timer); };
-  }, [revision]);
+  }, [lockingPath, revision]);
 
   useEffect(() => {
     const element = document.getElementById(`${side}-pane`);
@@ -186,6 +231,11 @@ export function ProcessBrowser({ side }: { side: Side }) {
 
   return (
     <div className="process-browser">
+      {lockingPath && <div className="locking-process-target">
+        <span title={lockingPath}>{t("Locking processes for {0}", lockingPath)}</span>
+        <Button type="button" onClick={() => setRevision((previous) => previous + 1)}>{t("Refresh")}</Button>
+        <Button type="button" onClick={onClose}>{t("Back to files")}</Button>
+      </div>}
       <label className="process-search">
         <Search aria-hidden="true" />
         <input type="search" aria-label={t("Find process")} placeholder={t("Find by name or PID")} value={filter} onChange={(event) => {
@@ -228,7 +278,7 @@ export function ProcessBrowser({ side }: { side: Side }) {
                 <span>{process.name || t("Process")}</span>
               </span>,
               pid: process.pid,
-              cpu: process.cpu.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%",
+              cpu: processCpu(process.cpu),
               memory: formatSize(process.memory),
             };
             return <tr key={key} id={`${side}-process-${key}`} aria-selected={selected.includes(key)}
@@ -241,21 +291,26 @@ export function ProcessBrowser({ side }: { side: Side }) {
             </tr>;
           })}</tbody>
         </table>
-        {!visible.length && <p className="pane-empty">{filter ? t("No processes match the search.") : t("Loading processes…")}</p>}
+        {!visible.length && <p className="pane-empty">{filter ? t("No processes match the search.") :
+          error ? t("Could not list processes.") : loaded ? t(lockingPath ? "Windows found no processes using these files." : "No running processes.") :
+            t(lockingPath ? "Checking files…" : "Loading processes…")}</p>}
       </div>
       {columnsAnchor && <ColumnMenu anchor={columnsAnchor} onClose={() => setColumnsAnchor(null)}
         fallback={() => table.current?.querySelector("thead button")} choices={processColumns.map(({ key, label }) => ({
           key, label, checked: !hidden.includes(key), disabled: displayed.length === 1 && !hidden.includes(key),
           toggle: () => toggleColumn(key),
         }))} />}
+      {partial && <p role="status" className="pane-error">{t("Only some files could be checked.")}</p>}
       {error && <p role="alert" className="pane-error">{errorText(error)}</p>}
       <div className="pane-footer"><span>{filter ? t("{0} of {1}", visible.length, countText(items.length, "process")) : countText(items.length, "process")}</span>
+        <Button type="button" disabled={!focusedProcess} onClick={() => setProperties(focusedProcess ?? null)}>{t("Properties")}</Button>
         <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>{t("End selected")}</Button></div>
+      {properties && <ProcessProperties process={properties} onClose={() => setProperties(null)} onEnd={() => setEnding([properties])} />}
       {ending.length > 0 && (
-        <EndProcesses items={ending} onClose={() => setEnding([])} onFinished={() => {
+        <EndProcesses items={ending} onClose={() => setEnding([])} onAttempted={() => setRevision((previous) => previous + 1)} onFinished={() => {
           setEnding([]);
+          setProperties(null);
           setSelected([]);
-          setRevision((previous) => previous + 1);
         }} />
       )}
     </div>

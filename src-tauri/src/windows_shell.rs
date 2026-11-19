@@ -438,7 +438,7 @@ pub struct LockReport {
 }
 
 #[tauri::command]
-pub async fn locking_processes(paths: Vec<String>) -> Result<LockReport> {
+pub async fn locking_processes(paths: Vec<String>, app: tauri::AppHandle) -> Result<LockReport> {
     crate::desktop::blocking(move || {
         let mut pending = paths
             .iter()
@@ -486,6 +486,7 @@ pub async fn locking_processes(paths: Vec<String>) -> Result<LockReport> {
                     name: String::from_utf16_lossy(&entry.strAppName[..end]),
                     cpu: 0.0,
                     memory: 0,
+                    executable: None,
                     can_terminate: pid > 4
                         && pid != std::process::id()
                         && entry.ApplicationType != RmCritical,
@@ -493,7 +494,7 @@ pub async fn locking_processes(paths: Vec<String>) -> Result<LockReport> {
             }
         }
         Ok(LockReport {
-            processes: owners.into_values().collect(),
+            processes: crate::processes::refresh_lock_owners(&app, owners.into_values().collect())?,
             incomplete,
         })
     })
