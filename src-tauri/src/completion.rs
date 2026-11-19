@@ -389,7 +389,11 @@ fn read_process(mut command: Command, input: Vec<u8>) -> Option<Vec<u8>> {
         let read = result.and_then(|()| reader.take(1024 * 1024).read_to_end(&mut bytes));
         let _ = sender.send(read.ok().map(|_| bytes));
     });
-    let bytes = results.recv_timeout(Duration::from_secs(4)).ok().flatten();
+    let timeout = if cfg!(windows) { 8 } else { 4 };
+    let bytes = results
+        .recv_timeout(Duration::from_secs(timeout))
+        .ok()
+        .flatten();
     if bytes.is_none() || child.try_wait().ok().flatten().is_none() {
         #[cfg(unix)]
         unsafe {
