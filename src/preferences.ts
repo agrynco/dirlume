@@ -1,7 +1,14 @@
 import { readSchemes, readTheme, type Scheme, type Theme } from "./appearance";
 import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
-import { readLanguage, type Language } from "./i18n";
+import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
+import { folderGroups, type FolderGroup } from "./folderShortcuts";
+
+type FolderGroupCommand = `addFolderGroup${FolderGroup}` | `openFolderGroup${FolderGroup}`;
+const folderGroupCommands = Object.fromEntries(folderGroups.flatMap((group) => [
+  [`addFolderGroup${group}`, { label: "Add folder shortcut to group {0}", key: `Ctrl+Shift+${group}` }],
+  [`openFolderGroup${group}`, { label: "Open folder shortcut group {0}", key: `Ctrl+${group}` }],
+])) as Record<FolderGroupCommand, { label: string; key: string }>;
 
 export const commands = {
   switchPane: { label: "Switch pane", key: "Tab" },
@@ -67,11 +74,29 @@ export const commands = {
   ftpSources: { label: "Select FTP in the sources menu", key: "1" },
   addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
+  folderShortcuts: { label: "Folder shortcuts", key: "" },
+  addFolderShortcut: { label: "Bookmark current folder in group 8", key: "Ctrl+Shift+F8" },
+  ...folderGroupCommands,
+  pickerAddFolder: { label: "Add a folder shortcut from the picker", key: "Insert" },
+  pickerEditFolder: { label: "Edit the selected folder shortcut", key: "F4" },
+  pickerRemoveFolder: { label: "Remove the selected folder shortcut", key: "Delete" },
+  pickerFolderUp: { label: "Move the folder shortcut up", key: "Ctrl+ArrowUp" },
+  pickerFolderDown: { label: "Move the folder shortcut down", key: "Ctrl+ArrowDown" },
 } as const;
 
 export type Command = keyof typeof commands;
 export type Bindings = Record<Command, string>;
 export type Provider = "server" | "kswitcher";
+
+export function folderGroupCommand(command: Command) {
+  const match = /^(addFolderGroup|openFolderGroup)([0-9])$/.exec(command);
+  return match ? { add: match[1] === "addFolderGroup", group: Number(match[2]) as FolderGroup } : null;
+}
+
+export function commandLabel(command: Command) {
+  const folder = folderGroupCommand(command);
+  return folder ? t(commands[command].label, folder.group) : t(commands[command].label);
+}
 
 export function commandScope(command: Command) {
   if (command === "help" || command === "menu") return "global";
@@ -81,6 +106,7 @@ export function commandScope(command: Command) {
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
+  if (command.startsWith("picker")) return "folderPicker";
   return "main";
 }
 
@@ -108,7 +134,8 @@ const mac = /Mac/i.test(navigator.userAgent);
 export const commandNames = Object.keys(commands) as Command[];
 export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wheel"];
 export const defaultBindings = Object.fromEntries(
-  commandNames.map((command) => [command, mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont"
+  commandNames.map((command) => [command, mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
+    command !== "addFolderShortcut" && !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key]),
 ) as Bindings;
 
@@ -178,6 +205,12 @@ export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: b
     ...(shiftKey ? ["Shift"] : []),
     key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key,
   ].join("+");
+}
+
+export function physicalFolderBinding(event: KeyboardEvent, shortcuts: Bindings): FolderGroupCommand | undefined {
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.getModifierState("AltGraph") || !/^Digit[0-9]$/.test(event.code)) return;
+  const command = `${event.shiftKey ? "addFolderGroup" : "openFolderGroup"}${event.code.at(-1)}` as FolderGroupCommand;
+  if (shortcuts[command] === defaultBindings[command]) return command;
 }
 
 export function quickSearchSeed(event: KeyboardEvent, binding: string): string | null {

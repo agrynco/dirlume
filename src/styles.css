@@ -605,6 +605,21 @@ button.dialog-resize-grip {
 .conflict-details td { color: var(--muted); }
 .delete-warning { padding: 10px; background: var(--danger-bg); color: var(--danger); border-radius: var(--radius); }
 .command-menu button { justify-content: space-between; border-color: var(--line); white-space: normal; overflow-wrap: anywhere; }
+.folder-shortcut-editor, .folder-shortcut-picker { display: grid; gap: 8px; }
+.folder-shortcut-list {
+  max-height: min(40vh, 320px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 3px;
+  background: var(--dialog-input);
+}
+.folder-shortcut-row { display: grid; gap: 2px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.folder-shortcut-row > :is(span, small) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.folder-shortcut-row small { color: var(--dialog-muted); }
+.folder-shortcut-row:hover { background: var(--hover); }
+.folder-shortcut-row[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.folder-shortcut-actions { flex-wrap: wrap; gap: 6px; }
 .dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--raised); }
 .dialog-footer button, .text-toolbar button, .comparison-toolbar button { border-color: var(--line); background: var(--surface); }
 button.primary, button.primary:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-fill); border-color: var(--accent-fill); }

@@ -10,6 +10,8 @@ The two panes have independent folder navigation, sorting, filtering, and file s
 
 Pane addresses, transfer destinations, and the KSwitcher installation folder suggest matching paths as you type. Use the arrow keys and **Enter** or click a suggestion to choose it. Press **Tab** to complete a folder and continue the path. The browse button opens the system folder picker for local folder paths or a Save As dialog for a single-file destination. FTP suggestions come from the connected server.
 
+Use **Ctrl+Shift+F8** to bookmark the active local or paired KSwitcher folder in group 8. Use **Ctrl+Shift+0–9** to choose another group and **Ctrl+0–9** to open its bookmarks. **Commands → Folder shortcuts** opens the picker for any saved group. In the picker, use **Insert** to add, **F4** to edit, **Delete** to remove, or **Ctrl+Up/Down** to reorder.
+
 Drag the right edge of a file column heading to resize it. Double-click the edge to restore its default width. Right-click the heading row to show or hide **Size** and **Modified**. **Name** is always visible. Each pane saves its widths and visible columns independently and scrolls horizontally when the columns exceed the available space.
 
 Dirlume bundles **GoMono Nerd Font Mono** from [Nerd Fonts v3.5.1](https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1) and uses it at **18 px** by default. Choose it by name in the font picker or clear an override to use the default. The bundled faces work offline. The [font notices](src/assets/fonts/GoMono-NOTICE.txt) and upstream licenses are included in the desktop packages.

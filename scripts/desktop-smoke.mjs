@@ -7,6 +7,7 @@ import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
+import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -1507,6 +1508,7 @@ try {
   await themeRoot().waitFor();
   assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
   console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
+  page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

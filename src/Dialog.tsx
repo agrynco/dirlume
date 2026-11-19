@@ -15,13 +15,14 @@ function readSize(key: string | undefined): Dimensions | undefined {
   } catch { /* Use the default size. */ }
 }
 
-export function Dialog({ title, children, onClose, onKeyDown, wide = false, resizeKey }: {
+export function Dialog({ title, children, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false }: {
   title: string;
   children: ReactNode;
   onClose?: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   wide?: boolean;
   resizeKey?: string;
+  dismissOnOutside?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -62,6 +63,14 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
       onPointerDown={(event) => {
+        if (dismissOnOutside && event.button === 0 && event.target === event.currentTarget) {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < bounds.left || event.clientX > bounds.right ||
+              event.clientY < bounds.top || event.clientY > bounds.bottom) {
+            event.preventDefault();
+            onClose?.();
+          }
+        }
         if (!resizeKey || event.button !== 0 || !(event.target instanceof HTMLElement)) return;
         const handle = event.target.closest<HTMLElement>("[data-resize-edge]");
         if (handle?.closest("dialog") !== event.currentTarget) return;

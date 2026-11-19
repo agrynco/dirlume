@@ -8,7 +8,7 @@ import { SettingsPreview } from "./SettingsPreview";
 import { colorGroups, fontGroups } from "./appearance";
 import { api, windowsClient } from "./api";
 import {
-  commandNames, commands, defaultBindings, eventShortcut, shortcutScopesOverlap, showShortcut, wheelBindings,
+  commandLabel, commandNames, commands, defaultBindings, eventShortcut, shortcutScopesOverlap, showShortcut, wheelBindings,
   type Command, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
@@ -74,7 +74,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const appearanceMatches = appearancePages.filter(({ label, terms }) => matches("Appearance", "Color scheme", label, ...terms));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings");
   const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
-    matches(commands[command].label, preferences.shortcuts[command], showShortcut(preferences.shortcuts[command])));
+    matches(commands[command].label, commandLabel(command), preferences.shortcuts[command], showShortcut(preferences.shortcuts[command])));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
   const isAppearance = !feature && page !== "general" && page !== "shortcuts";
@@ -117,7 +117,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     const existing = commandNames.find((item) => item !== command && shortcutScopesOverlap(item, command) &&
       preferences.shortcuts[item] === shortcut);
     if (existing) {
-      setConflict(t("{0} is assigned to {1}.", showShortcut(shortcut), t(commands[existing].label)));
+      setConflict(t("{0} is assigned to {1}.", showShortcut(shortcut), commandLabel(existing)));
       return;
     }
     onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: shortcut } });
@@ -214,25 +214,25 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <div className="shortcut-list">
             {visibleCommands.map((command) => (
               <div key={command} className="shortcut-setting">
-                <span>{t(commands[command].label)}</span>
+                <span>{commandLabel(command)}</span>
                 {command === "zoomFont" ? (
-                  <select className="shortcut-key" aria-label={t("Change shortcut for {0}", t(commands[command].label))}
+                  <select className="shortcut-key" aria-label={t("Change shortcut for {0}", commandLabel(command))}
                     value={preferences.shortcuts[command]}
                     onChange={(event) => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: event.target.value } })}>
                     <option value="">{t("Unassigned")}</option>
                     {wheelBindings.map((binding) => <option key={binding} value={binding}>{showShortcut(binding)}</option>)}
                   </select>
                 ) : capture === command ? (
-                  <input aria-label={t("New shortcut for {0}", t(commands[command].label))} readOnly autoFocus data-shortcut-capture
+                  <input aria-label={t("New shortcut for {0}", commandLabel(command))} readOnly autoFocus data-shortcut-capture
                     placeholder={t("Press a shortcut")} onKeyDown={(event) => assign(event, command)}
                     onBlur={() => { setCapture(null); setConflict(""); }} />
                 ) : (
-                  <Button type="button" className="shortcut-key" aria-label={t("Change shortcut for {0}", t(commands[command].label))}
+                  <Button type="button" className="shortcut-key" aria-label={t("Change shortcut for {0}", commandLabel(command))}
                     onClick={() => { setCapture(command); setConflict(""); }}>
                     {showShortcut(preferences.shortcuts[command]) || t("Unassigned")}
                   </Button>
                 )}
-                <Button type="button" className="icon-button" aria-label={t("Clear shortcut for {0}", t(commands[command].label))}
+                <Button type="button" className="icon-button" aria-label={t("Clear shortcut for {0}", commandLabel(command))}
                   disabled={!preferences.shortcuts[command]}
                   onClick={() => onChange({ ...preferences, shortcuts: { ...preferences.shortcuts, [command]: "" } })}>
                   <Delete />
