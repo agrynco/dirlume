@@ -67,6 +67,33 @@ function fileMask(mask: string) {
   };
 }
 
+export async function findFiles(root: Place, mask: string, showHidden: boolean, signal: AbortSignal, append: (matches: SearchMatch[]) => void) {
+  if (root.kind === "ftp") return findFtp(root, mask, showHidden, signal, append);
+  const includes = fileMask(mask);
+  const pending: { place: Place; prefix: string }[] = [{ place: root, prefix: "" }];
+  let skipped = 0;
+  while (pending.length && !signal.aborted) {
+    const folder = pending.pop()!;
+    const result = await readPlace(folder.place).catch((failure: unknown) => {
+      if (folder.prefix === "") throw failure;
+      skipped++;
+      return null;
+    });
+    if (signal.aborted || !result) continue;
+    skipped += result.listing.omitted;
+    const found: SearchMatch[] = [];
+    for (const entry of result.listing.entries) {
+      if (entry.hidden && !showHidden) continue;
+      const relativePath = folder.prefix + entry.name;
+      if (entry.directory) {
+        if (!entry.link) pending.push({ place: childPlace(result.place, entry.name), prefix: relativePath + "/" });
+      } else if (includes(entry.name)) found.push({ directory: result.place, entry, relativePath });
+    }
+    if (found.length) append(found);
+  }
+  return skipped;
+}
+
 export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResults }: {
   root: Place;
   showHidden: boolean;
@@ -106,39 +133,14 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
     setError("");
     setStatus("Searching…");
     setRunning(true);
-    const includes = fileMask(mask);
-    const pending = [{ place: root, prefix: "" }];
     const found: SearchMatch[] = [];
     snapshot.current = { mask, matches: found, incomplete: false };
-    let skipped = 0;
     try {
-      if (root.kind === "ftp") {
-        skipped = await findFtp(root, mask, showHidden, controller.signal, (matches) => {
-          const count = found.length;
-          found.push(...matches);
-          if (count < previewLimit) setResults(found.slice(0, previewLimit));
-        });
-      } else while (pending.length && !controller.signal.aborted) {
-        const folder = pending.pop()!;
-        const result = await readPlace(folder.place).catch((failure: unknown) => {
-          if (folder.prefix === "") throw failure;
-          skipped++;
-          return null;
-        });
-        if (controller.signal.aborted || !result) continue;
-        skipped += result.listing.omitted;
+      const skipped = await findFiles(root, mask, showHidden, controller.signal, (matches) => {
         const count = found.length;
-        for (const entry of result.listing.entries) {
-          if (entry.hidden && !showHidden) continue;
-          const relativePath = folder.prefix + entry.name;
-          if (entry.directory) {
-            if (!entry.link) pending.push({ place: childPlace(result.place, entry.name), prefix: relativePath + "/" });
-          } else if (includes(entry.name)) {
-            found.push({ directory: result.place, entry, relativePath });
-          }
-        }
-        if (count < previewLimit && found.length > count) setResults(found.slice(0, previewLimit));
-      }
+        for (const match of matches) found.push(match);
+        if (count < previewLimit) setResults(found.slice(0, previewLimit));
+      });
       if (controller.signal.aborted) return;
       snapshot.current.incomplete = skipped > 0;
       const summary = found.length > previewLimit ? t("{0} matches. Open the results panel to see all matches.", found.length) :

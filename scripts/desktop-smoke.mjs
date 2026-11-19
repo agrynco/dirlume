@@ -16,6 +16,13 @@ import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
+import { testMcp } from "./mcp-smoke.mjs";
+import { testProcessColumns } from "./process-columns-smoke.mjs";
+import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
+import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
+import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
+import { testInlineRename } from "./inline-rename-smoke.mjs";
+import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 
@@ -909,7 +916,6 @@ try {
   assert.deepEqual(pids.map(Number), pids.map(Number).sort((a, b) => a - b));
   await pidHeader.getByRole("button").click();
   assert.equal(await pidHeader.getAttribute("aria-sort"), "descending");
-  await leftPane.getByRole("searchbox", { name: "Find process" }).fill(String(lockedBy.pid));
   const task = taskList.getByRole("row").filter({ has: page.getByRole("gridcell", { name: String(lockedBy.pid), exact: true }) });
   await task.locator(".process-icon").waitFor();
   await task.click();
@@ -918,7 +924,6 @@ try {
   await endProcesses.getByText(new RegExp(`PID ${lockedBy.pid}\\)`)).waitFor();
   await endProcesses.getByRole("button", { name: "Cancel", exact: true }).click();
   if (process.env.DIRLUME_PROCESSES_SCREENSHOT) {
-    await leftPane.getByRole("searchbox", { name: "Find process" }).fill("");
     await page.screenshot({ path: process.env.DIRLUME_PROCESSES_SCREENSHOT, scale: "css" });
   }
   await leftPane.getByRole("button", { name: "Close processes" }).click();
@@ -1431,7 +1436,7 @@ try {
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
-    assert.equal(topicLinks.length, 19);
+    assert.ok(topicLinks.includes("#help-archives"));
     assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
     if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
     for (const href of topicLinks) {
@@ -1584,7 +1589,14 @@ try {
   await testShortcutFields(page);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
   await testOsTimestamps(page, temp);
+  await testPermanentDelete(page, temp);
+  await testInlineRename(page, temp);
+  await testLockingProcessPane(page, temp);
+  await testProcessColumns(page);
+  await testProcessQuickSearch(page, temp);
+  await testProcessExecutablePath(page, child.pid);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
+  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

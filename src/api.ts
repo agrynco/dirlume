@@ -160,13 +160,21 @@ export interface ProcessInfo extends ProcessId {
   name: string;
   cpu: number;
   memory: number;
+  executable: string | null;
   canTerminate: boolean;
 }
+
+export type McpConnection = { endpoint: string; token: string };
 
 export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {
+  startMcp: () => invoke<McpConnection>("start_mcp"),
+  stopMcp: () => invoke<void>("stop_mcp"),
+  mcpConnection: () => invoke<McpConnection | null>("mcp_connection"),
+  mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
+  mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
   checkForUpdate: (manual: boolean) => invoke<AppUpdate | null>("check_for_update", { manual }),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
