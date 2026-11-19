@@ -21,12 +21,13 @@ const server = [
   "        print('LOGIN', flush=True)",
   "    def ftp_RETR(self, path):",
   "        print('RETR ' + os.path.basename(path), flush=True)",
+  "        print('RETR-SESSION ' + str(self.remote_port), flush=True)",
   "        return super().ftp_RETR(path)",
   "    def ftp_MLSD(self, path):",
-  "        print('LIST', flush=True)",
+  "        print('LIST ' + str(self.remote_port), flush=True)",
   "        return super().ftp_MLSD(path)",
   "    def ftp_LIST(self, path):",
-  "        print('LIST', flush=True)",
+  "        print('LIST ' + str(self.remote_port), flush=True)",
   "        return super().ftp_LIST(path)",
   "    def on_file_sent(self, path):",
   "        if os.path.basename(path) == 'change-during-download.txt':",
@@ -89,7 +90,6 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   child.stdout.setEncoding("utf8").on("data", (data) => { ftpLog += data; });
   const retrieves = () => ftpLog.split(/\r?\n/).filter((line) => line.startsWith("RETR "));
   const logins = () => (ftpLog.match(/^LOGIN$/gm) ?? []).length;
-  const listings = () => (ftpLog.match(/^LIST$/gm) ?? []).length;
   const profiles = join(config, "ftp-profiles.json");
   const rightPane = page.getByRole("region", { name: "right pane" });
   const right = rightPane.getByRole("listbox", { name: "right files" });
@@ -262,10 +262,15 @@ export async function testFtp(page, temp, source, destination, config, restartDe
       await remoteRow(folder + "\\b").click();
       await page.keyboard.press("F5");
       await copy.getByLabel("Destination", { exact: true }).fill(destination);
-      const before = listings();
+      const before = ftpLog.length;
       await button(copy, "Copy").click();
       await complete.getByText("1 completed.", { exact: true }).waitFor({ timeout: 90_000 });
-      const commands = listings() - before;
+      // Pane refreshes use other control connections and are not part of the download.
+      const transferLog = ftpLog.slice(before);
+      const transferSessions = new Set(Array.from(transferLog.matchAll(/^RETR-SESSION (\d+)\r?$/gm), ([, session]) => session));
+      assert.ok(transferSessions.size > 0, "The fixture must observe download requests.");
+      const commands = Array.from(transferLog.matchAll(/^LIST (\d+)\r?$/gm), ([, session]) => session)
+        .filter((session) => transferSessions.has(session)).length;
       assert.ok(commands <= 5, `Expected at most five directory listings for ${count} files, got ${commands}.`);
       assert.equal((await readdir(join(destination, folder))).length, count);
       await button(complete, "Done").click();
