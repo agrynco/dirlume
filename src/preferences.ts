@@ -71,6 +71,7 @@ export const commands = {
   cancelText: { label: "Exit the viewer or editor", key: "Escape" },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
+  folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
   ftpSources: { label: "Select FTP in the sources menu", key: "1" },
   addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
@@ -106,6 +107,7 @@ export function commandScope(command: Command) {
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "saveTextAlternate" || command === "closeText" || command === "cancelText") return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
+  if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
   return "main";
 }

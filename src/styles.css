@@ -647,6 +647,10 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.negative, button.negative:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
 .field { display: grid; gap: 5px; }
 .new-file-encoding { margin-top: 12px; }
+.folder-name-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.folder-name-history { max-height: 12rem; overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 6px; }
+.folder-history-date { display: block; padding: 4px 6px; color: var(--muted); font-size: .85em; }
+.folder-name-history [role="option"] { width: 100%; justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; }
 .quick-search {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
   gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); background: var(--raised);

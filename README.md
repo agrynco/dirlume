@@ -42,12 +42,14 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
-| F7 / F8 / Shift+Delete | Create a folder, send selected items to Trash, or permanently delete after confirmation. |
+| F7 / F8 / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
 | Ctrl+E / Alt+F8 | Recall earlier commands or open command history. Alt+F8 also works from the terminal. |
 | Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
+
+In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
 Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The open terminal follows the active local panel in PowerShell, Bash, Zsh, and compatible Bourne shells. If a command is running or being edited, the directory changes when the shell returns to its prompt. The command line also sends commands to the shell from the active local folder. **Alt+F8** opens the command line history from either control. Terminal colors adapt to the background of the active color scheme.
 

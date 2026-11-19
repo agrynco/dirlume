@@ -1351,6 +1351,7 @@ pub fn run() {
         file_attributes,
         update_file_attributes,
         operate,
+        crate::folders::create_folders,
         connect_server,
         list_server,
         disconnect_server,
