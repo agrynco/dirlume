@@ -76,6 +76,43 @@ export async function testMarkdown(page, source, wheelFont) {
   await task("Main task", true).waitFor();
   assert.equal(await readFile(catalogue, "utf8"), external);
   await catalogueViewer.getByRole("button", { name: "Close document", exact: true }).click();
+  await testTaskSource(page, source);
   console.log("Verified Markdown link navigation and Ctrl-click tabs, shared preview zoom, heading anchors, task persistence, and external edit protection.");
   return enlargedSize;
+}
+
+async function testTaskSource(page, source) {
+  const files = page.getByRole("listbox", { name: "left files", exact: true });
+
+  for (const dirty of [false, true]) {
+    const name = dirty ? "dirty-task.md" : "clean-task.md";
+    const path = join(source, name);
+    const original = "# Tasks\r\n\r\n- [ ] Preserve this state\r\n";
+    const toggled = original.replace("[ ]", "[x]");
+    await writeFile(path, original);
+    await files.getByRole("option").filter({ hasText: name }).click();
+    await page.keyboard.press("F4");
+    const window = page.getByRole("region", { name, exact: true });
+    const editor = window.getByLabel(`Edit ${name}`, { exact: true });
+    await editor.waitFor();
+    if (dirty) {
+      await editor.press("Control+Home");
+      await page.keyboard.insertText("Before preview.\n\n");
+      await editor.getByText("Before preview.", { exact: true }).waitFor();
+    }
+    await window.getByRole("button", { name: "Preview", exact: true }).click();
+    const checkbox = window.getByRole("checkbox", { name: "Preserve this state", exact: true });
+    await checkbox.click();
+    await window.getByRole("checkbox", { name: "Preserve this state", exact: true, checked: true }).waitFor();
+    assert.equal(await readFile(path, "utf8"), dirty ? original : toggled);
+    await window.getByRole("button", { name: "Source", exact: true }).click();
+    await editor.getByText(/\[x\] Preserve this state/).waitFor();
+    await editor.press("Control+End");
+    await page.keyboard.insertText("After preview.");
+    await window.getByRole("button", { name: "Save", exact: true }).click();
+    await window.getByRole("button", { name: "Save", exact: true }).and(window.locator("button:disabled")).waitFor();
+    assert.equal(await readFile(path, "utf8"), (dirty ? "Before preview.\r\n\r\n" : "") + toggled + "After preview.");
+    await window.getByRole("button", { name: "Close document", exact: true }).click();
+  }
+  console.log("Verified Markdown task changes survive returning to the clean and dirty source editor.");
 }
