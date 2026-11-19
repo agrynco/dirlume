@@ -159,6 +159,7 @@ export interface ProcessInfo extends ProcessId {
   name: string;
   cpu: number;
   memory: number;
+  executable: string | null;
   canTerminate: boolean;
 }
 

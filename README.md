@@ -72,6 +72,8 @@ Drag marked files and folders into the other local pane to open the transfer dia
 
 Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort the table, or search by name or PID. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
 
+On Windows, select a local file or folder and choose **Find locking processes** from the main menu. The opposite pane shows what Windows found and keeps the source selection. Choose **Properties** for executable details or **Back to files** to return to the previous location. Both **F8** and **End process** in Properties ask for confirmation.
+
 Press **Ctrl+A** while focused on a file list to inspect the current item’s attributes, owner, and timestamps. **Apply** saves supported flags and refreshes the file panes. Windows supports Archive, Hidden, System, Not indexed, and Read-only on files. On Linux and macOS you can change the owner’s write bit. Remote item details are read-only and depend on what the source reports.
 
 In the main menu, **Help → Help** opens the offline guide and **Help → About** shows the running version. **Commands → Check for updates** checks for a desktop update.
