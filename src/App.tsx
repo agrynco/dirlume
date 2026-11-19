@@ -1137,7 +1137,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const onFiles = target.closest(".file-list");
     const inField = target.closest("input, select, textarea, [contenteditable]");
     if (!command || command === "quickSearch") {
-      if (panelsHidden || processPanels[active] || !pane.place || (inField && !inCommandLine)) return;
+      const unavailable = processPanels[active] ? target !== onFiles || !onFiles?.classList.contains("process-table") : !pane.place;
+      if (panelsHidden || unavailable || (inField && !inCommandLine)) return;
       const seed = quickSearchSeed(event.nativeEvent, preferences.shortcuts.quickSearch);
       if (seed === null) return;
       event.preventDefault();

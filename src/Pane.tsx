@@ -16,6 +16,7 @@ import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
 import { columnWidthsStyle, FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
+import { QuickSearch, useQuickSearch } from "./QuickSearch";
 
 interface PaneProps {
   side: Side;
@@ -98,8 +99,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
   const [filterOpen, setFilterOpen] = useState(false);
-  const [quickSearch, setQuickSearch] = useState<string | null>(null);
-  const quickSearchInput = useRef<HTMLInputElement>(null);
+  const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [draggedRow, setDraggedRow] = useState<string | null>(null);
@@ -113,13 +113,6 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const selected = paneCursorIndex(pane, entries);
   const search = Boolean(pane.search);
   const matches = pane.search?.matches;
-  const quickMatches = useMemo(() => {
-    if (!quickSearch) return [];
-    const prefix = quickSearch.normalize("NFC").toLocaleLowerCase();
-    return entries.filter((entry) => entry.name !== ".." &&
-      (matches?.get(entry.name)?.entry.name ?? entry.name).normalize("NFC").toLocaleLowerCase().startsWith(prefix));
-  }, [entries, matches, quickSearch]);
-  const currentQuickMatch = quickMatches.find(({ name }) => name === pane.selected);
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
   const virtual = search || entries.length > 100;
   const start = virtual ? Math.min(entries.length, Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : 0;
@@ -165,16 +158,6 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const free = localFolder && space?.folder === localFolder ? space.value : null;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
-  const quickSearchOpen = quickSearch !== null;
-  useLayoutEffect(() => {
-    if (!quickSearchOpen) return;
-    const input = quickSearchInput.current;
-    input?.focus();
-    if (input) input.setSelectionRange(input.value.length, input.value.length);
-  }, [quickSearchOpen]);
-  useEffect(() => {
-    if (!currentQuickMatch && quickMatches[0]) onQuickMatch(quickMatches[0].name);
-  }, [currentQuickMatch, onQuickMatch, quickMatches]);
   useLayoutEffect(() => {
     const element = list.current;
     const probe = rowProbe.current;
@@ -227,14 +210,11 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       setLocationsOpen((open) => !open);
       locationsButton.current?.focus();
     };
-    const showQuickSearch = (event: Event) => setQuickSearch((event as CustomEvent<string>).detail);
     target?.addEventListener("dirlume-filter", show);
     target?.addEventListener("dirlume-locations", showLocations);
-    target?.addEventListener("dirlume-quick-search", showQuickSearch);
     return () => {
       target?.removeEventListener("dirlume-filter", show);
       target?.removeEventListener("dirlume-locations", showLocations);
-      target?.removeEventListener("dirlume-quick-search", showQuickSearch);
     };
   }, [side]);
 
@@ -450,32 +430,11 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           </div>
         )}
       </div>
-      {quickSearch !== null && <div className="quick-search">
-        <label htmlFor={side + "-quick-search"}>{t("Quick search")}</label>
-        <input id={side + "-quick-search"} ref={quickSearchInput} type="text" value={quickSearch} spellCheck={false}
-          autoComplete="off" onChange={(event) => setQuickSearch(event.target.value)} onBlur={() => setQuickSearch(null)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
-            if (event.key === "Escape" || event.key === "Enter") {
-              event.preventDefault();
-              event.stopPropagation();
-              const match = currentQuickMatch ?? quickMatches[0];
-              if (event.key === "Enter" && !match) return;
-              setQuickSearch(null);
-              list.current?.focus({ preventScroll: true });
-              if (event.key === "Enter" && match) onOpen(match);
-            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault();
-              event.stopPropagation();
-              if (!quickMatches.length) return;
-              const index = currentQuickMatch ? quickMatches.indexOf(currentQuickMatch) : 0;
-              const offset = event.key === "ArrowDown" ? 1 : -1;
-              const next = (index + offset + quickMatches.length) % quickMatches.length;
-              onQuickMatch(quickMatches[next].name);
-            }
-          }} />
-        <span role="status">{quickSearch ? (quickMatches.length ? countText(quickMatches.length, "match") : t("No match")) : ""}</span>
-      </div>}
+      {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={pane.selected}
+        items={folderItems.map(({ name }) => ({ id: name, name: matches?.get(name)?.entry.name ?? name }))}
+        onChange={setQuickSearch} onMatch={onQuickMatch}
+        onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
+        onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
       {pane.error && <p className="pane-error" role="alert">{errorText(pane.error)}</p>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
       {classic && <div className="pane-details" aria-live="off">
