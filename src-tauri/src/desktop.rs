@@ -81,6 +81,14 @@ async fn list_directory(path: String) -> Result<local::Listing> {
     blocking(move || local::list(local::absolute(&path).map_err(message)?).map_err(message)).await
 }
 
+#[tauri::command]
+async fn disk_space(path: String) -> Result<crate::disk_space::DiskSpace> {
+    blocking(move || {
+        crate::disk_space::query(local::absolute(&path).map_err(message)?).map_err(message)
+    })
+    .await
+}
+
 fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
     Ok(local::absolute(directory)?.join(local::name_component(name)?))
 }
@@ -1374,6 +1382,7 @@ pub fn run() {
         crate::windows_shell::file_icons,
         installed_fonts,
         list_directory,
+        disk_space,
         file_attributes,
         update_file_attributes,
         operate,

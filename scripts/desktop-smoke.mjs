@@ -143,13 +143,17 @@ try {
     const groups = ["ui", "panel", "dialog", "viewer", "editor", "terminal"];
     return {
       faces: loaded.map((faces) => faces.length > 0 && faces.every((face) => face.status === "loaded")),
-      families: groups.map((group) => root.getPropertyValue(`--${group}-font`).startsWith(`"${family}"`)),
-      sizes: groups.map((group) => root.getPropertyValue(`--${group}-size`)),
+      bundled: groups.map((group) => root.getPropertyValue(`--${group}-font`).trim().startsWith(`"${family}"`)),
+      system: groups.map((group) => root.getPropertyValue(`--${group}-font`).trim()
+        .startsWith(root.getPropertyValue("--system-font").trim())),
+      sizes: groups.map((group) => root.getPropertyValue(`--${group}-size`).trim()),
     };
   }, bundledFamily);
   assert.deepEqual(defaultFonts.faces, [true, true, true, true]);
-  assert.ok(defaultFonts.families.every(Boolean));
-  assert.deepEqual(defaultFonts.sizes, Array(6).fill("18px"));
+  // The window and dialogs use the system font; file panels and text tools use the bundled monospace font.
+  assert.deepEqual(defaultFonts.bundled, [false, true, false, true, true, true]);
+  assert.deepEqual(defaultFonts.system, [true, false, true, false, false, false]);
+  assert.deepEqual(defaultFonts.sizes, ["14px", "15px", "14px", "18px", "18px", "18px"]);
   assert.equal(await page.getByRole("button", { name: "Find files" }).getAttribute("title"), "Find files (Alt+F7)");
   assert.equal(await page.getByRole("region", { name: "right pane" }).getByRole("button", { name: "Refresh folder" }).getAttribute("title"), "Refresh folder");
   assert.deepEqual(await page.locator("button:visible").evaluateAll((buttons) =>
@@ -243,7 +247,9 @@ try {
     await list.press("ArrowLeft");
     assert.equal(await list.locator(parentRow).getAttribute("data-current"), "true");
     assert.equal(await list.locator(parentRow).getAttribute("draggable"), "false");
-    assert.equal(await page.getByRole("button", { name: /^Copy F5$/ }).isEnabled(), false);
+    const copyAction = page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Copy", exact: true });
+    assert.equal(await copyAction.getAttribute("aria-keyshortcuts"), "F5");
+    assert.equal(await copyAction.isEnabled(), false);
     await list.press("Enter");
     await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor();
     assert.equal(await other.inputValue(), otherPath);
@@ -753,7 +759,7 @@ try {
   await optionsDialog.getByRole("button", { name: "Reset file panels font", exact: true }).click();
   assert.equal(await panelFont.inputValue(), "");
   assert.equal(await optionsDialog.locator(".preview-frame").evaluate((element) =>
-    getComputedStyle(element).getPropertyValue("--panel-size")), "18px");
+    getComputedStyle(element).getPropertyValue("--panel-size").trim()), "15px");
   await panelFont.fill("aRiAl");
   const arial = panelSuggestions.getByRole("option", { name: "Arial", exact: true });
   await arial.waitFor();
@@ -1231,6 +1237,11 @@ try {
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
   const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
+  // Default tracks use em units and can start at fractional pixels, while dragged widths are stored as whole pixels.
+  const assertColumnWidth = async (side, column, expected) => {
+    const actual = await columnWidth(side, column);
+    assert.ok(Math.abs(actual - expected) <= 1, `${side} ${column} column is ${actual}px, expected about ${expected}px.`);
+  };
   const columnHandle = (side, name) => page.getByRole("region", { name: `${side} pane`, exact: true })
     .getByRole("separator", { name: `Resize ${name} column`, exact: true });
   async function dragColumn(side, name, delta) {
@@ -1250,7 +1261,7 @@ try {
   await dragColumn("left", "Name", 56);
   assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
   await dragColumn("left", "Size", 32);
-  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  await assertColumnWidth("left", "size", leftSize + 32);
   assert.equal(await columnWidth("right", "size"), rightSize);
   await page.locator("#left-files").evaluate((list) => { list.scrollLeft = 60; });
   await page.waitForFunction(() => {
@@ -1261,7 +1272,7 @@ try {
         list.querySelector(".file-size").getBoundingClientRect().left) <= 1;
   });
   await dragColumn("right", "Modified", -28);
-  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await assertColumnWidth("right", "modified", rightModified - 28);
   await columnHandle("right", "Modified").dblclick();
   assert.equal(await columnWidth("right", "modified"), rightModified);
   await dragColumn("right", "Modified", -28);
@@ -1273,10 +1284,10 @@ try {
   await columnMenu().getByRole("menuitemcheckbox", { name: "Size", exact: true, checked: true }).click();
   await rightHeader().getByRole("button", { name: "Size", exact: true }).waitFor({ state: "hidden" });
   assert.equal(await page.locator("#right-files .file-size:visible").count(), 0);
-  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await assertColumnWidth("right", "modified", rightModified - 28);
   const newModifiedPosition = await rightHeader().locator(".col-modified").evaluate((column) => column.getBoundingClientRect().left);
   assert.ok(Math.abs(newModifiedPosition - (modifiedPosition - rightSize)) <= 1);
-  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  await assertColumnWidth("left", "size", leftSize + 32);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Modified", exact: true, checked: false }).waitFor();
@@ -1299,14 +1310,14 @@ try {
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
   assert.ok(Math.abs(await columnWidth("left", "name") - leftName - 56) <= 1);
-  assert.equal(await columnWidth("left", "size"), leftSize + 32);
+  await assertColumnWidth("left", "size", leftSize + 32);
   assert.equal(await columnWidth("right", "size"), rightSize);
   await rightHeader().getByRole("button", { name: "Modified", exact: true }).waitFor({ state: "hidden" });
   await rightHeader().getByRole("button", { name: "Name", exact: true }).press("Shift+F10");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Modified", exact: true, checked: false }).click();
   await page.keyboard.press("Escape");
   await columnMenu().waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "modified"), rightModified - 28);
+  await assertColumnWidth("right", "modified", rightModified - 28);
   assert.equal(await page.getByLabel("left path").inputValue(), src);
   assert.equal(await page.getByLabel("right path").inputValue(), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
@@ -1353,7 +1364,7 @@ try {
   page = await startDesktop();
   await page.getByRole("button", { name: "Знайти файли", exact: true }).waitFor();
   assert.equal(await page.locator("html").getAttribute("lang"), "uk");
-  assert.equal(await page.locator("#left-pane .col-name button").innerText(), "Назва");
+  assert.equal(await page.locator("#left-pane .col-name button").textContent(), "Назва");
   await rightHeader().getByRole("button", { name: "Назва", exact: true }).click({ button: "right" });
   const ukrainianColumns = page.getByRole("menu", { name: "Колонки", exact: true });
   await ukrainianColumns.getByRole("menuitemcheckbox", { name: "Розмір", exact: true }).waitFor();
@@ -1365,7 +1376,7 @@ try {
   await reopenedOptions.getByLabel("Мова", { exact: true }).selectOption("ru");
   await reopenedOptions.getByRole("button", { name: "Готово", exact: true }).click();
   assert.equal(await page.locator("html").getAttribute("lang"), "ru");
-  assert.equal(await page.locator("#left-pane .col-name button").innerText(), "Имя");
+  assert.equal(await page.locator("#left-pane .col-name button").textContent(), "Имя");
   await page.locator("#left-pane .file-list").press("F1");
   const russianHelp = page.getByRole("dialog", { name: "Справка", exact: true });
   await russianHelp.getByRole("heading", { name: "Основные файловые панели", exact: true }).waitFor();
@@ -1435,6 +1446,8 @@ try {
     await page.keyboard.press("Escape");
     await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
+    // The restored workspace keeps earlier document tabs, so closing a viewer can reveal another document.
+    await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "Files", exact: true }).click();
   }
   assert.equal(await page.getByRole("combobox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
   console.log("Verified feature settings search, independent font overrides, and persistence after restart.");

@@ -68,6 +68,7 @@ const OTHER_OPERATIONS: &[&str] = &[
     "build_version",
     "locations",
     "requested_location",
+    "disk_space",
     "list_processes",
     "process_icons",
     "file_icons",

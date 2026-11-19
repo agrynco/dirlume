@@ -102,6 +102,11 @@ export const textEncodingLabels = {
 } as const;
 export type TextEncoding = keyof typeof textEncodingLabels;
 
+export interface DiskSpace {
+  available: number;
+  total: number;
+}
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean };
 export type CommandCompletion = { index: number; length: number; matches: { label: string; text: string; directory: boolean }[] };
@@ -197,6 +202,7 @@ export const api = {
   saveArchiveText: (id: number, segments: string[], revision: string, text: string, encoding: TextEncoding) =>
     invoke<TextDocument>("save_archive_text", { id, segments, revision, text, encoding }),
   deleteArchiveEntries: (id: number, paths: string[][]) => invoke<void>("delete_archive_entries", { id, paths }),
+  diskSpace: (path: string) => invoke<DiskSpace>("disk_space", { path }),
   fileAttributes: (directory: string, name: string) =>
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>

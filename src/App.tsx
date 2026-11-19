@@ -33,7 +33,7 @@ import {
   type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
-  quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
+  compactShortcut, quickSearchSeed, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -1240,7 +1240,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   return (
     <div className={`app${terminal ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
-      onKeyDown={keyDown} onKeyDownCapture={documentKeys}>
+      data-layout={preferences.layout} onKeyDown={keyDown} onKeyDownCapture={documentKeys}>
       <header className="topbar">
         <div className="brand"><span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1></div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
@@ -1260,7 +1260,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       <main className="workspace" hidden={panelsHidden}
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
-          <Pane key={side} side={side} active={active === side} showHidden={preferences.hidden}
+          <Pane key={side} side={side} active={active === side} layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
             rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
               ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
@@ -1347,8 +1347,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       <nav className="actionbar" aria-label={t("File actions")}>
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
           fileActions.map(({ command, label, Icon, disabled }) => (
-          <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}>
-            <Icon /><span>{t(label)}</span>{keyLabel(command) && <kbd>{keyLabel(command)}</kbd>}
+          <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
+            aria-keyshortcuts={preferences.shortcuts[command] || undefined}>
+            {keyLabel(command) && <kbd aria-hidden="true">{compactShortcut(preferences.shortcuts[command])}</kbd>}<Icon /><span>{t(label)}</span>
           </Button>
         ))}
       </nav>
