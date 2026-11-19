@@ -364,10 +364,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   useEffect(() => {
     if (isTauri()) {
-      const nativeTheme = theme === "system" ? null : theme === "slate" ? "dark" : theme;
+      const base = scheme?.base ?? theme;
+      const nativeTheme = base === "system" ? null : base === "light" ? "light" : "dark";
       void getCurrentWindow().setTheme(nativeTheme).catch(() => {});
     }
-  }, [theme]);
+  }, [theme, scheme?.base]);
 
   useEffect(() => {
     if (!isTauri()) return;

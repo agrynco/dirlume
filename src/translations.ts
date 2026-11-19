@@ -273,6 +273,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Dark": ["Темна", "Тёмная"],
   "Light": ["Світла", "Светлая"],
   "Slate": ["Сіро-синя", "Серо-синяя"],
+  "Classic blue": ["Класична синя", "Классическая синяя"],
   "Window": ["Вікно", "Окно"],
   "Window background": ["Тло вікна", "Фон окна"],
   "Toolbar and status bar": ["Панель інструментів і рядок стану", "Панель инструментов и строка состояния"],
