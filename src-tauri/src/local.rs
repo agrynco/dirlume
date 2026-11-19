@@ -283,15 +283,94 @@ pub fn is_link(metadata: &fs::Metadata) -> bool {
     metadata.is_symlink()
 }
 
+#[derive(Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CopyAccess {
+    #[default]
+    Default,
+    Copy,
+    Inherit,
+}
+
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CopyOptions {
+    pub access: CopyAccess,
+    pub preserve_timestamps: bool,
+    pub follow_links: bool,
+    pub mask: Option<String>,
+}
+
+impl CopyOptions {
+    pub fn metadata(&self, path: &Path) -> io::Result<fs::Metadata> {
+        if self.follow_links {
+            fs::metadata(path)
+        } else {
+            fs::symlink_metadata(path)
+        }
+    }
+
+    pub fn includes(&self, path: &Path) -> bool {
+        let Some(mask) = &self.mask else { return true };
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return false;
+        };
+        let pattern: Vec<_> = mask.to_lowercase().chars().collect();
+        let letters: Vec<_> = name.to_lowercase().chars().collect();
+        let (mut file, mut mask) = (0, 0);
+        let mut star = None;
+        while file < letters.len() {
+            match pattern.get(mask) {
+                Some('*') => {
+                    star = Some((mask, file));
+                    mask += 1;
+                }
+                Some(symbol) if *symbol == '?' || *symbol == letters[file] => {
+                    mask += 1;
+                    file += 1;
+                }
+                _ => {
+                    let Some((index, matched)) = star else {
+                        return false;
+                    };
+                    file = matched + 1;
+                    mask = index + 1;
+                    star = Some((index, file));
+                }
+            }
+        }
+        pattern[mask..].iter().all(|symbol| *symbol == '*')
+    }
+}
+
+#[cfg(any(feature = "desktop", test))]
 pub fn copy_to(
     source: &Path,
     target: &Path,
     replace: bool,
+    progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+) -> io::Result<()> {
+    copy_with_options(
+        source,
+        target,
+        replace,
+        &CopyOptions::default(),
+        &mut Vec::new(),
+        progress,
+    )
+}
+
+pub fn copy_with_options(
+    source: &Path,
+    target: &Path,
+    replace: bool,
+    options: &CopyOptions,
+    ancestors: &mut Vec<PathBuf>,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
 ) -> io::Result<()> {
     let target = transfer_path(source, target)?;
     let directory = target.parent().expect("transfer path has a parent");
-    let metadata = fs::symlink_metadata(source)?;
+    let metadata = options.metadata(source)?;
     if !replace {
         ensure_absent(&target)?;
     }
@@ -299,7 +378,7 @@ pub fn copy_to(
         .prefix(".dirlume-")
         .tempdir_in(directory)?;
     let staged = workspace.path().join("copy");
-    copy_entry(source, &staged, metadata, &mut progress)?;
+    copy_entry(source, &staged, metadata, options, ancestors, &mut progress)?;
     progress(source, 0, None)?;
     if replace {
         replace_file(&staged, &target)
@@ -384,6 +463,8 @@ fn copy_entry(
     source: &Path,
     destination: &Path,
     metadata: fs::Metadata,
+    options: &CopyOptions,
+    ancestors: &mut Vec<PathBuf>,
     progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
 ) -> io::Result<()> {
     if is_link(&metadata) {
@@ -393,29 +474,45 @@ fn copy_entry(
         ));
     }
     if metadata.is_dir() {
-        progress(source, 0, None)?;
-        fs::create_dir(destination)?;
-        for child in fs::read_dir(source)? {
-            let child = child?;
-            let path = child.path();
-            copy_entry(
-                &path,
-                &destination.join(child.file_name()),
-                fs::symlink_metadata(&path)?,
-                progress,
-            )?;
-        }
+        with_copy_directory(source, destination, options, ancestors, |ancestors| {
+            progress(source, 0, None)?;
+            fs::create_dir(destination)?;
+            for child in fs::read_dir(source)? {
+                let child = child?;
+                let path = child.path();
+                copy_entry(
+                    &path,
+                    &destination.join(child.file_name()),
+                    options.metadata(&path)?,
+                    options,
+                    ancestors,
+                    progress,
+                )?;
+            }
+            if options.preserve_timestamps {
+                preserve_directory_times(destination, &metadata)?;
+            }
+            if matches!(options.access, CopyAccess::Copy) {
+                copy_access(source, destination, &metadata)?;
+            }
+            Ok(())
+        })?;
     } else if metadata.is_file() {
+        if !options.includes(source) {
+            return Ok(());
+        }
         let input = fs::File::open(source)?;
         let mut output = fs::File::create_new(destination)?;
         copy_stream(input, &mut output, Some(metadata.len()), |bytes, total| {
             progress(source, bytes, total)
         })?;
-        if let Ok(modified) = metadata.modified() {
-            output.set_times(fs::FileTimes::new().set_modified(modified))?;
-        }
+        output.set_times(copy_times(&metadata, options.preserve_timestamps))?;
         output.sync_all()?;
-        output.set_permissions(metadata.permissions())?;
+        match options.access {
+            CopyAccess::Default => output.set_permissions(metadata.permissions())?,
+            CopyAccess::Copy => copy_access(source, destination, &metadata)?,
+            CopyAccess::Inherit => {}
+        }
     } else {
         return Err(io::Error::new(
             ErrorKind::Unsupported,
@@ -423,6 +520,132 @@ fn copy_entry(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn with_copy_directory<T>(
+    source: &Path,
+    destination: &Path,
+    options: &CopyOptions,
+    ancestors: &mut Vec<PathBuf>,
+    copy: impl FnOnce(&mut Vec<PathBuf>) -> io::Result<T>,
+) -> io::Result<T> {
+    if !options.follow_links {
+        return copy(ancestors);
+    }
+    let directory = source.canonicalize()?;
+    let target_parent = destination
+        .parent()
+        .ok_or_else(|| io::Error::other("The destination has no parent folder."))?
+        .canonicalize()?;
+    if ancestors.contains(&directory) || target_parent.starts_with(&directory) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "A folder link points back into the copy.",
+        ));
+    }
+    ancestors.push(directory);
+    let result = copy(ancestors);
+    ancestors.pop();
+    result
+}
+
+fn copy_times(metadata: &fs::Metadata, preserve_all: bool) -> fs::FileTimes {
+    let mut times = fs::FileTimes::new();
+    if let Ok(modified) = metadata.modified() {
+        times = times.set_modified(modified);
+    }
+    if preserve_all {
+        if let Ok(accessed) = metadata.accessed() {
+            times = times.set_accessed(accessed);
+        }
+        #[cfg(windows)]
+        if let Ok(created) = metadata.created() {
+            use std::os::windows::fs::FileTimesExt;
+            times = times.set_created(created);
+        }
+    }
+    times
+}
+
+pub(crate) fn preserve_directory_times(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES,
+        };
+        fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)?
+    };
+    #[cfg(not(windows))]
+    let file = fs::File::open(path)?;
+    file.set_times(copy_times(metadata, true))
+}
+
+#[cfg(not(windows))]
+fn copy_access(_source: &Path, destination: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    fs::set_permissions(destination, metadata.permissions())
+}
+
+#[cfg(windows)]
+fn copy_access(source: &Path, destination: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    use std::{
+        iter::once,
+        os::windows::ffi::OsStrExt,
+        ptr::{null, null_mut},
+    };
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT},
+            DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        },
+    };
+    let windows_path = |path: &Path| {
+        path.as_os_str()
+            .encode_wide()
+            .chain(once(0))
+            .collect::<Vec<_>>()
+    };
+    let source = windows_path(source);
+    let target = windows_path(destination);
+    let mut acl = null_mut();
+    let mut descriptor = null_mut();
+    // The ACL points into the allocated descriptor and is valid until LocalFree.
+    let read = unsafe {
+        GetNamedSecurityInfoW(
+            source.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            &mut acl,
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if read != 0 {
+        return Err(io::Error::from_raw_os_error(read as i32));
+    }
+    let result = unsafe {
+        let result = SetNamedSecurityInfoW(
+            target.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            acl,
+            null(),
+        );
+        LocalFree(descriptor);
+        result
+    };
+    if result != 0 {
+        return Err(io::Error::from_raw_os_error(result as i32));
+    }
+    fs::set_permissions(destination, metadata.permissions())
 }
 
 pub fn copy_stream(

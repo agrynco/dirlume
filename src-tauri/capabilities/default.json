@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Dirlume's local main window",
   "windows": ["main", "options", "compare-*"],
-  "permissions": ["core:default", "core:window:allow-set-theme", "core:window:allow-set-title", "core:window:allow-set-focus", "core:window:allow-close", "core:window:allow-destroy", "dialog:allow-open", "dialog:allow-save"]
+  "permissions": ["core:default", "core:window:allow-show", "core:window:allow-set-theme", "core:window:allow-set-title", "core:window:allow-set-focus", "core:window:allow-close", "core:window:allow-destroy", "core:window:allow-start-resize-dragging", "core:window:allow-set-size", "dialog:allow-open", "dialog:allow-save"]
 }

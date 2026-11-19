@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ export async function testMarkdownNoWrap(page, root) {
     "",
     '<span style="white-space: nowrap">Outside the table</span>',
   ].join("\n"));
-  const address = page.getByLabel("left path", { exact: true });
+  const address = await editPaneAddress(page);
   const previous = await address.inputValue();
   await address.fill(directory);
   await address.press("Enter");
@@ -69,7 +70,7 @@ export async function testMarkdownNoWrap(page, root) {
   await viewer.getByRole("link", { name: "DEMO-456", exact: true }).click();
   await page.getByRole("heading", { name: "Linked issue", exact: true }).waitFor();
   await page.keyboard.press("Escape");
-  await address.fill(previous);
+  await (await editPaneAddress(page)).fill(previous);
   await address.press("Enter");
   console.log("Verified that explicitly unwrapped Markdown table links stay on one line, adjacent notes wrap, and the formatting toggle and link navigation work.");
 }

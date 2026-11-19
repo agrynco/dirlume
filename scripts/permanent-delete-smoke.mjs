@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, stat, writeFile } from "node:fs/promises";
@@ -8,10 +9,10 @@ export async function testPermanentDelete(page, root) {
   const longName = "Дуже-довга-назва-проєкту-".repeat(5) + "fixture.txt";
   await mkdir(join(folder, "projects"), { recursive: true });
   await writeFile(join(folder, longName), "Temporary verification file");
-  const path = page.getByLabel("left path", { exact: true });
+  const path = await editPaneAddress(page);
   await path.fill(folder);
   await path.press("Enter");
-  const row = (name) => page.locator("#left-files").getByRole("option").and(page.getByTitle(name, { exact: true }));
+  const row = (name) => page.locator("#left-files").getByRole("option").and(page.locator("[data-tooltip=" + JSON.stringify(name) + "]"));
 
   async function open(name, title, cancelLabel) {
     await row(name).click();
@@ -30,7 +31,19 @@ export async function testPermanentDelete(page, root) {
     return dialog;
   }
 
+  for (const key of ["F8", "Delete"]) {
+    await row("projects").click();
+    await page.keyboard.press(key);
+    const trash = page.getByRole("dialog", { name: "Move to Trash", exact: true });
+    await trash.getByText("Move projects to Trash?", { exact: true }).waitFor();
+    assert.equal(await trash.locator(".trash-confirmation > svg").count(), 1);
+    assert.equal(await trash.getByRole("button", { name: "Move to Trash" }).evaluate((button) =>
+      button.matches(".negative, .primary")), false);
+    await page.keyboard.press("Escape");
+    await trash.waitFor({ state: "hidden" });
+  }
   const standard = await open("projects", "Delete permanently", "Cancel");
+  assert.equal(await standard.evaluate((dialog) => getComputedStyle(dialog).backgroundColor), "rgb(128, 0, 0)");
   await standard.getByText("Permanently delete projects?", { exact: true }).waitFor();
   await standard.getByText("This action cannot be undone.", { exact: true }).waitFor();
   await page.keyboard.press("Escape");

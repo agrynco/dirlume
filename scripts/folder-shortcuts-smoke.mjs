@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -9,13 +10,13 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   const title = () => dialog().getByRole("textbox", { name: "Title (optional)", exact: true });
   const path = () => dialog().getByLabel("Path", { exact: true });
   const confirm = () => dialog().getByRole("button", { name: "OK", exact: true }).click();
-  const address = (side) => page.getByLabel(`${side} path`, { exact: true });
   const opened = (side, target) => page.getByRole("region", { name: `${side} pane`, exact: true })
     .getByRole("heading", { name: basename(target), exact: true }).waitFor({ state: "attached" });
 
   async function navigate(side, target) {
-    await address(side).fill(target);
-    await address(side).press("Enter");
+    const address = await editPaneAddress(page, side);
+    await address.fill(target);
+    await address.press("Enter");
     await opened(side, target);
   }
 
@@ -55,9 +56,9 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await page.locator("#right-pane.active").waitFor();
   await list("right").press("Control+8");
   await opened("right", src);
-  await list("right").locator('[data-current="true"][title=".."]').waitFor();
+  await list("right").locator('[data-current="true"][data-tooltip=".."]').waitFor();
   assert.equal(await dialog().count(), 0);
-  assert.equal(await address("left").inputValue(), src);
+  assert.equal(await page.locator("#left-path").getAttribute("data-path"), src);
   await navigate("right", dst);
 
   await list("left").focus();
@@ -128,7 +129,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   }
   await picker(8).press("Enter");
   await opened("right", edited);
-  assert.equal(await address("left").inputValue(), src);
+  assert.equal(await page.locator("#left-path").getAttribute("data-path"), src);
   await list("right").press("Control+8");
   await picker(8).press("Delete");
   assert.equal(await picker(8).getByRole("option").count(), 1);

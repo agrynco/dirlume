@@ -3,6 +3,9 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { api, describeError } from "./api";
 import { errorText, t } from "./i18n";
+import appIcon from "../src-tauri/icons/128x128.png";
+
+const donationUrl = "https://send.monobank.ua/jar/6ZninEa3R4";
 
 interface MenuItem {
   label: string;
@@ -113,7 +116,7 @@ export function MainMenu({ groups, shortcut, ref }: {
           <Button type="button" role="menuitem" data-menu-group={index} tabIndex={active === index ? 0 : -1}
             shortcut={shortcut} aria-haspopup="menu" aria-expanded={shown} onFocus={() => setActive(index)}
             onClick={() => { if (shown) close(true); else open(index); }}>{t(label)}</Button>
-          {shown && <div className="main-menu-dropdown" role="menu" aria-label={t(label)}>
+          {shown && <div className="main-menu-dropdown" role="menu" aria-label={t(label)} data-tauri-drag-region="false">
             {items.map(({ label, shortcut, disabled, run }, item) => (
               <Button key={label} type="button" role="menuitem" tabIndex={-1} data-menu-item={item}
                 aria-disabled={disabled || undefined} shortcut={shortcut}
@@ -135,6 +138,7 @@ export function MainMenu({ groups, shortcut, ref }: {
 export function AboutDialog({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
+  const [donationError, setDonationError] = useState("");
   useEffect(() => {
     let open = true;
     void api.buildVersion().then(
@@ -145,10 +149,20 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
   }, []);
   return <Dialog title={t("About")} onClose={onClose}>
     <div className="dialog-body about-body">
-      <strong>Dirlume</strong>
-      {version ? <p>{t("Version")} <code>{version}</code></p> :
-        error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}
+      <img src={appIcon} width={52} height={52} alt="" />
+      <div>
+        <strong>Dirlume</strong>
+        {version ? <p>{t("Version")} <code>{version}</code></p> :
+          error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}
+      </div>
+      {donationError && <p role="alert" className="dialog-error">{errorText(donationError)}</p>}
     </div>
-    <footer className="dialog-footer"><Button data-initial-focus type="button" onClick={onClose}>{t("Close")}</Button></footer>
+    <footer className="dialog-footer">
+      <Button type="button" className="about-donate" onClick={() => {
+        setDonationError("");
+        void api.openWebLink(donationUrl).catch((failure: unknown) => setDonationError(describeError(failure)));
+      }}>{t("Donate via monobank")}</Button>
+      <Button data-initial-focus type="button" onClick={onClose}>{t("Close")}</Button>
+    </footer>
   </Dialog>;
 }

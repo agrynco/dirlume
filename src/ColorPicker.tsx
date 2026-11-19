@@ -1,10 +1,13 @@
+import { HistoryField } from "./HistoryField";
 import { t } from "./i18n";
 import { useState, type CSSProperties, type PointerEvent } from "react";
+import { Pipette } from "lucide-react";
 import { isHexColor } from "./appearance";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 
 type Color = { hue: number; saturation: number; brightness: number };
+type ScreenColorPicker = new () => { open(): Promise<{ sRGBHex: string }> };
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 
 function parseColor(hex: string): Color {
@@ -41,8 +44,33 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
 }) {
   const [color, setColor] = useState(() => parseColor(initial));
   const [hex, setHex] = useState(initial);
+  const [sampling, setSampling] = useState(false);
+  const [sampleError, setSampleError] = useState(false);
+  const EyeDropper = (window as Window & { EyeDropper?: ScreenColorPicker }).EyeDropper;
   const current = toHex(color);
   const valid = isHexColor(hex);
+
+  function changeHex(value: string) {
+    const normalized = "#" + value.replace(/^#/, "").toLowerCase();
+    setHex(isHexColor(normalized) ? normalized : value);
+    if (!isHexColor(normalized)) return;
+    setColor(parseColor(normalized));
+    onChange(normalized);
+  }
+
+  async function sampleScreen() {
+    if (!EyeDropper || sampling) return;
+    setSampling(true);
+    setSampleError(false);
+    try {
+      const { sRGBHex } = await new EyeDropper().open();
+      changeHex(sRGBHex);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setSampleError(true);
+    } finally {
+      setSampling(false);
+    }
+  }
 
   function change(next: Color) {
     setColor(next);
@@ -92,21 +120,19 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
           </label>
           <div className="color-picker-values">
             <label className="field">HEX
-              <input data-initial-focus type="text" value={hex} maxLength={7} spellCheck={false} autoComplete="off"
-                aria-invalid={!valid} onChange={(event) => {
-                  const value = event.target.value;
-                  const normalized = "#" + value.replace(/^#/, "").toLowerCase();
-                  setHex(isHexColor(normalized) ? normalized : value);
-                  if (!isHexColor(normalized)) return;
-                  setColor(parseColor(normalized));
-                  onChange(normalized);
-                }} />
+              <HistoryField historyKey="appearance-hex" aria-label="HEX" data-initial-focus type="text" value={hex} maxLength={7} spellCheck={false}
+                aria-invalid={!valid} onValueChange={changeHex} />
             </label>
             <div className="color-picker-swatches">
-              <span title={t("Original color {0}", initial)} style={{ "--swatch": initial } as CSSProperties} />
-              <span title={t("Selected color {0}", current)} style={{ "--swatch": current } as CSSProperties} />
+              <span data-tooltip={t("Original color {0}", initial)} style={{ "--swatch": initial } as CSSProperties} />
+              <span data-tooltip={t("Selected color {0}", current)} style={{ "--swatch": current } as CSSProperties} />
             </div>
+            {EyeDropper && <Button type="button" className="icon-button"
+              aria-label={t("Pick a color from the screen")} disabled={sampling} onClick={() => { void sampleScreen(); }}>
+              <Pipette />
+            </Button>}
           </div>
+          {sampleError && <p role="alert">{t("Could not pick a color from the screen.")}</p>}
         </div>
         <footer className="dialog-footer">
           <Button type="button" onClick={onCancel}>{t("Cancel")}</Button>

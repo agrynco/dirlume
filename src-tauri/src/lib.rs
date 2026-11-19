@@ -46,6 +46,8 @@ mod watch;
 mod windows_environment;
 #[cfg(all(feature = "desktop", windows))]
 mod windows_shell;
+#[cfg(all(feature = "desktop", windows))]
+mod windows_smb;
 
 #[cfg(feature = "desktop")]
 pub use desktop::run;

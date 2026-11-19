@@ -576,6 +576,8 @@ struct TransferRequest {
     moving: bool,
     policy: local_transfer::Policy,
     ask_read_only: bool,
+    #[serde(default)]
+    copy_options: local::CopyOptions,
 }
 
 #[derive(Serialize)]
@@ -762,6 +764,11 @@ async fn transfer_item(
             moving: request.moving,
             policy: request.policy,
             ask_read_only: request.ask_read_only,
+            copy: if request.moving || source.is_none() {
+                local::CopyOptions::default()
+            } else {
+                request.copy_options
+            },
         };
         if let TransferSource::Archive { segments, .. } = &request.source {
             if request.moving {
@@ -1467,6 +1474,10 @@ pub fn run() {
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
     #[cfg(windows)]
     let builder = builder.setup(|app| {
+        #[cfg(windows)]
+        if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+            window.set_decorations(false)?;
+        }
         crate::windows_environment::attach(app.handle());
         Ok(())
     });
@@ -1474,6 +1485,7 @@ pub fn run() {
     let builder = builder.on_page_load(crate::updates::fixture::page_loaded);
     let dispatch: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         diagnostics::report_diagnostic,
+        diagnostics::error_log,
         build_version,
         open_tool_window,
         crate::updates::check_for_update,
@@ -1493,8 +1505,12 @@ pub fn run() {
         crate::mcp::mcp_result,
         crate::file_clipboard::copy_file_references,
         crate::file_clipboard::clipboard_files,
+        crate::file_clipboard::copy_path,
+        crate::file_clipboard::dropped_files,
         #[cfg(windows)]
         crate::windows_shell::windows_item_menu,
+        #[cfg(windows)]
+        crate::windows_smb::connect_smb,
         #[cfg(windows)]
         crate::windows_shell::open_elevated,
         #[cfg(windows)]

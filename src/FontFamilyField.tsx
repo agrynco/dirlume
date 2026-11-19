@@ -3,12 +3,14 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties }
 import { ChevronDown } from "lucide-react";
 import { bundledFontFamily, maxFontFamilyLength } from "./appearance";
 import { Button } from "./Button";
+import { readFieldHistory, rememberFieldValue } from "./HistoryField";
 
 export type InstalledFonts = { families: string[]; error?: string } | null;
 
-export function FontFamilyField({ label, value, installed, builtIn, onChange }: {
+export function FontFamilyField({ label, value, fallback, installed, builtIn, onChange }: {
   label: string;
   value: string;
+  fallback: string;
   installed: InstalledFonts;
   builtIn: boolean;
   onChange: (family: string) => void;
@@ -22,9 +24,12 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
   const [position, setPosition] = useState<CSSProperties>();
   const matches = useMemo(() => {
     const prefix = query?.trim().toLocaleLowerCase();
-    const families = [bundledFontFamily, ...(installed?.families ?? []).filter(
-      (family) => family.toLowerCase() !== bundledFontFamily.toLowerCase(),
-    )];
+    const unique = new Map<string, string>();
+    for (const family of [...readFieldHistory("font-family"), bundledFontFamily, ...(installed?.families ?? [])]) {
+      const key = family.toLocaleLowerCase();
+      if (!unique.has(key)) unique.set(key, family);
+    }
+    const families = [...unique.values()];
     if (!prefix) return families;
     const starts = [];
     const contains = [];
@@ -34,7 +39,7 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
       else if (name.includes(prefix)) contains.push(family);
     }
     return [...starts, ...contains];
-  }, [installed, query]);
+  }, [installed, query, open]);
   const expanded = open && position !== undefined;
   const optionId = (index: number) => `${id}-${index}`;
 
@@ -84,6 +89,7 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
   }
 
   function choose(family: string) {
+    rememberFieldValue("font-family", family);
     close();
     onChange(family);
   }
@@ -99,7 +105,7 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
       <input ref={input} id={`${id}-input`} aria-label={t("{0} font family", t(label))} type="text" role="combobox"
         aria-autocomplete="list" aria-expanded={expanded} aria-controls={expanded ? id : undefined}
         aria-activedescendant={expanded && matches[index] ? optionId(index) : undefined}
-        value={builtIn ? query ?? value : value} placeholder={t("Default font")} maxLength={maxFontFamilyLength}
+        value={builtIn ? query ?? value : value} placeholder={fallback} maxLength={maxFontFamilyLength}
         autoComplete="off" spellCheck={false}
         onChange={(event) => {
           setQuery(event.target.value);
@@ -109,7 +115,10 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
         }}
         onBlur={() => {
           if (builtIn && query?.trim()) choose(query.trim());
-          else close();
+          else {
+            if (query?.trim()) rememberFieldValue("font-family", query.trim());
+            close();
+          }
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -128,7 +137,7 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
           }
         }} />
       <Button type="button" className="icon-button" aria-label={t("Browse installed fonts for {0}", t(label).toLocaleLowerCase())}
-        title={t("Browse installed fonts")} aria-haspopup="listbox" aria-expanded={expanded} tabIndex={-1}
+        tooltip={t("Browse installed fonts")} aria-haspopup="listbox" aria-expanded={expanded} tabIndex={-1}
         onMouseDown={(event) => event.preventDefault()} onClick={() => {
           input.current?.focus({ preventScroll: true });
           if (open) close();
@@ -137,7 +146,7 @@ export function FontFamilyField({ label, value, installed, builtIn, onChange }: 
       {expanded && <div className="font-suggestions" style={position}>
         <div role="listbox" id={id} aria-label={t("{0} font suggestions", t(label))}>
           {matches.map((family, indexOfFamily) => <div key={family} id={optionId(indexOfFamily)} role="option"
-            aria-selected={indexOfFamily === index} title={family} onMouseDown={(event) => event.preventDefault()}
+            aria-selected={indexOfFamily === index} data-tooltip={family} onMouseDown={(event) => event.preventDefault()}
             onClick={() => choose(family)}>{family}</div>)}
         </div>
         {matches.length === 0 && <div role={installed?.error ? "alert" : "status"} className="font-suggestion-status">

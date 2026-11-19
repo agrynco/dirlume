@@ -13,6 +13,13 @@ async (upgraded, reject) => {
   try {
     if (upgraded) {
       await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
+      const updates = await waitFor(() => {
+        const commands = [...document.querySelectorAll(".main-menu [data-menu-group]")].find((button) => button.textContent === "Commands");
+        if (commands?.getAttribute("aria-expanded") === "false") commands.click();
+        return [...document.querySelectorAll(".main-menu [data-menu-item]")].find((button) => button.textContent === "Check for updates");
+      });
+      updates.click();
+      await waitFor(() => [...document.querySelectorAll("dialog[open] p")].some((text) => text.textContent === "Dirlume is up to date."));
       await report(null);
       return;
     }

@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -25,13 +26,14 @@ export async function testOsTimestamps(page, root) {
   assert.deepEqual(await native("time"), [expected[1]]);
   assert.deepEqual(await native("date_time"), [expected.join(", ")]);
 
-  const address = page.getByLabel("left path", { exact: true });
+  const address = await editPaneAddress(page);
   await address.fill(directory);
   await address.press("Enter");
   const pane = page.locator("#left-pane");
   const file = pane.getByRole("option").filter({ hasText: "newer.txt" });
-  await file.getByText(expected.join(", "), { exact: true }).waitFor();
-  const modified = pane.getByRole("button", { name: "Modified", exact: true });
+  await file.locator(".file-date").filter({ hasText: expected[0] }).waitFor();
+  await file.locator(".file-time").filter({ hasText: expected[1] }).waitFor();
+  const modified = pane.getByRole("button", { name: "Date", exact: true });
   await modified.click();
   const order = () => pane.locator(".file-name").allTextContents().then((names) => names.filter((name) => name.endsWith(".txt")));
   const initial = await order();
@@ -49,7 +51,7 @@ export async function testOsTimestamps(page, root) {
   await general.getByRole("button", { name: "General", exact: true }).click();
   await general.getByLabel("Language", { exact: true }).selectOption("uk");
   await closeToolWindow(window, () => general.getByRole("button", { name: "Done", exact: true }).click());
-  await pane.locator(".file-date").filter({ hasText: expected.join(", ") }).waitFor();
+  await file.locator(".file-date").filter({ hasText: expected[0] }).waitFor();
   const localized = await openOptionsWindow(page, () => page.keyboard.press("Control+Alt+s"), "Налаштування");
   const localizedOptions = localized.getByRole("dialog", { name: "Налаштування", exact: true });
   await localizedOptions.locator("select").filter({ has: localized.locator('option[value="uk"]') }).selectOption("en");

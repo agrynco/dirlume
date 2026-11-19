@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
@@ -13,7 +14,7 @@ export async function testCompareWorker(page, sameLeft, sameRight) {
 
   let window, dialog, busy, whitespace, tooDifferent;
   for (const [side, path] of [["left", sameLeft], ["right", sameRight]]) {
-    const address = page.getByLabel(`${side} path`, { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
     await page.locator(`#${side}-files`).getByRole("option", { name: /^large-diff.txt/ }).waitFor();

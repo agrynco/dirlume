@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -16,7 +17,7 @@ export async function testCompareLayouts(page, root) {
   await writeFile(join(left, "identical.txt"), original);
   await writeFile(join(right, "revised.txt"), revised);
   for (const [side, path] of [["left", left], ["right", right]]) {
-    const address = page.getByLabel(`${side} path`, { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
   }

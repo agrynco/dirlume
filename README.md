@@ -4,27 +4,41 @@ Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri
 
 Choose English, Ukrainian, or Russian in **Options → General → Language**. Apply changes to switch the interface immediately. Dirlume remembers your choice after restart and uses it for numbers. Dates and times follow the operating system's regional settings. Native system menus and terminal output use their own language settings.
 
-Choose **Classic blue** under **Options → Appearance → Color scheme** for deep blue file panes with cyan focus indicators. You can use it as the base for a custom scheme.
+Choose **Classic blue** in **Options → Appearance → Window → Color scheme** for vivid blue file panes, cyan borders, yellow column headings, and a teal selection. You can use it as the base for a custom scheme.
+
+Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
+Local copies can preserve timestamps and access rights, follow symbolic links, and filter filenames using `*` and `?`. **Process multiple destinations** copies the selection to each listed folder.
+
+Drop files or folders from your system file manager onto a local or connected FTP pane to open the transfer dialog. Local drops also offer a move. Dragging between Dirlume's panes uses the same transfer flow.
+
 Pane addresses, transfer destinations, and the KSwitcher installation folder suggest matching paths as you type. Use the arrow keys and **Enter** or click a suggestion to choose it. Press **Tab** to complete a folder and continue the path. The browse button opens the system folder picker for local folder paths or a Save As dialog for a single-file destination. FTP suggestions come from the connected server.
+
+Use the arrow beside an editable text field or press **Alt+↓** to recall recent entries. Typing a prefix narrows the suggestions. Use **↑/↓** and **Enter** to insert a value, or **Esc** to dismiss the list. Dirlume saves the history separately for each type of field. Password and connection token fields have history disabled.
 
 Use **Ctrl+Shift+F8** to bookmark the active local or paired KSwitcher folder in group 8. Use **Ctrl+Shift+0–9** to choose another group and **Ctrl+0–9** to open its bookmarks. **Commands → Folder shortcuts** opens the picker for any saved group. In the picker, use **Insert** to add, **F4** to edit, **Delete** to remove, or **Ctrl+Up/Down** to reorder.
 
-Drag the right edge of a file column heading to resize it. Double-click the edge to restore its default width. Right-click the heading row to show or hide **Size** and **Modified**. **Name** is always visible. Each pane saves its widths and visible columns independently and scrolls horizontally when the columns exceed the available space.
+**Size**, **Date**, and **Time** size themselves to the display font and stay aligned to the right. **Name** fills the remaining space. Right-click the headings to show or hide metadata columns independently for each pane.
 
-Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → Main File Panels → Panel layout**. Every layout works with every color scheme. Twin panels keeps file icons and adds drive buttons with icons, a line with the drive's free space above each list, column separators, and a flat key bar with icons. Classic commander uses dense rows without icons, a bar of drives and places above each pane, details of the current item below the list, and a function-key strip. Marked items use the **Marked items** color from **Appearance → Panels**: Standard adds a check mark and a tinted row, and Classic commander highlights the name, size, and date. The pane footer shows the free space on the volume of a local folder.
+Click a breadcrumb to open an ancestor folder. Hover over the address to edit or copy it, or press **Ctrl+L** to type a path. When a folder opens slowly or sizes are being calculated, **Esc** cancels the pending operation. Moving to another folder also cancels its size calculation.
+
+Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → Main File Panels → Panel layout**. Every layout works with every color scheme. Twin panels keeps file icons and adds drive buttons with icons, a line with the drive's free space above each list, column separators, and a flat key bar with icons. Classic commander uses dense rows without icons, a bar of drives and places above each pane, details of the current item below the list, and a function-key strip. Marked items use the **Marked items** color from **Appearance → Panels** for their check marks. The active and inactive selection colors set the row backgrounds. The pane footer shows the free space on the volume of a local folder.
 
 Set **Main menu position** under **Options → General**. Set **Action button width** under **Options → Main File Panels** to choose full-width or compact buttons.
 
 Dirlume bundles **GoMono Nerd Font Mono** from [Nerd Fonts v3.5.1](https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1). By default, file panels use it at **15 px**, and the viewer, editor, and terminal use it at **18 px**. Menus, toolbars, and dialogs use the system interface font at **14 px**. Choose it by name in the font picker or clear an override to use the default. The bundled faces work offline. The [font notices](src/assets/fonts/GoMono-NOTICE.txt) and upstream licenses are included in the desktop packages.
 
-Use **Options → Appearance → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, type a name to filter installed fonts in the dropdown, or open the full list with the arrow button. Use the arrow keys and Enter to choose a font, or click a result. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
+Use **Options → Appearance → Window → New scheme** to save your own colors for the window, file panels, dialogs, and text tools. The **File types** section controls the filename colors for categories such as source code, images, and archives. In **Fonts**, type a name to filter installed fonts in the dropdown, or open the full list with the arrow button. Use the arrow keys and Enter to choose a font, or click a result. Use **Options → Keyboard shortcuts** to change, disable, or reset a binding. **Apply** saves changes and keeps Options open. **Done** saves and closes Options.
 
-**File types** also has separate colors for hidden and system files and folders. Hidden items include dot-prefixed names and items with the Windows Hidden attribute. Items with the Windows System attribute use the system color, including when they are also hidden. **Show hidden files** controls whether hidden items are listed.
+**File types** has separate colors for hidden and system items. Their names are italic and slightly dimmed. Hidden items include dot-prefixed names and items with the Windows Hidden attribute. Items with the Windows System attribute use the system color, including when they are also hidden. **Show hidden files** controls whether hidden items are listed.
 
 Use **Search settings** above the Options tree to find a setting or shortcut. **Main File Panels** contains hidden-file visibility, pane fonts and sizes, and panel colors. **Viewer**, **Editor**, and **Terminal** each have their own font settings. They inherit the scheme's shared text font and size until you set their own values. **General** contains the interface language and remote connection settings, and **Appearance** contains shared themes and styles.
+
+Use **Settings** in the viewer or editor toolbar to open its section directly. The controls show the inherited font family and pixel size when no override is set. New installations use **GoMono Nerd Font Mono** at **18 px**.
+
+**Viewer → Reading area** controls the background and maximum width of text, hex, and Markdown. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
 
 Drag any edge or corner of Options to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 
@@ -40,7 +54,7 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Ctrl+Wheel | Change the font size of the file pane, viewer, or editor under the pointer. |
 | Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
-| Esc inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
+| Esc / F10 inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
 | Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |
 | F5 / F6 | Open the Copy or Rename or move dialog. |
 | Ctrl+Alt+S | Open Options. |
@@ -48,16 +62,20 @@ Drag any edge or corner of Options to resize it. When Options reopens, it restor
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
 | F2 | Rename the selected file or folder in its row. |
 | Shift+F1 | Create an archive from local files and folders. |
-| F7 / F8 / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
+| F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
+| Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
 | Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
-| Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. Alt+F8 also works from the terminal. |
+| Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. The terminal receives keystrokes while its input has focus. |
 | Shift+F11 | Compare files. Use F7 and F8 to navigate between differences. |
 
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
 Click **Terminal** beside the command line to open an interactive PowerShell or system shell in the active local folder. The open terminal follows the active local panel in PowerShell, Bash, Zsh, and compatible Bourne shells. If a command is running or being edited, the directory changes when the shell returns to its prompt. The command line also sends commands to the shell from the active local folder. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells after they return to the prompt. **Alt+F8** shows the history grouped by execution date. Search by command text, date, or topic, such as `DNS cache`. Select a result to edit or rerun it. Terminal colors adapt to the background of the active color scheme.
+Click **Terminal** to show or hide the interactive shell. Hiding the terminal preserves the shell session. Dirlume remembers the last split height when you reopen the terminal, including after a restart. With focus in a file pane, use **F12** to toggle the terminal, **Ctrl+↑/↓** to resize it in steps, or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** in the terminal header to end the session.
+
+While the terminal has focus, keystrokes go to the shell or the program running in it. Click a file pane to use file shortcuts, or click **Terminal** to return to the command line. From the command line, **Alt+F8** opens the command history for recall and editing.
 
 Type in the command line to see matching history and completions for the active local folder. On Windows, PowerShell supplies completions, including options for Windows tools and installed Git and .NET commands. On macOS and Linux, Dirlume uses available Bash or Zsh completions and can also complete executable names and paths. Use **↑/↓** to choose a suggestion, **Tab** or **Enter** to insert it, and **Esc** to dismiss the list. **Enter** runs the draft when no suggestion is selected. **Shift+Enter** runs it with the list open.
 
@@ -80,6 +98,7 @@ Drag marked files and folders into the other local pane to open the transfer dia
 Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a heading to sort or use **Alt+Letter** to start Quick search by process name. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window. macOS and Linux use Dirlume's file actions menu.
 
 On Windows, select a local file or folder and choose **Find locking processes** from the main menu. The opposite pane shows what Windows found and keeps the source selection. Choose **Properties** for executable details or **Back to files** to return to the previous location. Both **F8** and **End process** in Properties ask for confirmation.
+Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort the table, or search by name or PID. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-click an item or the empty space in a filesystem pane for the classic Shell context menu. Dirlume provides its own context menu for FTP panes. A sharing violation can open a list of processes Windows reports as using the files. An access-denied error can offer **Open as administrator**, which requests UAC for a separate Dirlume window.
 
 Press **Ctrl+A** while focused on a file list to inspect the current item’s attributes, owner, and timestamps. **Apply** saves supported flags and refreshes the file panes. Windows supports Archive, Hidden, System, Not indexed, and Read-only on files. On Linux and macOS you can change the owner’s write bit. Remote item details are read-only and depend on what the source reports.
 
@@ -145,8 +164,11 @@ Use the client's tool list for argument schemas. The server works with the locat
 | Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
 
 For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
+On Windows, choose **SMB** in a pane's sources menu. Enter a server name or IP address to list shares, or open a path such as `\\\\server\\documents` directly. **Save SMB location** adds the server or share to the dialog for quick access. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager. The pane heading shows the SMB server address.
 
 ## Desktop diagnostics
+
+Use **Help → Open error log** to open the log in Dirlume's viewer.
 
 Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
 
@@ -160,7 +182,7 @@ Each entry records the failed operation, an error code, a timestamp in Unix mill
 
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows NSIS, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
-Install the first signed release manually to enable in-app updates for later releases.
+Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
 
 [GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64, Ubuntu x64, macOS Apple Silicon, and macOS Intel. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
 
@@ -172,6 +194,6 @@ For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.tom
 
 The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime. To update the Windows ZIP edition without an installer, download and extract a newer ZIP.
 
-The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. Configure `DIRLUME_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. Store the matching encrypted key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. Generate the key outside the repository with `npm run tauri -- signer generate -w <key-file>` and keep the private key available to the release maintainers. Installed apps trust the key embedded at build time. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
+The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 
 The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks that a modified package is rejected and that the original signed package installs, restarts, and restores a saved pane font setting.

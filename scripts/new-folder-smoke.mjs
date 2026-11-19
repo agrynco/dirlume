@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -13,7 +14,7 @@ export async function testNewFolder({ page, startDesktop, exitDesktop, root }) {
   const dialog = () => page.getByRole("dialog", { name: "New folder", exact: true });
   const name = () => dialog().getByLabel("Name", { exact: true });
   const create = () => dialog().getByRole("button", { name: "Create", exact: true }).click();
-  const entry = (name) => page.locator("#left-files").getByRole("option").and(page.getByTitle(name, { exact: true }));
+  const entry = (name) => page.locator("#left-files").getByRole("option").and(page.locator("[data-tooltip=" + JSON.stringify(name) + "]"));
   const lastSelected = (name) => entry(name).and(page.locator("[data-current='true']")).waitFor();
   async function open() {
     await page.locator("#left-files").focus();
@@ -27,12 +28,12 @@ export async function testNewFolder({ page, startDesktop, exitDesktop, root }) {
     await create();
   }
 
-  const address = page.getByLabel("left path", { exact: true });
+  const address = await editPaneAddress(page);
   await address.fill(source);
   await address.press("Enter");
   await entry("link-target").click();
 
-  // The earlier shortcut test remaps New folder to F12.
+  // Restore the default after testing the custom New folder shortcut.
   const window = await openOptionsWindow(page);
   const options = window.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();

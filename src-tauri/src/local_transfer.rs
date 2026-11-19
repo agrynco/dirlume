@@ -105,10 +105,12 @@ impl Conflict {
     }
 }
 
+#[derive(Clone)]
 pub struct Options {
     pub moving: bool,
     pub policy: Policy,
     pub ask_read_only: bool,
+    pub copy: local::CopyOptions,
 }
 
 pub(crate) struct Incoming {
@@ -228,7 +230,14 @@ pub fn transfer(
     mut ask: impl FnMut(Conflict) -> io::Result<Decision>,
 ) -> io::Result<bool> {
     let target = local::transfer_path(source, target)?;
-    transfer_entry(source, &target, options, &mut progress, &mut ask)
+    transfer_entry(
+        source,
+        &target,
+        options,
+        &mut Vec::new(),
+        &mut progress,
+        &mut ask,
+    )
 }
 
 // KSwitcher Files tries a same-volume move first. A cross-volume move commits
@@ -237,11 +246,15 @@ fn transfer_entry(
     source: &Path,
     target: &Path,
     options: &Options,
+    ancestors: &mut Vec<PathBuf>,
     progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ask: &mut impl FnMut(Conflict) -> io::Result<Decision>,
 ) -> io::Result<bool> {
     progress(source, 0, None)?;
-    let incoming = fs::symlink_metadata(source)?;
+    let incoming = options.copy.metadata(source)?;
+    if !incoming.is_dir() && !options.copy.includes(source) {
+        return Ok(false);
+    }
     let Some(PlannedTarget {
         path: target,
         replace,
@@ -281,24 +294,33 @@ fn transfer_entry(
             fs::create_dir(&target)?;
         }
         let target_folder = same_file::Handle::from_path(&target)?;
-        let entries = fs::read_dir(source)?.collect::<io::Result<Vec<_>>>()?;
-        let mut all_transferred = true;
-        for entry in entries {
-            verify_folder(source, &source_folder)?;
-            verify_folder(&target, &target_folder)?;
-            all_transferred &= transfer_entry(
-                &entry.path(),
-                &target.join(entry.file_name()),
-                options,
-                progress,
-                ask,
-            )?;
-        }
+        let all_transferred =
+            local::with_copy_directory(source, &target, &options.copy, ancestors, |ancestors| {
+                let entries = fs::read_dir(source)?.collect::<io::Result<Vec<_>>>()?;
+                let mut all_transferred = true;
+                for entry in entries {
+                    verify_source_folder(source, &source_folder, &options.copy)?;
+                    verify_folder(&target, &target_folder)?;
+                    all_transferred &= transfer_entry(
+                        &entry.path(),
+                        &target.join(entry.file_name()),
+                        options,
+                        ancestors,
+                        progress,
+                        ask,
+                    )?;
+                }
+                if options.copy.preserve_timestamps {
+                    verify_folder(&target, &target_folder)?;
+                    local::preserve_directory_times(&target, &incoming)?;
+                }
+                Ok(all_transferred)
+            })?;
         if options.moving && all_transferred {
             verify_folder(source, &source_folder)?;
             fs::remove_dir(source)?;
         }
-        return Ok(all_transferred);
+        return Ok(!options.moving || all_transferred);
     }
 
     let original = if options.moving {
@@ -306,18 +328,25 @@ fn transfer_entry(
     } else {
         None
     };
-    local::copy_to(source, &target, replace.is_some(), |path, bytes, total| {
-        progress(path, bytes, total)?;
-        if path == source && total.is_none() {
-            if let Some(original) = &original {
-                original.verify(source)?;
+    local::copy_with_options(
+        source,
+        &target,
+        replace.is_some(),
+        &options.copy,
+        ancestors,
+        |path, bytes, total| {
+            progress(path, bytes, total)?;
+            if path == source && total.is_none() {
+                if let Some(original) = &original {
+                    original.verify(source)?;
+                }
+                if let Some(existing) = &replace {
+                    existing.verify(&target)?;
+                }
             }
-            if let Some(existing) = &replace {
-                existing.verify(&target)?;
-            }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
     if let Some(original) = original {
         remove_original(source, &original).map_err(|error| {
             io::Error::other(format!(
@@ -328,6 +357,21 @@ fn transfer_entry(
         })?;
     }
     Ok(true)
+}
+
+fn verify_source_folder(
+    path: &Path,
+    identity: &same_file::Handle,
+    copy: &local::CopyOptions,
+) -> io::Result<()> {
+    if copy.follow_links
+        && fs::metadata(path)?.is_dir()
+        && same_file::Handle::from_path(path)? == *identity
+    {
+        Ok(())
+    } else {
+        verify_folder(path, identity)
+    }
 }
 
 pub(crate) fn verify_folder(path: &Path, identity: &same_file::Handle) -> io::Result<()> {

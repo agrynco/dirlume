@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, useState, type FormEvent, type Keyboard
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { PathField } from "./PathField";
+import { HistoryField } from "./HistoryField";
 import { folderGroups, normalizeFolderPath, sameFolderShortcut, type FolderGroup, type FolderShortcut, type FolderShortcuts } from "./folderShortcuts";
 import { countText, t } from "./i18n";
 import { eventShortcut, showShortcut, type Bindings } from "./preferences";
@@ -93,10 +94,11 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
       <div className="dialog-body folder-shortcut-editor">
         <strong>{t("Group {0}", group)}</strong>
         <label className="field">{t("Title (optional)")}
-          <input type="text" data-initial-focus maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} />
+          <HistoryField historyKey="folder-shortcut-title" aria-label={t("Title (optional)")} type="text" data-initial-focus
+            maxLength={255} value={title} onValueChange={setTitle} />
         </label>
         <label className="field" htmlFor={id}>{entry.peer ? t("Path on {0}", entry.peer.name) : t("Path")}</label>
-        <PathField id={id} label={entry.peer ? t("Path on {0}", entry.peer.name) : t("Path")}
+        <PathField id={id} historyKey="folder-shortcut-path" label={entry.peer ? t("Path on {0}", entry.peer.name) : t("Path")}
           value={path} onChange={setPath} browse={entry.peer ? undefined : "folder"}
           kswitcher={entry.peer ? { directory: bridgeDirectory, peer: entry.peer.id } : undefined} required />
         {error && <p className="dialog-error" role="alert">{error}</p>}
@@ -185,7 +187,7 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
         {entries.map((entry, index) => {
           const path = entry.peer ? `${entry.peer.name} · ${entry.path}` : entry.path;
           return <div key={`${entry.peer?.id || ""}:${entry.path}`} id={`${id}-${index}`} role="option"
-            className="folder-shortcut-row" aria-selected={index === selection} title={path}
+            className="folder-shortcut-row" aria-selected={index === selection} data-tooltip={path}
             onClick={() => { select(index); list.current?.focus({ preventScroll: true }); }}
             onDoubleClick={() => onOpen(entry)}>
             <span>{entry.title || path}</span>

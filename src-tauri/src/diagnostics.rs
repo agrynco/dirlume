@@ -9,6 +9,27 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[tauri::command]
+pub async fn error_log() -> crate::desktop::Result<Option<String>> {
+    crate::desktop::blocking(|| {
+        let log = LOG
+            .get()
+            .ok_or("The diagnostics directory is unavailable.")?;
+        let metadata = match fs::metadata(&log.path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(crate::desktop::message(error)),
+        };
+        if metadata.len() == 0 {
+            return Ok(None);
+        }
+        crate::local::display_path(&log.path)
+            .map(Some)
+            .map_err(crate::desktop::message)
+    })
+    .await
+}
+
 const HISTORY_SIZE: usize = 32;
 const ACTIONS: &[&str] = &[
     "list_directory",
@@ -85,6 +106,7 @@ const OTHER_OPERATIONS: &[&str] = &[
     "has_kswitcher_bridge",
     "kswitcher_peers",
     "installed_fonts",
+    "show_window",
     "write_terminal",
     "resize_terminal",
     "watch_directory",

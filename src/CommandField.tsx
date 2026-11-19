@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { api, windowsClient, type CommandCompletion } from "./api";
 import { t } from "./i18n";
+import { HistoryButton } from "./HistoryField";
 
 type Option = { label: string; text: string; index: number; length: number; history?: boolean };
 
@@ -14,6 +15,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
 }) {
   const id = useId();
   const [focused, setFocused] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [position, setPosition] = useState(draft.length);
   const [selection, setSelection] = useState<{ query: string; index: number } | null>(null);
   const [dismissed, setDismissed] = useState("");
@@ -23,7 +25,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   const query = JSON.stringify([draft, caret, directory, refreshEnvironment]);
   const selected = selection?.query === query ? selection.index : -1;
   const setSelected = (index: number) => setSelection(index < 0 ? null : { query, index });
-  const suggesting = focused && !!draft.trim() && dismissed !== query;
+  const suggesting = focused && !showHistory && !!draft.trim() && dismissed !== query;
 
   useEffect(() => {
     if (!suggesting || !directory || draft.includes("\n")) return;
@@ -41,7 +43,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   }, [suggesting, directory, draft, caret, query, refreshEnvironment]);
 
   const prefix = windowsClient ? draft.toLowerCase() : draft;
-  const recent = suggesting && caret === draft.length
+  const recent = showHistory ? [...new Set(history)].slice(0, 30) : suggesting && caret === draft.length
     ? [...new Set(history.filter((line) => (windowsClient ? line.toLowerCase() : line).startsWith(prefix)))].slice(0, 5)
     : [];
   const options: Option[] = recent.map((line) => ({ label: line, text: line, index: 0, length: draft.length, history: true }));
@@ -55,7 +57,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
       options.push({ label, text, index: batch.index, length: batch.length });
     }
   }
-  const open = options.length > 0;
+  const open = showHistory || options.length > 0;
   const activeOption = options[selected];
 
   useLayoutEffect(() => {
@@ -71,11 +73,13 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   }, [draft, dismissed, input]);
 
   function dismiss() {
+    setShowHistory(false);
     setDismissed(query);
     setSelected(-1);
   }
 
   function choose(option: Option) {
+    setShowHistory(false);
     const value = draft.slice(0, option.index) + option.text + draft.slice(option.index + option.length);
     const next = option.index + option.text.length;
     setDismissed(JSON.stringify([value, next, directory, refreshEnvironment]));
@@ -94,7 +98,15 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.nativeEvent.isComposing || event.ctrlKey || event.metaKey) return;
+    if (event.altKey && event.key === "ArrowDown" && !event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      setShowHistory(true);
+      setSelected(-1);
+      return;
+    }
+    if (event.altKey) return;
     if (event.key === "Enter" && (event.shiftKey || !activeOption)) {
       event.preventDefault();
       event.stopPropagation();
@@ -104,6 +116,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     }
     if (!open || event.shiftKey) return;
     if (event.key === "Escape") dismiss();
+    else if (!options.length) return;
     else if (event.key === "ArrowDown") setSelected((selected + 1) % options.length);
     else if (event.key === "ArrowUp") setSelected(selected < 0 ? options.length - 1 : (selected - 1 + options.length) % options.length);
     else if (event.key === "Tab") choose(activeOption ?? options[0]);
@@ -118,23 +131,30 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
       aria-controls={open ? id : undefined} aria-activedescendant={activeOption ? `${id}-${selected}` : undefined}
       rows={Math.min(4, draft.split("\n").length)} wrap="off" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
       onFocus={(event) => { setFocused(true); setDismissed(""); selectCaret(event.currentTarget); }}
-      onBlur={() => { setFocused(false); setSelected(-1); setNative(null); }}
+      onBlur={() => { setFocused(false); setShowHistory(false); setSelected(-1); setNative(null); }}
       onSelect={(event) => selectCaret(event.currentTarget)}
       onKeyUp={(event) => selectCaret(event.currentTarget)}
       onChange={(event) => {
         setFocused(document.activeElement === event.currentTarget);
         setPosition(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
+        setShowHistory(false);
         setDismissed("");
         setSelected(-1);
         onChange(event.currentTarget.value);
       }}
       onKeyDown={keyDown} />
+    <HistoryButton id={id} expanded={open} onClick={() => {
+      input.current?.focus({ preventScroll: true });
+      setShowHistory(!showHistory);
+      setSelected(-1);
+    }} />
     {open && <div className="command-suggestions" role="listbox" id={id} aria-label={t("Command suggestions")}>
       {options.map((option, index) => <div key={`${option.index}:${option.text}`} id={`${id}-${index}`}
-        role="option" aria-selected={index === selected} title={option.label}
+        role="option" aria-selected={index === selected} data-tooltip={option.label}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)}>
         <span>{option.label}</span>{option.history && <small>{t("History")}</small>}
       </div>)}
+      {!options.length && <div className="history-empty" role="status">{t("No previous entries.")}</div>}
     </div>}
   </div>;
 }

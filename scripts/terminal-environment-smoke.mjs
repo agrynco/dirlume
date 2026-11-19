@@ -41,6 +41,7 @@ export async function testTerminalEnvironment(page) {
   const change = (value, kind = "String") => userEnvironment({ name: variable, value, kind });
   const field = page.getByRole("combobox", { name: "Command line", exact: true });
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  const toggle = page.getByRole("button", { name: "Toggle terminal", exact: true });
   const notice = terminal.getByText(/Windows environment changed/);
   const oldPath = process.env.CI ? userEnvironment({ name: "Path", read: true }) : null;
   const extraPath = `${process.env.USERPROFILE}\\${variable}`;
@@ -59,6 +60,7 @@ export async function testTerminalEnvironment(page) {
 
   async function run(code, expected) {
     const marker = `ENVPROBE${++serial}`;
+    if (await terminal.isVisible()) await toggle.click();
     await field.fill(`${code}; Write-Output ('${marker}' + '=' + $result)`);
     await field.press("Enter");
     await page.waitForFunction((value) => document.querySelector(".xterm-rows")?.textContent.replace(/\s/g, "").includes(value.replace(/\s/g, "")),
@@ -68,7 +70,7 @@ export async function testTerminalEnvironment(page) {
   async function reopen() {
     await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
     await terminal.waitFor({ state: "hidden" });
-    await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
+    await toggle.click();
     await terminal.waitFor();
   }
 

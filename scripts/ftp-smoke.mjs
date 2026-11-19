@@ -119,7 +119,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await right.focus();
     await page.keyboard.press("Alt+F2");
     await button(rightPane, "FTP").waitFor();
-    await page.keyboard.press("1");
+    await page.keyboard.press("2");
     await connections.getByText("No saved FTP connections.", { exact: true }).waitFor();
     await page.keyboard.press("Shift+F4");
     const add = page.getByRole("dialog", { name: "Add FTP connection" });
@@ -143,7 +143,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await saved.getByRole("option", { name: /^Saved FTP fixture/ }).waitFor({ state: "attached" });
     await saved.press("Enter");
     await remoteRow("guide.md").waitFor();
-    assert.equal(await remotePath.inputValue(), "/start");
+    assert.equal(await page.locator("#right-path").getAttribute("data-path"), "/start");
     const parentRow = right.getByRole("option", { name: /^\.\./ });
     await parentRow.click();
     await page.keyboard.press("Shift+ArrowDown");
@@ -153,7 +153,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     assert.equal(await right.locator(".file-row.marked").count(), 0);
     await parentRow.dblclick();
     await right.getByRole("option", { name: /^start/ }).waitFor();
-    assert.equal(await remotePath.inputValue(), "/");
+    assert.equal(await page.locator("#right-path").getAttribute("data-path"), "/");
     await right.getByRole("option", { name: /^start/ }).dblclick();
 
     await remoteRow("search-fixture").dblclick();
@@ -202,8 +202,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("F2");
     await page.waitForFunction(() => {
       const active = document.querySelector(".text-window:not([hidden])");
-      return active?.querySelector("[role=alert]") || [...(active?.querySelectorAll("button") ?? [])]
-        .some((button) => button.textContent.trim() === "Save" && button.disabled);
+      return active?.querySelector("[role=alert]") || active?.querySelector(".document-encoding")?.textContent.trim() === "UTF8";
     });
     const saveError = page.locator(".text-window:not([hidden])").getByRole("alert");
     if (await saveError.count()) throw new Error(await saveError.innerText());
@@ -320,6 +319,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await assert.rejects(readFile(join(remoteCopy, "файл.txt")), { code: "ENOENT" });
     console.log("Verified saved FTP credentials, navigation, viewing, editing, conflicts, bidirectional copy, rename, and recursive deletion.");
 
+    await right.press("Control+l");
     await remotePath.fill("/start/sav");
     await rightPane.getByRole("listbox", { name: "right path suggestions", exact: true })
       .getByRole("option", { name: "saved-folder", exact: true }).click();
@@ -333,8 +333,8 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     const expectRestoredFolder = async () => {
       const panel = page.getByRole("region", { name: "left pane", exact: true });
       await panel.getByRole("option", { name: /^restored.txt/ }).waitFor();
-      assert.equal(await panel.getByLabel("left path").inputValue(), "/start/saved-folder");
-      assert.equal(await page.getByLabel("right path").inputValue(), source);
+      assert.equal(await panel.locator("#left-path").getAttribute("data-path"), "/start/saved-folder");
+      assert.equal(await page.locator("#right-path").getAttribute("data-path"), source);
       await waitForSavedLocation();
     };
     await waitForSavedLocation();
@@ -346,7 +346,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     page = await restartDesktop();
     await page.getByRole("region", { name: "left pane", exact: true })
       .getByRole("alert").filter({ hasText: "Could not restore the FTP folder." }).waitFor();
-    assert.equal(await page.getByLabel("left path").inputValue(), destination);
+    assert.equal(await page.locator("#left-path").getAttribute("data-path"), destination);
     await waitForSavedLocation();
     await renamePath(unavailable, lastFolder);
     page = await restartDesktop();

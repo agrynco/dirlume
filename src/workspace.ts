@@ -15,6 +15,8 @@ interface Workspace {
   panels: Record<Side, SavedPane>;
   active: Side;
   split: number;
+  terminalHeightStep?: number;
+  terminalHeight?: number;
   documents: DocumentWindow[];
   activeDocument: number | null;
 }
@@ -54,7 +56,7 @@ export function restorePane(saved?: SavedPane): PaneState {
     selected: typeof saved.selected === "string" ? saved.selected : null,
     marked: Array.isArray(saved.marked) ? saved.marked.filter((name) => typeof name === "string") : [],
     filter: typeof saved.filter === "string" ? saved.filter : "",
-    sort: ["name", "size", "modified"].includes(saved.sort?.column) ? saved.sort : emptyPane.sort,
+    sort: ["name", "size", "modified", "time"].includes(saved.sort?.column) ? saved.sort : emptyPane.sort,
   };
 }
 
@@ -71,10 +73,10 @@ function savePane(pane: PaneState, failedFtp?: SavedFtpLocation): SavedPane {
   };
 }
 
-export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, split: number,
+export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, split: number, terminalHeight: number,
   documents: DocumentWindow[], activeDocument: number | null, failedFtp: Partial<Record<Side, SavedFtpLocation>>) {
   const workspace: Workspace = {
-    panels: { left: savePane(panes.left, failedFtp.left), right: savePane(panes.right, failedFtp.right) }, active, split,
+    panels: { left: savePane(panes.left, failedFtp.left), right: savePane(panes.right, failedFtp.right) }, active, split, terminalHeight,
     documents: documents.filter(({ file }) => isLocal(file.place)), activeDocument,
   };
   try { localStorage.setItem(storageKey, JSON.stringify(workspace)); }

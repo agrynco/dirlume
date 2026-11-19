@@ -2,11 +2,12 @@ import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { childPlace, formatSize, localPath } from "./panes";
 import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
+import { HistoryField } from "./HistoryField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 
 export interface Transfer {
@@ -41,6 +42,13 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   onFinished: (success: boolean) => void;
 }) {
   const [destination, setDestination] = useState(transfer.target);
+  const [multipleDestinations, setMultipleDestinations] = useState(false);
+  const [additional, setAdditional] = useState([""]);
+  const [access, setAccess] = useState<CopyOptions["access"]>("default");
+  const [preserveTimestamps, setPreserveTimestamps] = useState(false);
+  const [followLinks, setFollowLinks] = useState(false);
+  const [useFilter, setUseFilter] = useState(false);
+  const [mask, setMask] = useState("*");
   const [policy, setPolicy] = useState<ConflictPolicy>("ask");
   const [askReadOnly, setAskReadOnly] = useState(true);
   const [phase, setPhase] = useState<"setup" | "working" | "done">("setup");
@@ -64,7 +72,12 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp" || transfer.source.kind === "archive";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
-  const singleFile = itemCount === 1 && !transfer.items[0].entry.directory;
+  const manyDestinations = multipleDestinations && !moving;
+  const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
+  const copies = targets.length * itemCount;
+  const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
+  const singleFile = !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
+  const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
   const separator = localTarget && windowsClient ? "\\" : "/";
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
     ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
@@ -131,7 +144,8 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
     };
     try {
       await api.beginTransfer(id);
-      for (const [index, item] of transfer.items.entries()) {
+      const jobs = targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+      for (const [index, { destination, item }] of jobs.entries()) {
         if (index < processed) continue;
         if (cancelled.current) break;
         attempted = item;
@@ -139,12 +153,13 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
         setProgress({ file: entry.name, bytes: 0, total: null });
         previousBytes = 0;
         const ftpCopy = !localTarget || transfer.source.kind === "ftp";
-        const target = ftpCopy && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
+        const target = ftpCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
           : destination;
         const request = {
           source: itemSource(place, entry), destination: target, ftpDestination: transfer.ftpDestination, moving,
-          multiple: itemCount > 1, policy, askReadOnly,
+          multiple: itemCount > 1 || manyDestinations, policy, askReadOnly,
+          copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
         const result = await api.transfer(id, request, output);
         if (result.kind === "completed") setCompleted((count) => count + 1);
@@ -178,18 +193,34 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
       {phase === "setup" ? (
         <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
           <div className="dialog-body transfer-body">
-            <div className="transfer-source">
-              <strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>
-              <span title={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
-                {placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}
-              </span>
-            </div>
             <div className="field">
-              <label htmlFor="transfer-destination">{t("Destination")}</label>
+              <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
+                {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+              </label>
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
                 required initialFocus selectOnFocus showHidden={showHidden} ftp={transfer.ftpDestination} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />
             </div>
+            {manyDestinations && <>
+              {additional.map((path, index) => <PathField key={index} id={`transfer-destination-${index + 2}`}
+                label={t("Destination {0}", index + 2)} historyKey="transfer-destination" value={path} required
+                onChange={(value) => setAdditional((current) => current.map((old, offset) => offset === index ? value : old))}
+                showHidden={showHidden} ftp={transfer.ftpDestination} browse="folder" />)}
+              <div className="transfer-destination-actions">
+                <Button type="button" onClick={() => setAdditional([...additional, ""])}>{t("Add destination")}</Button>
+                <Button type="button" onClick={() => {
+                  if (additional.length === 1) setMultipleDestinations(false);
+                  else setAdditional(additional.slice(0, -1));
+                }}>{t("Remove last destination")}</Button>
+              </div>
+            </>}
+            {localCopy && <label className="setting"><span>{t("Access rights")}</span>
+              <select value={access} onChange={(event) => setAccess(event.target.value as CopyOptions["access"])}>
+                <option value="default">{t("Default")}</option>
+                <option value="copy">{t("Copy from source")}</option>
+                <option value="inherit">{t("Inherit from destination")}</option>
+              </select>
+            </label>}
             <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">{t("Ask")}</option><option value="skip">{t("Skip")}</option>
@@ -200,32 +231,53 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
                 </>}
               </select>
             </label>
-            {replaceable && localTarget && <label className="transfer-checkbox">
-              <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} /> {t("Also ask about read-only files")}
+            {replaceable && localTarget && <label className="field-checkbox">
+              <span>{t("Also ask about read-only files")}</span>
+              <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} />
             </label>}
-            {transfer.chooseOperation && <label className="transfer-checkbox">
-              <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} /> {t("Move instead of copying")}
+            {localCopy && <>
+              <label className="field-checkbox"><span>{t("Preserve all timestamps")}</span>
+                <input type="checkbox" checked={preserveTimestamps} onChange={(event) => setPreserveTimestamps(event.target.checked)} />
+              </label>
+              <label className="field-checkbox"><span>{t("Copy contents of symbolic links")}</span>
+                <input type="checkbox" checked={followLinks} onChange={(event) => setFollowLinks(event.target.checked)} />
+              </label>
+            </>}
+            {!moving && <label className="field-checkbox"><span>{t("Process multiple destinations")}</span>
+              <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
+            </label>}
+            {localCopy && <>
+              <label className="field-checkbox"><span>{t("Use filter")}</span>
+                <input type="checkbox" checked={useFilter} onChange={(event) => setUseFilter(event.target.checked)} />
+              </label>
+              {useFilter && <label className="field">{t("File mask")}
+                <HistoryField historyKey="copy-mask" type="text" value={mask} onValueChange={setMask} required placeholder="*.txt" />
+              </label>}
+            </>}
+            {transfer.chooseOperation && <label className="field-checkbox">
+              <span>{t("Move instead of copying")}</span>
+              <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} />
             </label>}
           </div>
           <footer className="dialog-footer">
             <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
-            <Button type="submit" className="primary" disabled={!destination}>{t(verb)}</Button>
+            <Button type="submit" className="primary" disabled={targets.some((path) => !path.trim()) || (localCopy && useFilter && !mask.trim())}>{t(verb)}</Button>
           </footer>
         </form>
       ) : (
         <>
           <div className="dialog-body transfer-body">
                 <div className="transfer-meter">
-                  <span title={progress?.file}>{progress?.file ?? t("Preparing…")}</span>
+                  <span data-tooltip={progress?.file}>{progress?.file ?? t("Preparing…")}</span>
                   <span>{progress?.total == null ? formatSize(progress?.bytes ?? null) : `${formatSize(progress.bytes)} / ${formatSize(progress.total)}`}</span>
                 </div>
                 <progress aria-label={t("Current file progress")} max={Math.max(progress?.total ?? 1, 1)}
                   value={progress?.total == null ? (phase === "done" ? 0 : undefined) : progress.total === 0 ? 1 : progress.bytes} />
                 <div className="transfer-meter">
-                  <span>{t("{0} / {1} items", processed, itemCount)}{skipped ? ` · ${t("{0} skipped", skipped)}` : ""}</span>
+                  <span>{t("{0} / {1} items", processed, copies)}{skipped ? ` · ${t("{0} skipped", skipped)}` : ""}</span>
                   <span>{t("{0} transferred", formatSize(bytes))}</span>
                 </div>
-                <progress aria-label={t("Overall transfer progress")} max={itemCount} value={processed} />
+                <progress aria-label={t("Overall transfer progress")} max={copies} value={processed} />
                 {phase === "done" && <p role="status">{t("{0} completed", completed)}{skipped ? `, ${t("{0} skipped", skipped)}` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
                 {localTarget && windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
@@ -257,7 +309,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
       )}
     </Dialog>
     {conflict && (
-      <Dialog key={conflict.path} title={conflict.directory ? t("Folder already exists") : t("File already exists")} onClose={cancel}>
+      <Dialog key={conflict.path} title={conflict.directory ? t("Folder already exists") : t("File already exists")} tone="warning" onClose={cancel}>
         <div className="dialog-body transfer-body">
           <p><strong>{conflict.path}</strong>{conflict.readOnly ? ` ${t("(read-only)")}` : ""}</p>
           <table className="conflict-details">
@@ -268,8 +320,9 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
           </table>
           {conflict.directory && conflict.replaceable && <p>{t("Merge the folders and handle conflicting files individually.")}</p>}
           {!conflict.replaceable && <p>{t("Skip this item or choose another destination.")}</p>}
-          {conflict.allowRemember && <label className="transfer-checkbox">
-            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> {t("Remember choice")}
+          {conflict.allowRemember && <label className="field-checkbox">
+            <span>{t("Remember choice")}</span>
+            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
           </label>}
         </div>
         <footer className="dialog-footer">

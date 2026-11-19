@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import type { Entry } from "./api";
+import type { Preferences } from "./preferences";
 
 export const builtInThemes = {
   system: "System",
@@ -9,7 +11,7 @@ export const builtInThemes = {
 } as const;
 
 export type Theme = keyof typeof builtInThemes;
-type BaseTheme = Exclude<Theme, "system">;
+export type BaseTheme = Exclude<Theme, "system">;
 
 function isTheme(value: unknown): value is Theme {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(builtInThemes, value);
@@ -124,8 +126,15 @@ export function fileColor({ name, directory, hidden, system }: Pick<Entry, "name
 
 export type Color = {
   [Group in keyof typeof colorGroups]: keyof (typeof colorGroups)[Group]["colors"];
-}[keyof typeof colorGroups];
-const colors = Object.values(colorGroups).flatMap(({ colors }) => Object.keys(colors)) as Color[];
+}[keyof typeof colorGroups] | keyof typeof viewerColors | keyof typeof mermaidColors;
+export const viewerColors = { "viewer-bg": "Viewer background" } as const;
+export const mermaidColors = {
+  "mermaid-node-bg": "Block background",
+  "mermaid-node-ink": "Block text",
+  "mermaid-node-border": "Block border",
+} as const;
+const colors = [...Object.values(colorGroups).flatMap(({ colors }) => Object.keys(colors)),
+  ...Object.keys(viewerColors), ...Object.keys(mermaidColors)] as Color[];
 
 export const bundledFontFamily = "GoMono Nerd Font Mono";
 
@@ -159,8 +168,52 @@ export const maxFontFamilyLength = 80;
 export const maxSchemeNameLength = 48;
 export const isHexColor = (value: string) => /^#[a-f\d]{6}$/i.test(value);
 
-export function systemTheme(): BaseTheme {
-  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+export function inheritedFont(scheme: Scheme | null, group: FontGroup): Required<Font> {
+  const parent = group === "panel" || group === "dialog" ? scheme?.fonts.ui :
+    group === "viewer" || group === "editor" || group === "terminal" ? scheme?.fonts.mono : undefined;
+  return { family: parent?.family || bundledFontFamily, size: parent?.size ?? 18 };
+}
+
+const systemColorQuery = "(prefers-color-scheme: dark)";
+
+export function systemTheme(): "light" | "dark" {
+  return matchMedia(systemColorQuery).matches ? "dark" : "light";
+}
+
+export function useSystemTheme() {
+  const [theme, setTheme] = useState(systemTheme);
+  useEffect(() => {
+    const query = matchMedia(systemColorQuery);
+    const changed = () => setTheme(query.matches ? "dark" : "light");
+    changed();
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  }, []);
+  return theme;
+}
+
+export function schemeFits(base: BaseTheme, mode: "light" | "dark") {
+  return (base === "light") === (mode === "light");
+}
+
+export function readSystemScheme(value: unknown, schemes: Scheme[], fallback: "light" | "dark"): string {
+  if (isBaseTheme(value) && schemeFits(value, fallback)) return value;
+  if (typeof value === "string" && schemes.some(({ id, base }) => value === `custom:${id}` && schemeFits(base, fallback))) return value;
+  return fallback;
+}
+
+export function selectAppearance(preferences: Preferences, value: string): Preferences {
+  const custom = preferences.schemes.find(({ id }) => value === `custom:${id}`);
+  return { ...preferences, activeScheme: custom?.id ?? null, theme: custom ? preferences.theme : readTheme(value) };
+}
+
+export function resolveAppearance(preferences: Preferences, system: "light" | "dark"): { theme: BaseTheme; scheme: Scheme | null } {
+  const explicit = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
+  if (explicit) return { theme: explicit.base, scheme: explicit };
+  if (preferences.theme !== "system") return { theme: preferences.theme, scheme: null };
+  const favorite = system === "dark" ? preferences.systemDarkScheme : preferences.systemLightScheme;
+  const scheme = preferences.schemes.find(({ id }) => favorite === `custom:${id}`) ?? null;
+  return { theme: scheme?.base ?? (isBaseTheme(favorite) ? favorite : system), scheme };
 }
 
 export function readSchemes(value: unknown): Scheme[] {
@@ -190,8 +243,8 @@ export function readSchemes(value: unknown): Scheme[] {
   return result;
 }
 
-export function applyAppearance(theme: Theme, scheme: Scheme | null, root = document.documentElement) {
-  root.dataset.theme = scheme?.base ?? (theme === "system" ? systemTheme() : theme);
+export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = document.documentElement) {
+  root.dataset.theme = scheme?.base ?? theme;
   for (const color of colors) {
     const value = scheme?.colors[color];
     if (value) root.style.setProperty(`--${color}`, value);

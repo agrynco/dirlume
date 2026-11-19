@@ -1,3 +1,4 @@
+import { HistoryField } from "./HistoryField";
 import { errorText, t } from "./i18n";
 import { Message } from "./Message";
 import { useEffect, useState, type FormEvent } from "react";
@@ -109,7 +110,7 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
         setEditing(undefined);
         requestAnimationFrame(() => document.querySelector<HTMLSelectElement>(".ftp-connections select")?.focus());
       }} />}
-    {removing && profile && <Dialog title={t("Remove FTP connection")} onClose={() => { if (!working) setRemoving(false); }}>
+    {removing && profile && <Dialog title={t("Remove FTP connection")} tone="warning" onClose={() => { if (!working) setRemoving(false); }}>
       <div className="dialog-body">
         <p><Message text="Remove the saved connection {0}?"><strong>{profile.label}</strong></Message></p>
         {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
@@ -161,25 +162,28 @@ function ProfileDialog({ profile, windowsCodePage, onSave, onClose }: {
       <form className="dialog-form" onSubmit={(event) => { void save(event); }} autoComplete="off">
         <div className="dialog-body ftp-fields">
           <label className="field">{t("Connection name")}
-            <input data-initial-focus required value={label} onChange={(event) => setLabel(event.target.value)} />
+            <HistoryField historyKey="ftp-name" aria-label={t("Connection name")} data-initial-focus required value={label} onValueChange={setLabel} />
           </label>
           <div className="ftp-host-row">
             <label className="field">{t("Server")}
-              <input required spellCheck={false} placeholder="ftp.example.com" value={host} onChange={(event) => setHost(event.target.value)} />
+              <HistoryField historyKey="ftp-host" aria-label={t("Server")} required spellCheck={false}
+                placeholder="ftp.example.com" value={host} onValueChange={setHost} />
             </label>
             <label className="field">{t("Port")}
               <input required type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} />
             </label>
           </div>
           <label className="field">{t("Username")}
-            <input placeholder={t("Anonymous")} value={username} onChange={(event) => setUsername(event.target.value)} spellCheck={false} />
+            <HistoryField historyKey="ftp-username" aria-label={t("Username")} placeholder={t("Anonymous")}
+              value={username} onValueChange={setUsername} spellCheck={false} />
           </label>
           <label className="field">{t("Password")}
             <input type="password" autoComplete="new-password" placeholder={profile ? t("Keep saved password") : undefined}
               value={password} disabled={clearPassword} onChange={(event) => setPassword(event.target.value)} />
           </label>
-          {profile && <label className="transfer-checkbox">
-            <input type="checkbox" checked={clearPassword} onChange={(event) => setClearPassword(event.target.checked)} /> {t("Clear saved password")}
+          {profile && <label className="field-checkbox">
+            <span>{t("Clear saved password")}</span>
+            <input type="checkbox" checked={clearPassword} onChange={(event) => setClearPassword(event.target.checked)} />
           </label>}
           <div className="ftp-encoding-row">
             <label className="field">{t("Filename code page")}

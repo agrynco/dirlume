@@ -1,5 +1,6 @@
 import { t } from "./i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
@@ -19,13 +20,14 @@ const palette = syntaxHighlighting(HighlightStyle.define([
 const languageChoices = [...languages].sort((a, b) => a.name.localeCompare(b.name));
 const externalEdit = Annotation.define<boolean>();
 
-export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, onChange }: {
+export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, syntaxTarget, onChange }: {
   fileName: string;
   editing: boolean;
   locked: boolean;
   active: boolean;
   fontSize?: number;
   value: string;
+  syntaxTarget: HTMLElement | null;
   onChange: (text: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -119,14 +121,14 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
 
   return (
     <>
-      <div className="text-toolbar syntax-toolbar">
+      {syntaxTarget && createPortal(<div className="syntax-toolbar">
         <label>{t("Syntax")} <select value={syntax} onChange={(event) => setSyntax(event.target.value)}>
           <option value="auto">{t("Automatic ({0})", language?.name ?? t("Plain text"))}</option>
           <option value="plain">{t("Plain text")}</option>
           {languageChoices.map(({ name }) => <option key={name} value={name}>{name}</option>)}
         </select></label>
         {unavailable && <span role="status">{t("Syntax unavailable.")}</span>}
-      </div>
+      </div>, syntaxTarget)}
       <div className="code-surface" ref={container} />
     </>
   );

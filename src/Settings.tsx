@@ -3,13 +3,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronDown, ChevronRight, Delete, RotateCcw, Search } from "lucide-react";
 import { Dialog } from "./Dialog";
-import { AppearanceSettings, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
+import { AppearanceSettings, OptionalNumberInput, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
 import { PathField } from "./PathField";
+import { HistoryField } from "./HistoryField";
 import { SettingsPreview } from "./SettingsPreview";
-import { colorGroups, fontGroups } from "./appearance";
+import { colorGroups, fontGroups, mermaidColors, viewerColors } from "./appearance";
 import { api, windowsClient } from "./api";
 import {
-  actionButtonWidths, commandLabel, commandNames, commands, defaultBindings, eventShortcut, menuPositions, panelLayouts,
+  actionButtonWidths, commandLabel, commandNames, commands, defaultBindings, eventShortcut, menuPositions, maxTerminalResizeRows, panelLayouts,
   shortcutScopesOverlap, showShortcut, wheelBindings, type ActionButtonWidth, type Command, type MenuPosition,
   type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
@@ -46,13 +47,17 @@ function readOptionsLocation(): OptionsLocation {
   } catch { return defaults; }
 }
 
-export function Settings({ preferences: saved, onChange: applyPreferences, onClose, standalone = false }: {
+export function Settings({ preferences: saved, onChange: applyPreferences, onClose, initialPage, standalone = false }: {
   preferences: Preferences;
   onChange: (value: Preferences) => Preferences;
   onClose: () => void;
   standalone?: boolean;
+  initialPage?: FeaturePage;
 }) {
-  const [initialLocation] = useState(readOptionsLocation);
+  const [initialLocation] = useState(() => {
+    const saved = readOptionsLocation();
+    return initialPage ? { ...saved, page: initialPage, query: "", scrollTop: 0 } : saved;
+  });
   const [page, setPage] = useState(initialLocation.page);
   const [query, setQuery] = useState(initialLocation.query);
   const [expanded, setExpanded] = useState(initialLocation.expanded);
@@ -76,10 +81,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       "Show hidden files", "Panel layout", "Action button width",
       ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
     ] :
-      feature === "terminal" && windowsClient ? ["Automatically refresh environment variables"] : [];
+      feature === "viewer" ? ["Reading area", "Maximum content width (px)", "Mermaid diagrams", ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
+      feature === "terminal" ? ["Resize step (rows)", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Size (px)", "font size", ...views.map((view) => viewFonts[view].label), ...terms);
   });
-  const appearanceMatches = appearancePages.filter(({ label, terms }) => matches("Appearance", "Color scheme", label, ...terms));
+  const appearanceMatches = appearancePages.filter(({ id, label, terms }) => matches("Appearance", label, ...terms,
+    ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",
+      "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
+      "Main menu alignment", "Align left", "Align center", "Align right", "System"] : [])));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings");
   const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
     matches(commands[command].label, commandLabel(command), preferences.shortcuts[command], showShortcut(preferences.shortcuts[command])));
@@ -146,12 +155,21 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   return (
-    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone}>
+    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} footer={<>
+      {page === "shortcuts" && (
+        <Button type="button" onClick={() => { onChange({ ...preferences, shortcuts: defaultBindings }); setCapture(null); setConflict(""); }}>
+          <RotateCcw /> {t("Restore defaults")}
+        </Button>
+      )}
+      {standalone && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
+      <Button type="button" disabled={!hasChanges} onClick={apply}>{t("Apply")}</Button>
+      <Button type="button" className="primary" onClick={() => { apply(); close(); }}>{t("Done")}</Button>
+    </>}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <label className="settings-search"><Search aria-hidden="true" />
-            <input type="search" aria-label={t("Search settings")} placeholder={t("Search settings")} value={query}
-              data-initial-focus onChange={(event) => setQuery(event.target.value)}
+            <HistoryField historyKey="settings-search" type="search" aria-label={t("Search settings")} placeholder={t("Search settings")} value={query}
+              data-initial-focus onValueChange={setQuery}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || !searching) return;
                 event.preventDefault();
@@ -170,7 +188,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               <>
                 <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
                   onClick={() => {
-                    if (!isAppearance) { select("panels"); setExpanded(true); }
+                    if (!isAppearance) { select(appearanceMatches[0].id); setExpanded(true); }
                     else setExpanded(!expanded);
                   }}>
                   {expanded || searching ? <ChevronDown /> : <ChevronRight />} {t("Appearance")}
@@ -223,14 +241,19 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </div>
       ) : isFeaturePage(page) ? (
         <>
-          {page === "terminal" && windowsClient && <div className="dialog-body settings-general">
-            <label className="setting"><span>{t("Automatically refresh environment variables")}</span>
+          {page === "terminal" && <div className="dialog-body settings-general">
+            <label className="view-font-setting"><span>{t("Resize step (rows)")}</span>
+              <OptionalNumberInput label={t("Resize step (rows)")} size={preferences.terminalResizeRows === 1 ? undefined : preferences.terminalResizeRows}
+                fallback="1" min={1} max={maxTerminalResizeRows}
+                onChange={(rows) => onChange({ ...preferences, terminalResizeRows: rows ?? 1 })} />
+            </label>
+            {windowsClient && <label className="field-checkbox"><span>{t("Automatically refresh environment variables")}</span>
               <input type="checkbox" checked={preferences.refreshEnvironment}
                 onChange={(event) => onChange({ ...preferences, refreshEnvironment: event.target.checked })} />
-            </label>
+            </label>}
           </div>}
           {page === "filePanels" && <div className="dialog-body settings-general">
-            <label className="setting"><span>{t("Show hidden files")}</span>
+            <label className="field-checkbox"><span>{t("Show hidden files")}</span>
               <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
             </label>
             <label className="setting"><span>{t("Panel layout")}</span>
@@ -298,16 +321,6 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <SettingsPreview page={page} preferences={preferences} />
         </div>
       </div>
-      <footer className="dialog-footer">
-        {page === "shortcuts" && (
-          <Button type="button" onClick={() => { onChange({ ...preferences, shortcuts: defaultBindings }); setCapture(null); setConflict(""); }}>
-            <RotateCcw /> {t("Restore defaults")}
-          </Button>
-        )}
-        {standalone && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
-        <Button type="button" disabled={!hasChanges} onClick={apply}>{t("Apply")}</Button>
-        <Button type="button" className="primary" onClick={() => { apply(); close(); }}>{t("Done")}</Button>
-      </footer>
     </Dialog>
   );
 }

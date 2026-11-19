@@ -7,7 +7,6 @@ import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { X } from "lucide-react";
 import { api, describeError, windowsClient, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
-import { eventShortcut } from "./preferences";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
 import "@xterm/xterm/css/xterm.css";
@@ -51,26 +50,22 @@ function terminalAppearance(): ITerminalOptions {
   };
 }
 
-export default function TerminalPanel({ session, directory, theme, scheme, shortcut, historyShortcut, pendingCommands, watchEnvironment,
-  onCommandsQueued, onCommandSubmitted, onShortcut, onHistory, onClose }: {
+export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
+  onCommandsQueued, rowHeight, onCommandSubmitted, onClose }: {
   session: TerminalSession;
   directory: string | null;
+  visible: boolean;
   theme: Theme;
   scheme: Scheme | null;
-  shortcut: string;
-  historyShortcut: string;
   pendingCommands: TerminalCommand[];
   watchEnvironment: boolean;
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
-  onShortcut: () => void;
-  onHistory: () => void;
+  rowHeight: { current: number };
   onClose: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
-  const instance = useRef<{ term: Terminal; fit: FitAddon } | null>(null);
-  const shortcuts = useRef({ onShortcut, shortcut, onHistory, historyShortcut });
-  shortcuts.current = { onShortcut, shortcut, onHistory, historyShortcut };
+  const instance = useRef<{ term: Terminal; fit: () => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
   const enqueue = useRef<((command: TerminalCommand) => void) | null>(null);
@@ -93,35 +88,32 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
   }, [watchEnvironment]);
 
   useEffect(() => {
-    if (!container.current) return;
+    const surface = container.current;
+    if (!surface) return;
     const term = new Terminal({
       ...terminalAppearance(), cursorBlink: true, screenReaderMode: true,
     });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(container.current);
-    term.attachCustomKeyEventHandler((event) => {
-      const { onShortcut, shortcut, onHistory, historyShortcut } = shortcuts.current;
-      const key = eventShortcut(event);
-      const action = key && key === shortcut ? onShortcut : key && key === historyShortcut ? onHistory : null;
-      if (!action) return true;
-      event.preventDefault();
-      if (event.type === "keydown" && !event.repeat) action();
-      return false;
-    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(surface);
+    const fit = () => {
+      if (!surface.clientWidth || !surface.clientHeight) return;
+      fitAddon.fit();
+      const height = surface.querySelector(".xterm-screen")?.getBoundingClientRect().height;
+      if (height && term.rows) rowHeight.current = height / term.rows;
+    };
     instance.current = { term, fit };
-    fit.fit();
-    if (!document.activeElement?.closest(".command-bar")) term.focus();
+    fit();
     const output = new Channel<TerminalOutput>();
     let stopped = false;
     let closed = false;
-    let ready = false;
     let atPrompt = false;
     let tracksPrompt = true;
     let draft = false;
     let currentDirectory: string | null = session.path;
     let nextDirectory: string | null = null;
     let queued = Promise.resolve();
+    let resizing = Promise.resolve();
     const promptToken = `Dirlume-${crypto.getRandomValues(new Uint32Array(4)).join("-")}`;
     const promptPrefix = promptToken + ":";
     const decoder = new TextDecoder();
@@ -217,7 +209,6 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
     };
     const opening = api.openTerminal(session, promptToken, term.rows, term.cols, output);
     void opening.then((tracked) => {
-      ready = true;
       tracksPrompt = tracked;
       if (!tracked) while (runQueuedCommand()) { /* Unsupported shells have no prompt marker. */ }
     }, (error: unknown) => {
@@ -243,10 +234,13 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
     };
     const data = term.onData(send);
     const resized = term.onResize(({ rows, cols }) => {
-      if (ready && !closed && !stopped) void api.resizeTerminal(session.id, rows, cols).catch(() => {});
+      resizing = resizing.then(async () => {
+        await opening;
+        if (!closed && !stopped) await api.resizeTerminal(session.id, rows, cols);
+      }).catch(() => {});
     });
-    const resize = new ResizeObserver(() => fit.fit());
-    resize.observe(container.current);
+    const resize = new ResizeObserver(fit);
+    resize.observe(surface);
     return () => {
       stopped = true;
       instance.current = null;
@@ -260,7 +254,13 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
       term.dispose();
       void opening.then(() => api.closeTerminal(session.id)).catch(() => {});
     };
-  }, [session.id, session.path]);
+  }, [session.id, session.path, rowHeight]);
+
+  useEffect(() => {
+    if (!visible || !instance.current) return;
+    instance.current.fit();
+    if (!document.querySelector("dialog[open]")) instance.current.term.focus();
+  }, [visible]);
 
   useEffect(() => { moveTo.current?.(directory); }, [directory]);
 
@@ -277,7 +277,7 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
       const { term, fit } = instance.current;
       const appearance = terminalAppearance();
       term.options = appearance;
-      fit.fit();
+      fit();
     };
     const frame = requestAnimationFrame(update);
     const onChange = () => requestAnimationFrame(update);
@@ -286,8 +286,8 @@ export default function TerminalPanel({ session, directory, theme, scheme, short
   }, [theme, scheme]);
 
   return (
-    <section className="terminal-card" aria-label={t("Terminal")}>
-      <header><h2>{t("Terminal")}</h2><span title={shellDirectory}>{shellDirectory}</span>
+    <section className="terminal-card" aria-label={t("Terminal")} hidden={!visible}>
+      <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}><h2>{t("Terminal")}</h2><span data-tooltip={shellDirectory}>{shellDirectory}</span>
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
       {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">

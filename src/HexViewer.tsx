@@ -1,3 +1,4 @@
+import { HistoryField } from "./HistoryField";
 import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
@@ -51,7 +52,7 @@ export function HexViewer({ file }: { file: NamedFile }) {
         <Button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>{t("Previous page")}</Button>
         <Button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>{t("Next page")}</Button>
         <form onSubmit={goTo}>
-          <input aria-label={t("Byte offset")} placeholder="0x0000" value={address} onChange={(event) => setAddress(event.target.value)} />
+          <HistoryField historyKey="hex-offset" aria-label={t("Byte offset")} placeholder="0x0000" value={address} onValueChange={setAddress} />
           <Button type="submit" disabled={!Number.isSafeInteger(addressValue) || !page || addressValue >= page.length}>{t("Go to offset")}</Button>
         </form>
         {page && <span>{t("{0} bytes", page.length.toLocaleString(locale()))}</span>}

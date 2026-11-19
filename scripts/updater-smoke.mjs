@@ -50,7 +50,7 @@ async function build(version, publicKey, privateKey) {
   }));
   run(process.execPath, [cli, "build", "--ci", "--bundles", bundle, "--features", "ui-automation", "--config", configFile, "--", "--locked"], {
     env: {
-      ...process.env, CARGO_TARGET_DIR: cargoTarget, DIRLUME_UPDATER_PUBLIC_KEY: publicKey,
+      ...process.env, CARGO_TARGET_DIR: cargoTarget,
       TAURI_SIGNING_PRIVATE_KEY: privateKey, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "",
     },
   });

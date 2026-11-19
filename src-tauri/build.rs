@@ -1,6 +1,5 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=DIRLUME_BUILD_NUMBER");
-    println!("cargo:rerun-if-env-changed=DIRLUME_UPDATER_PUBLIC_KEY");
     let mut version =
         std::env::var("CARGO_PKG_VERSION").expect("Cargo must provide the product version");
     if let Ok(number) = std::env::var("DIRLUME_BUILD_NUMBER") {

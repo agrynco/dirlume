@@ -7,9 +7,11 @@ import type { NamedFile } from "./api";
 import { installDiagnosticListeners, reportFrontendError } from "./diagnostics";
 import { setLanguage } from "./i18n";
 import { readPreferences } from "./preferences";
+import { installTooltips } from "./tooltips";
 import "./styles.css";
 
 installDiagnosticListeners();
+installTooltips();
 const preferences = readPreferences();
 setLanguage(preferences.language);
 const label = isTauri() ? getCurrentWindow().label : "main";

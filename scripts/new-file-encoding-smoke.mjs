@@ -49,7 +49,7 @@ export async function testNewFileEncoding(page, root) {
     }
     await page.keyboard.press("Escape");
     await document.waitFor({ state: "hidden" });
-    await fileList.locator(`[title="${name}"]`).click();
+    await fileList.locator(`[data-tooltip="${name}"]`).click();
     await page.keyboard.press("F4");
     await document.getByText(status, { exact: true }).waitFor();
     assert.match(await editor.innerText(), /Другий запис ✓/);

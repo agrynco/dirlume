@@ -1,3 +1,4 @@
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -10,13 +11,10 @@ export async function testArchives(page, root) {
   await writeFile(join(source, "folder", "note.txt"), "archived text");
   await writeFile(join(source, "folder", "keep.txt"), "unrelated text");
 
-  await page.waitForFunction(() => ["left", "right"].every((side) =>
-    document.getElementById(`${side}-address`)?.value &&
-    document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
   for (const [side, path] of [["left", source], ["right", destination]]) {
     const list = page.locator(`#${side}-files[aria-busy="false"]`);
     await list.waitFor();
-    const address = page.getByLabel(`${side} path`, { exact: true });
+    const address = await editPaneAddress(page, side);
     await address.fill(path);
     await address.press("Enter");
     await page.getByRole("region", { name: `${side} pane`, exact: true })
@@ -31,8 +29,8 @@ export async function testArchives(page, root) {
     if (await filesTab.isVisible()) await filesTab.click();
     await left.waitFor();
   }
-  const row = (name) => left.getByRole("option").and(page.getByTitle(name, { exact: true }));
-  const badge = (name) => page.getByTitle(name, { exact: true }).filter({ hasText: name });
+  const row = (name) => left.getByRole("option").and(page.locator("[data-tooltip=" + JSON.stringify(name) + "]"));
+  const badge = (name) => page.locator("[data-tooltip=" + JSON.stringify(name) + "]").filter({ hasText: name });
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
   const options = dialog("Create archive");
@@ -73,9 +71,10 @@ export async function testArchives(page, root) {
   await returnToFiles();
   await row("note.txt").click();
   await page.keyboard.press("F4");
-  await document.getByLabel("Edit note.txt").fill("updated in archive");
-  await button(document, "Save").click();
-  await button(document, "Save").and(document.locator("button:disabled")).waitFor();
+  const editor = document.getByLabel("Edit note.txt");
+  await editor.fill("updated in archive");
+  await editor.press("F2");
+  await document.locator(".document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
   await button(document, "Close document").click();
   await returnToFiles();
   await row("keep.txt").click();

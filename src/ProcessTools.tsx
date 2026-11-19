@@ -69,7 +69,7 @@ function EndProcesses({ items, onClose, onFinished, onAttempted }: {
   }
 
   return (
-    <Dialog title={t("End processes")} onClose={() => { if (!working) onClose(); }}>
+    <Dialog title={t("End processes")} tone="warning" onClose={() => { if (!working) onClose(); }}>
       <div className="dialog-body end-processes">
         <p className="delete-warning">{t("Ending processes may cause unsaved work to be lost.")}</p>
         <ul>{items.map(({ pid, name }) => <li key={pid}>{name || t("Process")} (PID {pid})</li>)}</ul>
@@ -319,7 +319,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
                 table.current?.focus({ preventScroll: true });
               }}>
               {displayed.map(({ key }) => <td key={key} className={`process-cell-${key}`}
-                title={key === "name" ? process.name : key === "executable" ? process.executable ?? undefined : undefined}>{values[key]}</td>)}
+                data-tooltip={key === "name" ? process.name : key === "executable" ? process.executable ?? undefined : undefined}>{values[key]}</td>)}
             </tr>;
           })}</tbody>
         </table>
