@@ -7,6 +7,7 @@ import {
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import type { AppUpdate, UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { FtpDialog } from "./FtpDialog";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
@@ -19,7 +20,7 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownAnchor } from "./MarkdownPreview";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, extendKeyboardRange, localPath, opposite, paneItem, parentPlace,
+  applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, localPath, opposite, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
@@ -47,7 +48,10 @@ type Modal =
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
   | { kind: "fileActions"; side: Side; entry?: Entry }
-  | { kind: "menu" | "commandHistory" | "exit" }
+  | { kind: "menu" | "commandHistory" }
+  | { kind: "exit"; update?: AppUpdate }
+  | { kind: "update"; update: AppUpdate }
+  | { kind: "installUpdate"; version: string }
   | ActionModal;
 
 const rowCommands = {
@@ -79,6 +83,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const theme = scheme?.base ?? preferences.theme;
   const [modal, setModal] = useState<Modal | null>(null);
   const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const checkingUpdates = useRef(false);
+  const manualUpdateCheck = useRef(false);
+  const installingUpdate = useRef(false);
   const [documents, setDocuments] = useState<DocumentWindow[]>(startup?.documents ?? []);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
   const [linkedAnchor, setLinkedAnchor] = useState<{ id: number; anchor: MarkdownAnchor } | null>(null);
@@ -128,6 +137,35 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const helpShortcut = preferences.shortcuts.help;
   const modalKind = modal?.kind;
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
+
+  const checkUpdates = useCallback(async (manual: boolean) => {
+    if (manual) {
+      manualUpdateCheck.current = true;
+      setStatus({ text: "Checking for updates…" });
+    }
+    if (checkingUpdates.current) return;
+    checkingUpdates.current = true;
+    try {
+      const update = await api.checkForUpdate(manual);
+      if (update) setAvailableUpdate(update);
+      if (manualUpdateCheck.current) setStatus({ text: update ? "Ready" : "Dirlume is up to date." });
+    } catch (error) {
+      if (manualUpdateCheck.current) setStatus({ text: describeError(error), error: true });
+    } finally {
+      checkingUpdates.current = false;
+      manualUpdateCheck.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isTauri()) void checkUpdates(false);
+  }, [checkUpdates]);
+
+  useEffect(() => {
+    if (!availableUpdate || modal || helpTopic) return;
+    setModal({ kind: "update", update: availableUpdate });
+    setAvailableUpdate(null);
+  }, [availableUpdate, modal, helpTopic]);
 
   useLayoutEffect(() => {
     if (!helpShortcut) return;
@@ -325,6 +363,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   useEffect(() => {
     if (!isTauri()) return;
     const listener = getCurrentWindow().onCloseRequested((event) => {
+      if (installingUpdate.current) {
+        event.preventDefault();
+        return;
+      }
       if (!exitConfirmed.current && dirtyDocuments.current.size) {
         event.preventDefault();
         setModal({ kind: "exit" });
@@ -332,6 +374,23 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     });
     return () => { void listener.then((unlisten) => unlisten()).catch(() => {}); };
   }, []);
+
+  function installUpdate(update: AppUpdate) {
+    if (update.kind === "debian") {
+      void api.openWebLink(update.url).catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
+      return;
+    }
+    installingUpdate.current = true;
+    setUpdateProgress(null);
+    setModal({ kind: "installUpdate", version: update.version });
+    const progress = new Channel<UpdateProgress>();
+    progress.onmessage = setUpdateProgress;
+    void api.installUpdate(update.version, progress).catch((error: unknown) => {
+      installingUpdate.current = false;
+      setModal(null);
+      setStatus({ text: describeError(error), error: true });
+    });
+  }
 
   function focus(side: Side) {
     setActive(side);
@@ -1051,19 +1110,49 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         setPreferences(next);
       }} onClose={() => setModal(null)} />}
       {modal?.kind === "exit" && (
-        <Dialog title={t("Unsaved changes")} onClose={() => setModal(null)}>
-          <div className="dialog-body"><p>{t("Some editors have unsaved changes. Discard them and exit Dirlume?")}</p></div>
+        <Dialog title={t("Unsaved changes")} onClose={() => setModal(modal.update ? { kind: "update", update: modal.update } : null)}>
+          <div className="dialog-body"><p>{t(modal.update ? "Some editors have unsaved changes. Discard them and install the update?" :
+            "Some editors have unsaved changes. Discard them and exit Dirlume?")}</p></div>
           <footer className="dialog-footer">
             <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Keep working")}</Button>
             <Button type="button" className="negative" onClick={() => {
+              if (modal.update) { installUpdate(modal.update); return; }
               exitConfirmed.current = true;
               void getCurrentWindow().close().catch((error: unknown) => {
                 exitConfirmed.current = false;
                 setModal(null);
                 setStatus({ text: describeError(error), error: true });
               });
-            }}>{t("Discard changes and exit")}</Button>
+            }}>{t(modal.update ? "Discard changes and update" : "Discard changes and exit")}</Button>
           </footer>
+        </Dialog>
+      )}
+      {modal?.kind === "update" && (
+        <Dialog title={t("Update available")} onClose={() => setModal(null)}>
+          <div className="dialog-body transfer-body">
+            <p>{t("Dirlume {0} is available.", modal.update.version)}</p>
+            {modal.update.kind === "debian" && <>
+              <p>{t("Download the Debian package and run this command in the download folder.")}</p>
+              <code>sudo apt install ./{modal.update.url.split("/").at(-1)}</code>
+            </>}
+          </div>
+          <footer className="dialog-footer">
+            <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Later")}</Button>
+            <Button type="button" className="primary" onClick={() => {
+              if (modal.update.kind === "install" && dirtyDocuments.current.size) setModal({ kind: "exit", update: modal.update });
+              else installUpdate(modal.update);
+            }}>{t(modal.update.kind === "debian" ? "Download Debian package" : "Install and restart")}</Button>
+          </footer>
+        </Dialog>
+      )}
+      {modal?.kind === "installUpdate" && (
+        <Dialog title={t("Installing update")}>
+          <div className="dialog-body transfer-body">
+            <p>{t("Downloading and verifying Dirlume {0}…", modal.version)}</p>
+            <progress aria-label={t("Update download progress")} max={updateProgress?.total || 1}
+              value={updateProgress?.total ? updateProgress.downloaded : undefined} />
+            {updateProgress && <p>{t("{0} transferred", formatSize(updateProgress.downloaded))}</p>}
+          </div>
         </Dialog>
       )}
       {modal?.kind === "transfer" && (
@@ -1091,6 +1180,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               .map((command) => <Button key={command} type="button" shortcut={keyLabel(command)} onClick={() => { setModal(null); perform(command); }}>
                 {t(commands[command].label)}<kbd>{keyLabel(command)}</kbd>
               </Button>)}
+            {isTauri() && <Button type="button" onClick={() => { setModal(null); void checkUpdates(true); }}>
+              {t("Check for updates")}
+            </Button>}
           </div>
         </Dialog>
       )}

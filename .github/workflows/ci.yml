@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - run: node --test scripts/build-version.test.mjs
+      - run: node --test scripts/build-version.test.mjs scripts/package.test.mjs
       - name: Resolve product version and build number
         id: resolve
         env:
@@ -45,6 +45,8 @@ jobs:
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
+      DIRLUME_UPDATER_PUBLIC_KEY: ${{ vars.DIRLUME_UPDATER_PUBLIC_KEY }}
+      DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +91,19 @@ jobs:
       - name: Verify filesystem and server
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features server
       - name: Bundle desktop app
-        run: npm run tauri -- build --ci --bundles "${{ matrix.bundles }}" -- --locked
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: |
+          $configArgs = @()
+          if ($env:DIRLUME_SIGNED_RELEASE -eq 'true') {
+            node scripts/package.mjs configure-signing
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $configArgs = @('--config', 'src-tauri/target/updater-config.json')
+          }
+          npm run tauri -- build --ci --bundles "${{ matrix.bundles }}" @configArgs -- --locked
+          exit $LASTEXITCODE
       - name: Build headless server
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default-features --features server --bin dirlume-server
       - name: Test two-process TLS access

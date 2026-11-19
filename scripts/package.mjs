@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { artifactVersion, manifestVersion } from "./build-version.mjs";
@@ -23,9 +23,23 @@ const formats = {
   "macos-x64": [["dmg", ".dmg", "dmg"]],
 };
 
-function artifactNames(platform, label) {
+const updaterFormats = {
+  "windows-x64": { target: "windows-x86_64", bundle: "nsis", suffix: "-setup.exe", extension: "setup.exe" },
+  "linux-x64": { target: "linux-x86_64", bundle: "appimage", suffix: ".AppImage", extension: "AppImage" },
+  "macos-arm64": { target: "darwin-aarch64", bundle: "macos", suffix: ".app.tar.gz", extension: "app.tar.gz" },
+  "macos-x64": { target: "darwin-x86_64", bundle: "macos", suffix: ".app.tar.gz", extension: "app.tar.gz" },
+};
+
+function bundleFormats(platform, signed) {
+  if (!signed) return formats[platform];
+  const { bundle, suffix, extension } = updaterFormats[platform];
+  const signedBundles = bundle === "macos" ? [[bundle, suffix, extension]] : [];
+  return [...formats[platform], ...signedBundles, [bundle, suffix + ".sig", extension + ".sig"]];
+}
+
+function artifactNames(platform, label, signed) {
   return [
-    ...formats[platform].map(([, , extension]) => `Dirlume-${label}-${platform}.${extension}`),
+    ...bundleFormats(platform, signed).map(([, , extension]) => `Dirlume-${label}-${platform}.${extension}`),
     `Dirlume-Server-${label}-${platform}.tar.gz`,
   ];
 }
@@ -34,10 +48,11 @@ async function collect(platform) {
   if (!Object.hasOwn(formats, platform)) throw new Error("Unknown artifact platform.");
   const product = await version();
   const number = process.env.DIRLUME_BUILD_NUMBER;
-  const outputs = artifactNames(platform, artifactVersion(product, number));
+  const signed = process.env.DIRLUME_SIGNED_RELEASE === "true";
+  const outputs = artifactNames(platform, artifactVersion(product, number), signed);
   const target = "src-tauri/target/release";
   await mkdir("release", { recursive: true });
-  for (const [index, [kind, suffix]] of formats[platform].entries()) {
+  for (const [index, [kind, suffix]] of bundleFormats(platform, signed).entries()) {
     const directory = join(target, "bundle", kind);
     const matches = (await readdir(directory)).filter((file) => file.endsWith(suffix));
     if (matches.length !== 1) throw new Error(`Expected exactly one ${kind} bundle, got ${matches.length}.`);
@@ -66,16 +81,38 @@ async function collect(platform) {
   }
 }
 
+async function configureSigning() {
+  const key = process.env.DIRLUME_UPDATER_PUBLIC_KEY?.trim();
+  if (!key || !process.env.TAURI_SIGNING_PRIVATE_KEY) {
+    throw new Error("A release needs DIRLUME_UPDATER_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY.");
+  }
+  const directory = "src-tauri/target";
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "updater-config.json"), JSON.stringify({
+    bundle: { createUpdaterArtifacts: true },
+    plugins: { updater: { pubkey: key, requireSignedVersion: true } },
+  }));
+}
+
 async function verifyRelease() {
-  const { DIRLUME_PRODUCT_VERSION, DIRLUME_BUILD_NUMBER, TAG } = process.env;
+  const { DIRLUME_PRODUCT_VERSION, DIRLUME_BUILD_NUMBER, TAG, GITHUB_REPOSITORY } = process.env;
   if (!DIRLUME_BUILD_NUMBER || TAG !== `v${DIRLUME_PRODUCT_VERSION}`) {
     throw new Error("Release packages must match the resolved build number and tag.");
   }
   const label = artifactVersion(DIRLUME_PRODUCT_VERSION, DIRLUME_BUILD_NUMBER);
-  const expected = Object.keys(formats).flatMap((platform) => artifactNames(platform, label))
+  const expected = Object.keys(formats).flatMap((platform) => artifactNames(platform, label, true))
     .flatMap((name) => [name, `${name}.sha256`]).sort();
   const actual = (await readdir("release")).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("The release artifact set does not match the resolved version.");
+  if (!GITHUB_REPOSITORY) throw new Error("The release repository is missing.");
+  const platforms = {};
+  for (const [platform, { target, extension }] of Object.entries(updaterFormats)) {
+    const name = `Dirlume-${label}-${platform}.${extension}`;
+    const signature = (await readFile(join("release", `${name}.sig`), "utf8")).trim();
+    if (!signature) throw new Error(`Missing updater signature for ${target}.`);
+    platforms[target] = { signature, url: `https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${name}` };
+  }
+  await writeFile(join("release", "latest.json"), JSON.stringify({ version: DIRLUME_PRODUCT_VERSION, platforms }, null, 2) + "\n");
 }
 
 if (process.argv[2] === "check") {
@@ -84,6 +121,8 @@ if (process.argv[2] === "check") {
   await collect(process.argv[3]);
 } else if (process.argv[2] === "verify-release") {
   await verifyRelease();
+} else if (process.argv[2] === "configure-signing") {
+  await configureSigning();
 } else {
-  throw new Error("Use package.mjs check, collect <platform>, or verify-release.");
+  throw new Error("Use package.mjs check, collect <platform>, configure-signing, or verify-release.");
 }

@@ -18,7 +18,7 @@ function readSize(key: string | undefined): Dimensions | undefined {
 export function Dialog({ title, children, onClose, onKeyDown, wide = false, resizeKey }: {
   title: string;
   children: ReactNode;
-  onClose: () => void;
+  onClose?: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   wide?: boolean;
   resizeKey?: string;
@@ -84,10 +84,10 @@ export function Dialog({ title, children, onClose, onKeyDown, wide = false, resi
           start.height + 2 * start.vertical * (event.clientY - start.y));
       }}
       onLostPointerCapture={finishResize}
-      onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}>
+      onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose?.(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>
-        <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>
+        {onClose && <Button type="button" className="icon-button" aria-label={t("Close dialog")} onClick={onClose}><X /></Button>}
       </header>
       {children}
       {resizeKey && resizeEdges.map((edge) =>

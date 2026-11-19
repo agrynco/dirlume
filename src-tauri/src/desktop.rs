@@ -1078,6 +1078,7 @@ async fn list_kswitcher(
 }
 
 pub fn run() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     #[cfg(windows)]
     if requested_location().is_some() {
         if let Some(base) = dirs::data_local_dir() {
@@ -1114,6 +1115,8 @@ pub fn run() {
     };
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(crate::updates::PendingUpdate::default())
         .manage(Connections::default())
         .manage(ftp::FtpState::default())
         .manage(TransferSessions::default())
@@ -1124,9 +1127,15 @@ pub fn run() {
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
+    #[cfg(feature = "ui-automation")]
+    let builder = builder.on_page_load(crate::updates::fixture::page_loaded);
     builder
         .invoke_handler(tauri::generate_handler![
             build_version,
+            crate::updates::check_for_update,
+            crate::updates::install_update,
+            #[cfg(feature = "ui-automation")]
+            crate::updates::fixture::updater_fixture_result,
             locations,
             requested_location,
             crate::processes::list_processes,
