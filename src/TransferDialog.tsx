@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
-import { childPlace, formatDate, formatSize, localPath } from "./panes";
+import { childPlace, formatSize, localPath } from "./panes";
+import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 
@@ -20,9 +21,12 @@ export interface Transfer {
 type Decision = "overwrite" | "skip";
 let nextSession = 0;
 
-function itemSource(place: Place, item: Entry): TransferSource {
+export const nextTransferId = () => ++nextSession;
+
+export function itemSource(place: Place, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (place.kind === "ftp") return { kind: "ftp", connection: place.id, segments: [...place.segments, item.name] };
+  if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "server") {
     return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
   }
@@ -57,7 +61,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
   const localTarget = transfer.ftpDestination === undefined;
-  const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp";
+  const replaceable = transfer.source.kind === "local" || transfer.source.kind === "ftp" || transfer.source.kind === "archive";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
   const singleFile = itemCount === 1 && !transfer.items[0].entry.directory;
@@ -103,7 +107,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (running.current !== null || phase !== "setup") return;
-    const id = ++nextSession;
+    const id = nextTransferId();
     running.current = id;
     setPhase("working");
     setError("");
@@ -279,8 +283,9 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
 }
 
 function ConflictDetails({ label, details }: { label: string; details: TransferEntryDetails }) {
+  const dateLabel = useTimestamps([details.modified]);
   return <tr><th scope="row">{label}</th>
     <td>{details.directory ? t("Folder") : `${details.size.toLocaleString(locale())} B`}</td>
-    <td>{formatDate(details.modified)}</td>
+    <td>{dateLabel(details.modified) ?? "–"}</td>
   </tr>;
 }

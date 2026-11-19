@@ -25,6 +25,7 @@ pub struct ProcessInfo {
     pub name: String,
     pub cpu: f32,
     pub memory: u64,
+    pub executable: Option<String>,
     pub can_terminate: bool,
 }
 
@@ -39,6 +40,10 @@ impl From<&sysinfo::Process> for ProcessInfo {
             name: process.name().to_string_lossy().into_owned(),
             cpu: process.cpu_usage(),
             memory: process.memory(),
+            executable: process
+                .exe()
+                .filter(|path| path.is_absolute())
+                .map(|path| path.to_string_lossy().into_owned()),
             can_terminate: terminable(pid),
         }
     }
@@ -48,27 +53,68 @@ fn terminable(pid: u32) -> bool {
     pid > 4 && pid != std::process::id()
 }
 
+fn refresh(
+    app: &tauri::AppHandle,
+    selection: ProcessesToUpdate<'_>,
+    collect: impl FnOnce(&System) -> Vec<ProcessInfo>,
+) -> Result<Vec<ProcessInfo>> {
+    use tauri::Manager;
+    let state = app.state::<ProcessMonitor>();
+    let mut slot = state.system.lock().map_err(message)?;
+    if slot.is_none() {
+        *slot = Some(System::new().map_err(message)?);
+    }
+    let system = slot.as_mut().expect("process monitor initialized");
+    system.refresh_processes_specifics(
+        selection,
+        true,
+        ProcessRefreshKind::nothing()
+            .with_cpu()
+            .with_memory()
+            .with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
+    );
+    Ok(collect(system))
+}
+
 #[tauri::command]
 pub async fn list_processes(app: tauri::AppHandle) -> Result<Vec<ProcessInfo>> {
-    use tauri::Manager;
     blocking(move || {
-        let state = app.state::<ProcessMonitor>();
-        let mut slot = state.system.lock().map_err(message)?;
-        if slot.is_none() {
-            *slot = Some(System::new().map_err(message)?);
-        }
-        let system = slot.as_mut().expect("process monitor initialized");
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing()
-                .with_cpu()
-                .with_memory()
-                .with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
-        );
-        Ok(system.processes().values().map(ProcessInfo::from).collect())
+        refresh(&app, ProcessesToUpdate::All, |system| {
+            system.processes().values().map(ProcessInfo::from).collect()
+        })
     })
     .await
+}
+
+#[cfg(windows)]
+pub fn refresh_lock_owners(
+    app: &tauri::AppHandle,
+    owners: Vec<ProcessInfo>,
+) -> Result<Vec<ProcessInfo>> {
+    if owners.is_empty() {
+        return Ok(owners);
+    }
+    let pids: Vec<_> = owners
+        .iter()
+        .map(|owner| sysinfo::Pid::from_u32(owner.id.pid))
+        .collect();
+    refresh(app, ProcessesToUpdate::Some(&pids), |system| {
+        owners
+            .into_iter()
+            .zip(&pids)
+            .map(|(owner, pid)| {
+                let Some(process) = system
+                    .process(*pid)
+                    .filter(|process| process.start_time() == owner.id.started)
+                else {
+                    return owner;
+                };
+                let mut details = ProcessInfo::from(process);
+                details.can_terminate &= owner.can_terminate;
+                details
+            })
+            .collect()
+    })
 }
 
 #[cfg(windows)]

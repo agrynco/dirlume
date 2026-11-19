@@ -5,7 +5,7 @@ import { t } from "./i18n";
 type Option = { label: string; text: string; index: number; length: number; history?: boolean };
 
 export function CommandField({ input, draft, directory, history, refreshEnvironment, onChange }: {
-  input: RefObject<HTMLInputElement | null>;
+  input: RefObject<HTMLTextAreaElement | null>;
   draft: string;
   directory: string | null;
   history: readonly string[];
@@ -25,7 +25,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   const suggesting = focused && !!draft.trim() && dismissed !== query;
 
   useEffect(() => {
-    if (!suggesting || !directory) return;
+    if (!suggesting || !directory || draft.includes("\n")) return;
     let current = true;
     const timer = window.setTimeout(() => {
       void api.completeCommand(draft, caret, directory, refreshEnvironment).then(
@@ -78,7 +78,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     });
   }
 
-  function selectCaret(element: HTMLInputElement) {
+  function selectCaret(element: HTMLTextAreaElement) {
     const next = element.selectionStart ?? element.value.length;
     if (next !== position) {
       setPosition(next);
@@ -86,18 +86,16 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     }
   }
 
-  function keyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.shiftKey) {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        event.stopPropagation();
-        dismiss();
-        event.currentTarget.form?.requestSubmit();
-      }
+    if (event.key === "Enter" && (event.shiftKey || !activeOption)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+      event.currentTarget.form?.requestSubmit();
       return;
     }
-    if (!open) return;
+    if (!open || event.shiftKey) return;
     if (event.key === "Escape") dismiss();
     else if (event.key === "ArrowDown") setSelected((selected + 1) % options.length);
     else if (event.key === "ArrowUp") setSelected(selected < 0 ? options.length - 1 : (selected - 1 + options.length) % options.length);
@@ -109,13 +107,15 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   }
 
   return <div className="command-entry">
-    <input ref={input} aria-label={t("Command line")} role="combobox" aria-autocomplete="list" aria-expanded={open}
+    <textarea ref={input} aria-label={t("Command line")} role="combobox" aria-autocomplete="list" aria-expanded={open}
       aria-controls={open ? id : undefined} aria-activedescendant={activeOption ? `${id}-${selected}` : undefined}
-      type="text" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
+      rows={Math.min(4, draft.split("\n").length)} wrap="off" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
       onFocus={(event) => { setFocused(true); setDismissed(""); selectCaret(event.currentTarget); }}
       onBlur={() => { setFocused(false); setSelected(-1); setNative(null); }}
       onSelect={(event) => selectCaret(event.currentTarget)}
+      onKeyUp={(event) => selectCaret(event.currentTarget)}
       onChange={(event) => {
+        setFocused(document.activeElement === event.currentTarget);
         setPosition(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
         setDismissed("");
         setSelected(-1);

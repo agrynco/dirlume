@@ -12,6 +12,21 @@ import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
+import { testCompareWorker } from "./compare-smoke.mjs";
+import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
+import { testNewFolder } from "./new-folder-smoke.mjs";
+import { testShortcutFields } from "./shortcut-field-smoke.mjs";
+import { testTerminalHistory } from "./terminal-history-smoke.mjs";
+import { testArchives } from "./archive-smoke.mjs";
+import { testMcp } from "./mcp-smoke.mjs";
+import { testProcessColumns } from "./process-columns-smoke.mjs";
+import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
+import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
+import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
+import { testInlineRename } from "./inline-rename-smoke.mjs";
+import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
+import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -162,6 +177,7 @@ try {
     }
   }
   let diagnosticsBeforeRestart;
+  await testFilenameRendering(page, temp);
   if (process.env.DIRLUME_INTERNAL_CDP === "1") {
     const secret = "dirlume-private-fixture-data";
     await page.evaluate(async (path) => {
@@ -380,9 +396,31 @@ try {
   await page.getByRole("option", { name: /^data.bin/, selected: true }).waitFor();
   const bulk = join(temp, "bulk");
   await mkdir(bulk);
-  await Promise.all(Array.from({ length: 1005 }, (_, index) => writeFile(join(bulk, `file-${index}.tmp`), "")));
+  for (let start = 0; start < 10_000; start += 100) {
+    await Promise.all(Array.from({ length: 100 }, (_, offset) => {
+      const index = start + offset;
+      const name = index < 1005 ? `file-${index}.tmp` : `unmatched-${index}.dat`;
+      return writeFile(join(bulk, name), "");
+    }));
+  }
+  const openBulk = performance.now();
   await navigate("left", bulk);
+  await left.getByRole("option", { name: /^file-0.tmp/ }).waitFor();
+  const mountedRows = await left.getByRole("option").count();
+  assert.ok(mountedRows < 100, `Mounted ${mountedRows} rows for 10,000 entries.`);
   await left.focus();
+  await left.press("ArrowRight");
+  const tail = left.getByRole("option", { name: /^unmatched-9999.dat/, selected: true });
+  await tail.waitFor();
+  assert.equal(await tail.getAttribute("aria-posinset"), "10001");
+  assert.equal(await left.getAttribute("aria-activedescendant"), await tail.getAttribute("id"));
+  await left.evaluate((list) => { list.scrollTop = list.scrollHeight / 2; });
+  await left.getByRole("option", { name: /^unmatched-5000.dat/ }).waitFor();
+  assert.ok(await left.getByRole("option").count() < 100);
+  assert.equal(await left.getAttribute("aria-activedescendant"), await tail.getAttribute("id"));
+  await left.press("ArrowLeft");
+  await left.getByRole("option", { name: /^\.\./, selected: true }).waitFor();
+  console.log(`Mounted ${mountedRows} rows for 10,000 files in ${Math.round(performance.now() - openBulk)} ms including keyboard jumps and scrolling.`);
   await page.keyboard.press("Alt+F7");
   await mask.fill("*.tmp");
   await mask.press("Enter");
@@ -820,7 +858,7 @@ try {
   await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
   await page.keyboard.press("F12");
-  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name").fill("verified");
+  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name", { exact: true }).fill("verified");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
 
@@ -880,7 +918,6 @@ try {
   assert.deepEqual(pids.map(Number), pids.map(Number).sort((a, b) => a - b));
   await pidHeader.getByRole("button").click();
   assert.equal(await pidHeader.getAttribute("aria-sort"), "descending");
-  await leftPane.getByRole("searchbox", { name: "Find process" }).fill(String(lockedBy.pid));
   const task = taskList.getByRole("row").filter({ has: page.getByRole("gridcell", { name: String(lockedBy.pid), exact: true }) });
   await task.locator(".process-icon").waitFor();
   await task.click();
@@ -889,7 +926,6 @@ try {
   await endProcesses.getByText(new RegExp(`PID ${lockedBy.pid}\\)`)).waitFor();
   await endProcesses.getByRole("button", { name: "Cancel", exact: true }).click();
   if (process.env.DIRLUME_PROCESSES_SCREENSHOT) {
-    await leftPane.getByRole("searchbox", { name: "Find process" }).fill("");
     await page.screenshot({ path: process.env.DIRLUME_PROCESSES_SCREENSHOT, scale: "css" });
   }
   await leftPane.getByRole("button", { name: "Close processes" }).click();
@@ -1403,7 +1439,7 @@ try {
     const contents = help.getByRole("navigation", { name: "Table of contents" });
     await contents.waitFor();
     const links = contents.getByRole("link");
-    assert.equal(topicLinks.length, 19);
+    assert.ok(topicLinks.includes("#help-archives"));
     assert.deepEqual(await links.evaluateAll((items) => items.map((link) => link.getAttribute("href"))), topicLinks);
     if (process.env.DIRLUME_HELP_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_HELP_SCREENSHOT, scale: "css" });
     for (const href of topicLinks) {
@@ -1550,7 +1586,21 @@ try {
   console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
+  await testCompareWorker(page, src, dst);
+  await testCompareLayouts(page, temp);
   await testCommandCompletion(page, temp);
+  page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
+  await testShortcutFields(page);
+  page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
+  await testOsTimestamps(page, temp);
+  await testPermanentDelete(page, temp);
+  await testInlineRename(page, temp);
+  await testLockingProcessPane(page, temp);
+  await testProcessColumns(page);
+  await testProcessQuickSearch(page, temp);
+  await testProcessExecutablePath(page, child.pid);
+  if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
+  page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

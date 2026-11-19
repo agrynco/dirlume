@@ -131,12 +131,12 @@ export function paneItem(pane: PaneState, entry?: Entry): { place: Place; entry:
 
 export const opposite = (side: Side): Side => side === "left" ? "right" : "left";
 
-export function localPath(path: string): Place {
+export function localPath(path: string): Extract<Place, { kind: "local" }> {
   return { kind: "local", path, parent: null };
 }
 
 export function childPlace(place: Place, name: string): Place {
-  if (place.kind === "server" || place.kind === "ftp") return { ...place, segments: [...place.segments, name] };
+  if (place.kind === "server" || place.kind === "ftp" || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
     return { ...place, path, parent: null };
@@ -146,6 +146,8 @@ export function childPlace(place: Place, name: string): Place {
 }
 
 export function parentPlace(place: Place): Place | null {
+  if (place.kind === "archive") return place.segments.length
+    ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || place.kind === "ftp") {
     return place.segments.length ? { ...place, segments: place.segments.slice(0, -1) } : null;
   }
@@ -154,6 +156,7 @@ export function parentPlace(place: Place): Place | null {
 }
 
 export async function readPlace(place: Place): Promise<{ place: Place; listing: Listing }> {
+  if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
@@ -203,16 +206,13 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   };
 }
 
-const formats = new Map<string, { number: Intl.NumberFormat; time: Intl.DateTimeFormat }>();
+const formats = new Map<string, Intl.NumberFormat>();
 
 function currentFormats() {
   const language = locale();
   let format = formats.get(language);
   if (!format) {
-    format = {
-      number: new Intl.NumberFormat(language, { maximumFractionDigits: 1 }),
-      time: new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }),
-    };
+    format = new Intl.NumberFormat(language, { maximumFractionDigits: 1 });
     formats.set(language, format);
   }
   return format;
@@ -226,9 +226,5 @@ export function formatSize(size: number | null) {
     size /= 1024;
     unit++;
   }
-  return `${currentFormats().number.format(size)} ${units[unit]}`;
-}
-
-export function formatDate(time: number | null) {
-  return time === null ? "–" : currentFormats().time.format(new Date(time * 1000));
+  return `${currentFormats().format(size)} ${units[unit]}`;
 }

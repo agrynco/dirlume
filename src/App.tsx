@@ -1,5 +1,8 @@
 import { Button } from "./Button";
 import { CommandField } from "./CommandField";
+import { clampSplit, SplitDivider } from "./SplitDivider";
+import { timestampSeconds, useTimestamps } from "./useTimestamps";
+import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
@@ -7,8 +10,8 @@ import {
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, connectFtpLocation, describeError, isLockError, isPermissionError, placePath, windowsClient, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
-import { textEncodingLabels, type AppUpdate, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
+import { api, connectFtpLocation, describeError, folderLabel, isLockError, isPermissionError, placePath, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
@@ -16,7 +19,10 @@ import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortc
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
+import { NewFolderDialog } from "./NewFolderDialog";
+import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
@@ -35,17 +41,24 @@ import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
-import { changeShellDirectory, shellArgument } from "./shell";
+import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" }>;
+type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
+type RowRename = { side: Side; place: RenameLocation; name: string };
+
+function sameRenameLocation(current: Place | null, place: RenameLocation) {
+  return current !== null && current.kind === place.kind && placePath(current) === placePath(place) &&
+    (place.kind === "local" || sameConnection(current, place));
+}
 
 type ActionModal = (
-  | { kind: "mkdir" | "rename" | "newFile"; path: string; name: string }
+  | { kind: "rename" | "newFile"; path: string; name: string }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[] }
-) & { ftp?: FtpPlace };
+) & { ftp?: FtpPlace; archive?: ArchivePlace };
 
 type Modal =
   | { kind: "settings" }
@@ -53,10 +66,13 @@ type Modal =
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
+  | { kind: "createArchive"; side: Side; directory: string; names: string[] }
+  | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "fileActions"; side: Side; entry?: Entry }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
-  | { kind: "about" | "commandHistory" }
+  | { kind: "about" | "commandHistory" | "mcp" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
   | { kind: "installUpdate"; version: string }
@@ -79,7 +95,7 @@ function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | nu
 }
 
 function sameConnection(left: Place | null, right: Place) {
-  return (left?.kind === "server" || left?.kind === "ftp") && left.kind === right.kind && left.id === right.id;
+  return (left?.kind === "server" || left?.kind === "ftp" || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
 }
 
 function disconnect(place: NetworkPlace) {
@@ -90,9 +106,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const [startup] = useState(readWorkspace);
   const [ready, setReady] = useState(false);
   const [panes, setPanes] = useState(() => ({ left: restorePane(startup?.panels.left), right: restorePane(startup?.panels.right) }));
+  const visiblePanes = useRef(panes);
+  visiblePanes.current = panes;
+  const [rowRename, setRowRename] = useState<RowRename | null>(null);
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
-  const [processPanels, setProcessPanels] = useState({ left: false, right: false });
+  const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
   const scheme = preferences.schemes.find(({ id }) => id === preferences.activeScheme) ?? null;
   const theme = scheme?.base ?? preferences.theme;
@@ -112,16 +131,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const busy = modal?.kind === "transfer";
   const [terminal, setTerminal] = useState<TerminalSession | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
-  const [split, setSplit] = useState(Number.isFinite(startup?.split) ? Math.max(20, Math.min(80, startup!.split)) : 50);
+  const [split, setSplit] = useState(Number.isFinite(startup?.split) ? clampSplit(startup!.split) : 50);
   const [commandLine, setCommandLine] = useState("");
-  const [pendingCommands, setPendingCommands] = useState<string[]>([]);
-  const commandInput = useRef<HTMLInputElement>(null);
-  const [historyItems, setHistoryItems] = useState<string[]>(() => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]");
-      return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 1000) : [];
-    } catch { return []; }
-  });
+  const [pendingCommands, setPendingCommands] = useState<TerminalCommand[]>([]);
+  const commandInput = useRef<HTMLTextAreaElement>(null);
+  const [historyItems, setHistoryItems] = useState(readCommandHistory);
+  const commandTexts = useMemo(() => historyItems.map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
@@ -149,6 +164,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const currentItem = paneItem(pane, current);
   const local = pane.place?.kind === "local" ? pane.place : null;
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
+  const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const otherFtp = !other.search && other.place?.kind === "ftp";
   const canTransfer = Boolean(current && pane.place);
   const helpShortcut = preferences.shortcuts.help;
@@ -357,7 +373,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("dirlume.command-history", JSON.stringify(historyItems));
+    saveCommandHistory(historyItems);
   }, [historyItems]);
 
   useLayoutEffect(() => {
@@ -441,7 +457,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (index < 0) return;
     const remaining = documents.filter((document) => document.id !== id);
     const { place } = documents[index].file;
-    if (place.kind !== "local" && !Object.values(connected.current).some((connection) => sameConnection(connection, place)) &&
+    if ((place.kind === "server" || place.kind === "ftp") && !Object.values(connected.current).some((connection) => sameConnection(connection, place)) &&
         !remaining.some(({ file }) => sameConnection(file.place, place))) {
       disconnect(place);
     }
@@ -494,13 +510,41 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const { place, entry: file } = item;
     if (file.directory) {
       void load(side, childPlace(place, file.name));
-    } else if (place.kind === "ftp" && !file.link) {
+    } else if ((place.kind === "ftp" || place.kind === "archive") && !file.link) {
       openDocument({ place, name: file.name }, false);
     } else if (place.kind === "local") {
+      if (!file.link && isArchiveName(file.name)) {
+        const path = placePath(childPlace(place, file.name));
+        void openArchive(side, path).catch((error: unknown) => {
+          const text = describeError(error);
+          if (text === passwordError) setModal({ kind: "archivePassword", side, path });
+          else setStatus({ text, error: true });
+        });
+        return;
+      }
       void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
         setStatus({ text: describeError(error), error: true }));
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
+    }
+  }
+
+  async function openArchive(side: Side, path: string, password?: string) {
+    const ticket = ++request.current[side];
+    listingPending.current[side] = true;
+    updatePane(side, (pane) => ({ ...pane, loading: true }));
+    try {
+      const { listing, ...opened } = await api.openArchive(path, password);
+      if (ticket === request.current[side]) {
+        const place: ArchivePlace = { ...opened, kind: "archive", segments: [],
+          address: opened.writable ? "Archive" : "Read-only archive" };
+        updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
+      }
+    } finally {
+      if (ticket === request.current[side]) {
+        listingPending.current[side] = false;
+        updatePane(side, (pane) => ({ ...pane, loading: false }));
+      }
     }
   }
 
@@ -515,7 +559,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     const place = panes[side].place;
     const target = place && parentPlace(place);
-    if (target) void load(side, target);
+    if (target) void load(side, target, "push", place?.kind === "archive" && !place.segments.length ? folderLabel(place) : undefined);
   }
 
   function currentFolderShortcut(side: Side) {
@@ -574,9 +618,15 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (place) void load(side, place, position);
   }
 
-  function showProcesses(side: Side, visible: boolean) {
-    setProcessPanels((panels) => ({ ...panels, [side]: visible }));
+  function showProcesses(side: Side, visible: boolean, path?: string) {
+    setProcessPanels((panels) => ({ ...panels, [side]: visible ? { path } : null }));
     requestAnimationFrame(() => focus(side));
+  }
+
+  function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
+    if (!windowsClient || item?.place.kind !== "local") return;
+    const { place, entry } = item;
+    showProcesses(opposite(side), true, placePath(childPlace(place, entry.name)));
   }
 
   function closeResults(side: Side) {
@@ -720,6 +770,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
+    if (rowRename && (rowRename.side !== side || rowRename.name !== entry.name)) setRowRename(null);
     const items = entries[side];
     const index = items.findIndex(({ name }) => name === entry.name);
     const anchorName = selectionAnchor.current[side] ?? panes[side].selected ?? entry.name;
@@ -734,8 +785,28 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }));
   }
 
-  function resizeSplit(value: number) {
-    setSplit(Math.max(20, Math.min(80, value)));
+  async function renameItem(place: RenameLocation, name: string, newName: string) {
+    if (place.kind === "ftp") await api.renameFtp(place.id, [...place.segments, name], newName);
+    else await api.operate(place.path, { kind: "rename", name, new_name: newName });
+  }
+
+  function closeRowRename(side: Side) {
+    setRowRename(null);
+    requestAnimationFrame(() => document.getElementById(side + "-files")?.focus());
+  }
+
+  async function submitRowRename(rename: RowRename, name: string) {
+    if (name !== rename.name) {
+      await renameItem(rename.place, rename.name, name);
+      if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+        await load(rename.side, rename.place, "refresh", name);
+        refresh(opposite(rename.side));
+      }
+    }
+    setRowRename((current) => current === rename ? null : current);
+    if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+      requestAnimationFrame(() => document.getElementById(rename.side + "-files")?.focus());
+    }
   }
 
   function openTerminal() {
@@ -759,18 +830,23 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     else openTerminal();
   }
 
+  function recordCommand(text: string) {
+    if (!text.trim()) return;
+    const date = Date.now();
+    setHistoryItems((history) => [{ text, date }, ...history].slice(0, historyLimit));
+    historyIndex.current = -1;
+  }
+
   function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (!commandLine.trim()) {
-      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, "\r"]);
+      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, null]);
       else if (currentRow) open(active, currentRow);
       return;
     }
     if (!local || !openTerminal()) return;
-    const prefix = changeShellDirectory(local.path) + (windowsClient ? "; " : " && ");
-    setPendingCommands((commands) => [...commands, `${prefix}${commandLine}\r`]);
-    setHistoryItems((items) => [commandLine, ...items].slice(0, 1000));
-    historyIndex.current = -1;
+    setPendingCommands((commands) => [...commands, { command: commandLine, directory: local.path }]);
+    recordCommand(commandLine);
     setCommandLine("");
   }
 
@@ -918,8 +994,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
         break;
       }
-      case "shrinkLeft": resizeSplit(split - 1); break;
-      case "growLeft": resizeSplit(split + 1); break;
+      case "shrinkLeft": setSplit(clampSplit(split - 1)); break;
+      case "growLeft": setSplit(clampSplit(split + 1)); break;
       case "terminal":
         if (panelsHidden) setPanelsHidden(false);
         else if (terminal || openTerminal()) setPanelsHidden(true);
@@ -931,7 +1007,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name);
         break;
       case "previousCommand": {
-        const previous = historyItems[historyIndex.current + 1];
+        const previous = commandTexts[historyIndex.current + 1];
         if (previous !== undefined) {
           historyIndex.current++;
           setCommandLine(previous);
@@ -953,27 +1029,41 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
       case "copyClipboard": if (current) void copyClipboard(active, current); break;
+      case "lockingProcesses": if (current) showLockingProcesses(active, currentItem); break;
       case "pasteClipboard": void pasteClipboard(active); break;
       case "search":
         if (pane.place && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
         break;
-      case "rename":
-      case "newFile":
-      case "mkdir": {
-        const writable = local ?? (command === "rename" ? ftp : undefined);
-        if (writable && !pane.search && !busy && !pane.loading && (command !== "rename" || current)) {
-          setModal({ kind: command, path: placePath(writable), name: command === "rename" ? current?.name ?? "" : "", ftp });
+      case "mkdir":
+        if (local && !pane.search && !busy && !pane.loading) setModal({ kind: "mkdir", side: active, place: local });
+        break;
+      case "createArchive":
+        if (local && current && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "createArchive", side: active, directory: local.path,
+            names: transferItems(active, current).map(({ entry }) => entry.name) });
+        }
+        break;
+      case "rename": {
+        const place = local ?? ftp;
+        if (place && current && !pane.search && !busy && !pane.loading) {
+          setRowRename({ side: active, place, name: current.name });
+        }
+        break;
+      }
+      case "newFile": {
+        if (local && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "newFile", path: local.path, name: "" });
         }
         break;
       }
       case "delete":
       case "recycle": {
-        const writable = local ?? ftp;
+        const writable = local ?? ftp ?? (archive?.writable ? archive : undefined);
         if (writable && !pane.search && current && !busy && !pane.loading) {
           const marked = entries[active].filter(({ name }) => pane.marked.includes(name));
           const selected = marked.length ? marked : [current];
           setModal({
-            kind: ftp ? "delete" : command, path: placePath(writable), ftp,
+            kind: ftp || archive ? "delete" : command, path: placePath(writable), ftp, archive,
             names: selected.map(({ name }) => name),
             directories: ftp ? selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name) : undefined,
           });
@@ -992,7 +1082,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || file.place.kind !== "server")) openDocument(file, command === "edit");
+        if (file && (command === "view" || writableTextPlace(file.place))) openDocument(file, command === "edit");
         break;
       }
       case "compare": {
@@ -1010,6 +1100,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function keyDown(event: KeyboardEvent) {
+    if ((event.target as HTMLElement).closest(".inline-rename")) return;
     if (modal || event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
     if (target.closest("dialog[open]")) return;
@@ -1032,7 +1123,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const onFiles = target.closest(".file-list");
     const inField = target.closest("input, select, textarea, [contenteditable]");
     if (!command || command === "quickSearch") {
-      if (panelsHidden || processPanels[active] || !pane.place || (inField && !inCommandLine)) return;
+      const unavailable = processPanels[active] ? target !== onFiles || !onFiles?.classList.contains("process-table") : !pane.place;
+      if (panelsHidden || unavailable || (inField && !inCommandLine)) return;
       const seed = quickSearchSeed(event.nativeEvent, preferences.shortcuts.quickSearch);
       if (seed === null) return;
       event.preventDefault();
@@ -1058,16 +1150,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return showShortcut(preferences.shortcuts[command]);
   }
 
+  const currentFile = fileFor(active);
   const fileActions = ([
     { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
-    { command: "edit", label: "Edit", Icon: Pencil, disabled: !fileFor(active) || fileFor(active)?.place.kind === "server" },
-    { command: "copy", label: local || ftp ? "Copy" : "Download", Icon: local || ftp ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
+    { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !writableTextPlace(currentFile.place) },
+    { command: "copy", label: local || ftp || archive ? "Copy" : "Download", Icon: local || ftp || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: !local || !!pane.search || !current || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp) || !!pane.search || !current || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
-    { command: "recycle", label: ftp ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp) || !!pane.search || !current || busy },
+    { command: "recycle", label: ftp || archive ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp && !archive?.writable) || !!pane.search || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
@@ -1099,7 +1192,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && (!target.place || !parentPlace(target.place))),
-        inPane("refresh", processPanels[side] || !target.place),
+        inPane("refresh", !!processPanels[side] || !target.place),
       ],
     };
   }
@@ -1108,10 +1201,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     paneMenu("left"),
     { label: "Files", items: [
       ...fileActions.map(({ command, label, disabled }) => menuCommand(command, !filesAvailable || disabled, label)),
+      menuCommand("createArchive", !filesAvailable || !local || !current || !!pane.search, "Create archive"),
       menuCommand("attributes", !filesAvailable || !currentItem || busy),
+      ...(windowsClient ? [menuCommand("lockingProcesses", !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
-      ...(ftp ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
+      ...(ftp || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
     ] },
     { label: "Commands", items: [
       menuCommand("search", !filesAvailable || !pane.place),
@@ -1120,6 +1215,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       menuCommand("commandHistory", activeDocument !== null),
       menuCommand("folderShortcuts", !panesAvailable),
       { label: "Toggle terminal", disabled: activeDocument !== null, run: toggleTerminal },
+      ...(isTauri() ? [{ label: "MCP server", run: () => setModal({ kind: "mcp" }) }] : []),
       ...(isTauri() ? [{ label: "Check for updates", run: () => { void checkUpdates(true); } }] : []),
     ] },
     { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
@@ -1135,7 +1231,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
         <div className="top-actions">
           <Button className="toolbar-button" shortcut={keyLabel("connect")} onClick={() => perform("connect")}><Server /> {t("Connect")}</Button>
-          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || processPanels[active] || !pane.place || pane.loading}
+          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || !!processPanels[active] || !pane.place || pane.loading}
             onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
           <Button className="icon-button" aria-label={t("Swap panes")} shortcut={keyLabel("swap")} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
@@ -1151,6 +1247,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
+            rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
+              ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name, keyboardRange: undefined })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
@@ -1179,21 +1277,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
-        <div className="pane-divider" role="separator" aria-label={t("Pane divider")} aria-orientation="vertical"
-          aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
-          onDoubleClick={() => resizeSplit(50)}
-          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
-          onPointerMove={(event) => {
-            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-            const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
-            if (bounds) resizeSplit((event.clientX - bounds.left) / bounds.width * 100);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-              event.preventDefault();
-              resizeSplit(split + (event.key === "ArrowLeft" ? -1 : 1));
-            }
-          }} />
+        <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
         {documents.map(({ id, file, editing }) => (
@@ -1218,6 +1302,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal} historyShortcut={preferences.shortcuts.commandHistory}
             watchEnvironment={preferences.refreshEnvironment}
             pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
+            onCommandSubmitted={recordCommand}
             onShortcut={() => perform("terminal")} onHistory={() => setModal({ kind: "commandHistory" })} onClose={closeTerminal} />
         </Suspense>
       )}
@@ -1227,7 +1312,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         </Button>
         <span title={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] ? null : local?.path ?? null}
-          history={historyItems} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
+          history={commandTexts} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
       <nav className="actionbar" aria-label={t("File actions")}>
@@ -1253,7 +1338,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <span role={status.error ? "alert" : "status"} title={errorText(status.text)}>
           {errorText(status.text)}
         </span>
-        <span>{pane.place && pane.place.kind !== "local" ? pane.place.address : t("Local file system")}</span>
+        <span>{pane.place?.kind === "archive" ? t(pane.place.address) :
+          pane.place && pane.place.kind !== "local" ? pane.place.address : t("Local file system")}</span>
       </footer>
       {modal?.kind === "settings" && <Settings preferences={preferences} onChange={(next) => {
         setLanguage(next.language);
@@ -1324,13 +1410,19 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           }} />
       )}
       {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
+      {modal?.kind === "mcp" && <McpDialog onClose={() => setModal(null)} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
-        onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
+        onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
         <Dialog title={t("File actions")} onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
             {modal.entry && <Button type="button" disabled={paneItem(panes[modal.side], modal.entry)?.place.kind !== "local"}
               onClick={() => { setModal(null); void copyClipboard(modal.side, modal.entry); }}>{t("Copy files to clipboard")}</Button>}
+            {windowsClient && modal.entry && paneItem(panes[modal.side], modal.entry)?.place.kind === "local" &&
+              <Button type="button" onClick={() => {
+                setModal(null);
+                showLockingProcesses(modal.side, paneItem(panes[modal.side], modal.entry));
+              }}>{t("Find locking processes")}</Button>}
             <Button type="button" disabled={panes[modal.side].place?.kind !== "local" || Boolean(panes[modal.side].search)}
               onClick={() => { setModal(null); void pasteClipboard(modal.side); }}>{t("Paste files")}</Button>
           </div>
@@ -1364,7 +1456,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={preferences.shortcuts.previousChange} nextShortcut={preferences.shortcuts.nextChange} onClose={() => setModal(null)} />}
-      {(modal?.kind === "mkdir" || modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
+      {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
+        historyShortcut={preferences.shortcuts.folderNameHistory} onClose={() => setModal(null)}
+        onCreated={async (name) => {
+          await load(modal.side, modal.place, "refresh", name);
+          refresh(opposite(modal.side));
+        }} />}
+      {modal?.kind === "createArchive" && <ArchiveDialog directory={modal.directory} names={modal.names}
+        showHidden={preferences.hidden} onClose={() => setModal(null)} onCreated={() => { refresh("left"); refresh("right"); }} />}
+      {modal?.kind === "archivePassword" && <ArchivePasswordDialog onClose={() => setModal(null)}
+        onOpen={async (password) => { await openArchive(modal.side, modal.path, password); setModal(null); }} />}
+      {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
           hasNonemptyFolders={modal.ftp && "names" in modal ? async () => {
             const ftp = modal.ftp!;
@@ -1376,7 +1478,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           } : undefined}
           onSubmit={async (operation, recursive) => {
           const ftp = modal.ftp;
-          if ("names" in modal) {
+          if ("names" in modal && modal.archive) {
+            const archive = modal.archive;
+            await api.deleteArchiveEntries(archive.id, modal.names.map((name) => [...archive.segments, name]));
+            refresh("left");
+            refresh("right");
+          } else if ("names" in modal) {
             try {
               await batch(modal.names, (name) => ftp
                 ? api.deleteFtp(ftp.id, [...ftp.segments, name], recursive && (modal.directories?.includes(name) ?? false))
@@ -1386,9 +1493,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               refresh("right");
             }
           } else if (operation) {
-            if (ftp && operation.kind === "rename") {
-              await api.renameFtp(ftp.id, [...ftp.segments, operation.name], operation.new_name);
-            } else await api.operate(modal.path, operation);
+            if (operation.kind === "rename") await renameItem(ftp ?? localPath(modal.path), operation.name, operation.new_name);
+            else await api.operate(modal.path, operation);
             refresh("left");
             refresh("right");
             if (modal.kind === "newFile") {
@@ -1399,24 +1505,37 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         }} />
       )}
       {helpTopic && <HelpDialog initialTopic={helpTopic} language={preferences.language} onClose={() => setHelpTopic(null)} />}
+      <McpRequests context={{
+        active, panes, preferences, shortcuts: folderShortcuts, load, remote: routeRemote, refresh,
+        selection: (side, names) => {
+          updatePane(side, (pane) => ({ ...pane, marked: names, selected: names[0] ?? pane.selected, keyboardRange: undefined }));
+          setActive(side);
+        },
+        setPreferences: (next) => { persistPreferences(next); setPreferences(next); },
+        setShortcuts: (next) => { persistFolderShortcuts(next); setFolderShortcuts(next); },
+      }} />
     </div>
   );
 }
 
 function CommandHistory({ commands, onChoose, onClose }: {
-  commands: string[];
+  commands: CommandEntry[];
   onChoose: (command: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const matches = [...new Set(commands)].filter((command) => command.toLowerCase().includes(query.toLowerCase()));
+  const dateLabel = useTimestamps(commands.map(({ date }) => timestampSeconds(date)), "date");
+  const groups = commandHistoryGroups(commands, query, dateLabel, t("Unknown date"));
   return (
     <Dialog title={t("Command history")} onClose={onClose}>
       <div className="dialog-body command-menu">
         <label className="field">{t("Search commands")}
           <input data-initial-focus type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
-        {matches.length ? matches.map((command) => <Button key={command} title={command} onClick={() => onChoose(command)}>{command}</Button>) :
+        {groups.length ? groups.map(({ date, commands }, index) => <section className="command-history-group" key={date + index} aria-label={date}>
+          <h3>{date}</h3>
+          {commands.map((command) => <Button key={command} title={command} onClick={() => onChoose(command)}>{command}</Button>)}
+        </section>) :
           <p>{t("No commands found.")}</p>}
       </div>
     </Dialog>
@@ -1435,9 +1554,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
-  const titles = { mkdir: "New folder", newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
+  const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const title = t(titles[modal.kind]);
   const removing = "names" in modal;
+  const permanent = modal.kind === "delete";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1449,8 +1569,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         setRecursive(true);
         return;
       }
-      await onSubmit(modal.kind === "mkdir" ? { kind: "create_folder", name } :
-        modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
+      await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
     } catch (error) {
       setError(describeError(error));
@@ -1464,11 +1583,17 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     <Dialog key={String(recursive)} title={recursive ? t("Delete FTP folder contents") : title} onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
-          {recursive ? <p className="delete-warning">{t("Permanently delete the selected FTP folders and all their contents?")}</p> : removing
-            ? <p className={modal.kind === "delete" ? "delete-warning" : undefined}>
-              <Message text={modal.kind === "delete" ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
-                {modal.names.length === 1 ? <strong>{modal.names[0]}</strong> : countText(modal.names.length, "item")}
-              </Message></p>
+          {removing
+            ? <div className={permanent ? "permanent-delete-message" : undefined}>
+              {permanent && <Trash2 aria-hidden="true" />}
+              <div>
+                <p>{recursive ? t("Permanently delete the selected FTP folders and all their contents?") :
+                  <Message text={permanent ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
+                    <strong>{modal.names.length === 1 ? modal.names[0] : countText(modal.names.length, "item")}</strong>
+                  </Message>}</p>
+                {permanent && <p className="permanent-delete-note">{t("This action cannot be undone.")}</p>}
+              </div>
+            </div>
             : <label className="field">{t("Name")}
               <input data-initial-focus value={name} type="text" required onChange={(event) => setName(event.target.value)}
                 onFocus={(event) => { if (modal.kind === "rename") event.currentTarget.select(); }} />
@@ -1487,9 +1612,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button>}
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
-          <Button type="submit" className={removing ? "negative" : "primary"}
+          <Button type="submit" className={permanent ? "permanent-delete-button" : removing ? "negative" : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
-            {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "mkdir" || modal.kind === "newFile" ? t("Create") : title}
+            {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}
           </Button>
         </div>
       </form>
