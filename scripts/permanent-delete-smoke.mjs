@@ -47,5 +47,9 @@ export async function testPermanentDelete(page, root) {
   await translated.getByRole("button", { name: "Видалити остаточно", exact: true }).click();
   await row(longName).waitFor({ state: "detached" });
   await assert.rejects(stat(join(folder, longName)), { code: "ENOENT" });
+  await page.getByRole("button", { name: "Налаштування", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Налаштування", exact: true });
+  await settings.getByLabel("Мова", { exact: true }).selectOption("en");
+  await settings.getByRole("button", { name: "Готово", exact: true }).click();
   console.log("Verified permanent delete dialog layout, translated long filenames, keyboard cancellation, and confirmed deletion.");
 }
