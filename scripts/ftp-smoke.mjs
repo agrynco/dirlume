@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename as renamePath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename as renamePath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { close, port } from "./server-smoke.mjs";
 
@@ -22,6 +22,15 @@ const server = [
   "    def ftp_RETR(self, path):",
   "        print('RETR ' + os.path.basename(path), flush=True)",
   "        return super().ftp_RETR(path)",
+  "    def ftp_MLSD(self, path):",
+  "        print('LIST', flush=True)",
+  "        return super().ftp_MLSD(path)",
+  "    def ftp_LIST(self, path):",
+  "        print('LIST', flush=True)",
+  "        return super().ftp_LIST(path)",
+  "    def on_file_sent(self, path):",
+  "        if os.path.basename(path) == 'change-during-download.txt':",
+  "            with open(path, 'ab') as file: file.write(b' changed')",
   "logging.disable(logging.CRITICAL)",
   "auth = DummyAuthorizer()",
   "auth.add_user('dirlume', os.environ['DIRLUME_FIXTURE_PASSWORD'], sys.argv[1], perm='elradfmw')",
@@ -54,6 +63,16 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   await writeFile(join(searchRoot, "unrelated.txt"), "");
   await writeFile(join(searchRoot, "branch", "middle.find.txt"), "");
   await writeFile(join(nestedSearch, "deep.FIND.TXT"), "");
+  for (const count of [100, 1000]) {
+    const bulk = join(remoteFolder, "bulk-" + count);
+    await mkdir(bulk);
+    for (let start = 0; start < count; start += 100) {
+      await Promise.all(Array.from({ length: 100 }, (_, offset) => writeFile(join(bulk, `file-${start + offset}.txt`), "fixture")));
+    }
+  }
+  const unstable = join(remoteFolder, "unstable");
+  await mkdir(unstable);
+  await writeFile(join(unstable, "change-during-download.txt"), "initial");
   await writeFile(join(localFolder, "existing.txt"), "local upload");
   await writeFile(join(localFolder, "файл.txt"), "Unicode name");
   await writeFile(join(remoteCopy, "existing.txt"), "remote original");
@@ -70,6 +89,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   child.stdout.setEncoding("utf8").on("data", (data) => { ftpLog += data; });
   const retrieves = () => ftpLog.split(/\r?\n/).filter((line) => line.startsWith("RETR "));
   const logins = () => (ftpLog.match(/^LOGIN$/gm) ?? []).length;
+  const listings = () => (ftpLog.match(/^LIST$/gm) ?? []).length;
   const profiles = join(config, "ftp-profiles.json");
   const rightPane = page.getByRole("region", { name: "right pane" });
   const right = rightPane.getByRole("listbox", { name: "right files" });
@@ -236,6 +256,30 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await button(complete, "Done").click();
     assert.equal(await readFile(existingLocal, "utf8"), "keep this");
     assert.equal(retrieves().length, beforeSkip);
+
+    for (const count of [100, 1000]) {
+      const folder = "bulk-" + count;
+      await remoteRow(folder + "\\b").click();
+      await page.keyboard.press("F5");
+      await copy.getByLabel("Destination", { exact: true }).fill(destination);
+      const before = listings();
+      await button(copy, "Copy").click();
+      await complete.getByText("1 completed.", { exact: true }).waitFor({ timeout: 90_000 });
+      const commands = listings() - before;
+      assert.ok(commands <= 5, `Expected at most five directory listings for ${count} files, got ${commands}.`);
+      assert.equal((await readdir(join(destination, folder))).length, count);
+      await button(complete, "Done").click();
+      console.log(`FTP downloaded ${count} small files with ${commands} directory listings.`);
+    }
+
+    await remoteRow("unstable").click();
+    await page.keyboard.press("F5");
+    await copy.getByLabel("Destination", { exact: true }).fill(destination);
+    await button(copy, "Copy").click();
+    const changed = page.getByRole("alert").filter({ hasText: "The FTP file changed during the download." });
+    await changed.waitFor();
+    await assert.rejects(readdir(join(destination, "unstable")), { code: "ENOENT" });
+    await button(changed.locator("xpath=ancestor::dialog"), "Done").click();
 
     await remoteRow("guide.md").click();
     await page.keyboard.press("F6");

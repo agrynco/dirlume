@@ -508,6 +508,25 @@ impl Session {
         Ok(found)
     }
 
+    pub fn matches_file(&mut self, segments: &[String], expected: &File) -> Result<bool> {
+        if self.use_mlsd {
+            // MLST may use an absolute name where the directory listing uses a bare name.
+            let path = absolute(segments)?;
+            if let Ok(reply) = self.stream.mlst(Some(&path)) {
+                if let Some((facts, name)) = reply.split_once("; ") {
+                    if (name == path || name == expected.name())
+                        && ListParser::parse_mlst(&format!("{facts}; {}", expected.name()))
+                            .is_ok_and(|file| file == *expected)
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        // Legacy servers and replies with different facts use the listing check.
+        Ok(self.stat(segments)?.as_ref() == Some(expected))
+    }
+
     pub fn folder_size(&mut self, segments: &[String], stop: &AtomicBool) -> Option<(u64, bool)> {
         if stop.load(Ordering::Relaxed) {
             return None;
