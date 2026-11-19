@@ -16,9 +16,14 @@ export async function testShortcutFields(page) {
     }), true, command + " overflows its shortcut field");
     assert.equal(await options.getByRole("button", { name: "Clear shortcut for " + command, exact: true }).isEnabled(), true);
   };
+  const extend = "Extend selection down";
+  await check(extend, "Shift+↓");
+  await check("Forward", "Alt+→");
+  await lookup(extend).click();
+  await options.getByLabel("New shortcut for " + extend, { exact: true }).press("Control+Alt+Shift+Backspace");
   const verify = async () => {
-    await check("Extend selection down", "Shift+ArrowDown");
-    await check("Forward", "Alt+ArrowRight");
+    await check(extend, "Ctrl+Alt+Shift+Backspace");
+    await check("Forward", "Alt+→");
   };
   await verify();
   const grip = options.getByRole("button", { name: "Resize Options", exact: true });
