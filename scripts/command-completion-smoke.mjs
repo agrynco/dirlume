@@ -50,7 +50,7 @@ export async function testCommandCompletion(page, root) {
   assert.equal(await input.inputValue(), "git checkout --quiet");
 
   await draft("cd comp", /completion folder/);
-  assert.equal(await option(/completion file/).count(), 0);
+  assert.deepEqual(await option(/completion file/).allTextContents(), []);
   await option(/completion folder/).click();
   assert.match(await input.inputValue(), /^cd .*completion folder/);
 
