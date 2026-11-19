@@ -161,6 +161,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <RotateCcw /> {t("Restore defaults")}
         </Button>
       )}
+      {standalone && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
       <Button type="button" disabled={!hasChanges} onClick={apply}>{t("Apply")}</Button>
       <Button type="button" className="primary" onClick={() => { apply(); close(); }}>{t("Done")}</Button>
     </>}>

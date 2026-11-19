@@ -14,7 +14,7 @@ export async function testProcessExecutablePath(page, appPid) {
     const displayed = await executable.innerText();
     assert.ok(isAbsolute(displayed));
     assert.match(displayed, /[\\/]dirlume\.exe$/i);
-    assert.equal(await executable.getAttribute("title"), displayed);
+    assert.equal(await executable.getAttribute("data-tooltip"), displayed);
     await table.locator(".process-cell-executable").getByText("—", { exact: true }).first().waitFor();
     const column = table.getByRole("columnheader").filter({ has: page.getByRole("button", { name: "Executable path", exact: true }) });
     const heading = column.getByRole("button", { name: "Executable path", exact: true });

@@ -258,7 +258,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
-      <header className={`pane-heading${localFolder && !processView && !search ? " local-heading" : ""}`}>
+      <header className={`pane-heading${localFolder && !host && !processView && !search ? " local-heading" : ""}`}>
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}

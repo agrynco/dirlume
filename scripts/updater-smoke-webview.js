@@ -14,8 +14,8 @@ async (upgraded, reject) => {
     if (upgraded) {
       await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
       const updates = await waitFor(() => {
-        const help = [...document.querySelectorAll(".main-menu [data-menu-group]")].find((button) => button.textContent === "Help");
-        if (help?.getAttribute("aria-expanded") === "false") help.click();
+        const commands = [...document.querySelectorAll(".main-menu [data-menu-group]")].find((button) => button.textContent === "Commands");
+        if (commands?.getAttribute("aria-expanded") === "false") commands.click();
         return [...document.querySelectorAll(".main-menu [data-menu-item]")].find((button) => button.textContent === "Check for updates");
       });
       updates.click();

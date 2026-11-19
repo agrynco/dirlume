@@ -56,7 +56,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await page.locator("#right-pane.active").waitFor();
   await list("right").press("Control+8");
   await opened("right", src);
-  await list("right").locator('[data-current="true"][title=".."]').waitFor();
+  await list("right").locator('[data-current="true"][data-tooltip=".."]').waitFor();
   assert.equal(await dialog().count(), 0);
   assert.equal(await page.locator("#left-path").getAttribute("data-path"), src);
   await navigate("right", dst);

@@ -115,8 +115,8 @@ async function testTaskSource(page, source) {
     await editor.getByText(/\[x\] Preserve this state/).waitFor();
     await editor.press("Control+End");
     await page.keyboard.insertText("After preview.");
-    await window.getByRole("button", { name: "Save", exact: true }).click();
-    await window.getByRole("button", { name: "Save", exact: true }).and(window.locator("button:disabled")).waitFor();
+    await editor.press("F2");
+    await window.locator(".document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
     assert.equal(await readFile(path, "utf8"), (dirty ? "Before preview.\r\n\r\n" : "") + toggled + "After preview.");
     await window.getByRole("button", { name: "Close document", exact: true }).click();
   }

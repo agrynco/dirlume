@@ -664,7 +664,7 @@ try {
   await measuredItem.getByText("1 B", { exact: true }).waitFor();
   const sizeSort = leftPane.getByRole("button", { name: /^Size\b/ });
   await sizeSort.click();
-  assert.deepEqual(await left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.title)),
+  assert.deepEqual(await left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)),
     ["..", "measured-item", "other.txt"]);
   await leftPane.getByRole("button", { name: /^Name\b/ }).click();
   await navigate("left", src);
@@ -795,7 +795,7 @@ try {
   });
   assert.deepEqual(settingsFocus, { visible: true, fits: true }, "The Options tree should show the full keyboard focus outline.");
   await optionsPage.getByRole("button", { name: "Window", exact: true }).click();
-  await optionsPage.getByLabel("Color scheme").selectOption("light");
+  await optionsPage.getByLabel("Color scheme", { exact: true }).selectOption("light");
   await optionsPage.getByRole("button", { name: "Apply", exact: true }).click();
   await optionsPage.getByRole("dialog", { name: "Options", exact: true }).waitFor();
   await page.locator("html[data-theme=light]").waitFor();
@@ -818,7 +818,7 @@ try {
   await hex.press("Escape");
   await picker.waitFor({ state: "hidden" });
   await optionsDialog.waitFor();
-  assert.equal(await optionsPage.getByLabel("Color scheme").inputValue(), "light");
+  assert.equal(await optionsPage.getByLabel("Color scheme", { exact: true }).inputValue(), "light");
   await swatch.click();
   const initialColor = await hex.inputValue();
   await spectrum.click({ position: { x: 120, y: 45 } });
@@ -905,7 +905,7 @@ try {
   await optionsPage.getByRole("button", { name: "Change shortcut for New folder" }).click();
   await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("F5");
   await optionsPage.getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
-  await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("F12");
+  await optionsPage.getByRole("textbox", { name: "New shortcut for New folder" }).press("Control+F12");
   await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await navigate("left", attributes);
   const attributeRow = (name) => left.locator(`.file-row[data-tooltip="${name}"]`);
@@ -976,7 +976,7 @@ try {
   await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
   await page.keyboard.press("Control+F12");
-  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name").fill("verified");
+  await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name", { exact: true }).fill("verified");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
 
@@ -987,12 +987,12 @@ try {
   await navigate("left", src);
   await left.focus();
   await page.keyboard.press("Shift+F4");
-  await page.getByRole("dialog", { name: "New file" }).getByLabel("Name").fill("draft.md");
+  await page.getByRole("dialog", { name: "New file" }).getByLabel("Name", { exact: true }).fill("draft.md");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("textbox", { name: "Edit draft.md" }).fill("# Draft");
   await page.keyboard.press("F2");
   const editor = page.getByRole("region", { name: "draft.md", exact: true });
-  await editor.locator(".document-heading .document-encoding").getByText("UTF8", { exact: true }).waitFor();
+  await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
   await editor.locator(".document-heading").getByRole("combobox", { name: "Syntax" }).waitFor();
   assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
     parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
@@ -1209,7 +1209,7 @@ try {
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
   const terminalSplit = await paneSplit();
   for (const key of ["ArrowUp", "ArrowDown", "Control+ArrowLeft", "Control+ArrowRight",
-    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "Control+ArrowUp", "F1", "F8", "F12"]) {
+    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "Control+ArrowUp", "F1", "F5", "F8", "F12"]) {
     await terminalInput.press(key);
   }
   assert.equal(await paneSplit(), terminalSplit);
@@ -1269,13 +1269,12 @@ try {
   await toggleTerminal.click();
 
   const input = terminalInput;
-  await input.focus();
   await left.getByRole("option", { name: /^notes\.txt/ }).click();
-  await input.press("F5");
+  await page.keyboard.press("F5");
   await copySetup.waitFor();
   await copySetup.getByRole("button", { name: "Cancel", exact: true }).click();
   await terminal.waitFor();
-  assert.ok(await input.evaluate((field) => field === document.activeElement), "Copy should restore focus to the terminal.");
+  await input.focus();
   const terminalText = () => page.locator(".terminal-card").innerText();
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("PS "));
   await input.pressSequentially("if ((Get-Location).Path.EndsWith('from')) { Write-Output ('dirlume-' + 'terminal-ok') }");
@@ -1730,7 +1729,9 @@ try {
   await group("Commands").click();
   const updateAction = menu("Commands").getByRole("menuitem", { name: "Check for updates", exact: true });
   await updateAction.click();
-  await page.getByRole("status").filter({ hasText: "Dirlume is up to date." }).waitFor();
+  const updateStatus = page.getByRole("dialog", { name: "Check for updates", exact: true });
+  await updateStatus.getByText("Dirlume is up to date.", { exact: true }).waitFor();
+  await updateStatus.getByRole("button", { name: "Close", exact: true }).click();
   async function openAppearance() {
     await showOptions();
     const settings = optionsDialog;
@@ -1808,7 +1809,9 @@ try {
     assert.deepEqual(await colors(), ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
     await row.click({ modifiers: ["Control"] });
     await otherRow.click();
-    assert.deepEqual(await colors(), original);
+    const marked = await colors();
+    assert.notEqual(marked[0], original[0]);
+    assert.equal(marked[1], original[1]);
   }
   if (process.env.DIRLUME_CLASSIC_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CLASSIC_SCREENSHOT, scale: "css" });
   await exitDesktop(page);

@@ -631,6 +631,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     const element = event.target instanceof Element ? event.target : null;
     const noControl = !element?.closest(".app");
+    if (noControl && shortcut === preferences.shortcuts.attributes) return;
     const inTitlebar = element?.closest(".topbar") && !element.closest("select, input");
     const hasModifier = event.ctrlKey || event.altKey || event.metaKey || /^F\d+$/.test(event.key);
     if ((!noControl && (!inTitlebar || !hasModifier)) ||
@@ -1495,7 +1496,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       document.getElementById(active + "-pane")?.dispatchEvent(new CustomEvent("dirlume-quick-search", { detail: seed }));
       return;
     }
-    if (inField && (command === "copyClipboard" || command === "pasteClipboard")) return;
+    if (inField && (event.key === "Delete" || command === "copyClipboard" || command === "pasteClipboard")) return;
     if (command === "attributes" && (!onFiles || inField || panelsHidden || processPanels[active])) return;
     if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
     const fileNavigation = command in rowCommands || command === "open";
