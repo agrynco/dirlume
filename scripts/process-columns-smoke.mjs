@@ -10,7 +10,7 @@ export async function testProcessColumns(page) {
   const width = (side, name) => resize(side, name).evaluate((handle) => handle.parentElement.getBoundingClientRect().width);
 
   for (const [side, shortcut] of [["left", "Alt+F1"], ["right", "Alt+F2"]]) {
-    await page.keyboard.press(shortcut);
+    await pane(side).getByRole("listbox", { name: side + " files", exact: true }).press(shortcut);
     await pane(side).getByRole("button", { name: "Processes", exact: true }).click();
     await table(side).locator("tbody tr").first().waitFor();
   }
@@ -72,7 +72,7 @@ export async function testProcessColumns(page) {
   await table("left").focus();
   await page.locator(".actionbar").getByRole("button", { name: "Back to files", exact: true }).click();
   await table("left").waitFor({ state: "detached" });
-  await page.keyboard.press("Alt+F1");
+  await pane("left").getByRole("listbox", { name: "left files", exact: true }).press("Alt+F1");
   await pane("left").getByRole("button", { name: "Processes", exact: true }).click();
   for (const [name, value] of customized) {
     assert.equal(await width("left", name), value);

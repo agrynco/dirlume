@@ -10,7 +10,7 @@ export async function testProcessQuickSearch(page, root) {
   const pane = (side) => page.getByRole("region", { name: side + " pane", exact: true });
   try {
     for (const [side, shortcut] of [["left", "Alt+F1"], ["right", "Alt+F2"]]) {
-      await page.keyboard.press(shortcut);
+      await pane(side).getByRole("listbox", { name: side + " files", exact: true }).press(shortcut);
       await pane(side).getByRole("button", { name: "Processes", exact: true }).click();
       const table = pane(side).getByRole("grid", { name: "Running processes", exact: true });
       for (const child of children) await table.getByRole("gridcell", { name: String(child.pid), exact: true }).waitFor();

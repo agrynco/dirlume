@@ -3,8 +3,8 @@ import { isAbsolute } from "node:path";
 
 export async function testProcessExecutablePath(page, appPid) {
   for (const [side, shortcut] of [["left", "Alt+F1"], ["right", "Alt+F2"]]) {
-    await page.keyboard.press(shortcut);
     const pane = page.getByRole("region", { name: side + " pane", exact: true });
+    await pane.getByRole("listbox", { name: side + " files", exact: true }).press(shortcut);
     await pane.getByRole("button", { name: "Processes", exact: true }).click();
     const table = pane.getByRole("grid", { name: "Running processes", exact: true });
     const app = table.getByRole("row").filter({
