@@ -22,7 +22,7 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownAnchor } from "./MarkdownPreview";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, localPath, opposite, paneItem, parentPlace,
+  applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, visibleEntries,
   type PaneState, type Side, type SortColumn,
 } from "./panes";
@@ -138,7 +138,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     left: visibleEntries(panes.left, preferences.hidden),
     right: visibleEntries(panes.right, preferences.hidden),
   }), [panes, preferences.hidden]);
-  const currentRow = entries[active].find((entry) => entry.name === pane.selected) ?? entries[active][0];
+  const currentRow = entries[active][paneCursorIndex(pane, entries[active])];
   const current = currentRow?.name === ".." ? undefined : currentRow;
   const currentItem = paneItem(pane, current);
   const local = pane.place?.kind === "local" ? pane.place : null;
@@ -739,7 +739,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     });
   }
 
-  function fileFor(side: Side, entry = entries[side].find((entry) => entry.name === panes[side].selected) ?? entries[side][0]): NamedFile | null {
+  function fileFor(side: Side, entry = entries[side][paneCursorIndex(panes[side], entries[side])]): NamedFile | null {
     const item = paneItem(panes[side], entry);
     return item && item.place.kind !== "kswitcher" && !item.entry.directory && !item.entry.link
       ? { place: item.place, name: item.entry.name } : null;
@@ -797,7 +797,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       if (!items.length) return;
       const offset = rowCommands[command as keyof typeof rowCommands];
       updatePane(active, (pane) => {
-        const index = Math.max(0, items.findIndex(({ name }) => name === pane.selected));
+        const index = paneCursorIndex(pane, items);
         const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
         return isRangeCommand(command) ? extendKeyboardRange(pane, items, index, next) :
           { ...pane, selected: items[next].name, keyboardRange: undefined };
