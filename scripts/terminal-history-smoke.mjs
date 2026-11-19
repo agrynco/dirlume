@@ -55,16 +55,23 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
   const secure = "Read-Host 'history-password-prompt' -AsSecureString | Out-Null";
   await run(secure);
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("history-password-prompt:"));
+  const queued = "Write-Output ('queued-' + 'history-marker')";
+  await input().fill(queued);
+  await input().press("Shift+Enter");
   await run("disposable-history-password");
   await waitForCommand(secure);
+  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("queued-history-marker"));
   await terminalInput().pressSequentially("Write-Output 'abandoned-draft'");
   await terminalInput().press("Control+c");
   await run("Write-Output 'history-after-cancel'");
   await waitForCommand("Write-Output 'history-after-cancel'");
   const history = await stored();
   assert.equal(history.filter(({ text }) => text === fromField).length, 1);
+  assert.equal(history.filter(({ text }) => text === queued).length, 1);
   assert.equal(history.some(({ text }) => /abandoned-draft|disposable-history-password|Set-Location -LiteralPath/.test(text)), false);
   assert.ok(history.find(({ text }) => text === direct).date > 0);
+  await run("exit");
+  await waitForCommand("exit");
 
   await page.evaluate(() => {
     const key = "dirlume.command-history";

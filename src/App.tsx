@@ -9,7 +9,7 @@ import {
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, connectFtpLocation, describeError, folderLabel, isLockError, isPermissionError, placePath, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
-import { textEncodingLabels, type AppUpdate, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
+import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog } from "./Dialog";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
@@ -38,7 +38,7 @@ import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
-import { changeShellDirectory, shellArgument, shellCommand } from "./shell";
+import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const fileDrag = "application/x-dirlume-files";
@@ -120,7 +120,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const [panelsHidden, setPanelsHidden] = useState(false);
   const [split, setSplit] = useState(Number.isFinite(startup?.split) ? Math.max(20, Math.min(80, startup!.split)) : 50);
   const [commandLine, setCommandLine] = useState("");
-  const [pendingCommands, setPendingCommands] = useState<string[]>([]);
+  const [pendingCommands, setPendingCommands] = useState<TerminalCommand[]>([]);
   const commandInput = useRef<HTMLTextAreaElement>(null);
   const [historyItems, setHistoryItems] = useState(readCommandHistory);
   const commandTexts = useMemo(() => historyItems.map(({ text }) => text), [historyItems]);
@@ -800,13 +800,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (!commandLine.trim()) {
-      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, "\r"]);
+      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, null]);
       else if (currentRow) open(active, currentRow);
       return;
     }
     if (!local || !openTerminal()) return;
-    const prefix = changeShellDirectory(local.path) + (windowsClient ? "; " : " && ");
-    setPendingCommands((commands) => [...commands, `${prefix}${shellCommand(commandLine)}\r`]);
+    setPendingCommands((commands) => [...commands, { command: commandLine, directory: local.path }]);
     recordCommand(commandLine);
     setCommandLine("");
   }
@@ -1265,7 +1264,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             theme={theme} scheme={scheme} shortcut={preferences.shortcuts.terminal} historyShortcut={preferences.shortcuts.commandHistory}
             watchEnvironment={preferences.refreshEnvironment}
             pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
-            onCommand={recordCommand}
+            onCommandSubmitted={recordCommand}
             onShortcut={() => perform("terminal")} onHistory={() => setModal({ kind: "commandHistory" })} onClose={closeTerminal} />
         </Suspense>
       )}
@@ -1374,7 +1373,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       )}
       {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} language={preferences.language} onClose={() => setModal(null)}
-        onChoose={(line) => { setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
+        onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); requestAnimationFrame(() => commandInput.current?.focus()); }} />}
       {modal?.kind === "fileActions" && (
         <Dialog title={t("File actions")} onClose={() => setModal(null)}>
           <div className="dialog-body command-menu">
