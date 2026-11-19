@@ -30,16 +30,24 @@ export function WindowResizeGrip({ title }: { title: string }) {
     if (!isTauri()) return;
     const handle = getCurrentWindow();
     let active = true;
+    let revision = 0;
+    let frame = 0;
     const sync = () => {
-      void Promise.all([handle.isResizable(), handle.isMaximized(), handle.isFullscreen()])
-        .then(([resizable, maximized, fullscreen]) => {
-          if (active) setCanResize(resizable && !maximized && !fullscreen);
-        }).catch((error: unknown) => reportFrontendError("window_state", error));
+      if (!active) return;
+      const requested = ++revision;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        void Promise.all([handle.isResizable(), handle.isMaximized(), handle.isFullscreen()])
+          .then(([resizable, maximized, fullscreen]) => {
+            if (active && requested === revision) setCanResize(resizable && !maximized && !fullscreen);
+          }).catch((error: unknown) => reportFrontendError("window_state", error));
+      });
     };
     const resize = handle.onResized(sync);
-    sync();
+    void resize.then(sync).catch((error: unknown) => reportFrontendError("window_state", error));
     return () => {
       active = false;
+      cancelAnimationFrame(frame);
       void resize.then((unlisten) => unlisten()).catch(() => {});
     };
   }, []);
