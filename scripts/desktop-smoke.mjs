@@ -12,6 +12,7 @@ import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
+import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
@@ -1579,6 +1580,7 @@ try {
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
+  await testCompareLayouts(page, temp);
   await testCommandCompletion(page, temp);
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);

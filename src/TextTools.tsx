@@ -1,7 +1,7 @@
 import { errorText, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
 import { describeError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
@@ -12,7 +12,8 @@ import { systemTheme, type Theme } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
 import { normalized } from "./textFormat";
-import type { CompareRequest, DiffResult } from "./compare.worker";
+import type { CompareRequest, DiffBlock, DiffLine, DiffResult } from "./compare.worker";
+import { SplitDivider } from "./SplitDivider";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
 
@@ -191,6 +192,93 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   );
 }
 
+type CompareLayout = "unified" | "side-by-side";
+const compareLayoutKey = "dirlume.compare-layout";
+const compareConnectorsKey = "dirlume.compare-connectors";
+
+function compareOption(key: string, fallback: string) {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+
+function saveCompareOption(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* Keep the setting for this dialog. */ }
+}
+
+function DiffText({ line }: { line: DiffLine | null }) {
+  if (!line?.text) return " ";
+  return line.fragments ? line.fragments.map(({ text, changed }, index) =>
+    changed ? <mark key={index}>{text}</mark> : text) : line.text;
+}
+
+function ChangeConnector({ block, ratio }: { block: DiffBlock; ratio: number }) {
+  const svg = useRef<SVGSVGElement>(null);
+  const lastRow = block.rows.length - 1;
+  const firstMissingLeft = block.rows.findIndex(({ left }) => left === null);
+  const firstMissingRight = block.rows.findIndex(({ right }) => right === null);
+  const leftEnd = firstMissingLeft < 0 ? lastRow : firstMissingLeft - 1;
+  const rightEnd = firstMissingRight < 0 ? lastRow : firstMissingRight - 1;
+  const [ends, setEnds] = useState([leftEnd < 0 ? 0 : 100, rightEnd < 0 ? 0 : 100]);
+
+  useLayoutEffect(() => {
+    const group = svg.current?.closest(".diff-block");
+    const shorter = Math.min(leftEnd, rightEnd);
+    if (!group || shorter < 0 || shorter === lastRow) return;
+    const row = group.children[shorter];
+    const measure = () => {
+      const region = group.getBoundingClientRect();
+      const bottom = (row.getBoundingClientRect().bottom - region.top) / region.height * 100;
+      if (Number.isFinite(bottom)) setEnds(leftEnd < rightEnd ? [bottom, 100] : [100, bottom]);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(group);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [leftEnd, rightEnd, lastRow, ratio]);
+
+  const [a, b] = ends;
+  return <div className="diff-connector" aria-hidden="true">
+    <svg ref={svg} viewBox="0 0 24 100" preserveAspectRatio="none">
+      <path data-ends={ends.join(",")} className={leftEnd < 0 ? "added" : rightEnd < 0 ? "removed" : "changed"}
+        d={`M0 0 H24 V${b} C14 ${b} 10 ${a} 0 ${a} Z`} />
+    </svg>
+  </div>;
+}
+
+function DiffRows({ block, current, split, connectors, ratio }: {
+  block: DiffBlock;
+  current: number;
+  split: boolean;
+  connectors: boolean;
+  ratio: number;
+}) {
+  const changed = block.group !== null;
+  const unified = (left: DiffLine | null, right: DiffLine | null, kind: string) =>
+    <div key={`${left?.number ?? ""}:${right?.number ?? ""}`} className={`diff-row diff-unified ${kind}`}>
+      <span className="diff-number">{left?.number}</span>
+      <span className="diff-number">{right?.number}</span>
+      <span className="diff-sign" aria-hidden="true">{kind === "added" ? "+" : kind === "removed" ? "−" : ""}</span>
+      <span className="diff-text"><DiffText line={right ?? left} /></span>
+    </div>;
+  const half = (line: DiffLine | null, side: "left" | "right") =>
+    <div className={`diff-half ${changed && line ? side === "left" ? "removed" : "added" : ""}`} data-diff-side={side}>
+      <span className="diff-number">{line?.number}</span>
+      <span className="diff-text"><DiffText line={line} /></span>
+    </div>;
+  return <div className={`diff-block${changed && block.group === current ? " current" : ""}`}
+    data-change={block.group ?? undefined}>
+    {split ? block.rows.map(({ left, right }) =>
+      <div key={`${left?.number ?? ""}:${right?.number ?? ""}`} className="diff-row diff-split">
+        {half(left, "left")}{half(right, "right")}
+      </div>
+    ) : changed ? <>
+      {block.rows.flatMap(({ left }) => left ? unified(left, null, "removed") : [])}
+      {block.rows.flatMap(({ right }) => right ? unified(null, right, "added") : [])}
+    </> : block.rows.map(({ left, right }) => unified(left, right, "same"))}
+    {split && changed && connectors && <ChangeConnector block={block} ratio={ratio} />}
+  </div>;
+}
+
 export function CompareDialog({ left, right, previousShortcut, nextShortcut, onClose }: {
   left: NamedFile;
   right: NamedFile;
@@ -201,11 +289,15 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const [documents, setDocuments] = useState<{ left: string; right: string } | null>(null);
   const [error, setError] = useState("");
   const [whitespace, setWhitespace] = useState(false);
+  const [layout, setLayout] = useState<CompareLayout>(() => compareOption(compareLayoutKey, "side-by-side") === "unified"
+    ? "unified" : "side-by-side");
+  const [connectors, setConnectors] = useState(() => compareOption(compareConnectorsKey, "true") === "true");
+  const [ratio, setRatio] = useState(50);
   const [current, setCurrent] = useState(0);
   const [comparison, setComparison] = useState<{ documents: { left: string; right: string }; whitespace: boolean; result: DiffResult } | null>(null);
   const output = useRef<HTMLDivElement>(null);
   const result = comparison?.documents === documents && comparison.whitespace === whitespace ? comparison.result : null;
-  const computed = result && "rows" in result ? result : null;
+  const computed = result && "blocks" in result ? result : null;
   const groups = computed?.groups ?? 0;
 
   useEffect(() => {
@@ -250,10 +342,16 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   function jump(offset: number) {
     if (!groups) return;
     const group = current === 0 ? offset > 0 ? 1 : groups : (current - 1 + offset + groups) % groups + 1;
+    if (group === current) output.current?.querySelector(`[data-change="${group}"]`)?.scrollIntoView({ block: "start", inline: "nearest" });
     setCurrent(group);
-    output.current?.querySelector(`[data-change="${group}"]`)?.scrollIntoView({ block: "center" });
   }
 
+  useLayoutEffect(() => {
+    if (current) output.current?.querySelector(`[data-change="${current}"]`)?.scrollIntoView({ block: "start", inline: "nearest" });
+  }, [current, layout]);
+
+  const split = layout === "side-by-side";
+  const columns = { "--comparison-columns": `minmax(0, ${ratio}fr) var(--comparison-gutter) minmax(0, ${100 - ratio}fr)` } as CSSProperties;
   const failure = error || (result && "error" in result ? result.error : "");
   return (
     <Dialog title={t("Compare files")} wide onClose={onClose} onKeyDown={(event) => {
@@ -267,22 +365,37 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
         <Button disabled={!groups} shortcut={showShortcut(previousShortcut)} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
         <Button disabled={!groups} shortcut={showShortcut(nextShortcut)} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
         <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
+        <label className="comparison-layout">{t("Layout")}
+          <select aria-label={t("Layout")} value={layout} onChange={(event) => {
+            const next = event.target.value as CompareLayout;
+            setLayout(next);
+            saveCompareOption(compareLayoutKey, next);
+          }}>
+            <option value="unified">{t("Unified")}</option>
+            <option value="side-by-side">{t("Side-by-side")}</option>
+          </select>
+        </label>
+        {split && <label><input type="checkbox" checked={connectors} onChange={(event) => {
+          setConnectors(event.target.checked);
+          saveCompareOption(compareConnectorsKey, String(event.target.checked));
+        }} /> {t("Show change connectors")}</label>}
         <label><input type="checkbox" checked={whitespace} onChange={(event) => {
           setWhitespace(event.target.checked); setCurrent(0);
         }} /> {t("Show whitespace changes")}</label>
       </div>
-      <div className="comparison-head"><span title={left.name}>{left.name}</span><span title={right.name}>{right.name}</span></div>
       {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}
       {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
       {documents && !result && !failure && <div className="dialog-body" role="status">{t("Comparing…")}</div>}
       {computed && (
-        <div className="comparison" ref={output} tabIndex={0} aria-label={t("File differences")}>
-          {computed.rows.map((row, index) => (
-            <div key={index} className={`diff-row ${row.kind}${row.group !== null && row.group === current ? " current" : ""}`}
-              data-change={row.group ?? undefined}>
-              <span>{row.left || " "}</span><span>{row.right || " "}</span>
-            </div>
-          ))}
+        <div className="comparison" data-layout={layout} style={columns} ref={output} tabIndex={0} aria-label={t("File differences")}>
+          <div className={`comparison-head${split ? " comparison-head-split" : ""}`}>
+            <span title={left.name}>{left.name}</span>
+            {split ? <SplitDivider label={t("Comparison divider")} className="comparison-divider" value={ratio} onResize={setRatio} />
+              : <span aria-hidden="true">→</span>}
+            <span title={right.name}>{right.name}</span>
+          </div>
+          {computed.blocks.map((block, index) =>
+            <DiffRows key={index} block={block} current={current} split={split} connectors={connectors} ratio={ratio} />)}
         </div>
       )}
     </Dialog>

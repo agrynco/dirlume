@@ -1,5 +1,6 @@
 import { Button } from "./Button";
 import { CommandField } from "./CommandField";
+import { clampSplit, SplitDivider } from "./SplitDivider";
 import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
@@ -119,7 +120,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const busy = modal?.kind === "transfer";
   const [terminal, setTerminal] = useState<TerminalSession | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
-  const [split, setSplit] = useState(Number.isFinite(startup?.split) ? Math.max(20, Math.min(80, startup!.split)) : 50);
+  const [split, setSplit] = useState(Number.isFinite(startup?.split) ? clampSplit(startup!.split) : 50);
   const [commandLine, setCommandLine] = useState("");
   const [pendingCommands, setPendingCommands] = useState<TerminalCommand[]>([]);
   const commandInput = useRef<HTMLTextAreaElement>(null);
@@ -766,10 +767,6 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }));
   }
 
-  function resizeSplit(value: number) {
-    setSplit(Math.max(20, Math.min(80, value)));
-  }
-
   function openTerminal() {
     if (!local) {
       setStatus({ text: "Choose a local folder to open a terminal.", error: true });
@@ -955,8 +952,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
         break;
       }
-      case "shrinkLeft": resizeSplit(split - 1); break;
-      case "growLeft": resizeSplit(split + 1); break;
+      case "shrinkLeft": setSplit(clampSplit(split - 1)); break;
+      case "growLeft": setSplit(clampSplit(split + 1)); break;
       case "terminal":
         if (panelsHidden) setPanelsHidden(false);
         else if (terminal || openTerminal()) setPanelsHidden(true);
@@ -1226,21 +1223,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             ftpShortcut={preferences.shortcuts.ftpSources} zoomShortcut={preferences.shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
-        <div className="pane-divider" role="separator" aria-label={t("Pane divider")} aria-orientation="vertical"
-          aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(split)} tabIndex={0}
-          onDoubleClick={() => resizeSplit(50)}
-          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
-          onPointerMove={(event) => {
-            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-            const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
-            if (bounds) resizeSplit((event.clientX - bounds.left) / bounds.width * 100);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-              event.preventDefault();
-              resizeSplit(split + (event.key === "ArrowLeft" ? -1 : 1));
-            }
-          }} />
+        <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
         {documents.map(({ id, file, editing }) => (

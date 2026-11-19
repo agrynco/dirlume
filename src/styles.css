@@ -849,16 +849,79 @@ button.color-swatch {
 .markdown blockquote { border-left: 3px solid var(--line); padding-left: 12px; color: var(--muted); margin-left: 2px; }
 .markdown table { border-collapse: collapse; }
 .markdown td, .markdown th { border: 1px solid var(--line); padding: 4px 8px; }
-.comparison-toolbar label { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); }
-.comparison-head, .diff-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.comparison-head { border-block: 1px solid var(--line); background: var(--raised); }
-.comparison-head span, .diff-row span { padding: 3px 10px; border-right: 1px solid var(--line); }
-.comparison-head span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.comparison { min-height: 120px; overflow: auto; background: var(--text-bg); color: var(--text-ink); font: var(--mono-size)/1.5 var(--mono); }
-.diff-row span { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 20px; }
-.diff-row.removed span:first-child, .diff-row.changed span:first-child { background: var(--removed); }
-.diff-row.added span:last-child, .diff-row.changed span:last-child { background: var(--added); }
-.diff-row.current { outline: 1px solid var(--accent); outline-offset: -1px; }
+.comparison-toolbar { flex-wrap: wrap; }
+.comparison-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.comparison-layout { margin-inline-start: auto; }
+.comparison-layout select { padding: 5px 8px; }
+.comparison {
+  --comparison-gutter: 24px;
+  min-height: 120px;
+  overflow: auto;
+  scroll-padding-block-start: 2.4em;
+  background: var(--text-bg);
+  color: var(--text-ink);
+  font: var(--mono-size)/1.5 var(--mono);
+}
+.comparison-head {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-block: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--ink);
+}
+.comparison-head-split, .diff-split, .diff-connector {
+  display: grid;
+  grid-template-columns: var(--comparison-columns);
+  gap: 0;
+}
+.comparison-head > span { padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.comparison-divider {
+  cursor: col-resize;
+  touch-action: none;
+  background: linear-gradient(to right, transparent calc(50% - 1px), var(--line) calc(50% - 1px), var(--line) 50%, transparent 50%);
+}
+.comparison-divider:hover, .comparison-divider:focus-visible { background-color: var(--hover); }
+.diff-block { position: relative; }
+.diff-block.current::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--accent);
+  pointer-events: none;
+}
+.diff-split { background: var(--raised); }
+.diff-half {
+  display: grid;
+  grid-template-columns: 5ch minmax(0, 1fr);
+  background: var(--text-bg);
+}
+.diff-half:first-child { grid-column: 1; border-inline-end: 1px solid var(--line); }
+.diff-half:last-child { grid-column: 3; border-inline-start: 1px solid var(--line); }
+.diff-unified { display: grid; grid-template-columns: 5ch 5ch 2ch minmax(0, 1fr); }
+.diff-number {
+  padding-inline: 0.35em;
+  border-inline-end: 1px solid var(--line);
+  color: var(--muted);
+  text-align: end;
+  user-select: none;
+}
+.diff-sign { text-align: center; user-select: none; }
+.diff-text { padding-inline: 0.55em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-row :is(.added, .removed), .diff-unified:is(.added, .removed) { background: var(--diff-tone); }
+.diff-row .removed, .diff-unified.removed, .diff-connector .removed { --diff-tone: var(--removed); }
+.diff-row .added, .diff-unified.added, .diff-connector .added { --diff-tone: var(--added); }
+.diff-text mark {
+  color: inherit;
+  background: color-mix(in srgb, var(--diff-tone), var(--text-ink) 20%);
+}
+.diff-connector { position: absolute; inset: 0; pointer-events: none; }
+.diff-connector svg { grid-column: 2; width: 100%; height: 100%; min-height: 0; }
+.diff-connector path { fill: color-mix(in srgb, var(--diff-tone), var(--accent) 20%); }
+.diff-connector .changed { --diff-tone: color-mix(in srgb, var(--added), var(--removed)); }
 
 @media (max-width: 900px) { :root { --file-name-default: 88px; --file-size-default: 63px; --file-modified-default: 106px; } .actionbar { gap: 4px; } .actionbar button { padding-inline: 6px; } }
 @media (max-width: 760px) { :root { --file-name-default: 75px; --file-size-default: 55px; --file-modified-default: 87px; } .workspace { padding-inline: 8px; } .file-date { padding-left: 5px; } .file-columns .col-modified button { padding-inline-start: 5px; } }
