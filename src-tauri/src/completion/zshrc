@@ -1,0 +1,31 @@
+PS1=''
+RPS1=''
+autoload -Uz compinit
+compinit -i -D >/dev/null 2>&1
+
+compadd() {
+    # Some completion functions already query matches through these flags.
+    if (( ${argv[(I)-[AOD]]} )); then
+        builtin compadd "$@"
+        return
+    fi
+    local -a matches
+    local value
+    builtin compadd -O matches "$@"
+    for value in "${matches[@]}"; do
+        printf '%s\0' "$value" >> "$DIRLUME_COMPLETION_OUTPUT"
+    done
+    builtin compadd "$@"
+}
+
+_dirlume_complete_widget() {
+    BUFFER=$DIRLUME_COMPLETION_DRAFT
+    CURSOR=$DIRLUME_COMPLETION_CURSOR
+    zle _dirlume_matches
+    exit
+}
+
+zle -C _dirlume_matches complete-word _main_complete
+zle -N _dirlume_complete_widget
+bindkey '^I' _dirlume_complete_widget
+printf 'DIRLUME-ZSH-READY\n'

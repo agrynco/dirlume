@@ -10,6 +10,7 @@ import { testMarkdown } from "./markdown-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testCommandCompletion } from "./command-completion-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -472,7 +473,7 @@ try {
   await page.getByRole("option", { name: /^notes.txt/ }).click();
   await page.keyboard.press("Insert");
   await left.getByRole("option", { name: /^second.txt/ }).click({ modifiers: ["Control"] });
-  await page.getByRole("textbox", { name: "Command line" }).press("F5");
+  await page.getByRole("combobox", { name: "Command line" }).press("F5");
   await finishTransfer("Copy", 2);
   await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^notes.txt/ }).waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
@@ -1020,7 +1021,7 @@ try {
   await page.keyboard.press("Escape");
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 
-  const commandLine = page.getByRole("textbox", { name: "Command line" });
+  const commandLine = page.getByRole("combobox", { name: "Command line" });
   await commandLine.press("Control+ArrowRight");
   assert.equal(await page.getByRole("separator", { name: "Pane divider" }).getAttribute("aria-valuenow"), "51");
   await commandLine.press("Control+o");
@@ -1374,7 +1375,7 @@ try {
     await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
   }
-  assert.equal(await page.getByRole("textbox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
+  assert.equal(await page.getByRole("combobox", { name: "Command line" }).evaluate((input) => getComputedStyle(input).fontSize), "17px");
   console.log("Verified feature settings search, independent font overrides, and persistence after restart.");
   const help = page.getByRole("dialog", { name: "Help", exact: true });
   await page.context().setOffline(true);
@@ -1531,6 +1532,7 @@ try {
   console.log("Verified Classic blue contrast, file colors in selected rows, preview, and custom and built-in theme persistence.");
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
+  await testCommandCompletion(page, temp);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

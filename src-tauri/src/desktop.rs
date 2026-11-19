@@ -1197,6 +1197,7 @@ pub fn run() {
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
         .manage(watch::Measurements::default())
+        .manage(Arc::new(crate::completion::CompletionQueue::default()))
         .manage(crate::processes::ProcessMonitor::default())
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
@@ -1268,6 +1269,7 @@ pub fn run() {
         resolve_transfer,
         transfer_item,
         terminal::open_terminal,
+        crate::completion::complete_command,
         terminal::write_terminal,
         terminal::resize_terminal,
         terminal::close_terminal,

@@ -501,7 +501,26 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .terminal-surface { flex: 1; min-height: 0; margin: 6px 8px; }
 .command-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 12px; font: var(--terminal-size)/1.4 var(--terminal-font); }
 .command-bar span { max-width: 36%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
-.command-bar input { flex: 1; margin-block: 2px; padding-block: 4px; }
+.command-entry { flex: 1; min-width: 0; position: relative; }
+.command-entry > input { width: 100%; margin-block: 2px; padding-block: 4px; }
+.command-suggestions {
+  position: absolute;
+  z-index: 40;
+  inset-inline: 0;
+  bottom: calc(100% + 3px);
+  max-height: min(250px, 40vh);
+  overflow: auto;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px #0002;
+}
+.command-suggestions [role="option"] { display: flex; justify-content: space-between; gap: 10px; padding: 3px 8px; border-radius: 3px; cursor: pointer; }
+.command-suggestions [role="option"]:hover { background: var(--hover); }
+.command-suggestions [aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.command-suggestions [role="option"] span { color: inherit; max-width: none; }
+.command-suggestions small { flex: none; color: var(--muted); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(1turn); } }
 

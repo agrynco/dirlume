@@ -1,0 +1,1868 @@
+active
+add	alias volume
+add alias
+add volume
+adprep	/domainprep /forestprep /gpprep /rodcprep /silent /wssg
+append	/? /e /path: /path:off /path:on /x /x:off /x:on
+arp	-a -d -g -N -s -v /?
+assign	letter= mount=
+assoc	/?
+at	/? /delete /every:date /interactive /next:date /yes
+atmadm	/? /a /c /s
+attach-vdisk	sd=
+attrib	/? /d /l /s
+attributes	disk volume
+attributes disk	clear set
+attributes volume	clear set
+auditpol	/backup /clear /get /list /remove /resourceSACL /restore /set backup clear command get list remove resourcesacl restore set
+auditpol /backup	/? /file /file:
+auditpol /clear	/? /y
+auditpol /get	/? /category /category: /option /option: /r /sd /subcategory /subcategory: /user
+auditpol /list	/? /category /r /subcategory /user /v
+auditpol /remove	/? /allusers /user
+auditpol /resourceSACL	/? /access /access: /clear /failure /remove /set /success /type /type: /user /user: /view
+auditpol /restore	/? /file /file:
+auditpol /set	/? /category /category: /exclude /failure /failure: /include /option /option: /sd /subcategory /subcategory: /success /success: /user /value:
+auditpol backup	/? /backup /file /file:
+auditpol clear	/? /clear /y
+auditpol command
+auditpol get	/? /category /category: /get /option /option: /r /sd /subcategory /subcategory: /user
+auditpol list	/? /category /list /r /subcategory /user /v
+auditpol remove	/? /allusers /remove /user
+auditpol resourcesacl	/? /access /access: /clear /failure /remove /resourceSACL /set /success /type /type: /user /user: /view
+auditpol restore	/? /file /file: /restore
+auditpol set	/? /category /category: /exclude /failure /failure: /include /option /option: /sd /set /subcategory /subcategory: /success /success: /user /value:
+autochk
+autoconv
+autofmt
+automount
+bcdboot	/l /s
+bcdedit	/? /bootdebug /bootems /bootsequence /command /copy /create /createstore /dbgsettings /debug /default /delete /deletevalue /displayorder /ems /emssettings /enum /export /import /set /store /timeout /toolsdisplayorder /v
+bdehdcfg	-driveinfo -newdriveletter -quiet -size -target /? driveinfo newdriveletter quiet restart size target
+bdehdcfg driveinfo	-driveinfo
+bdehdcfg newdriveletter	-newdriveletter -target
+bdehdcfg quiet	-quiet -target
+bdehdcfg restart	-restart -target
+bdehdcfg size	-size -target
+bdehdcfg target	-target
+begin	backup restore
+begin backup
+begin restore
+bitsadmin	/addfile /addfileset /addfilewithranges /cache /cancel /complete /create /examples /getaclflags /getbytestotal /getbytestransferred /getclientcertificate /getcompletiontime /getcreationtime /getcustomheaders /getdescription /getdisplayname /geterror /geterrorcount /getfilestotal /getfilestransferred /gethelpertokenflags /gethelpertokensid /gethttpmethod /getmaxdownloadtime /getminretrydelay /getmodificationtime /getnoprogresstimeout /getnotifycmdline /getnotifyflags /getnotifyinterface /getowner /getpeercachingflags /getpriority /getproxybypasslist /getproxylist /getproxyusage /getreplydata /getreplyfilename /getreplyprogress /getsecurityflags /getstate /gettemporaryname /gettype /getvalidationstate /help /info /list /listfiles /makecustomheaderswriteonly /monitor /nowrap /peercaching /peers /rawreturn /removeclientcertificate /removecredentials /replaceremoteprefix /reset /resume /setaclflag /setclientcertificatebyid /setclientcertificatebyname /setcredentials /setcustomheaders /setdescription /setdisplayname /sethelpertoken /sethelpertokenflags /sethttpmethod /setmaxdownloadtime /setminretrydelay /setnoprogresstimeout /setnotifycmdline /setnotifyflags /setpeercachingflags /setpriority /setproxysettings /setreplyfilename /setsecurityflags /setvalidationstate /suspend /takeownership /transfer /util /wrap addfile addfileset addfilewithranges cache cancel complete create examples getaclflags getbytestotal getbytestransferred getclientcertificate getcompletiontime getcreationtime getcustomheaders getdescription getdisplayname geterror geterrorcount getfilestotal getfilestransferred gethelpertokenflags gethelpertokensid gethttpmethod getmaxdownloadtime getminretrydelay getmodificationtime getnoprogresstimeout getnotifycmdline getnotifyflags getnotifyinterface getowner getpeercachingflags getpriority getproxybypasslist getproxylist getproxyusage getreplydata getreplyfilename getreplyprogress getsecurityflags getstate gettemporaryname gettype getvalidationstate help info list listfiles makecustomheaderswriteonly monitor nowrap peercaching peers rawreturn removeclientcertificate removecredentials replaceremoteprefix reset resume setaclflag setclientcertificatebyid setclientcertificatebyname setcredentials setcustomheaders setdescription setdisplayname sethelpertoken sethelpertokenflags sethttpmethod setmaxdownloadtime setminretrydelay setnoprogresstimeout setnotifycmdline setnotifyflags setpeercachingflags setpriority setproxysettings setreplyfilename setsecurityflags setvalidationstate suspend takeownership transfer util wrap
+bitsadmin /addfile
+bitsadmin /addfileset
+bitsadmin /addfilewithranges
+bitsadmin /cache	/clear /delete /deleteurl /getexpirationtime /getlimit /help /info /list /setexpirationtime /setlimit
+bitsadmin /cache /clear
+bitsadmin /cache /delete
+bitsadmin /cache /deleteurl	/deleteURL
+bitsadmin /cache /getexpirationtime
+bitsadmin /cache /getlimit
+bitsadmin /cache /help
+bitsadmin /cache /info	/verbose
+bitsadmin /cache /list	/verbose
+bitsadmin /cache /setexpirationtime
+bitsadmin /cache /setlimit
+bitsadmin /cancel
+bitsadmin /complete
+bitsadmin /create
+bitsadmin /examples
+bitsadmin /getaclflags
+bitsadmin /getbytestotal
+bitsadmin /getbytestransferred
+bitsadmin /getclientcertificate
+bitsadmin /getcompletiontime
+bitsadmin /getcreationtime
+bitsadmin /getcustomheaders
+bitsadmin /getdescription
+bitsadmin /getdisplayname
+bitsadmin /geterror
+bitsadmin /geterrorcount
+bitsadmin /getfilestotal
+bitsadmin /getfilestransferred
+bitsadmin /gethelpertokenflags
+bitsadmin /gethelpertokensid
+bitsadmin /gethttpmethod
+bitsadmin /getmaxdownloadtime
+bitsadmin /getminretrydelay
+bitsadmin /getmodificationtime
+bitsadmin /getnoprogresstimeout
+bitsadmin /getnotifycmdline
+bitsadmin /getnotifyflags
+bitsadmin /getnotifyinterface
+bitsadmin /getowner
+bitsadmin /getpeercachingflags
+bitsadmin /getpriority
+bitsadmin /getproxybypasslist
+bitsadmin /getproxylist
+bitsadmin /getproxyusage
+bitsadmin /getreplydata
+bitsadmin /getreplyfilename
+bitsadmin /getreplyprogress
+bitsadmin /getsecurityflags
+bitsadmin /getstate
+bitsadmin /gettemporaryname
+bitsadmin /gettype
+bitsadmin /getvalidationstate
+bitsadmin /help	/?
+bitsadmin /info	/verbose
+bitsadmin /list	/allusers /verbose
+bitsadmin /listfiles
+bitsadmin /makecustomheaderswriteonly
+bitsadmin /monitor	/allusers /refresh
+bitsadmin /nowrap
+bitsadmin /peercaching	/getconfigurationflags /help /setconfigurationflags
+bitsadmin /peercaching /getconfigurationflags
+bitsadmin /peercaching /help
+bitsadmin /peercaching /setconfigurationflags
+bitsadmin /peers	/clear /discover /help /list
+bitsadmin /peers /clear
+bitsadmin /peers /discover
+bitsadmin /peers /help
+bitsadmin /peers /list
+bitsadmin /rawreturn
+bitsadmin /removeclientcertificate
+bitsadmin /removecredentials
+bitsadmin /replaceremoteprefix
+bitsadmin /reset	/allusers
+bitsadmin /resume
+bitsadmin /setaclflag
+bitsadmin /setclientcertificatebyid
+bitsadmin /setclientcertificatebyname
+bitsadmin /setcredentials
+bitsadmin /setcustomheaders
+bitsadmin /setdescription
+bitsadmin /setdisplayname
+bitsadmin /sethelpertoken
+bitsadmin /sethelpertokenflags
+bitsadmin /sethttpmethod
+bitsadmin /setmaxdownloadtime
+bitsadmin /setminretrydelay
+bitsadmin /setnoprogresstimeout
+bitsadmin /setnotifycmdline
+bitsadmin /setnotifyflags
+bitsadmin /setpeercachingflags
+bitsadmin /setpriority
+bitsadmin /setproxysettings
+bitsadmin /setreplyfilename
+bitsadmin /setsecurityflags
+bitsadmin /setvalidationstate
+bitsadmin /suspend
+bitsadmin /takeownership
+bitsadmin /transfer	/ACLflags /DYNAMIC /priority
+bitsadmin /util	/enableanalyticchannel /getieproxy /help /repairservice /setieproxy /version
+bitsadmin /util /enableanalyticchannel
+bitsadmin /util /getieproxy	/conn
+bitsadmin /util /help
+bitsadmin /util /repairservice	/force
+bitsadmin /util /setieproxy	/conn
+bitsadmin /util /version	/verbose
+bitsadmin /wrap
+bitsadmin addfile	/addfile
+bitsadmin addfileset	/addfileset
+bitsadmin addfilewithranges	/addfilewithranges
+bitsadmin cache	/cache /clear /delete /deleteURL /getexpirationtime /getlimit /help /info /list /setexpirationtime /setlimit and
+bitsadmin cache and	clear delete deleteurl getexpirationtime getlimit help info list setexpirationtime setlimit
+bitsadmin cache and clear	/cache /clear
+bitsadmin cache and delete	/cache /delete
+bitsadmin cache and deleteurl	/deleteURL
+bitsadmin cache and getexpirationtime	/cache /getexpirationtime
+bitsadmin cache and getlimit	/cache /getlimit
+bitsadmin cache and help	/cache /help
+bitsadmin cache and info	/cache /info /verbose
+bitsadmin cache and list	/cache /list /verbose
+bitsadmin cache and setexpirationtime	/cache /setexpirationtime
+bitsadmin cache and setlimit	/cache /setlimit
+bitsadmin cancel	/cancel
+bitsadmin complete	/complete
+bitsadmin create	/create
+bitsadmin examples
+bitsadmin getaclflags	/getaclflags
+bitsadmin getbytestotal	/getbytestotal
+bitsadmin getbytestransferred	/getbytestransferred
+bitsadmin getclientcertificate	/getclientcertificate
+bitsadmin getcompletiontime	/getcompletiontime
+bitsadmin getcreationtime	/getcreationtime
+bitsadmin getcustomheaders	/getcustomheaders
+bitsadmin getdescription	/getdescription
+bitsadmin getdisplayname	/getdisplayname
+bitsadmin geterror	/geterror
+bitsadmin geterrorcount	/geterrorcount
+bitsadmin getfilestotal	/getfilestotal
+bitsadmin getfilestransferred	/getfilestransferred
+bitsadmin gethelpertokenflags	/gethelpertokenflags
+bitsadmin gethelpertokensid	/gethelpertokensid
+bitsadmin gethttpmethod	/gethttpmethod
+bitsadmin getmaxdownloadtime	/getmaxdownloadtime
+bitsadmin getminretrydelay	/getminretrydelay
+bitsadmin getmodificationtime	/getmodificationtime
+bitsadmin getnoprogresstimeout	/getnoprogresstimeout
+bitsadmin getnotifycmdline	/getnotifycmdline
+bitsadmin getnotifyflags	/getnotifyflags
+bitsadmin getnotifyinterface	/getnotifyinterface
+bitsadmin getowner	/getowner
+bitsadmin getpeercachingflags	/getpeercachingflags
+bitsadmin getpriority	/getpriority
+bitsadmin getproxybypasslist	/getproxybypasslist
+bitsadmin getproxylist	/getproxylist
+bitsadmin getproxyusage	/getproxyusage
+bitsadmin getreplydata	/getreplydata
+bitsadmin getreplyfilename	/getreplyfilename
+bitsadmin getreplyprogress	/getreplyprogress
+bitsadmin getsecurityflags	/getsecurityflags
+bitsadmin getstate	/getstate
+bitsadmin gettemporaryname	/gettemporaryname
+bitsadmin gettype	/gettype
+bitsadmin getvalidationstate	/getvalidationstate
+bitsadmin help	/? /help
+bitsadmin info	/info /verbose
+bitsadmin list	/allusers /list /verbose
+bitsadmin listfiles	/listfiles
+bitsadmin makecustomheaderswriteonly	/makecustomheaderswriteonly
+bitsadmin monitor	/allusers /monitor /refresh
+bitsadmin nowrap	/nowrap
+bitsadmin peercaching	/getconfigurationflags /help /peercaching /setconfigurationflags and
+bitsadmin peercaching and	getconfigurationflags help setconfigurationflags
+bitsadmin peercaching and getconfigurationflags	/getconfigurationflags /peercaching
+bitsadmin peercaching and help	/help /peercaching
+bitsadmin peercaching and setconfigurationflags	/peercaching /setconfigurationflags
+bitsadmin peers	and
+bitsadmin peers and	clear discover help list
+bitsadmin peers and clear	/clear /peers
+bitsadmin peers and discover	/discover /peers
+bitsadmin peers and help	/help /peers
+bitsadmin peers and list	/list /peers
+bitsadmin rawreturn	/rawreturn
+bitsadmin removeclientcertificate	/removeclientcertificate
+bitsadmin removecredentials	/removecredentials
+bitsadmin replaceremoteprefix	/replaceremoteprefix
+bitsadmin reset	/allusers /reset
+bitsadmin resume	/resume
+bitsadmin setaclflag	/setaclflag
+bitsadmin setclientcertificatebyid	/setclientcertificatebyid
+bitsadmin setclientcertificatebyname	/setclientcertificatebyname
+bitsadmin setcredentials	/setcredentials
+bitsadmin setcustomheaders	/setcustomheaders
+bitsadmin setdescription	/setdescription
+bitsadmin setdisplayname	/setdisplayname
+bitsadmin sethelpertoken	/sethelpertoken
+bitsadmin sethelpertokenflags	/sethelpertokenflags
+bitsadmin sethttpmethod	/sethttpmethod
+bitsadmin setmaxdownloadtime	/setmaxdownloadtime
+bitsadmin setminretrydelay	/setminretrydelay
+bitsadmin setnoprogresstimeout	/setnoprogresstimeout
+bitsadmin setnotifycmdline	/setnotifycmdline
+bitsadmin setnotifyflags	/setnotifyflags
+bitsadmin setpeercachingflags	/setpeercachingflags
+bitsadmin setpriority	/setpriority
+bitsadmin setproxysettings	/setproxysettings
+bitsadmin setreplyfilename	/setreplyfilename
+bitsadmin setsecurityflags	/setsecurityflags
+bitsadmin setvalidationstate	/setvalidationstate
+bitsadmin suspend	/suspend
+bitsadmin takeownership	/takeownership
+bitsadmin transfer	/ACLflags /DYNAMIC /priority /transfer
+bitsadmin util	/getieproxy /help /repairservice /setieproxy /util /version and
+bitsadmin util and	enableanalyticchannel getieproxy help repairservice setieproxy version
+bitsadmin util and enableanalyticchannel	/enableanalyticchannel /util
+bitsadmin util and getieproxy	/conn /getieproxy /util
+bitsadmin util and help	/help /util
+bitsadmin util and repairservice	/force /repairservice /util
+bitsadmin util and setieproxy	/conn /setieproxy /util
+bitsadmin util and version	/util /verbose /version
+bitsadmin wrap	/wrap
+bootcfg	/addsw /copy /dbg1394 /debug /default /delete /ems /query /raw /rmsw /timeout addsw copy dbg1394 debug default delete ems query raw rmsw timeout
+bootcfg /addsw	/? /bv /id /mm /ng /p /s /so /u
+bootcfg /copy	/? /d /id /p /s /u
+bootcfg /dbg1394	/ch /dbg1394 /id /p /s /u off on
+bootcfg /dbg1394 /dbg1394	off on
+bootcfg /debug	/baud /debug /id /p /port /s /u edit off on
+bootcfg /debug /baud	115200 19200 38400 57600 9600
+bootcfg /debug /debug	edit off on
+bootcfg /debug /port	COM1 COM2 COM3 COM4
+bootcfg /default	/? /id /p /s /u
+bootcfg /delete	/? /id /p /s /u
+bootcfg /ems	/baud /ems /id /p /port /s /u edit off on
+bootcfg /ems /baud	115200 19200 38400 57600 9600
+bootcfg /ems /ems	edit off on
+bootcfg /ems /port	BIOSSET COM1 COM2 COM3 COM4
+bootcfg /query	/? /p /s /u
+bootcfg /raw	/? /a /id /p /s /u
+bootcfg /rmsw	/? /bv /id /mm /ng /p /s /so /u
+bootcfg /timeout	/? /p /s /timeout /u
+bootcfg addsw	/? /addsw /bv /id /mm /ng /p /s /so /u
+bootcfg copy	/? /copy /d /id /p /s /u
+bootcfg dbg1394	/? /ch /dbg1394 /id /p /s /u
+bootcfg dbg1394 /dbg1394	off on
+bootcfg debug	/? /baud /debug /id /p /port /s /u
+bootcfg debug /baud	115200 19200 38400 57600 9600
+bootcfg debug /debug	edit off on
+bootcfg debug /port	COM1 COM2 COM3 COM4
+bootcfg default	/? /default /id /p /s /u
+bootcfg delete	/? /delete /id /p /s /u
+bootcfg ems	/? /baud /ems /id /p /port /s /u
+bootcfg ems /baud	115200 19200 38400 57600 9600
+bootcfg ems /ems	edit off on
+bootcfg ems /port	BIOSSET COM1 COM2 COM3 COM4
+bootcfg query	/? /p /query /s /u
+bootcfg raw	/? /a /id /p /raw /s /u
+bootcfg rmsw	/? /bv /id /mm /ng /p /rmsw /s /so /u
+bootcfg timeout	/? /p /s /timeout /u
+break	break=
+cacls	/? /c /d /e /g /l /m /p /r /s /s:sddl /t
+call	/?
+cd	/? /d
+certreq	-? -accept -adminforcemachine -anonymous -any -attrib -binary -cert -clientcertificate -config -crl -enroll -f -kerberos -machine -new -p -policy -policyserver -q -renewonbehalfof -retrieve -rpc -sign -submit -unicode -unicodetext -user -username -v
+certutil	-admin -anonymous -cert -clientcertificate -config -csp -dc -enterprise -f -generateSSTFromWU -gmt -GroupPolicy -idispatch -kerberos -location -mt -nocr -nocrlf -nullsign -oldpfx -out -p -pin -policyserver -privatekey -protect -protectto -restrict -reverse -seconds -service -sid -silent -split -sslpolicy -symkeyalg -syncWithWU -t -Unicode -UnicodeText -urlfetch -user -username -ut -v -v1
+change	logon port user
+change logon	/? /disable /drain /drainuntilrestart /enable /query command
+change logon command	/? /disable /drain /drainuntilrestart /enable /query
+change port	/? /d /query command
+change port command	/? /d /query
+change user	/? /execute /install /query command
+change user command	/? /execute /install /query
+chcp	/?
+chdir
+chglogon
+chgport
+chgusr
+chkdsk	/? /b /c /f /forceofflinefix /freeorphanedchains /i /l /markclean /offlinescanandfix /perf /r /scan /sdcleanup /spotfix /v /x
+chkntfs	/? /c /d /t /x
+choice	/? /c /cs /d /m /n /t
+cipher	/? /adduser /b /c /certfile: /certhash: /d /e /h /k /n /r: /rekey /removeuser /s: /s:directory /smartcard /u /w: /x /y
+clean	all
+clean all
+cleanmgr	/? /autoclean /d /LOWDISK /sagerun:n /sageset:n /TUNEUP:n /VERYLOWDISK
+clip	/?
+cls	/?
+cmd	/? /a /c /d /e: /e:off /e:on /f: /f:off /f:on /k /q /s /t: /u /v: /v:off /v:on
+cmdkey	/? /add: /delete /delete: /generic: /list: /pass: /ras /smartcard /user:
+cmstp	/? /nf /q:a /s /u
+color	attr
+color attr
+comp	/? /a /c /d /l /n= /off
+compact	/? /A /C /CompactOs /EXE /F /I /Q /S /U /windir /windir:dir vdisk
+compact vdisk
+convert	basic dynamic gpt mbr
+convert basic	command noerr
+convert basic command
+convert basic noerr
+convert dynamic	command noerr
+convert dynamic command
+convert dynamic noerr
+convert gpt	command noerr
+convert gpt command
+convert gpt noerr
+convert mbr	command noerr
+convert mbr command
+convert mbr noerr
+copy	/? /a /b /d /n /v /y /z
+create	partition volume
+create partition	efi extended logical msr primary
+create partition efi	command offset= size=
+create partition efi command	offset= size=
+create partition extended	align= command offset= size=
+create partition extended command	align= offset= size=
+create partition logical	align= command offset= size=
+create partition logical command	align= offset= size=
+create partition msr	command offset= size=
+create partition msr command	offset= size=
+create partition primary	align= command id= offset= size=
+create partition primary command	align= id= offset= size=
+create volume	mirror raid simple stripe
+create volume mirror	align= command disk= size=
+create volume mirror command	align= disk= size=
+create volume raid	align= command disk= size=
+create volume raid command	align= disk= size=
+create volume simple	align= command disk= size=
+create volume simple command	align= disk= size=
+create volume stripe	align= command disk= size=
+create volume stripe command	align= disk= size=
+cscript	/? /b /d /e: /h:cscript /h:wscript /i /job: /logo /nologo /s /t: /u /x
+date	/? /t
+dcdiag	/? /a /c /DnsAll /DnsBasic /DnsDelegation /DnsDynamicUpdate /DnsForwarders /DnsInternetName: /DnsRecordRegistration /DnsResolveExtName /e /f: /fix /h /i /n: /p: /q /ReplSource: /s: /skip: /test: /test:DNS /u: /v /x: /xsl:
+dcgpofix	/? /ignoreschema /target /target:
+dcpromo	/? /adv /answer /CreateDCAccount /unattend /UninstallBinaries /UseExistingAccount:Attach
+defrag	/? /a /b /c /d /e /g /h /i /k /l /m /o /t /u /v /x
+del	/? /a /f /p /q /s
+delete	disk partition shadows volume
+delete disk	noerr
+delete disk noerr	override
+delete disk noerr override
+delete partition	noerr
+delete partition noerr	override
+delete partition noerr override
+delete shadows
+delete volume	noerr
+delete volume noerr
+detach	vdisk
+detach vdisk	noerr
+detach vdisk noerr
+detail	disk partition vdisk volume
+detail disk
+detail partition
+detail vdisk
+detail volume
+dfsdiag	/? /DFSPath: /DFSRoot: /domain: /full /recurse /testdcs /testdfsconfig /testdfsintegrity /testreferral /testsites testdcs testdfsconfig testdfsintegrity testreferral testsites
+dfsdiag /testdcs	/domain:
+dfsdiag /testdfsconfig	/DFSroot:
+dfsdiag /testdfsintegrity	/DFSroot: /full /recurse
+dfsdiag /testreferral	/DFSpath: /full
+dfsdiag /testsites	/DFSpath: /full /machine: /recurse
+dfsdiag testdcs	/domain: /testdcs
+dfsdiag testdfsconfig	/DFSroot: /testdfsconfig
+dfsdiag testdfsintegrity	/DFSroot: /full /recurse /testdfsintegrity
+dfsdiag testreferral	/DFSpath: /full /testreferral
+dfsdiag testsites	/DFSpath: /full /machine: /recurse /testsites
+dfsrmig	/? /createglobalobjects /deleterodfsrmember /deleterontfrsmember /getglobalstate /getmigrationstate /setglobalstate
+diantz	/? /d /f /l /v var=
+dir	/4 /? /a /b /c /d /l /n /o /p /q /r /s /t /w /x
+diskcomp	/?
+diskcopy	/? /v
+diskpart
+diskperf	-? -n -nd -nv -y -yd -yv
+diskraid	chap= count= drive= drives= hotspare= iadapter= initiator= iportal= iscsiname= lun= name= plex= secret= size= stripesize= target= tportal= type= wwn=
+diskshadow	-s
+dispdiag	-? -d -delay -out -testacpi
+dnscmd	/additional /addressanswerlimit /ageallrecords /aging /alldomains /allownsrecordsautocreation /allowupdate /authority /auto-created /bindsecondaries /bootmethod /cache /child /clear /clearcache /config /continue /createbuiltindirectorypartitions /createdirectorypartition /custom /customdirectorypartition /defaultagingstate /defaultnorefreshinterval /defaultrefreshinterval /deletedirectorypartition /detail /directorypartition /directorypartitioninfo /disableautoreversezones /disablensrecordsautocreation /domain /domaindirectorypartition /dp /ds /dsdel /dspollinginterval /dstombstoneinterval /ednscachetimeout /enablednssec /enableednsprobes /enableglobalnamessupport /enableglobalqueryblocklist /enlistdirectorypartition /enterprise /enumdirectorypartitions /enumrecords /enumzones /eventloglevel /exportsettings /f /file /forest /forestdirectorypartition /forward /forwarddelegations /forwarder /forwarderslave /forwardertimeout /forwardingtimeout /globalneamesqueryorder /globalqueryblocklist /glue /info /ipvalidate /isslave /legacy /legacydirectorypartition /local /localnetpriority /logfilemaxsize /logfilepath /logipfilterlist /loglevel /maxcachesize /maxcachettl /maxnegativecachettl /namecheckflag /node /nodedelete /nonotify /nonsecure /norecursion /norefreshinterval /noslave /notcp /notify /notifylist /noxfr /primary /recordadd /recorddelete /recursionretry /recursiontimeout /refreshinterval /resetforwarders /resetlistenaddresses /reverse /roundrobin /rpcprotocol /scavenginginterval /secondary /securelist /securens /secureresponses /securesecondaries /sendport /serverlevelplugindll /slave /startchild /startscavenging /statistics /strictfileparsing /stub /timeout /tree /type /unenlistdirectorypartition /updateoptions /writeauthorityns /writebackfiles /xfrconnecttimeout /zoneadd /zonechangedirectorypartition /zonedelete /zoneexport /zoneinfo /zonepause /zoneprint /zonerefresh /zonereload /zoneresetmasters /zoneresetscavengeservers /zoneresetsecondaries /zoneresettype /zoneresume /zoneupdatefromds /zonewriteback
+doskey	/? /exename= /history /insert /listsize= /macrofile= /macros /macros: /macros:all /overstrike /reinstall
+driverquery	/? /fo /nh /p /s /si /u /v
+driverquery /fo	csv list table
+dtrace	-b -BCeFhlqSvVwYZ -c -D -e -f -h -I -L -m -n -o -p -q -s -U -v -w -x -y -Z
+echo	off on
+edit	/? /b /h /r /s
+end	restore
+end restore
+endlocal	/?
+erase	/? /a /f /p /q /s
+eventcreate	/? /d /id /l /p /s /so /t /u
+eventcreate /l	APPLICATION SYSTEM
+eventcreate /t	ERROR FAILUREAUDIT INFORMATION SUCCESSAUDIT WARNING
+evntcmd	/? /n /s /v
+exec
+exit	/? /b
+expand	-d -f: -i -r /? vdisk
+expand vdisk	maximum=
+expose
+extend	disk= filesystem size=
+extend filesystem	noerr
+extend filesystem noerr
+extract	/a /c /d /e /l /y
+fc	/? /a /b /c /l /lb /n /off /t /u /w
+filesystems
+find	/? /c /i /n /off /v
+findstr	/? /a: /b /c: /d: /e /f: /g: /i /l /m /n /o /off /p /r /s /v /x
+finger	-l /?
+flattemp	/? /disable /enable /query
+fondue	/caller-name: /enable-feature: /hide-ux:
+for	/?
+forfiles	/? /C /D /M /P /S
+format	volume
+format volume	/A:size /C /F:size /I:state /L /N:sectors /P:passes /Q /S:state /T:tracks /V:label /X
+freedisk	/d /p /s /u
+fsutil	8dot3name behavior clfs devdrv dirty file fsinfo hardlink objectid quota repair reparsepoint resource sparse tiering transaction usn volume wim
+fsutil 8dot3name	query scan set strip
+fsutil 8dot3name query
+fsutil 8dot3name scan	/l /s /v
+fsutil 8dot3name set
+fsutil 8dot3name strip	/f /l /s /t /v
+fsutil behavior	query set
+fsutil behavior query
+fsutil behavior set
+fsutil clfs	authenticate
+fsutil clfs authenticate
+fsutil devdrv	clearfiltersallowed disable enable query setfiltersallowed trust untrust
+fsutil devdrv clearfiltersallowed	/f
+fsutil devdrv disable
+fsutil devdrv enable	/allowAv /disallowAv
+fsutil devdrv query
+fsutil devdrv setfiltersallowed	/f /volume
+fsutil devdrv trust	/f
+fsutil devdrv untrust	/f
+fsutil dirty	query set
+fsutil file	createnew findbysid optimizemetadata queryallocranges queryextents queryfileid queryfilenamebyid queryoptimizemetadata queryvaliddata seteof setshortname setvaliddata setzerodata
+fsutil file createnew
+fsutil file findbysid
+fsutil file optimizemetadata	/A
+fsutil file queryallocranges	length= offset=
+fsutil file queryextents	/R
+fsutil file queryfileid
+fsutil file queryfilenamebyid
+fsutil file queryoptimizemetadata
+fsutil file queryvaliddata	/D /R
+fsutil file seteof
+fsutil file setshortname
+fsutil file setvaliddata
+fsutil file setzerodata	length= offset=
+fsutil fsinfo	drives drivetype ntfsinfo statistics volumeinfo
+fsutil fsinfo drives
+fsutil fsinfo drivetype
+fsutil fsinfo ntfsinfo
+fsutil fsinfo statistics
+fsutil fsinfo volumeinfo
+fsutil hardlink	create list
+fsutil hardlink create
+fsutil hardlink list
+fsutil objectid	create delete query set
+fsutil objectid create
+fsutil objectid delete
+fsutil objectid query
+fsutil objectid set
+fsutil quota	disable enforce modify query track violations
+fsutil quota disable
+fsutil quota enforce
+fsutil quota modify
+fsutil quota query
+fsutil quota track
+fsutil quota violations
+fsutil repair	enumerate initiate query set
+fsutil repair enumerate
+fsutil repair initiate
+fsutil repair query
+fsutil repair set
+fsutil reparsepoint	delete query
+fsutil reparsepoint delete
+fsutil reparsepoint query
+fsutil resource	create info setautoreset setavailable setconsistent setlog start stop
+fsutil resource create
+fsutil resource info
+fsutil resource setautoreset	false true
+fsutil resource setavailable
+fsutil resource setconsistent
+fsutil resource setlog	growth
+fsutil resource setlog growth
+fsutil resource start
+fsutil resource stop
+fsutil sparse	queryflag queryrange setflag setrange
+fsutil sparse queryflag
+fsutil sparse queryrange
+fsutil sparse setflag
+fsutil sparse setrange
+fsutil tiering	clearflags queryflags regionlist setflags tierlist
+fsutil tiering clearflags
+fsutil tiering queryflags
+fsutil tiering regionlist
+fsutil tiering setflags
+fsutil tiering tierlist
+fsutil transaction	commit fileinfo list query rollback
+fsutil transaction commit
+fsutil transaction fileinfo
+fsutil transaction list
+fsutil transaction query	all files
+fsutil transaction rollback
+fsutil usn	createjournal deletejournal enablerangetracking enumdata queryjournal readdata readjournal
+fsutil usn createjournal	a= m=
+fsutil usn deletejournal	/d /n
+fsutil usn enablerangetracking
+fsutil usn enumdata
+fsutil usn queryjournal
+fsutil usn readdata
+fsutil usn readjournal	c= s=
+fsutil volume	allocationreport diskfree dismount filelayout list querycluster
+fsutil volume allocationreport
+fsutil volume diskfree
+fsutil volume dismount
+fsutil volume filelayout
+fsutil volume list
+fsutil volume querycluster
+fsutil wim	enumfiles enumwims queryfile removewim
+fsutil wim enumfiles
+fsutil wim enumwims
+fsutil wim queryfile
+fsutil wim removewim
+ftp	-? -a -b: -d -g -i -n -r: -s: -v -w: -x: append ascii bell binary bye cd close debug delete dir disconnect get glob hash lcd literal ls mdelete mdir mget mkdir mls mput open prompt put pwd quit quote recv remotehelp rename rmdir send status trace type user verbose
+ftp append
+ftp ascii
+ftp bell
+ftp binary
+ftp bye
+ftp cd
+ftp close
+ftp debug
+ftp delete
+ftp dir
+ftp disconnect
+ftp get
+ftp glob
+ftp hash
+ftp lcd
+ftp literal
+ftp ls
+ftp mdelete
+ftp mdir
+ftp mget
+ftp mkdir
+ftp mls
+ftp mput
+ftp open
+ftp prompt
+ftp put
+ftp pwd
+ftp quit
+ftp quote
+ftp recv
+ftp remotehelp
+ftp rename
+ftp rmdir
+ftp send
+ftp status
+ftp trace
+ftp type
+ftp user
+ftp verbose
+ftype	/?
+fveupdate
+getmac	/? /fo /nh /p /s /u /v
+getmac /fo	csv list table
+gettype
+goto	/?
+gpfixup	/? /dc: /newdns: /newnb: /olddns: /oldnb: /pwd: /sionly /user: /v
+gpresult	/? /f /h /p /r /s /scope /u /user /v /x /z
+gpresult /scope	computer user
+gpt	attributes=
+gpupdate	/? /boot /force /logoff /sync /target: /wait:
+graftabl	/? /status
+help
+helpctr
+hostname	/?
+icacls	directory name
+icacls directory	/C /L /Q /restore /substitute
+icacls name	/C /deny /findsid /grant /L /Q /remove /reset /save /setintegritylevel /setowner /T /verify
+if	/i cmdextversion defined not
+if cmdextversion
+if defined
+if not	errorlevel exist
+if not errorlevel
+if not exist
+inactive
+ipconfig	/? /all /allcompartments /displaydns /flushdns /registerdns /release /release6 /renew /renew6 /setclassid /showclassid
+ipxroute	board= config resolve ripout servers
+ipxroute config
+ipxroute resolve	guid name
+ipxroute ripout
+ipxroute servers	/type
+irftp	/h /s
+jetpack	/?
+klist	-lh -li
+ksetup	/? /addenctypeattr /addhosttorealmmap /addkdc /addkpasswd /addrealmflags /changepassword /delenctypeattr /delhosttorealmmap /delkdc /delkpasswd /delrealmflags /domain /dumpstate /getenctypeattr /listrealmflags /mapuser /removerealm /server /setcomputerpassword /setenctypeattr /setrealm /setrealmflags addenctypeattr addhosttorealmmap addkdc addkpasswd addrealmflags changepassword delenctypeattr delhosttorealmmap delkdc delkpasswd delrealmflags domain dumpstate getenctypeattr listrealmflags mapuser removerealm server setcomputerpassword setenctypeattr setrealm setrealmflags
+ksetup /addenctypeattr
+ksetup /addhosttorealmmap
+ksetup /addkdc
+ksetup /addkpasswd
+ksetup /addrealmflags
+ksetup /changepassword
+ksetup /delenctypeattr
+ksetup /delhosttorealmmap
+ksetup /delkdc
+ksetup /delkpasswd
+ksetup /delrealmflags
+ksetup /domain
+ksetup /dumpstate
+ksetup /getenctypeattr
+ksetup /listrealmflags
+ksetup /removerealm
+ksetup /server
+ksetup /setcomputerpassword
+ksetup /setenctypeattr
+ksetup /setrealm
+ksetup /setrealmflags
+ksetup addenctypeattr	/addenctypeattr
+ksetup addhosttorealmmap	/addhosttorealmmap
+ksetup addkdc	/addkdc
+ksetup addkpasswd	/addkpasswd
+ksetup addrealmflags	/addrealmflags
+ksetup changepassword	/changepassword
+ksetup delenctypeattr	/delenctypeattr
+ksetup delhosttorealmmap	/delhosttorealmmap
+ksetup delkdc	/delkdc
+ksetup delkpasswd	/delkpasswd
+ksetup delrealmflags	/delrealmflags
+ksetup domain	/domain
+ksetup dumpstate	/dumpstate
+ksetup getenctypeattr	/getenctypeattr
+ksetup listrealmflags	/listrealmflags
+ksetup mapuser	/mapuser
+ksetup removerealm	/removerealm
+ksetup server	/server
+ksetup setcomputerpassword	/setcomputerpassword
+ksetup setenctypeattr	/setenctypeattr
+ksetup setrealm	/setrealm
+ksetup setrealmflags	/setrealmflags
+ktmutil	force forget list resolve
+ktmutil force	commit rollback
+ktmutil force commit
+ktmutil force rollback
+ktmutil forget
+ktmutil list	tms transactions
+ktmutil list tms
+ktmutil list transactions
+ktmutil resolve	commit complete rollback
+ktmutil resolve commit
+ktmutil resolve complete
+ktmutil resolve rollback
+ktpass	/? /answer /crypto /h /help /in /itercount /kvno /mapop /mapuser /maxpass /minpass /out /pass /princ /ptype /rawsalt /target
+ktpass /crypto	AES128-SHA1 AES256-SHA1 All DES-CBC-CRC DES-CBC-MD5 RC4-HMAC-NT
+ktpass /mapop	add set
+ktpass /ptype	KRB5_NT_PRINCIPAL KRB5_NT_SRV_HST KRB5_NT_SRV_INST
+label	/? /mp
+list	disk partition providers shadows vdisk volume writers
+list providers
+list shadows
+list writers	detailed metadata status
+load	metadata
+load metadata
+lodctr	/? /r /r: /s: /t:
+logman	/? create delete import query start update
+logman create	-n alert api cfg counter trace
+logman create alert	-b -cf -config -e -m -n -o -rf -s -si -th -y /?
+logman create api	-b -config -e -exapis -exe -f -inapis -m -mods -n -o -rf -s -si -y /?
+logman create cfg	-b -config -e -ftc -m -mgt -n -o -reg -rf -s -si -y /?
+logman create counter	-b -c -cf -config -e -f -m -n -o -rf -s -sc -si -y /?
+logman create trace	-b -bs -config -ct -e -ets -f -ft -ln -m -mode -n -nb -o -pf -rf -s -y /?
+logman delete	-config -ets -n -s /?
+logman import	and
+logman import and	logman
+logman import and logman	export
+logman import and logman export	-config -ets -n -s -xml -y /?
+logman query	-config -ets -n -s /?
+logman start	and
+logman start and	logman
+logman start and logman	stop
+logman start and logman stop	-? -as -config -ets -n -s
+logman update	-n alert api cfg counter trace
+logman update alert	-b -cf -config -e -m -n -o -rf -s -si -th -y /?
+logman update api	-b -config -e -exapis -exe -f -inapis -m -mods -n -o -rf -s -si -y /?
+logman update cfg	-b -config -e -ftc -m -mgt -n -o -reg -rf -s -si -y /?
+logman update counter	-b -c -cf -config -e -f -m -n -o -rf -s -sc -si -y /?
+logman update trace	-b -bs -config -ct -e -ets -f -ft -ln -m -mode -n -nb -o -pf -rf -s -y /?
+logoff	/? /server: /v
+lpq	-l -P -S /?
+lpr	-C -d -J -o -P -S -x /?
+macfile	/creator: /datafork: /group: /owner: /path: /permissions: /resourcefork: /targetfile: /type: server volume
+macfile server	/loginmessage: /maxsessions:
+macfile volume	/add /guestsallowed: /maxusers: /name: /password: /readonly: /remove /set
+makecab	/? /d /f /l /v var=
+manage	bde
+manage bde	-? -autounlock -changekey -changepassword -changepin -forcerecovery -h -help -keypackage -lock -off -on -pause -protectors -resume -setidentifier -status -tpm -unlock -upgrade -wipefreespace /? autounlock changekey changepassword changepin forcerecovery keypackage lock off on pause protectors resume setidentifier status tpm unlock upgrade wipefreespace
+manage bde autounlock	-? -autounlock -clearallkeys -computername -disable -enable -h -help /?
+manage bde changekey	-? -changekey -computername -h -help /?
+manage bde changepassword	-? -changepassword -computername -h -help /?
+manage bde changepin	-? -changepin -computername -h -help /?
+manage bde forcerecovery	-? -computername -forcerecovery -h -help /?
+manage bde keypackage	-? -computername -h -help -ID -keypackage -path /?
+manage bde lock	-? -computername -h -help -lock /?
+manage bde off	-? -computername -h -help -off /?
+manage bde on	-? -ADaccountorgroup -certificate -computername -discoveryvolumetype -encryptionmethod -forceencryptiontype -h -help -on -password -recoverykey -recoverypassword -removevolumeshadowcopies -skiphardwaretest -startupkey -tpmandpin -tpmandpinandstartupkey -tpmandstartupkey -usedspaceonly /?
+manage bde on -encryptionmethod	aes128 aes128_diffuser aes256 aes256_diffuser
+manage bde pause	-? -computername -h -help -pause /?
+manage bde protectors	-? -aadbackup -adaccountorgroup -adbackup -add -certificate -cf -computername -ct -delete -disable -enable -get -h -help -ID -password -protectors -recoverykey -recoverypassword -startupkey -tpmandpin -tpmandpinandstartupkey -tpmandstartupkey -type /?
+manage bde resume	-? -computername -h -help -resume /?
+manage bde setidentifier	-? -computername -h -help -setidentifier /?
+manage bde status	-? -computername -h -help -protectionaserrorlevel -status /?
+manage bde tpm	-? -computername -h -help -takeownership -tpm -turnon /?
+manage bde unlock	-? -certificate -cf -computername -ct -h -help -password -pin -recoverykey -recoverypassword -unlock /?
+manage bde upgrade	-? -computername -h -help -upgrade /?
+manage bde wipefreespace	-? -cancel -computername -h -help -w -wipefreespace /?
+mapadmin	-all -d -f -p -setprimary -u -ug -uu -wg -wu -y
+md	/?
+merge	vdisk
+merge vdisk	depth=
+mkdir	/?
+mklink	/? /d /h /j
+mmc	/32 /64 /a
+mode	/? /status baud= cols= data= delay= dtr= idsr= lines= octs= odsr= parity= rate= rts= select= stop= to= xon=
+more	/? /c /p /s /t
+mount	-o -p: -u: fileaccess= lang= mtype= retry= rsize= sec= timeout= wsize=
+mountvol	/? /d /e /l /n /p /r /s
+move	-y /? /y
+mqbkup	/? /b /r
+mqsvc
+mqtgsvc
+msdt	-1 /advanced /af /cab /custom /dci /dt /id /modal /moreoptions /param /path
+msg	/? /server: /time: /v /w
+msiexec	/a /f /fa /fc /fd /fe /fm /fo /forcerestart /fp /fs /fu /fv /g /i /j /jm /ju /L /la /lc /le /li /lm /lo /lp /lr /lu /lv /lw /lx /norestart /p /package /passive /promptrestart /q /qb /qf /qn /qr /quiet /t /uninstall /update /x
+msinfo32	/? /categories /category /computer /nfo /pch /report /showcategories
+mstsc	/? /admin /control /edit /f /g: /h: /l /multimon /noConsentPrompt /prompt /public /remoteGuard /restrictedAdmin /shadow: /span /v: /w:
+nbtstat	/? /a /c /n /r /RR /s
+net	print user
+net print	/delete /hold /release
+net user	/add /delete /domain username
+net user username	/active: /times:
+netcfg	/? /b /c /d /e /i /l /m /q /s /u /v /winpe /x
+netdom	ADD COMPUTERNAME HELP JOIN move MOVENT4BDC QUERY REMOVE RENAMECOMPUTER reset RESETPWD TRUST VERIFY
+netdom add	machine
+netdom add machine	/DC /Domain:domain /OU:ou /PasswordD: /SecurePasswordPrompt /Server:server /UserD:user
+netdom computername	machine
+netdom computername machine	/Add: /Enumerate /MakePrimary: /PasswordD: /PasswordO: /Remove: /SecurePasswordPrompt /UserD:user /UserO:user /Verify
+netdom join	machine
+netdom join machine	/Domain:domain /OU:ou /PasswordD: /PasswordM: /PasswordO: /ReadOnly /REBoot /SecurePasswordPrompt /UserD:user /UserO:user
+netdom move	machine
+netdom move machine	/Domain:domain /OU:ou /PasswordD: /PasswordF: /PasswordO: /Reboot /SecurePasswordPrompt /UserD:user /UserF:user /UserO:user
+netdom movent4bdc	machine
+netdom movent4bdc machine	/Domain:domain /Reboot
+netdom query	/Direct /domain: /Domain:domain /PasswordD: /Reset /SecurePasswordPrompt /server: /Server:server /userd: /UserD:user /Verify
+netdom remove	machine
+netdom remove machine	/Domain:domain /Force /PasswordD: /PasswordO: /Reboot /SecurePasswordPrompt /UserD:user /UserO:user
+netdom renamecomputer	machine
+netdom renamecomputer machine	/Force /PasswordD: /PasswordO: /Reboot /SecurePasswordPrompt /UserD:user /UserO:user
+netdom reset	machine
+netdom reset machine	/Domain:domain /PasswordO: /SecurePasswordPrompt /Server:server /UserO:user
+netdom resetpwd	/PasswordD: /SecurePasswordPrompt /server: /userd: /UserD:user
+netdom trust	/Add /addtln: /AddTLN:TopLevelName /addtlnex: /AddTLNEX:TopLevelNameExclusion /AuthTargetValidation /authtargetvalidation:Yes /childdomain: /ChildDomain:childdomainname /CrossOrganization /domain: /EnablePIMTrust /enablepimtrust:Yes /EnableSIDHistory /enablesidhistory:Yes /EnableTgtDelegation /enabletgtdelegation:Yes /Force /ForestTransitive /foresttransitive:Yes /InvokeTrustScanner /Kerberos /namesuffixes: /OneSide: /oneside:trusted /PasswordD: /PasswordO: /passwordt: /Quarantine /quarantine:Yes /Realm /Remove /removetln: /RemoveTLN:TopLevelName /removetlnex: /RemoveTLNEX:TopLevelNameExclusion /Reset /SecurePasswordPrompt /selectiveauth:Yes /Transitive /transitive:Yes /Twoway /userd: /UserD:user /usero: /UserO:user /Verify
+netdom verify	machine
+netdom verify machine	/Domain:domain /PasswordO: /SecurePasswordPrompt /UserO:user
+netsh	-a -c -f -p -r -u add advfirewall branchcache bridge delete dhcpclient dnsclient dump exec http interface ipsec lan mbn namespace netio nlm ras rpc set show trace wcn wfp winhttp winsock wlan
+netsh add	helper
+netsh add helper	file
+netsh add helper file
+netsh advfirewall	consec export firewall import mainmode monitor reset set show
+netsh advfirewall export
+netsh advfirewall import
+netsh advfirewall monitor
+netsh advfirewall reset	export
+netsh advfirewall reset export
+netsh advfirewall set	allprofiles currentprofile domainprofile firewallpolicy global logging privateprofile publicprofile settings
+netsh advfirewall set firewallpolicy
+netsh advfirewall set global	ipsec mainmode statefulftp statefulpptp
+netsh advfirewall set global ipsec	strongcrlcheck
+netsh advfirewall set global ipsec strongcrlcheck
+netsh advfirewall set global mainmode	mmkeylifetime
+netsh advfirewall set global mainmode mmkeylifetime
+netsh advfirewall set logging
+netsh advfirewall set settings
+netsh advfirewall show	allprofiles currentprofile domainprofile global privateprofile publicprofile
+netsh advfirewall show global
+netsh branchcache	exportkey importkey set show smb
+netsh branchcache exportkey	outputfile=
+netsh branchcache importkey	inputfile=
+netsh branchcache set	cachesize directory= key localcache percent= publicationcache publicationcachesize service size=
+netsh branchcache set key	passphrase=
+netsh branchcache set service	mode=
+netsh branchcache show	hostedcache localcache publicationcache status
+netsh branchcache show status	detail=
+netsh branchcache smb	dump help set show
+netsh branchcache smb set	latency=
+netsh bridge	? add create destroy dump help list remove set show
+netsh bridge add
+netsh bridge create
+netsh bridge destroy
+netsh bridge list
+netsh bridge remove	all
+netsh bridge remove all	from
+netsh bridge remove all from
+netsh bridge set	adapter
+netsh bridge set adapter	forcecompatmode= id=
+netsh bridge show	adapter
+netsh bridge show adapter
+netsh delete	helper
+netsh delete helper	file
+netsh delete helper file
+netsh dhcpclient	? help list trace
+netsh dhcpclient list
+netsh dhcpclient trace
+netsh dnsclient	? add delete dump help set show
+netsh dnsclient add	dnsserver encryption global interface
+netsh dnsclient add dnsserver	address= index= name= validate=
+netsh dnsclient add encryption	autoupgrade= dohtemplate= dothost= server= udpfallback=
+netsh dnsclient add global	ddr= doh= dot=
+netsh dnsclient add interface	ddr= ddrfallback= name=
+netsh dnsclient delete	dnsserver encryption global interface
+netsh dnsclient delete dnsserver	address= index= name= validate=
+netsh dnsclient delete encryption	protocol= server=
+netsh dnsclient delete global	global=
+netsh dnsclient delete interface	name= setting=
+netsh dnsclient set	dnsserver encryption global interface
+netsh dnsclient set dnsserver	address= name= register= source= validate=
+netsh dnsclient set encryption	autoupgrade= dohtemplate= dothost= server= udpfallback=
+netsh dnsclient set global	ddr= doh= dot=
+netsh dnsclient set interface	ddr= ddrfallback= name=
+netsh dnsclient show	encryption global state
+netsh dnsclient show encryption	server=
+netsh dump
+netsh exec
+netsh http	? add delete dump flush help show update
+netsh http add	cacheparam iplisten setting sslcert timeout urlacl
+netsh http add cacheparam	type= value=
+netsh http add iplisten	ipaddress=
+netsh http add setting	settingtype= value=
+netsh http add sslcert	appid= ccs= certhash= certstorename= hostnameport= ipport= json= revocationfreshnesstime= sslctlidentifier= sslctlstorename= urlretrievaltimeout=
+netsh http add timeout	timeouttype= value=
+netsh http add urlacl	delegate= listen= sddl= url= user=
+netsh http delete	cache iplisten setting sslcert timeout urlacl
+netsh http delete cache	url=
+netsh http delete iplisten	ipaddress=
+netsh http delete setting	settingtype=
+netsh http delete sslcert	ccs= hostnameport= ipport=
+netsh http delete timeout	timeouttype=
+netsh http delete urlacl	url=
+netsh http dump
+netsh http flush	logbuffer
+netsh http flush logbuffer
+netsh http show	cachestate servicestate sslcert update urlacl
+netsh http show cachestate	url=
+netsh http show servicestate
+netsh http show sslcert	ccs= hostnameport= ipport= scopedccs=
+netsh http show update	sslpropertyex
+netsh http show update sslpropertyex	ccs= hostnameport= ipport= maxsettingsperframe= maxsettingsperminute= receivewindow=
+netsh http show urlacl	url=
+netsh http update	sslcert
+netsh http update sslcert	appid= ccs= certhash= certstorename= hostnameport= ipport= json= revocationfreshnesstime= sslctlidentifier= sslctlstorename= urlretrievaltimeout=
+netsh interface	6to4 ? clat dump fl48 fl68 help httpstunnel ipv4 ipv6 isatap portproxy set show tcp teredo udp
+netsh interface 6to4	dump set show
+netsh interface 6to4 dump
+netsh interface 6to4 set	interface relay routing state
+netsh interface 6to4 set interface	name= routing=
+netsh interface 6to4 set relay	interval= name= state=
+netsh interface 6to4 set routing	routing= sitelocals=
+netsh interface 6to4 set state	state= undoonstop=
+netsh interface 6to4 show
+netsh interface clat	dump set show
+netsh interface clat dump
+netsh interface clat set	global
+netsh interface clat set global	permit= pref64fromdns= pref64fromra=
+netsh interface clat show	global
+netsh interface clat show global
+netsh interface fl48	dump show
+netsh interface fl48 dump
+netsh interface fl48 show	virtualinterfaces
+netsh interface fl48 show virtualinterfaces
+netsh interface fl68	dump show
+netsh interface fl68 dump
+netsh interface fl68 show	virtualinterfaces
+netsh interface fl68 show virtualinterfaces
+netsh interface httpstunnel	add delete dump reset set show
+netsh interface httpstunnel add	interface
+netsh interface httpstunnel add interface	authmode= state= type= url=
+netsh interface httpstunnel delete	interface
+netsh interface httpstunnel delete interface
+netsh interface httpstunnel dump
+netsh interface httpstunnel reset
+netsh interface httpstunnel set	interface
+netsh interface httpstunnel set interface	authmode= state= url=
+netsh interface httpstunnel show	interfaces statistics
+netsh interface httpstunnel show interfaces	store=
+netsh interface httpstunnel show statistics	interface=
+netsh interface ipv4	add delete dump install reset set show uninstall
+netsh interface ipv4 add	address dnsservers excludedportrange neighbors route winsservers
+netsh interface ipv4 add address	address= gateway= gwmetric= mask= name= preferredlifetime= skipassource= store= subinterface= type= validlifetime=
+netsh interface ipv4 add dnsservers	address= index= name= validate=
+netsh interface ipv4 add excludedportrange	numberofports= protocol= startport= store=
+netsh interface ipv4 add neighbors	address= interface= neighbor= store= subinterface=
+netsh interface ipv4 add route	interface= metric= nexthop= preferredlifetime= prefix= publish= siteprefixlength= store= validlifetime=
+netsh interface ipv4 add winsservers	address= index= name=
+netsh interface ipv4 delete	address arpcache destinationcache dnsservers excludedportrange neighbors route winsservers
+netsh interface ipv4 delete address	address= gateway= name= store=
+netsh interface ipv4 delete arpcache	address= name= store= subinterface=
+netsh interface ipv4 delete destinationcache	address= interface=
+netsh interface ipv4 delete dnsservers	address= name= validate=
+netsh interface ipv4 delete excludedportrange	numberofports= protocol= startport= store=
+netsh interface ipv4 delete neighbors	address= name= store= subinterface=
+netsh interface ipv4 delete route	interface= nexthop= prefix= store=
+netsh interface ipv4 delete winsservers	address= name=
+netsh interface ipv4 dump
+netsh interface ipv4 install
+netsh interface ipv4 reset
+netsh interface ipv4 set	address compartment dnsservers dynamicportrange global interface neighbors route subinterface winsservers
+netsh interface ipv4 set address	address= gateway= gwmetric= mask= name= source= store= subinterface= type=
+netsh interface ipv4 set compartment	compartment= defaultcurhoplimit= store=
+netsh interface ipv4 set dnsservers	address= name= register= source= validate=
+netsh interface ipv4 set dynamicportrange	numberofports= protocol= startport= store=
+netsh interface ipv4 set global	addressmaskreply= defaultcurhoplimit= dhcpmediasense= flowlabel= groupforwardedfragments= icmpjumbograms= icmpredirects= loopbackexecutionmode= loopbacklargemtu= loopbackworkercount= mediasenseeventlog= minmtu= mldlevel= mldversion= multicastforwarding= neighborcachelimit= randomizeidentifiers= reassemblylimit= reassemblyoutoforderlimit= recursivereassembly= routecachelimit= routepolicies= slaacmaxdadattempts= slaacprivacylevel= sourcebasedecmp= sourceroutingbehavior= store= taskoffload=
+netsh interface ipv4 set interface	advertise= advertisedefaultroute= advertisedrouterlifetime= basereachabletime= currenthoplimit= dadtransmits= dhcpstaticipcoexistence= ecncapability= enabledirectedmacwolpattern= forcearpndwolpattern= forwarding= ignoredefaultroutes= interface= managedaddress= mtu= nud= otherstateful= rabaseddnsconfig= retransmittime= routerdiscovery= siteprefixlength= store= weakhostreceive= weakhostsend=
+netsh interface ipv4 set neighbors	address= interface= neighbor= store=
+netsh interface ipv4 set route	interface= metric= nexthop= preferredlifetime= prefix= publish= siteprefixlength= store= validlifetime=
+netsh interface ipv4 set subinterface	interface= mtu= store= subinterface=
+netsh interface ipv4 set winsservers	address= name= source=
+netsh interface ipv4 show	addresses compartments config destinationcache dnsservers dynamicportrange excludedportrange global icmpstats interfaces ipaddresses ipnettomedia ipstats joins neighbors offload route subinterfaces tcpconnections tcpstats udpconnections udpstats winsservers
+netsh interface ipv4 show addresses	name=
+netsh interface ipv4 show compartments	compartment= level= store=
+netsh interface ipv4 show config	name=
+netsh interface ipv4 show destinationcache	address= interface= level=
+netsh interface ipv4 show dnsservers	name=
+netsh interface ipv4 show dynamicportrange	protocol= store=
+netsh interface ipv4 show excludedportrange	protocol= store=
+netsh interface ipv4 show global	store=
+netsh interface ipv4 show icmpstats	rr=
+netsh interface ipv4 show interfaces	interface= level= rr= store=
+netsh interface ipv4 show ipaddresses	interface= level= store=
+netsh interface ipv4 show ipnettomedia	rr=
+netsh interface ipv4 show ipstats	rr=
+netsh interface ipv4 show joins	interface= level=
+netsh interface ipv4 show neighbors	address= interface= level= store= subinterface=
+netsh interface ipv4 show offload	name=
+netsh interface ipv4 show route	level= store=
+netsh interface ipv4 show subinterfaces	interface= level= store= subinterface=
+netsh interface ipv4 show tcpconnections	localaddress= localport= remoteaddress= remoteport= rr=
+netsh interface ipv4 show tcpstats	rr=
+netsh interface ipv4 show udpconnections	localaddress= localport= rr=
+netsh interface ipv4 show udpstats	rr=
+netsh interface ipv4 show winsservers	name=
+netsh interface ipv4 uninstall
+netsh interface ipv6	6to4 add delete dump isatap reset set show
+netsh interface ipv6 6to4	dump set show
+netsh interface ipv6 6to4 dump
+netsh interface ipv6 6to4 set	interface relay routing state
+netsh interface ipv6 6to4 set interface	name= routing=
+netsh interface ipv6 6to4 set relay	interval= name= state=
+netsh interface ipv6 6to4 set routing	routing= sitelocals=
+netsh interface ipv6 6to4 set state	state= undoonstop=
+netsh interface ipv6 6to4 show
+netsh interface ipv6 add	address dnsservers excludedportrange neighbors potentialrouter prefixpolicy route v6v4tunnel
+netsh interface ipv6 add address	address= interface= preferredlifetime= skipassource= store= type= validlifetime=
+netsh interface ipv6 add dnsservers	address= index= name= validate=
+netsh interface ipv6 add excludedportrange	numberofports= protocol= startport= store=
+netsh interface ipv6 add neighbors	address= interface= neighbor= store= subinterface=
+netsh interface ipv6 add potentialrouter	address= interface=
+netsh interface ipv6 add prefixpolicy	label= precedence= prefix= store=
+netsh interface ipv6 add route	interface= metric= nexthop= preferredlifetime= prefix= publish= siteprefixlength= store= validlifetime=
+netsh interface ipv6 add v6v4tunnel	interface= localaddress= remoteaddress=
+netsh interface ipv6 delete	address destinationcache dnsservers excludedportrange interface neighbors potentialrouter prefixpolicy route
+netsh interface ipv6 delete address	address= interface= store=
+netsh interface ipv6 delete destinationcache	address= interface=
+netsh interface ipv6 delete dnsservers	address= name= validate=
+netsh interface ipv6 delete excludedportrange	numberofports= protocol= startport= store=
+netsh interface ipv6 delete interface	interface=
+netsh interface ipv6 delete neighbors	address= interface= store= subinterface=
+netsh interface ipv6 delete potentialrouter	address= interface=
+netsh interface ipv6 delete prefixpolicy	prefix= store=
+netsh interface ipv6 delete route	interface= nexthop= prefix= store=
+netsh interface ipv6 dump
+netsh interface ipv6 isatap	dump set show
+netsh interface ipv6 isatap dump
+netsh interface ipv6 isatap set	router state
+netsh interface ipv6 isatap set router	interval= name= state=
+netsh interface ipv6 isatap set state	state=
+netsh interface ipv6 isatap show
+netsh interface ipv6 reset
+netsh interface ipv6 set	address compartment dnsservers dynamicportrange global interface neighbors prefixpolicy privacy route slaacsecretkey subinterface teredo
+netsh interface ipv6 set address	address= interface= preferredlifetime= store= type= validlifetime=
+netsh interface ipv6 set compartment	compartment= defaultcurhoplimit= store=
+netsh interface ipv6 set dnsservers	address= name= register= source= validate=
+netsh interface ipv6 set dynamicportrange	numberofports= protocol= startport= store=
+netsh interface ipv6 set global	addressmaskreply= defaultcurhoplimit= dhcpmediasense= flowlabel= groupforwardedfragments= icmpjumbograms= icmpredirects= loopbackexecutionmode= loopbacklargemtu= loopbackworkercount= mediasenseeventlog= minmtu= mldlevel= mldversion= multicastforwarding= neighborcachelimit= randomizeidentifiers= reassemblylimit= reassemblyoutoforderlimit= recursivereassembly= routecachelimit= routepolicies= slaacmaxdadattempts= slaacprivacylevel= sourcebasedecmp= sourceroutingbehavior= store= taskoffload=
+netsh interface ipv6 set interface	advertise= advertisedefaultroute= advertisedrouterlifetime= basereachabletime= currenthoplimit= dadtransmits= dhcpstaticipcoexistence= ecncapability= enabledirectedmacwolpattern= forcearpndwolpattern= forwarding= ignoredefaultroutes= interface= managedaddress= mtu= nud= otherstateful= rabaseddnsconfig= retransmittime= routerdiscovery= siteprefixlength= store= weakhostreceive= weakhostsend=
+netsh interface ipv6 set neighbors	address= interface= neighbor= store=
+netsh interface ipv6 set prefixpolicy	label= precedence= prefix= store=
+netsh interface ipv6 set privacy	label= precedence= prefix= store=
+netsh interface ipv6 set route	interface= metric= nexthop= preferredlifetime= prefix= publish= siteprefixlength= store= validlifetime=
+netsh interface ipv6 set slaacsecretkey	key=
+netsh interface ipv6 set subinterface	interface= mtu= store= subinterface=
+netsh interface ipv6 set teredo	clientport= refreshinterval= servername= servervirtualip=
+netsh interface ipv6 show	addresses compartments destinationcache dnsservers dynamicportrange excludedportrange global interfaces ipstats joins neighbors offload potentialrouters prefixpolicies privacy route siteprefixes slaacsecretkey subinterfaces tcpstats teredo tfofallback udpstats
+netsh interface ipv6 show addresses	interface= level= store=
+netsh interface ipv6 show compartments	compartment= level= store=
+netsh interface ipv6 show destinationcache	address= interface= level=
+netsh interface ipv6 show dnsservers	name=
+netsh interface ipv6 show dynamicportrange	protocol= store=
+netsh interface ipv6 show excludedportrange	protocol= store=
+netsh interface ipv6 show global	store=
+netsh interface ipv6 show interfaces	interface= level= rr= store=
+netsh interface ipv6 show ipstats	rr=
+netsh interface ipv6 show joins	interface= level=
+netsh interface ipv6 show neighbors	address= interface= level= store= subinterface=
+netsh interface ipv6 show offload	name=
+netsh interface ipv6 show potentialrouters	interface=
+netsh interface ipv6 show prefixpolicies	store=
+netsh interface ipv6 show privacy	store=
+netsh interface ipv6 show route	level= store=
+netsh interface ipv6 show siteprefixes
+netsh interface ipv6 show slaacsecretkey	store=
+netsh interface ipv6 show subinterfaces	interface= level= store= subinterface=
+netsh interface ipv6 show tcpstats	rr=
+netsh interface ipv6 show teredo
+netsh interface ipv6 show tfofallback
+netsh interface ipv6 show udpstats	rr=
+netsh interface isatap	dump set show
+netsh interface isatap dump
+netsh interface isatap set	router state
+netsh interface isatap set router	interval= name= state=
+netsh interface isatap set state	state=
+netsh interface isatap show
+netsh interface portproxy	add delete dump reset set show
+netsh interface portproxy add	v4tov4 v4tov6 v6tov4 v6tov6
+netsh interface portproxy add v4tov4	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy add v4tov6	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy add v6tov4	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy add v6tov6	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy delete	v4tov4 v4tov6 v6tov4 v6tov6
+netsh interface portproxy delete v4tov4	listenaddress= listenport= protocol=
+netsh interface portproxy delete v4tov6	listenaddress= listenport= protocol=
+netsh interface portproxy delete v6tov4	listenaddress= listenport= protocol=
+netsh interface portproxy delete v6tov6	listenaddress= listenport= protocol=
+netsh interface portproxy dump
+netsh interface portproxy reset
+netsh interface portproxy set	v4tov4 v4tov6 v6tov4 v6tov6
+netsh interface portproxy set v4tov4	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy set v4tov6	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy set v6tov4	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy set v6tov6	connectaddress= connectport= listenaddress= listenport= protocol=
+netsh interface portproxy show	all
+netsh interface portproxy show all
+netsh interface set	interface
+netsh interface set interface	admin= connect= name= newname=
+netsh interface show	interface
+netsh interface show interface	name=
+netsh interface tcp	add delete dump reload rundown set show
+netsh interface tcp add	supplementalport supplementalsubnet
+netsh interface tcp add supplementalport	localport= remoteport= template=
+netsh interface tcp add supplementalsubnet	address= family= template=
+netsh interface tcp delete	supplementalport supplementalsubnet
+netsh interface tcp delete supplementalport	localport= remoteport=
+netsh interface tcp delete supplementalsubnet	address= family=
+netsh interface tcp dump
+netsh interface tcp reload
+netsh interface tcp rundown
+netsh interface tcp set	global heuristics security supplemental
+netsh interface tcp set global	autotuninglevel= ecncapability= fastopen= fastopenfallback= hystart= initialrto= maxsynretransmissions= nonsackrttresiliency= pacingprofile= prr= rsc= rss= timestamps=
+netsh interface tcp set heuristics	forcews= wsh=
+netsh interface tcp set security	mpp= numberofports= profiles= startport=
+netsh interface tcp set supplemental	congestionprovider= delayedackfrequency= delayedacktimeout= enablecwndrestart= icw= minrto= rack= taillossprobe= template=
+netsh interface tcp show	global heuristics rscstats security supplemental supplementalports supplementalsubnets
+netsh interface tcp show global	store=
+netsh interface tcp show heuristics	heuristics=
+netsh interface tcp show rscstats	interface=
+netsh interface tcp show security	store=
+netsh interface tcp show supplemental	template=
+netsh interface tcp show supplementalports	level=
+netsh interface tcp show supplementalsubnets	level=
+netsh interface teredo	dump set show
+netsh interface teredo dump
+netsh interface teredo set	state
+netsh interface teredo set state	clientport= refreshinterval= servername= servervirtualip=
+netsh interface teredo show	state
+netsh interface teredo show state
+netsh interface udp	dump reset set show
+netsh interface udp dump
+netsh interface udp reset
+netsh interface udp set	global
+netsh interface udp set global	uro= uso=
+netsh interface udp show	global
+netsh interface udp show global	store=
+netsh ipsec	? dump dynamic help static
+netsh ipsec dynamic	add delete
+netsh ipsec dynamic add	mmpolicy qmpolicy rule
+netsh ipsec dynamic add mmpolicy	mmlifetime= mmsecmethods= name= qmpermm= softsaexpirationtime=
+netsh ipsec dynamic add qmpolicy	name= pfsgroup= qmsecmethods= soft=
+netsh ipsec dynamic add rule	actioninbound= actionoutbound= conntype= dstaddr= dstmask= dstport= kerberos= mirrored= mmpolicy= protocol= psk= qmpolicy= rootca= srcaddr= srcmask= srcport= tunneldstaddress=
+netsh ipsec dynamic delete	name= rule
+netsh ipsec dynamic delete rule	conntype= dstaddr= dstmask= dstport= mirrored= protocol= srcaddr= srcmask= srcport= tunneldstaddress=
+netsh ipsec static	add delete exportpolicy file= importpolicy set show
+netsh ipsec static add	filter filteraction filterlist policy rule
+netsh ipsec static add filter	description= dstaddr= dstmask= dstport= filterlist= mirrored= protocol= srcaddr= srcmask= srcport=
+netsh ipsec static add filteraction	action= description= inpass= name= qmpfs= qmsecmethods= soft=
+netsh ipsec static add filterlist	description= name=
+netsh ipsec static add policy	activatedefaultrule= assign= description= mmlifetime= mmpfs= mmsecmethods= name= pollinginterval= qmpermm=
+netsh ipsec static add rule	activate= conntype= description= filteraction= filterlist= kerberos= name= policy= psk= rootca= tunnel=
+netsh ipsec static delete	all filter filteraction filterlist name= policy rule
+netsh ipsec static delete all
+netsh ipsec static delete filter	dstaddr= dstmask= dstport= filterlist= mirrored= protocol= srcaddr= srcmask= srcport=
+netsh ipsec static delete rule	id= name= policy=
+netsh ipsec static set	batch defaultrule filteraction filterlist policy rule store
+netsh ipsec static set batch	mode=
+netsh ipsec static set defaultrule	activate= kerberos= policy= psk= qmpfs= qmsecmethods= rootca=
+netsh ipsec static set filteraction	action= description= guid= inpass= name= newname= qmpfs= qmsecmethods= soft=
+netsh ipsec static set filterlist	description= guid= name= newname=
+netsh ipsec static set policy	activatedefaultrule= assign= description= gponame= guid= mmlifetime= mmpfs= mmsecmethods= name= newname= pollinginterval= qmpermm=
+netsh ipsec static set rule	activate= conntype= description= filteraction= filterlist= id= kerberos= name= newname= policy= psk= rootca= tunnel=
+netsh ipsec static set store	domain= location=
+netsh ipsec static show	all filteraction filterlist gpoassignedpolicy policy rule
+netsh ipsec static show all	format= wide=
+netsh ipsec static show filteraction	format= level= name= rule= wide=
+netsh ipsec static show filterlist	format= level= name= resolvedns= rule= wide=
+netsh ipsec static show gpoassignedpolicy	name=
+netsh ipsec static show policy	format= level= name= wide=
+netsh ipsec static show rule	format= id= level= name= policy= type= wide=
+netsh lan	add delete export reconnect set show
+netsh lan add	profile
+netsh lan add profile	filename= interface=
+netsh lan delete	profile
+netsh lan delete profile	interface=
+netsh lan export	profile
+netsh lan export profile	folder= interface=
+netsh lan reconnect	interface=
+netsh lan set	autoconfig blockperiod eapuserdata profileparameter trace
+netsh lan set autoconfig	enabled= interface=
+netsh lan set blockperiod	value=
+netsh lan set eapuserdata	filename= interface=
+netsh lan set profileparameter	allowDialog= authMode= interface= maxDelay= oneXEnabled= oneXEnforced= ssoMode= userVLAN=
+netsh lan set trace	mode=
+netsh lan show	interfaces profiles settings tracing
+netsh lan show interfaces
+netsh lan show profiles	interface=
+netsh mbn	? add connect delete disconnect dump help set show test
+netsh mbn add	dmprofile profile
+netsh mbn add dmprofile	interface= name=
+netsh mbn add profile	interface= name=
+netsh mbn connect	connmode= interface= name=
+netsh mbn delete	dmprofile profile
+netsh mbn delete dmprofile	interface= name=
+netsh mbn delete profile	interface= name=
+netsh mbn disconnect	interface=
+netsh mbn set	acstate dataenablement dataroamcontrol enterpriseapnparams highestconncategory powerstate profileparameter slotmapping tracing
+netsh mbn set acstate	interface= state=
+netsh mbn set dataenablement	interface= mode= profileset=
+netsh mbn set dataroamcontrol	interface= profileset= state=
+netsh mbn set enterpriseapnparams	allowusercontrol= allowuserview= interface= profileaction=
+netsh mbn set highestconncategory	highestcc= interface=
+netsh mbn set powerstate	interface= state=
+netsh mbn set profileparameter	interface= name=
+netsh mbn set slotmapping	interface= slotindex=
+netsh mbn set tracing	mode=
+netsh mbn show	acstate
+netsh mbn show acstate	interface= name= purpose= slotindex=
+netsh mbn test	feature= param= taefPath= testPath=
+netsh namespace	dump show
+netsh namespace dump	show
+netsh namespace dump show	help
+netsh namespace dump show help
+netsh namespace show	namespace=
+netsh netio	? add delete dump help show
+netsh netio add	bindingfilter
+netsh netio add bindingfilter	client= npi= provider= store= type=
+netsh netio delete	bindingfilter
+netsh netio delete bindingfilter	client= npi= provider= store=
+netsh netio dump
+netsh netio show	bindingfilter
+netsh netio show bindingfilter	store=
+netsh nlm	? dump enum help query set show
+netsh nlm enum
+netsh nlm query	all
+netsh nlm query all
+netsh nlm set	connectionquality
+netsh nlm set connectionquality
+netsh nlm show
+netsh ras	? aaaa add delete diagnostics dump help ip ipv6 set show
+netsh ras aaaa	add delete set show
+netsh ras aaaa add	acctserver authserver
+netsh ras aaaa add acctserver	init-score= messages= name= port= secret= timeout=
+netsh ras aaaa add authserver	init-score= name= port= secret= signature= timeout=
+netsh ras aaaa delete	acctserver authserver
+netsh ras aaaa delete acctserver	name=
+netsh ras aaaa delete authserver	name=
+netsh ras aaaa set	accounting acctserver authentication authserver ipsecpolicy
+netsh ras aaaa set accounting	provider=
+netsh ras aaaa set acctserver	init-score= messages= name= port= secret= timeout=
+netsh ras aaaa set authentication	init-score= messages= name= port= secret= timeout=
+netsh ras aaaa set authserver	init-score= name= port= secret= signature= timeout=
+netsh ras aaaa set ipsecpolicy	psk= secret=
+netsh ras aaaa show	acctserver authserver
+netsh ras aaaa show acctserver	name=
+netsh ras aaaa show authserver	name=
+netsh ras add	authtype link multilink registeredserver
+netsh ras add authtype	type=
+netsh ras add link	type=
+netsh ras add multilink	type=
+netsh ras add registeredserver	domain= server=
+netsh ras delete	authtype link multilink registeredserver
+netsh ras delete authtype	type=
+netsh ras delete link	type=
+netsh ras delete multilink	type=
+netsh ras delete registeredserver	domain= server=
+netsh ras diagnostics	set show
+netsh ras diagnostics set	cmtracing loglevel modemtracing rastracing securityeventlog tracefacilities
+netsh ras diagnostics set cmtracing	state=
+netsh ras diagnostics set loglevel	events=
+netsh ras diagnostics set modemtracing	state=
+netsh ras diagnostics set rastracing	component= state=
+netsh ras diagnostics set securityeventlog	state=
+netsh ras diagnostics set tracefacilities	state=
+netsh ras diagnostics show
+netsh ras dump
+netsh ras ip	add delete dump set
+netsh ras ip add	range
+netsh ras ip add range	from= to=
+netsh ras ip delete	pool range
+netsh ras ip delete pool
+netsh ras ip delete range	from= to=
+netsh ras ip dump
+netsh ras ip set	access addrassign addrreq broadcastnameresolution negotiation preferredadapter
+netsh ras ip set access	mode=
+netsh ras ip set addrassign	method=
+netsh ras ip set addrreq	mode=
+netsh ras ip set broadcastnameresolution	mode=
+netsh ras ip set negotiation	mode=
+netsh ras ip set preferredadapter	name=
+netsh ras ipv6	dump set show
+netsh ras ipv6 dump
+netsh ras ipv6 set	access negotiation prefix routeradvertise
+netsh ras ipv6 set access	mode=
+netsh ras ipv6 set negotiation	mode=
+netsh ras ipv6 set prefix	prefix=
+netsh ras ipv6 set routeradvertise	mode=
+netsh ras ipv6 show
+netsh ras set	authmode client conf ikev2connection ikev2saexpiry portstatus sstp-ssl-cert type user wanports
+netsh ras set authmode	mode=
+netsh ras set client	name= state=
+netsh ras set conf	confstate=
+netsh ras set ikev2connection	idletimeout= nwoutagetime=
+netsh ras set ikev2saexpiry	sadatasizelimit= saexpirytime=
+netsh ras set portstatus	name=
+netsh ras set sstp-ssl-cert	hash= name=
+netsh ras set type	ipv4rtrtype= ipv6rtrtype= rastype=
+netsh ras set user	cbnumber= cbpolicy= dialin= name=
+netsh ras set wanports	ddinout= ddoutonly= device= maxports= phone= rasinonly=
+netsh ras show	activeservers authmode authtype client conf ikev2connection ikev2saexpiry link multilink portstatus registeredserver sstp-ssl-cert status type user wanports
+netsh ras show activeservers
+netsh ras show authmode
+netsh ras show authtype
+netsh ras show client	name=
+netsh ras show conf
+netsh ras show ikev2connection
+netsh ras show ikev2saexpiry
+netsh ras show link
+netsh ras show multilink
+netsh ras show portstatus	name= state=
+netsh ras show registeredserver
+netsh ras show sstp-ssl-cert
+netsh ras show status
+netsh ras show type
+netsh ras show user	mode= name=
+netsh ras show wanports	device=
+netsh rpc	? add delete dump filter help reset show
+netsh rpc add
+netsh rpc delete
+netsh rpc dump
+netsh rpc filter	add
+netsh rpc filter add	condition filter rule
+netsh rpc filter add condition	data= field= matchtype=
+netsh rpc filter add filter
+netsh rpc filter add rule	actiontype= audit= auditparameters= filterkey= layer= persistence=
+netsh rpc reset
+netsh rpc show
+netsh set	machine
+netsh set machine	name= pwd= user=
+netsh show
+netsh trace	? convert correlate diagnose dump export help merge postreset show start
+netsh trace convert	dump= input= manpath= metadata= output= overwrite= report= tmfpath=
+netsh trace correlate	filter= input= output= overwrite= retaincorrelationevents= retainglobalevents= retainpii=
+netsh trace diagnose	capture= namedAttribute= report= saveSessionTrace= scenario=
+netsh trace dump
+netsh trace export	file= scenario=
+netsh trace merge
+netsh trace postreset
+netsh trace show	name=
+netsh trace start	bufferSize= capture= capturetype= correlation= fileMode= globalKeywords= globalLevel= keywords= level= maxSize= overwrite= perfMerge= persistent= provider= providerFilter= report= scenario= traceFile=
+netsh wcn	dump enroll query
+netsh wcn dump	enroll
+netsh wcn dump enroll	query
+netsh wcn dump enroll query	help
+netsh wcn dump enroll query help
+netsh wcn enroll	enrolleeUUID= interface= password= profile= type=
+netsh wcn query	interface= SSID=
+netsh wfp	? capture dump help set show
+netsh wfp capture	start status stop
+netsh wfp capture start	cab= file= keywords= traceonly=
+netsh wfp capture status
+netsh wfp capture stop
+netsh wfp dump
+netsh wfp set	options
+netsh wfp set options	keywords= netevents= txnwatchdog=
+netsh wfp show	appid
+netsh wfp show appid	appid= dir= file= guid= localaddr= localport= optionsfor= protocol= remoteaddr= remoteport= timewindow= type= userid= verbose=
+netsh winhttp	? dump help import reset set show
+netsh winhttp dump
+netsh winhttp import	proxy
+netsh winhttp import proxy	source=
+netsh winhttp reset
+netsh winhttp set	advproxy proxy tracing
+netsh winhttp set advproxy
+netsh winhttp set proxy	bypass-list= proxy-server=
+netsh winhttp set tracing
+netsh winhttp show
+netsh winsock	? audit dump help remove reset set show
+netsh winsock audit	trail
+netsh winsock audit trail
+netsh winsock dump
+netsh winsock remove	provider
+netsh winsock remove provider
+netsh winsock reset
+netsh winsock set	autotuning
+netsh winsock set autotuning
+netsh winsock show
+netsh wlan	? add connect delete disconnect dump export help IHV refresh reportissues set show start stop
+netsh wlan add	filter profile
+netsh wlan add filter	networktype= permission= ssid=
+netsh wlan add profile	filename= interface= user=
+netsh wlan connect	interface= name= ssid=
+netsh wlan delete	filter profile
+netsh wlan delete filter	networktype= permission= ssid=
+netsh wlan delete profile	interface= name=
+netsh wlan disconnect	interface=
+netsh wlan dump
+netsh wlan export	profile
+netsh wlan export profile	folder= interface= key= name=
+netsh wlan ihv
+netsh wlan refresh	hostednetwork
+netsh wlan refresh hostednetwork	data=
+netsh wlan reportissues
+netsh wlan set	allowexplicitcreds autoconfig blockednetworks blockperiod createalluserprofile hostednetwork profileorder profileparameter profiletype randomization tracing
+netsh wlan set allowexplicitcreds	allow=
+netsh wlan set autoconfig	enabled= interface=
+netsh wlan set blockednetworks	display=
+netsh wlan set blockperiod	value=
+netsh wlan set createalluserprofile	enabled=
+netsh wlan set hostednetwork	key= keyUsage= mode= ssid=
+netsh wlan set profileorder	interface= name= priority=
+netsh wlan set profileparameter	allowDialog= authentication= authMode= cacheUserData= ConnectionType= cost= encryption= FIPS= heldPeriod= interface= keyIndex= keyMaterial= keyType= maxAuthFailures= maxDelay= maxStart= name= PMKCacheMode= PMKCacheSize= preAuthMode= preAuthThrottle= Randomization= SSIDname= ssoMode= StartPeriod= useOneX= userVLAN=
+netsh wlan set profiletype	interface= name= profiletype=
+netsh wlan set randomization	enabled= interface=
+netsh wlan set tracing	mode=
+netsh wlan show	all allowexplicitcreds autoconfig blockednetworks createalluserprofile drivers filters hostednetwork interfaces networks onlyusegpprofilesforallowednetworks profiles randomization settings tracing wirelesscapabilities wlanreport
+netsh wlan show all
+netsh wlan show allowexplicitcreds
+netsh wlan show autoconfig
+netsh wlan show blockednetworks
+netsh wlan show createalluserprofile
+netsh wlan show drivers
+netsh wlan show filters
+netsh wlan show hostednetwork
+netsh wlan show interfaces
+netsh wlan show networks
+netsh wlan show onlyusegpprofilesforallowednetworks
+netsh wlan show profiles
+netsh wlan show randomization
+netsh wlan show settings
+netsh wlan show tracing
+netsh wlan show wirelesscapabilities
+netsh wlan show wlanreport
+netsh wlan start	hostednetwork
+netsh wlan start hostednetwork
+netsh wlan stop	hostednetwork
+netsh wlan stop hostednetwork
+netstat	-a -b -e -n -o -p -q -r -s /?
+nfsadmin	client server
+nfsadmin client	computername
+nfsadmin client computername	-p -u
+nfsadmin server	computername
+nfsadmin server computername	-l -p -r -u
+nfsadmin server computername -r	all client
+nfsshare	-o /? /delete anon= anongid= anonuid= encoding= ro= root= rw=
+nfsstat	-c -m -n -r -s -z
+nlbmgr	/? /autorefresh /help /hostlist /noping
+nslookup	exit finger help ls lserver root server set view
+nslookup exit	command
+nslookup exit command	/? /exit /help
+nslookup finger	command
+nslookup finger command	/? /help
+nslookup help	/? /help
+nslookup ls	/? /help
+nslookup lserver	/? /help
+nslookup root	/? /help
+nslookup server	/? /help
+nslookup set	all class d2 debug domain port querytype recurse retry root search srchlist timeout type vc
+nslookup set all	/? /help
+nslookup set class	/? /help class=
+nslookup set d2	/? /help
+nslookup set debug	/? /help
+nslookup set domain	/? /help domain=
+nslookup set port	/? /help port=
+nslookup set querytype	/? /help querytype=
+nslookup set recurse	/? /help
+nslookup set retry	/? /help retry=
+nslookup set root	/? /help root=
+nslookup set search	/? /help
+nslookup set srchlist	/? /help srchlist=
+nslookup set timeout	/? /help timeout=
+nslookup set type	/? /help type=
+nslookup set vc	/? /help
+nslookup view	/? /help
+ntbackup
+ntcmdprompt	/?
+ntfrsutl	/? /now /quickly /slowly
+offline	disk volume
+offline disk	noerr
+offline disk noerr
+offline volume	noerr
+offline volume noerr
+online	disk volume
+online disk	noerr
+online disk noerr
+online volume	noerr
+online volume noerr
+openfiles	/? /a /disconnect /fo /id /local /nh /o /op /p /query /s /u /v
+openfiles /fo	CSV LIST TABLE
+pagefileconfig
+path	/?
+pathping	/4 /6 /? /g /h /i /n /p /q /w
+pause	/?
+pbadmin
+pentnt
+perfmon	/rel /report /res /sys
+ping	/4 /6 /? /a /f /I /j /k /l /n /r /s /t /v /w
+pktmon	counters etl2pcap etl2txt filter help hex2pkt list reset start status stop unload
+pktmon counters	-i -r -t -z
+pktmon filter	add list remove
+pktmon list	-a -i
+pktmon reset	-counters
+pktmon start	-f -k -l -m -o -p -s
+pktmon unload
+pnpunattend	auditsystem
+pnpunattend auditsystem	/? /h /help /l /s
+pnputil	-? -a -d -e -f -i
+popd	/?
+powershell	ise
+powershell ise
+print	/? /d: command
+print command	reference
+print command reference
+prncnfg	-? -f -g -h -i -l -m -o -P -r -S -st -t -u -ut -w -x -y -z /?
+prndrvr	-? -a -d -e -h -i -l -m -s -u -v -w -x /?
+prndrvr -v	0 1 2 3
+prnjobs	-? -j -l -m -p -s -u -w -x -z /?
+prnmngr	-? -a -d -g -l -m -p -r -s -t -u -w -x /?
+prnport	-2 -? -a -d -g -h -i -l -m -n -o -q -r -s -t -u -w -y /?
+prnport -o	lpr raw
+prnqctl	-? -e -m -p -s -u -w -x -z /?
+prompt	/?
+pubprn	/? DC=
+pushd	/?
+pushprinterconnections
+pwlauncher	/? /disable /enable
+qappsrv
+qprocess
+query	process session termserver user
+query process	/? /id: /server:
+query session	/? /connect /counter /flow /mode /server:
+query termserver	/? /address /continue /domain:
+query user	/? /server:
+quser	/? /server:
+qwinsta	/? /connect /counter /flow /mode /server:
+rd	/? /q /s
+rdpsign	/? /l /q /sha1 /sha256 /v
+recover	/? disk
+recover disk	group
+recover disk group
+refsutil	compression dedup fixboot iometrics leak salvage streamsnapshot triage
+refsutil compression	/c /cs /e /f /q
+refsutil dedup	/cpu /d /mm /s
+refsutil fixboot	-f -smr -w -x
+refsutil iometrics	/q /s /sg /sp /st
+refsutil leak	/a /d /q /s /t /v /x
+refsutil salvage	-C -D -FA -FS -IC -QA -QS -SL
+refsutil streamsnapshot	/c /d /l /q
+refsutil triage	/g /s /v
+reg	add compare copy delete export import load query restore save unload
+reg add	/? /d /f /reg:32 /reg:64 /s /t /v /ve
+reg compare	/? /oa /od /on /os /s /v /ve
+reg copy	/? /f /s
+reg delete	/? /f /v /va /ve
+reg export	/? /y
+reg import	/? /reg:32 /reg:64
+reg load	/?
+reg query	/? /c /d /e /f /k /reg:32 /reg:64 /s /se /t /v /ve /z
+reg restore	/?
+reg save	/? /y
+reg unload	/?
+regini	-b -h -i -m -o
+regsvr32	/? /i /i: /n /s /u
+relog	-a -b -c -cf -config -e -f -o -q -t -y /? /a /b /c /cf /config /e /f /o /q /t
+relog /f	bin csv SQL tsv
+rem	/?
+remove	letter= mount=
+ren	/?
+rename	/?
+repair	align= bde disk=
+repair bde	-? -f -kp -lf -pw -rk -rp /?
+replace	/? /a /p /r /s /u /w
+rescan
+reset	session
+reset session	/? /server: /v
+retain
+revert
+rexec
+risetup
+rmdir	/? /q /s
+robocopy	/256 /a /a-: /b /bytes /compress /copy: /copyall /create /dcopy: /dst /e /efsraw /eta /fat /fft /fp /ia: /if /im /iomaxsize: /iorate: /ipg: /is /it /j /job: /l /lev: /lfsm /lfsm: /log: /m /max: /maxage: /maxlad: /min: /minage: /minlad: /mir /mon: /mot: /mov /move /mt /mt: /nc /ndl /nfl /njh /njs /noclone /nocopy /nodcopy /nodd /nooffload /nosd /np /ns /pf /purge /quit /r: /reg /s /save: /sec /secfix /sj /sl /sparse: /tbd /tee /threshold: /timfix /ts /unicode /unilog: /v /w: /x /xa: /xc /xd /xf /xj /xjd /xjf /xl /xn /xo /xx /z /zb
+route	ws2008
+route ws2008	/? /f /p
+rpcinfo	/? /b /p /t /u
+rpcping	/? /a /B /C /d /e /f /H /i /M /N /O /P /q /r /s /t /u /v
+rsh
+rundll32	printui
+rundll32 printui	printuientry
+rundll32 printui printuientry	baseparameter
+rundll32 printui printuientry baseparameter	modificationparameter1
+rundll32 printui printuientry baseparameter modificationparameter1	modificationparameter2
+rundll32 printui printuientry baseparameter modificationparameter1 modificationparameter2	modificationparametern
+rundll32 printui printuientry baseparameter modificationparameter1 modificationparameter2 modificationparametern
+rwinsta
+san	policy=
+sc	config create delete query
+sc config	/? binpath= depend= displayname= error= group= obj= password= start= tag= type=
+sc create	/? binpath= depend= displayname= error= group= obj= password= start= tag= type=
+sc delete	/?
+sc query	/? bufsize= group= ri= state= type=
+schtasks	/change /create /delete /end /query /run
+schtasks /change	/? /DISABLE /du /ed /ENABLE /et /it /k /p /ri /rl /rp /ru /s /sd /st /tn /tr /u /z
+schtasks /create	/? /d /delay /du /ec /ed /et /f /hresult /i /it /k /m /mo /np /p /ri /rl /rp /ru /s /sc /sd /st /tn /tr /u /v1 /xml /z
+schtasks /delete	/? /f /p /s /tn /u
+schtasks /end	/? /p /s /tn /u
+schtasks /query	/? /fo /hresult /nh /p /s /tn /u /v /xml
+schtasks /query /fo	CSV LIST TABLE
+schtasks /run	/? /p /s /tn /u
+scwcmd	analyze configure register rollback transform view
+scwcmd analyze	/? /e /i: /l /m: /o: /ou: /p: /pw: /t: /u:
+scwcmd configure	/? /e /i: /l /m: /ou: /p: /pw: /t: /u:
+scwcmd register	/? /d /kb: /kbfile: /kbname:
+scwcmd rollback	/? /m: /pw: /u:
+scwcmd transform	/? /g: /p:
+scwcmd view	/? /s: /x:
+secedit	/analyze /configure /export /generaterollback /import /validate analyze configure export generaterollback import validate
+secedit /analyze	/cfg /db /log /overwrite /quiet
+secedit /configure	/areas /cfg /db /log /overwrite /quiet
+secedit /export	/areas /cfg /db /log /mergedpolicy /quiet
+secedit /generaterollback	/cfg /db /log /quiet /rbk
+secedit /import	/areas /cfg /db /log /overwrite /quiet
+secedit /validate
+secedit analyze	/analyze /cfg /db /log /overwrite /quiet
+secedit configure	/areas /cfg /configure /db /log /overwrite /quiet
+secedit export	/areas /cfg /db /export /log /mergedpolicy /quiet
+secedit generaterollback	/cfg /db /generaterollback /log /quiet /rbk
+secedit import	/areas /cfg /db /import /log /overwrite /quiet
+secedit validate	/validate
+select	disk partition vdisk volume
+select disk	disk=
+select partition	partition=
+select vdisk	file=
+select volume	volume=
+serverceipoptin	/? /disable /enable /query
+servermanagercmd	-? -allSubFeatures -help -inputpath -install -logpath -query -remove -restart -resultpath -version -whatif
+serverweroptin	/? /detailed /query /summary
+set	context environmental id metadata option shadow verbose
+set context
+set environmental	variables
+set environmental variables	/? /a /p
+set id	id=
+set metadata
+set option	differential plex
+set shadow	copy
+set shadow copy	/?
+set verbose	off on
+setlocal	disableextensions enableextensions
+setspn	-? -C -D -F -L -P -Q -R -S -T -U -X /?
+setx	/? /a /d /f /k /m /p /r /s /u /x
+sfc	/? /offbootdir /offbootdir= /offlogfile= /offwindir /offwindir= /scanfile /scanfile= /scannow /verifyfile /verifyfile= /verifyonly
+shadow	/? /server: /v
+shift	/? /n
+showmount	-a -d -e
+shrink	desired= minimum= querymax
+shrink querymax	noerr
+shrink querymax noerr
+shutdown	/? /a /c /d /e /f /fw /g /h /hybrid /i /l /m /o /p /r /s /sg /t
+simulate	restore
+simulate restore
+sort	/? /l /m /o /r /rec /t /unique
+start	/? /abovenormal /affinity /b /belownormal /d /high /i /low /machine /max /min /node /normal /realtime /separate /shared /wait
+subcommand	set start stop
+subcommand set	device drivergroup drivergroupfilter driverpackage image imagegroup multicasttransmission server transportserver
+subcommand set device	/BootImagepath: /BootProgram: /Device: /Domain: /ID: /JoinDomain: /JoinRights: /ReferralServer: /resetAccount /Set-Device /User: /WdsClientUnattend:
+subcommand set drivergroup	/Applicability: /DriverGroup: /Enabled: /Name: /Server: /Set-DriverGroup
+subcommand set drivergroupfilter	/AddValue: /DriverGroup: /FilterType: /Policy: /RemoveValue: /Server: /Set-DriverGroupFilter
+subcommand set driverpackage	/DriverPackage: /Enabled: /Name: /PackageId: /Server: /Set-DriverPackage
+subcommand set image	/Architecture: /Description: /Enabled: /Filename: /Name /Name: /OverwriteUnattend: /Server: /Set-Imagmedia: /UnattendFile: /UserFilter:
+subcommand set imagegroup	/Name: /Security: /Server: /set-imagegroup:
+subcommand set multicasttransmission	/Architecture: /Filename: /Server: /start-MulticastTransmissiomedia:
+subcommand set server	/add /address: /addresstype: /AllowN12forNewClients: /AnswerClients: /Approved: /Architecture: /ArchitectureDiscovery: /Authorize: /AutoaddPolicy /AutoaddSettings /BannedGuidPolicy /BcdRefreshPolicy /BindPolicy /BootImage: /BootProgram: /CommandlinePrecedence: /DefaultX86X64Imagetype: /DhcpOption60: /DomainSearchOrder: /Enabled: /End: /EndPort: /Fallback: /File: /forceNative /Guid: /JoinDomain: /JoinRights: /Known: /LoggingLevel: /MaxRetry: /Message: /MulticastSessionPolicy /N12BootProgram: /New: /NewMachineDomainJoin: /NewMachineNamingPolicy: /NewMachineOU /ObtainIpv4From: /ObtainIpv6From:Range /OSCMenuName: /Others: /OU: /Policy: /PollInterval: /PreferredDC: /PreferredGC: /PrestageUsingMAC: /Profile: /PxepromptPolicy /ReferralServer: /RefreshPeriod: /remove /resetBootProgram: /Responsedelay: /RetentionPeriod /RogueDetection: /RpcPort: /Server: /Set-Server /start: /startPort: /StreamCount: /Threshold: /Transport /type: /UseDhcpPorts: /User: /WdsClientLogging /WdsClientUnattend: /WdsUnattend
+subcommand set transportserver	/End: /EndPort: /Fallback: /MulticastSessionPolicy /ObtainIpv4From: /ObtainIpv6From:Range /Policy: /Profile: /Server: /Set-TransportServer /start: /startPort: /StreamCount: /Threshold:
+subcommand start	namespace server transportserver
+subcommand start namespace	/Namespace: /Server: /start-Namespace
+subcommand start server	/Server: /start-Server
+subcommand start transportserver	/Server: /start-TransportServer
+subcommand stop	server transportserver
+subcommand stop server	/Server: /Stop-Server
+subcommand stop transportserver	/Server: /Stop-TransportServer
+subst	/? /d
+sxstrace	-? -filter -filter: -logfile -logfile: -nostop -outfile -outfile:
+sysmon	-? -accepteula -c -i -m -s -u
+sysocmgr
+systeminfo	/? /fo /nh /p /s /u
+systeminfo /fo	CSV LIST TABLE
+takeown	/? /a /d /f /p /r /s /u
+takeown /d	N Y
+tapicfg	install makedefault publishscp remove removescp show
+tapicfg install	/? /directory: /forcedefault /server:
+tapicfg makedefault	/? /directory: /domain:
+tapicfg publishscp	/? /directory: /domain: /forcedefault
+tapicfg remove	/? /directory:
+tapicfg removescp	/? /directory: /domain:
+tapicfg show	/? /default /defaultonly /domain:
+taskkill	/f /fi /im /p /pid /s /t /u
+tasklist	/? /fi /fo /m /nh /p /s /svc /u /v
+tasklist /fo	csv list table
+tcmsetup	/? /c /d /q /x
+telnet	/? /a /e /f /l /t close display open quit send set status unset
+telnet /t	ansi vt100 vt52 vtnt
+telnet close
+telnet display
+telnet open
+telnet quit
+telnet send
+telnet set
+telnet status
+telnet unset
+tftp	-i
+time	/? /t
+timeout	/? /nobreak /t
+title	/?
+tlntadmn	-? -k -m -p -s -u
+tpmtool	/? /parameter
+tpmvscmgr	create destroy
+tpmvscmgr create	/? /adminkey /generate /machine /name /PIN /PUK
+tpmvscmgr destroy	/? /instance
+tracerpt	-l -rt
+tracert	/4 /6 /? /d /h /j /R /S /w
+tree	/? /a /f
+tscon	/? /dest: /password: /v
+tsdiscon	/? /server: /v
+tsecimp	/? /d /f /u /v
+tskill	/? /a /id: /server: /v
+tsprof	/? /copy /domain: /local /profile: /q /update
+type	/?
+typeperf	-cf -config -f -o -q -qx -s -sc -si -y /?
+tzutil	/? /g /l /s
+unexpose
+uniqueid	disk
+uniqueid disk	id=
+unlodctr	/?
+ver	/?
+verifier	/? /adddriver /all /bootmode /domain /driver /faults /faultssystematic /flags /help /interval /intervalseconds /iolevel /livedump /log /logging /query /querysettings /removedriver /reset /rules /standard /volatile
+verify	off on
+vol	/?
+vssadmin	delete list resize
+vssadmin delete	shadows
+vssadmin delete shadows	/all /for= /oldest /quiet /shadow=
+vssadmin list	providers shadows shadowstorage volumes writers
+vssadmin list providers
+vssadmin list shadows	/for= /shadow=
+vssadmin list shadowstorage	/for= /on=
+vssadmin list volumes
+vssadmin list writers
+vssadmin resize	shadowstorage
+vssadmin resize shadowstorage	/for= /maxsize= /on=
+waitfor	/? /p /s /si /t /u
+wbadmin	delete disable enable get restore start stop
+wbadmin delete	catalog systemstatebackup
+wbadmin delete catalog	-quiet
+wbadmin delete systemstatebackup	-backupTarget -backupTarget: -deleteoldest -keepVersions -keepVersions: -machine -machine: -quiet -version -version:
+wbadmin disable	backup
+wbadmin disable backup	-quiet
+wbadmin enable	backup
+wbadmin enable backup	-addtarget -addtarget: -allCritical -allowDeleteOldBackups -exclude -exclude: -hyperv -hyperv: -include -include: -nonRecurseExclude -nonRecurseExclude: -nonRecurseInclude -nonRecurseInclude: -password -password: -quiet -removetarget -removetarget: -schedule -schedule: -systemState -user -user: -vssCopy -vssFull
+wbadmin get	disks items status versions
+wbadmin get disks
+wbadmin get items	-backupTarget -backupTarget: -machine -machine: -version -version:
+wbadmin get status
+wbadmin get versions	-backupTarget -backupTarget: -machine -machine:BackupMachineName
+wbadmin restore	catalog
+wbadmin restore catalog	-backupTarget -backupTarget: -machine -machine: -quiet
+wbadmin start	backup recovery sysrecovery systemstatebackup systemstaterecovery
+wbadmin start backup	-allCritical -backupTarget -backupTarget: -exclude -exclude: -include -include: -noInheritAcl -nonRecurseExclude -nonRecurseExclude: -nonRecurseInclude -nonRecurseInclude: -noVerify -password -password: -quiet -systemState -user -user: -vssCopy -vssFull
+wbadmin start recovery	-backupTarget -backupTarget: -items -items: -itemtype -itemtype: -machine -machine: -noRollForward -notRestoreAcl -overwrite -overwrite: -quiet -recoveryTarget -recoveryTarget: -recursive -skipBadClusterCheck -version -version:
+wbadmin start sysrecovery	-backupTarget -backupTarget: -excludeDisks -machine -machine: -quiet -recreateDisks -restoreAllVolumes -skipBadClusterCheck -version -version:
+wbadmin start systemstatebackup	-backupTarget -backupTarget: -quiet
+wbadmin start systemstaterecovery	-authsysvol -autoReboot -backupTarget -backupTarget: -machine -machine: -quiet -recoveryTarget -recoveryTarget: -showsummary -version -version:
+wbadmin stop	job
+wbadmin stop job	-quiet
+wdsutil	add approve-autoadddevices convert-riprepimage copy delete-autoadddevices disable disconnect-client enable export-image get initialize-server new progress reject-autoadddevices remove replace-image set start stop uninitialize-server update-serverfiles verbose
+wdsutil add	command
+wdsutil add command
+wdsutil approve-autoadddevices	command
+wdsutil approve-autoadddevices command	/Approve-AutoaddDevices /BootImagepath: /BootProgram: /JoinDomain: /JoinRights: /MachineName: /OU: /ReferralServer: /RequestId: /Server: /User: /WdsClientUnattend:
+wdsutil convert-riprepimage	command
+wdsutil convert-riprepimage command	/Convert-RIPrepImage /Description: /DestinationImage /FilePath: /InPlace /Name: /Overwrite:
+wdsutil copy	command
+wdsutil copy command
+wdsutil delete-autoadddevices	command
+wdsutil delete-autoadddevices command	/delete-AutoaddDevices /Devicetype: /Server:
+wdsutil disable	command
+wdsutil disable command
+wdsutil disconnect-client	command
+wdsutil disconnect-client command	/ClientId: /Disconnect-Client /Force /Server:
+wdsutil enable	command
+wdsutil enable command
+wdsutil export-image	command
+wdsutil export-image command	/Architecture: /Description: /DestinationImage /Export-Image /Filename: /Filepath: /Name: /Overwrite: /Server:
+wdsutil get	command
+wdsutil get command
+wdsutil initialize-server	command
+wdsutil initialize-server command	/Authorize /Initialize-Server /remInst: /Server:
+wdsutil new	command
+wdsutil new command
+wdsutil progress	command
+wdsutil progress command	/progress
+wdsutil reject-autoadddevices	command
+wdsutil reject-autoadddevices command	/Reject-AutoaddDevices /RequestId: /Server:
+wdsutil remove	command
+wdsutil remove command
+wdsutil replace-image	command
+wdsutil replace-image command	/Architecture: /Description: /Filename: /Image: /ImageFile: /ImageGroup: /ImageType:Boot /ImageType:Install /Name: /Replace-Image /ReplacementImage /Server: /SourceImage:
+wdsutil set	command
+wdsutil set command
+wdsutil start	server
+wdsutil start server	command
+wdsutil start server command	/Server: /start-Server
+wdsutil stop	server
+wdsutil stop server	command
+wdsutil stop server command	/Server: /Stop-Server
+wdsutil uninitialize-server	command
+wdsutil uninitialize-server command	/Server: /Uninitialize-Server
+wdsutil update-serverfiles	command
+wdsutil update-serverfiles command	/Server: /Update-ServerFiles
+wdsutil verbose	command
+wdsutil verbose command	/verbose
+wecutil	create-subscription cs delete-subscription ds enum-subscription es get-subscription get-subscriptionruntimestatus gr gs qc quick-config retry-subscription rs set-subscription ss
+wecutil create-subscription	/cun: /cup:
+wecutil cs	/cun: /cup:
+wecutil delete-subscription
+wecutil ds
+wecutil enum-subscription
+wecutil es
+wecutil get-subscription	/f: /uni:
+wecutil get-subscriptionruntimestatus
+wecutil gr
+wecutil gs	/f: /uni:
+wecutil qc	/q:
+wecutil quick-config	/q:
+wecutil retry-subscription
+wecutil rs
+wecutil set-subscription	/aes /c: /cf: /cm: /ct: /cun: /cup: /d: /dia: /dm: /dmi: /dmlt: /e: /esa: /ese: /essp: /ex: /hi: /hn: /l: /lf: /pn: /q: /ree: /res /tn: /tp: /un: /up: /uri:
+wecutil ss	/aes /c: /cf: /cm: /ct: /cun: /cup: /d: /dia: /dm: /dmi: /dmlt: /e: /esa: /ese: /essp: /ex: /hi: /hn: /l: /lf: /pn: /q: /ree: /res /tn: /tp: /un: /up: /uri:
+wevtutil	al archive-log cl clear-log el enum-logs enum-publishers ep epl export-log get-log get-loginfo get-publisher gl gli gp im install-manifest qe query-events set-log sl um uninstall-manifest
+wevtutil al	/l:
+wevtutil archive-log	/l:
+wevtutil cl	/a: /bu: /p: /r: /u: /uni:
+wevtutil clear-log	/a: /bu: /p: /r: /u: /uni:
+wevtutil el
+wevtutil enum-logs
+wevtutil enum-publishers
+wevtutil ep
+wevtutil epl	/lf: /ow: /q: /sq:
+wevtutil export-log	/lf: /ow: /q: /sq:
+wevtutil get-log	/f:
+wevtutil get-loginfo	/lf:
+wevtutil get-publisher	/f: /ge: /gm:
+wevtutil gl	/f:
+wevtutil gli	/lf:
+wevtutil gp	/f: /ge: /gm:
+wevtutil im	/mf: /pf: /rf:
+wevtutil install-manifest	/mf: /pf: /rf:
+wevtutil qe	/bm: /c: /e: /f: /l: /lf: /q: /rd: /sbm: /sq:
+wevtutil query-events	/bm: /c: /e: /f: /l: /lf: /q: /rd: /sbm: /sq:
+wevtutil set-log	/ab: /c: /ca: /e: /i: /k: /l: /lfn: /ms: /rt:
+wevtutil sl	/ab: /c: /ca: /e: /i: /k: /l: /lfn: /ms: /rt:
+wevtutil um
+wevtutil uninstall-manifest
+where	/? /f /q /r /t
+whoami	/all /claims /fo /fqdn /groups /logonid /nh /priv /upn /user
+winnt
+winnt32	/? /checkupgradeonly /cmd /cmd: /cmdcons /copydir /copydir: /copysource /copysource: /debug /dudisable /duprepare /duprepare: /dushare /dushare: /emsbaudrate /emsbaudrate: /emsport /emsport: /m /m: /makelocalsource /noreboot /s /s: /syspart /syspart: /tempdrive /tempdrive: /udf /udf: /unattend
+winrs	/? /allowdelegate /compression /noecho /noprofile /unencrypted /usessl
+winsat	mem mfmedia
+winsat mem	-buffersize -do -eef -icn -idiskinfo -iguid -maxt -mint -nc -note -rn -up -v -xml
+winsat mfmedia	-dumpgraph -eef -icn -idiskinfo -iguid -input -nopmp -note -ns -play -pmp -v -xml
+wmic
+writer	exclude verify
+writer exclude
+writer verify
+wscript	/? /b /d /e /e: /h:cscript /h:wscript /i /job: /logo /nologo /s /t: /x
+xcopy	/? /a /b /c /compress /d /e /exclude:FileName1 /f /g /h /i /j /k /l /m /n /noclone /o /p /q /r /s /t /u /v /w /x /y /z

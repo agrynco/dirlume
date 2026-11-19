@@ -98,21 +98,23 @@ fn merge_environment(
     current
 }
 
-pub fn apply(command: &mut CommandBuilder, refresh: bool) -> io::Result<()> {
-    // portable-pty merges the registry into its default environment even with refresh disabled.
-    command.env_clear();
+pub fn variables(refresh: bool) -> io::Result<Vec<(OsString, OsString)>> {
     if refresh {
         let latest = windows_environment()?;
         let registered = STARTUP_VARIABLES.get_or_init(|| latest.keys().cloned().collect());
-        for (name, value) in
-            merge_environment(registered, latest, std::env::vars_os()).into_values()
-        {
-            command.env(name, value);
-        }
+        Ok(merge_environment(registered, latest, std::env::vars_os())
+            .into_values()
+            .collect())
     } else {
-        for (name, value) in std::env::vars_os() {
-            command.env(name, value);
-        }
+        Ok(std::env::vars_os().collect())
+    }
+}
+
+pub fn apply(command: &mut CommandBuilder, refresh: bool) -> io::Result<()> {
+    // portable-pty merges the registry into its default environment even with refresh disabled.
+    command.env_clear();
+    for (name, value) in variables(refresh)? {
+        command.env(name, value);
     }
     Ok(())
 }

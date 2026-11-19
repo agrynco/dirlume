@@ -1,4 +1,6 @@
 #[cfg(feature = "desktop")]
+mod completion;
+#[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
 mod diagnostics;

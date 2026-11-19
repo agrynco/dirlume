@@ -42,6 +42,7 @@ const ACTIONS: &[&str] = &[
     "cancel_transfer",
     "measure_folders",
     "open_terminal",
+    "complete_command",
     "close_terminal",
     "check_for_update",
     "install_update",
