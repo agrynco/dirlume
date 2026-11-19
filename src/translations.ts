@@ -5,6 +5,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Swap panes": ["Поміняти панелі місцями", "Поменять панели местами"],
   "Show hidden files": ["Показувати приховані файли", "Показывать скрытые файлы"],
   "Toggle terminal": ["Показати або приховати термінал", "Показать или скрыть терминал"],
+  "Automatically refresh environment variables": ["Автоматично оновлювати змінні середовища", "Автоматически обновлять переменные среды"],
+  "Windows environment changed. Reopen the terminal to apply the updated variables.": ["Змінні середовища Windows змінилися. Відкрийте термінал заново, щоб застосувати зміни.", "Переменные среды Windows изменились. Откройте терминал заново, чтобы применить изменения."],
   "Commands": ["Команди", "Команды"],
   "Main menu": ["Головне меню", "Главное меню"],
   "Folder shortcuts": ["Закладки папок", "Закладки папок"],

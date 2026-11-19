@@ -497,6 +497,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .terminal-card header { display: flex; align-items: center; gap: 12px; min-height: 33px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); background: var(--raised); }
 .terminal-card h2 { margin: 0; font-size: 13px; font-weight: 650; }
 .terminal-card header span { flex: 1; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.terminal-environment-notice { margin: 0; padding: 4px 10px; background: var(--raised); color: var(--ink); font-size: .84em; }
 .terminal-surface { flex: 1; min-height: 0; margin: 6px 8px; }
 .command-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 12px; font: var(--terminal-size)/1.4 var(--terminal-font); }
 .command-bar span { max-width: 36%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }

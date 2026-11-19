@@ -6,7 +6,7 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
 
 use crate::{
@@ -88,20 +88,27 @@ fn size(rows: u16, cols: u16) -> PtySize {
     }
 }
 
-fn create(
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenTerminal {
+    id: u32,
     directory: String,
     prompt_token: String,
     rows: u16,
     cols: u16,
-    output: Channel<Output>,
-) -> Result<SharedTerminal> {
-    let cwd = local::absolute(&directory).map_err(message)?;
+    refresh_environment: bool,
+}
+
+fn create(request: OpenTerminal, output: Channel<Output>) -> Result<SharedTerminal> {
+    let cwd = local::absolute(&request.directory).map_err(message)?;
     let pair = native_pty_system()
-        .openpty(size(rows, cols))
+        .openpty(size(request.rows, request.cols))
         .map_err(message)?;
     #[cfg(windows)]
     let mut command = {
         let mut command = CommandBuilder::new("powershell.exe");
+        crate::windows_environment::apply(&mut command, request.refresh_environment)
+            .map_err(message)?;
         command.args(["-NoLogo", "-NoExit", "-Command", POWERSHELL_PROMPT]);
         command
     };
@@ -109,9 +116,11 @@ fn create(
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(&shell);
+    #[cfg(not(windows))]
+    let _ = request.refresh_environment;
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
-    command.env("DIRLUME_PROMPT_TOKEN", prompt_token);
+    command.env("DIRLUME_PROMPT_TOKEN", request.prompt_token);
     let mut reader = pair.master.try_clone_reader().map_err(message)?;
     let writer = pair.master.take_writer().map_err(message)?;
     let mut child = pair.slave.spawn_command(command).map_err(message)?;
@@ -163,15 +172,12 @@ fn create(
 
 #[tauri::command]
 pub async fn open_terminal(
-    id: u32,
-    directory: String,
-    prompt_token: String,
-    rows: u16,
-    cols: u16,
+    request: OpenTerminal,
     output: Channel<Output>,
     state: State<'_, Terminals>,
 ) -> Result<()> {
-    let terminal = blocking(move || create(directory, prompt_token, rows, cols, output)).await?;
+    let id = request.id;
+    let terminal = blocking(move || create(request, output)).await?;
     state.0.lock().map_err(message)?.insert(id, terminal);
     Ok(())
 }

@@ -123,6 +123,7 @@ export interface Preferences {
   activeScheme: string | null;
   schemes: Scheme[];
   hidden: boolean;
+  refreshEnvironment: boolean;
   provider: Provider;
   kswitcher: string;
   shortcuts: Bindings;
@@ -141,7 +142,7 @@ export const defaultBindings = Object.fromEntries(
 
 export function readPreferences(): Preferences {
   const defaults: Preferences = {
-    theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, kswitcher: "", shortcuts: defaultBindings,
+    theme: "system", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "", shortcuts: defaultBindings,
     viewFontSizes: {}, language: "en",
   };
   try {
@@ -181,6 +182,7 @@ export function readPreferences(): Preferences {
       schemes,
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
       hidden: saved.hidden === true,
+      refreshEnvironment: saved.refreshEnvironment !== false,
       kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
       shortcuts,
       viewFontSizes,
