@@ -1,9 +1,8 @@
 import { errorText, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Save, X } from "lucide-react";
-import { diffLines } from "diff";
 import { describeError, placePath, readPlaceText, savePlaceText, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { HexViewer } from "./HexViewer";
@@ -12,12 +11,10 @@ import { eventShortcut, showShortcut } from "./preferences";
 import { systemTheme, type Theme } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
+import { normalized } from "./textFormat";
+import type { CompareRequest, DiffResult } from "./compare.worker";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
-
-function normalized(text: string) {
-  return text.replaceAll(/\r\n?/g, "\n");
-}
 
 export function TextWindow({ file, editing, active, theme, saveShortcut, alternateSaveShortcut, closeShortcut, cancelShortcut, hexShortcut, zoomShortcut, fontSizes, onZoom, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
@@ -193,57 +190,6 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, alterna
   );
 }
 
-type DiffResult =
-  | { rows: { kind: string; left: string; right: string; group: number | null }[]; groups: number }
-  | { error: string };
-
-function compare(left: string, right: string, whitespace: boolean): DiffResult {
-  if (Math.max(left.length, right.length) > 2 * 1024 * 1024) return { error: "Choose files under 2 MiB." };
-  const changes = diffLines(normalized(left), normalized(right), {
-    ignoreWhitespace: !whitespace, timeout: 1500, maxEditLength: 10_000,
-  });
-  if (!changes) return { error: "These files contain too many differences to compare." };
-  const rows: Extract<DiffResult, { rows: unknown }>["rows"] = [];
-  let groups = 0;
-  let removed: string[] = [];
-  let added: string[] = [];
-  function flush() {
-    if (!removed.length && !added.length) return;
-    groups++;
-    for (let index = 0; index < Math.max(removed.length, added.length); index++) {
-      rows.push({
-        kind: index < removed.length && index < added.length ? "changed" : index < removed.length ? "removed" : "added",
-        left: removed[index] ?? "", right: added[index] ?? "", group: groups,
-      });
-    }
-    removed = [];
-    added = [];
-  }
-  // Keep original whitespace on both sides of unchanged lines.
-  const oldLines = normalized(left).split("\n");
-  const newLines = normalized(right).split("\n");
-  if (oldLines.length > 20_000 || newLines.length > 20_000) return { error: "Choose files shorter than 20,000 lines." };
-  let leftIndex = 0;
-  let rightIndex = 0;
-  for (const change of changes) {
-    const count = change.count ?? 0;
-    if (change.added) {
-      added.push(...newLines.slice(rightIndex, rightIndex + count));
-      rightIndex += count;
-    } else if (change.removed) {
-      removed.push(...oldLines.slice(leftIndex, leftIndex + count));
-      leftIndex += count;
-    } else {
-      flush();
-      for (let index = 0; index < count; index++) {
-        rows.push({ kind: "same", group: null, left: oldLines[leftIndex++] ?? "", right: newLines[rightIndex++] ?? "" });
-      }
-    }
-  }
-  flush();
-  return { rows, groups };
-}
-
 export function CompareDialog({ left, right, previousShortcut, nextShortcut, onClose }: {
   left: NamedFile;
   right: NamedFile;
@@ -255,18 +201,50 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const [error, setError] = useState("");
   const [whitespace, setWhitespace] = useState(false);
   const [current, setCurrent] = useState(0);
+  const [comparison, setComparison] = useState<{ documents: { left: string; right: string }; whitespace: boolean; result: DiffResult } | null>(null);
   const output = useRef<HTMLDivElement>(null);
-  const result = useMemo(() => documents && compare(documents.left, documents.right, whitespace), [documents, whitespace]);
+  const result = comparison?.documents === documents && comparison.whitespace === whitespace ? comparison.result : null;
   const computed = result && "rows" in result ? result : null;
   const groups = computed?.groups ?? 0;
 
   useEffect(() => {
     let cancelled = false;
+    setError("");
+    setDocuments(null);
+    setCurrent(0);
     Promise.all([readPlaceText(left), readPlaceText(right)])
       .then(([left, right]) => { if (!cancelled) setDocuments({ left: left.text, right: right.text }); },
         (error: unknown) => { if (!cancelled) setError(describeError(error)); });
     return () => { cancelled = true; };
   }, [left, right]);
+
+  useEffect(() => {
+    if (!documents) return;
+    let worker: Worker;
+    const finish = (result: DiffResult) => setComparison({ documents, whitespace, result });
+    const failed = () => finish({ error: "Could not compare the files." });
+    try {
+      worker = new Worker(new URL("./compare.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      failed();
+      return;
+    }
+    worker.onmessage = (event: MessageEvent<DiffResult>) => {
+      finish(event.data);
+      worker.terminate();
+    };
+    worker.onerror = () => {
+      failed();
+      worker.terminate();
+    };
+    const request: CompareRequest = { ...documents, whitespace };
+    worker.postMessage(request);
+    return () => {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.terminate();
+    };
+  }, [documents, whitespace]);
 
   function jump(offset: number) {
     if (!groups) return;
@@ -295,6 +273,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       <div className="comparison-head"><span title={left.name}>{left.name}</span><span title={right.name}>{right.name}</span></div>
       {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}
       {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
+      {documents && !result && !failure && <div className="dialog-body" role="status">{t("Comparing…")}</div>}
       {computed && (
         <div className="comparison" ref={output} tabIndex={0} aria-label={t("File differences")}>
           {computed.rows.map((row, index) => (
