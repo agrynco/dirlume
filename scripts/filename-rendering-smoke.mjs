@@ -37,10 +37,10 @@ export async function testFilenameRendering(page, root) {
     await rows.and(pane.getByTitle(forms[index], { exact: true })).click();
     const values = await Promise.all(forms.map((form, other) => dimensions(form, other === index)));
     for (const value of values) {
-      assert.equal(value.fontSize, "18px");
+      assert.equal(value.fontSize, "15px");
       assert.match(value.fontFamily, /GoMono Nerd Font Mono/);
       assert.equal(value.selected, value.expected);
-      assert.equal(value.content.normalize("NFC"), sample);
+      assert.equal(value.content, sample);
       assert.equal(value.textOverflow, "ellipsis");
       assert.equal(value.direction, "ltr");
       assert.equal(value.overflowing, false);
@@ -59,5 +59,5 @@ export async function testFilenameRendering(page, root) {
     await nameField(forms[1]).screenshot({ path: join(process.env.DIRLUME_FILENAME_SCREENSHOTS, "filename-ellipsis.png"), scale: "css" });
   }
   await resize.dblclick();
-  console.log("Verified precomposed and decomposed names, selection, and end ellipsis using the bundled 18px file-panel font.");
+  console.log("Verified precomposed and decomposed names, selection, and end ellipsis using the bundled 15px file-panel font.");
 }

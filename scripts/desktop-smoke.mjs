@@ -262,6 +262,10 @@ try {
   await page.keyboard.press("Control+a");
   assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
     "Ctrl+A in a file pane must not highlight the workspace text.");
+  const selectAllAttributes = page.getByRole("dialog", { name: "Attributes", exact: true });
+  await selectAllAttributes.waitFor();
+  await page.keyboard.press("Escape");
+  await selectAllAttributes.waitFor({ state: "hidden" });
   await leftList.evaluate((list) => list.blur());
   await page.keyboard.press("Control+a");
   assert.equal(await page.evaluate(() => window.getSelection()?.toString()), "",
