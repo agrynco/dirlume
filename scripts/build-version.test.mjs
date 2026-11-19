@@ -20,13 +20,14 @@ test("CI numbers increase across runs and full retries", () => {
   assert.throws(() => resolveBuild("0.1.0", undefined, { ...run, runAttempt: "1000" }), /run number or attempt/);
 });
 
-test("automatic release picks the next patch or a higher source version and is restricted to main", () => {
+test("manual release picks the next patch or a higher source version and is restricted to main", () => {
   const release = { ...run, publishRequested: true };
   assert.deepEqual(resolveBuild("0.1.0", "0.1.9", release), { version: "0.1.10", number: "42001", publish: true });
   assert.equal(resolveBuild("1.0.0", "0.1.9", release).version, "1.0.0");
   assert.equal(resolveBuild("0.1.0", undefined, release).version, "0.1.0");
   assert.equal(resolveBuild("0.1.0", "0.2.0-beta.10", release).version, "0.2.0");
   assert.throws(() => resolveBuild("0.1.0", "0.1.9", { ...release, refName: "other" }), /from main/);
+  assert.throws(() => resolveBuild("0.2.0", "0.1.9", { ...release, refType: "tag", refName: "v0.2.0" }), /from main/);
 });
 
 test("tagged release requires matching source manifests and a higher version", () => {

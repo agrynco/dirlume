@@ -6,17 +6,12 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: Publish the next stable release from main after the build passes
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: dirlume-${{ ((github.event_name == 'push' && github.ref_type == 'tag') || inputs.publish_release) && 'release' || github.ref }}
+  group: dirlume-${{ ((github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && 'release' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -39,7 +34,7 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
         run: node scripts/build-version.mjs resolve
 
   build:
@@ -127,7 +122,7 @@ jobs:
 
   release:
     name: Publish GitHub release
-    if: needs.version.outputs.publish == 'true' && (github.event_name == 'push' || inputs.publish_release)
+    if: needs.version.outputs.publish == 'true'
     needs: [version, build]
     runs-on: ubuntu-22.04
     permissions:
