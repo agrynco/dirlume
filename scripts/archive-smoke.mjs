@@ -11,9 +11,6 @@ export async function testArchives(page, root) {
   await writeFile(join(source, "folder", "note.txt"), "archived text");
   await writeFile(join(source, "folder", "keep.txt"), "unrelated text");
 
-  await page.waitForFunction(() => ["left", "right"].every((side) =>
-    document.getElementById(`${side}-address`)?.value &&
-    document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
   for (const [side, path] of [["left", source], ["right", destination]]) {
     const list = page.locator(`#${side}-files[aria-busy="false"]`);
     await list.waitFor();
@@ -74,9 +71,10 @@ export async function testArchives(page, root) {
   await returnToFiles();
   await row("note.txt").click();
   await page.keyboard.press("F4");
-  await document.getByLabel("Edit note.txt").fill("updated in archive");
-  await button(document, "Save").click();
-  await button(document, "Save").and(document.locator("button:disabled")).waitFor();
+  const editor = document.getByLabel("Edit note.txt");
+  await editor.fill("updated in archive");
+  await editor.press("F2");
+  await document.locator(".document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
   await button(document, "Close document").click();
   await returnToFiles();
   await row("keep.txt").click();

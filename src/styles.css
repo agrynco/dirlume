@@ -415,7 +415,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .process-table :is(td, th):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .process-table :is(.process-col-executable, .process-cell-executable) { text-align: left; }
 .process-table th button { max-width: 100%; padding: 3px 4px; font-size: .88em; overflow: hidden; text-overflow: ellipsis; }
-.process-table th .file-column-resize { inset-inline-end: 0; }
+.process-table .file-column-resize { position: absolute; z-index: 1; inset: 0 0 0 auto; width: 8px; cursor: col-resize; touch-action: none; }
+.process-table .file-column-resize::after { content: ""; position: absolute; inset: 4px 3px; background: var(--line); }
+.process-table .file-column-resize:is(:hover, :active, :focus-visible)::after { background: var(--accent); }
 .process-cell-name > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .process-cell-name span span { overflow: hidden; text-overflow: ellipsis; }
 .process-cell-name :is(svg, img) { width: 17px; height: 17px; object-fit: contain; flex: none; }
