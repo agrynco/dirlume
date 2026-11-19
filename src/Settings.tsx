@@ -236,7 +236,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 ) : (
                   <Button type="button" className="shortcut-key" aria-label={t("Change shortcut for {0}", commandLabel(command))}
                     onClick={() => { setCapture(command); setConflict(""); }}>
-                    {showShortcut(preferences.shortcuts[command]) || t("Unassigned")}
+                    <span>{showShortcut(preferences.shortcuts[command]) || t("Unassigned")}</span>
                   </Button>
                 )}
                 <Button type="button" className="icon-button" aria-label={t("Clear shortcut for {0}", commandLabel(command))}
