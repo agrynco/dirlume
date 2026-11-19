@@ -13,6 +13,7 @@ import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
+import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
@@ -21,6 +22,7 @@ import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
 import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
+import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -1632,6 +1634,7 @@ try {
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
+  await testCompareLayouts(page, temp);
   await testCommandCompletion(page, temp);
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
@@ -1639,6 +1642,7 @@ try {
   await testPermanentDelete(page, temp);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
   await testLockingProcessPane(page, temp);
+  await testOsTimestamps(page, temp);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");

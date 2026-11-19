@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type Entry, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
-import { childPlace, formatDate, formatSize, localPath } from "./panes";
+import { childPlace, formatSize, localPath } from "./panes";
+import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 
@@ -280,8 +281,9 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
 }
 
 function ConflictDetails({ label, details }: { label: string; details: TransferEntryDetails }) {
+  const dateLabel = useTimestamps([details.modified]);
   return <tr><th scope="row">{label}</th>
     <td>{details.directory ? t("Folder") : `${details.size.toLocaleString(locale())} B`}</td>
-    <td>{formatDate(details.modified)}</td>
+    <td>{dateLabel(details.modified) ?? "–"}</td>
   </tr>;
 }

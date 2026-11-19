@@ -3,10 +3,11 @@ import { ChevronDown } from "lucide-react";
 import { api, describeError, isPermissionError, windowsClient, type FolderLinkType } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
-import { errorText, locale, t } from "./i18n";
+import { errorText, t } from "./i18n";
 import { PathField } from "./PathField";
 import { eventShortcut, showShortcut } from "./preferences";
 import { ElevationButton } from "./ProcessTools";
+import { timestampSeconds, useTimestamps } from "./useTimestamps";
 
 const historyKey = "dirlume.folder-name-history.v1";
 type HistoryEntry = { name: string; date: number };
@@ -44,9 +45,9 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const dates = new Map<string, HistoryEntry[]>();
-  const formatter = new Intl.DateTimeFormat(locale(), { dateStyle: "medium" });
+  const dateLabel = useTimestamps(historyOpen ? history.map(({ date }) => timestampSeconds(date)) : [], "date");
   if (historyOpen) for (const entry of history) {
-    const date = formatter.format(entry.date);
+    const date = dateLabel(timestampSeconds(entry.date)) ?? t("Unknown date");
     const group = dates.get(date) ?? [];
     group.push(entry);
     dates.set(date, group);

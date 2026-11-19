@@ -206,16 +206,13 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   };
 }
 
-const formats = new Map<string, { number: Intl.NumberFormat; time: Intl.DateTimeFormat }>();
+const formats = new Map<string, Intl.NumberFormat>();
 
 function currentFormats() {
   const language = locale();
   let format = formats.get(language);
   if (!format) {
-    format = {
-      number: new Intl.NumberFormat(language, { maximumFractionDigits: 1 }),
-      time: new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }),
-    };
+    format = new Intl.NumberFormat(language, { maximumFractionDigits: 1 });
     formats.set(language, format);
   }
   return format;
@@ -229,9 +226,5 @@ export function formatSize(size: number | null) {
     size /= 1024;
     unit++;
   }
-  return `${currentFormats().number.format(size)} ${units[unit]}`;
-}
-
-export function formatDate(time: number | null) {
-  return time === null ? "–" : currentFormats().time.format(new Date(time * 1000));
+  return `${currentFormats().format(size)} ${units[unit]}`;
 }

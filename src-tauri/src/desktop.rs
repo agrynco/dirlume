@@ -1383,6 +1383,7 @@ pub fn run() {
         installed_fonts,
         list_directory,
         disk_space,
+        crate::timestamps::format_timestamps,
         file_attributes,
         update_file_attributes,
         operate,

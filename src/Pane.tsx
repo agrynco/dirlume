@@ -7,12 +7,13 @@ import {
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, windowsClient, type DiskSpace, type Entry, type QuickLocation } from "./api";
-import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { folderMeasurement, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { eventShortcut, showShortcut, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
+import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
 import { columnWidthsStyle, FileColumns, readColumnLayout, saveColumnLayout } from "./FileColumns";
 
@@ -133,6 +134,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
     indices.sort((left, right) => left - right);
   }
   const fileIcons = new Map<string, { directory: string; name: string }>();
+  const dateLabel = useTimestamps(processView ? [] : indices.map((index) => entries[index].modified));
   const byName = new Map<string, string>();
   if (windowsClient && !processView) {
     for (const index of indices) {
@@ -435,7 +437,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
               {entry.link && <Link2 className="link-icon" aria-label={t("Link")} />}</span>
             <span className="file-size">{measuring ? <LoaderCircle className="spin" aria-label={t("Measuring folder")} /> :
               size ? `${size.incomplete ? "≥ " : ""}${formatSize(size.bytes)}` : formatSize(entry.directory ? null : entry.size)}</span>
-            <span className="file-date">{formatDate(entry.modified)}</span>
+            <span className="file-date">{dateLabel(entry.modified) ?? "–"}</span>
           </div>
           </Fragment>;
         })}
@@ -480,7 +482,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         <span className="pane-details-name">{current ? matches?.get(current.name)?.entry.name ?? current.name : ""}</span>
         <span>{current && current.name !== ".." && (current.directory && !currentSize ? t("<DIR>") :
           currentSize ? formatSize(currentSize.bytes) : formatSize(current.size))}</span>
-        <span>{current && current.name !== ".." ? formatDate(current.modified) : ""}</span>
+        <span>{current && current.name !== ".." ? (dateLabel(current.modified) ?? "–") : ""}</span>
       </div>}
       <footer className="pane-footer">
         <span className="pane-counts">{search ? countText(entries.length, "match") :

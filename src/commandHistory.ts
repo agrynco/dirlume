@@ -1,3 +1,5 @@
+import { timestampSeconds } from "./useTimestamps";
+
 export type CommandEntry = { text: string; date: number | null };
 
 const historyKey = "dirlume.command-history";
@@ -54,16 +56,16 @@ function keywords(command: string) {
   }
 }
 
-export function commandHistoryGroups(history: CommandEntry[], query: string, locale: string, unknownDate: string) {
+export function commandHistoryGroups(history: CommandEntry[], query: string,
+  dateLabel: (time: number | null) => string | null, unknownDate: string) {
   const words = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-  const labels = new Intl.DateTimeFormat(locale, { dateStyle: "long" });
   const groups = [new Map<string, string[]>(), new Map<string, string[]>()];
   const seen = new Set<string>();
   for (const { text, date } of history) {
     if (seen.has(text)) continue;
     seen.add(text);
     const day = date === null ? null : new Date(date);
-    const label = day ? labels.format(day) : unknownDate;
+    const label = dateLabel(timestampSeconds(date)) ?? unknownDate;
     const dateKey = day ? [day.getFullYear(), day.getMonth() + 1, day.getDate()]
       .map((number) => String(number).padStart(2, "0")).join("-") : "";
     const command = text.toLocaleLowerCase();
