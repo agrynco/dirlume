@@ -27,6 +27,9 @@ pub(super) fn native(
     if let Some(batch) = windows_options(context) {
         return Some(batch);
     }
+    if let Some(batch) = git_options(context, cwd, request.refresh_environment) {
+        return Some(batch);
+    }
     let script = STANDARD.encode(
         SCRIPT
             .encode_utf16()
@@ -58,6 +61,78 @@ pub(super) fn native(
     input.push(b'\n');
     let output = read_process(command, input)?;
     serde_json::from_slice(&output).ok()
+}
+
+fn git_options(
+    context: &Context,
+    cwd: &Path,
+    refresh_environment: bool,
+) -> Option<CompletionBatch> {
+    let (program, arguments) = context.words.split_first()?;
+    if !program.eq_ignore_ascii_case("git") && !program.eq_ignore_ascii_case("git.exe") {
+        return None;
+    }
+    let args: &[&str] = match arguments {
+        [] => &["--list-cmds=main,others,alias"],
+        [verb]
+            if [
+                "checkout",
+                "switch",
+                "merge",
+                "rebase",
+                "log",
+                "diff",
+                "show",
+                "reset",
+                "cherry-pick",
+                "revert",
+            ]
+            .contains(&verb.to_ascii_lowercase().as_str())
+                && !context.prefix.starts_with('-') =>
+        {
+            &[
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ]
+        }
+        _ => return None,
+    };
+    let environment = crate::windows_environment::variables(refresh_environment).ok()?;
+    let path = environment.iter().find_map(|(name, value)| {
+        name.to_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case("PATH"))
+            .then_some(value)
+    })?;
+    let git = std::env::split_paths(path)
+        .filter(|path| path.is_absolute())
+        .map(|path| path.join("git.exe"))
+        .find(|path| path.is_file())?;
+    let mut command = Command::new(git);
+    command
+        .current_dir(cwd)
+        .env_clear()
+        .envs(environment)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(args);
+    let output = String::from_utf8(read_process(command, Vec::new())?).ok()?;
+    let matches: Vec<_> = output
+        .lines()
+        .filter(|value| starts_with(value, &context.prefix))
+        .take(MAX_MATCHES)
+        .map(|value| Suggestion {
+            label: value.to_owned(),
+            text: shell_word(value),
+            directory: false,
+        })
+        .collect();
+    (!matches.is_empty()).then_some(CompletionBatch {
+        index: context.index,
+        length: context.length,
+        matches,
+    })
 }
 
 fn windows_options(context: &Context) -> Option<CompletionBatch> {
