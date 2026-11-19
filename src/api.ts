@@ -71,6 +71,14 @@ export interface KSwitcherPeer {
   name: string;
 }
 
+export const textEncodingLabels = {
+  utf8: "UTF-8",
+  utf8_bom: "UTF-8 with BOM",
+  utf16_le: "UTF-16 LE",
+  utf16_be: "UTF-16 BE",
+} as const;
+export type TextEncoding = keyof typeof textEncodingLabels;
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export interface SizeResult {
   name: string;
@@ -79,7 +87,8 @@ export interface SizeResult {
 }
 
 export type Operation =
-  | { kind: "open" | "create_folder" | "create_file" | "recycle" | "delete"; name: string }
+  | { kind: "open" | "create_folder" | "recycle" | "delete"; name: string }
+  | { kind: "create_file"; name: string; encoding?: TextEncoding }
   | { kind: "rename"; name: string; new_name: string };
 
 export type TransferSource =
@@ -106,7 +115,7 @@ interface Connection {
 
 export interface TextDocument {
   text: string;
-  encoding: "utf8" | "utf8_bom" | "utf16_le" | "utf16_be";
+  encoding: TextEncoding;
   revision?: string;
 }
 

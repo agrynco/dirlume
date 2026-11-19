@@ -115,12 +115,27 @@ async fn update_file_attributes(
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Operation {
-    Open { name: String },
-    Rename { name: String, new_name: String },
-    CreateFolder { name: String },
-    CreateFile { name: String },
-    Recycle { name: String },
-    Delete { name: String },
+    Open {
+        name: String,
+    },
+    Rename {
+        name: String,
+        new_name: String,
+    },
+    CreateFolder {
+        name: String,
+    },
+    CreateFile {
+        name: String,
+        #[serde(default)]
+        encoding: Encoding,
+    },
+    Recycle {
+        name: String,
+    },
+    Delete {
+        name: String,
+    },
 }
 
 #[tauri::command]
@@ -135,8 +150,11 @@ async fn operate(directory: String, operation: Operation) -> Result<()> {
             Operation::CreateFolder { name } => {
                 fs::create_dir(selected(&directory, &name).map_err(message)?)
             }
-            Operation::CreateFile { name } => {
-                fs::File::create_new(selected(&directory, &name).map_err(message)?).map(drop)
+            Operation::CreateFile { name, encoding } => {
+                return create_encoded_file(
+                    &selected(&directory, &name).map_err(message)?,
+                    encoding,
+                )
             }
             Operation::Delete { name } => {
                 local::permanently_delete(&selected(&directory, &name).map_err(message)?)
@@ -769,9 +787,10 @@ fn download_to(path: &Path, write: impl FnOnce(&mut fs::File) -> Result<()>) -> 
 
 const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Encoding {
+    #[default]
     Utf8,
     Utf8Bom,
     Utf16Le,
@@ -966,6 +985,29 @@ fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
         return Err("Text files can be at most 8 MiB.".to_owned());
     }
     Ok(buffer)
+}
+
+fn create_encoded_file(path: &Path, encoding: Encoding) -> Result<()> {
+    let bytes = encode_text(encoding, "")?;
+    if bytes.is_empty() {
+        return fs::File::create_new(path).map(drop).map_err(message);
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Choose a parent folder.".to_owned())?;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".dirlume-text-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o666));
+    }
+    let mut file = builder.tempfile_in(parent).map_err(message)?;
+    file.write_all(&bytes).map_err(message)?;
+    // Publish the initialized file only after writing the BOM, without replacing an existing file.
+    file.persist_noclobber(path)
+        .map(drop)
+        .map_err(|error| message(error.error))
 }
 
 fn ftp_text_revision(entry: &suppaftp::list::File, bytes: &[u8]) -> String {

@@ -7,6 +7,7 @@ import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
+import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -790,6 +791,11 @@ try {
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
 
+  const encodedFiles = join(temp, "encodings");
+  await mkdir(encodedFiles);
+  await navigate("left", encodedFiles);
+  await testNewFileEncoding(page, encodedFiles);
+  await navigate("left", src);
   await left.focus();
   await page.keyboard.press("Shift+F4");
   await page.getByRole("dialog", { name: "New file" }).getByLabel("Name").fill("draft.md");

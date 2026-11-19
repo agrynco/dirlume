@@ -8,6 +8,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Commands": ["Команди", "Команды"],
   "Main menu": ["Головне меню", "Главное меню"],
   "Folder shortcuts": ["Закладки папок", "Закладки папок"],
+  "Encoding": ["Кодування", "Кодировка"],
+  "UTF-8 with BOM": ["UTF-8 з BOM", "UTF-8 с BOM"],
   "Bookmark current folder in group 8": ["Додати поточну папку до групи 8", "Добавить текущую папку в группу 8"],
   "Add folder shortcut to group {0}": ["Додати закладку папки до групи {0}", "Добавить закладку папки в группу {0}"],
   "Open folder shortcut group {0}": ["Відкрити групу закладок {0}", "Открыть группу закладок {0}"],
