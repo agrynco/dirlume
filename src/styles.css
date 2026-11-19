@@ -329,7 +329,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .process-table :is(td, th):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .process-table :is(.process-col-executable, .process-cell-executable) { text-align: left; }
 .process-table th button { max-width: 100%; padding: 3px 4px; font-size: .88em; overflow: hidden; text-overflow: ellipsis; }
-.process-table th:last-child .file-column-resize { inset-inline-end: 0; }
+.process-table th .file-column-resize { inset-inline-end: 0; }
 .process-cell-name > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .process-cell-name span span { overflow: hidden; text-overflow: ellipsis; }
 .process-cell-name :is(svg, img) { width: 17px; height: 17px; object-fit: contain; flex: none; }

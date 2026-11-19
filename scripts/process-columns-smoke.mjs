@@ -54,7 +54,7 @@ export async function testProcessColumns(page) {
     await page.mouse.move(x + 165, y, { steps: 5 });
     await page.mouse.up();
     const actual = await width("left", name);
-    assert.ok(actual > start + 100);
+    assert.ok(actual > start + 100, `${name} width should grow from ${start}, got ${actual}`);
     assert.equal(await width("right", name), start);
     customized.set(name, actual);
   }
