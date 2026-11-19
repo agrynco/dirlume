@@ -69,7 +69,9 @@ export async function testLockingProcessPane(page, root) {
       await confirmation.waitFor({ state: "hidden" });
       await target.getByText("Windows found no processes using these files.", { exact: true }).waitFor();
       await button(target, "Back to files").click();
-      await row(side === "left" ? "right" : "left").waitFor();
+      const opposite = side === "left" ? "right" : "left";
+      await row(opposite).waitFor();
+      await page.waitForFunction((side) => document.activeElement?.id === `${side}-files`, opposite);
     } finally {
       await close(locked);
     }
