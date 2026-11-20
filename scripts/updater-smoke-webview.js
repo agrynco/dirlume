@@ -61,18 +61,30 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     row.click();
     await waitFor("the selected document mode fixture", () => row.dataset.current === "true" && document.activeElement === pane);
     key(pane, "F3");
-    const mode = (editing) => waitFor(editing ? "the same file in Editor" : "the same file in Viewer", () => {
+    const mode = (editing, text = "Document mode fixture", recordPhase = true) => waitFor(editing ? "the same file in Editor" : "the same file in Viewer", () => {
       const view = document.querySelector(`.text-window[data-editing="${editing}"][aria-label="${fileName}"]:not([hidden])`);
-      return view?.querySelector(".cm-content")?.textContent === "Document mode fixture" && view;
-    });
+      return view?.querySelector(".cm-content")?.textContent === text && view;
+    }, { recordPhase });
     const viewer = await mode(false);
     key(viewer, "F6");
     const editor = await mode(true);
     key(editor, "F6");
     if (await mode(false) !== viewer) throw new Error("F6 duplicated the existing Viewer.");
+    await record("an in-place document update");
+    await mode(false, "Edited in place", false);
     key(viewer, "F6");
-    key(await mode(true), "F10");
-    key(await mode(false), "F10");
+    await mode(true);
+    const changeDialog = () => [...document.querySelectorAll("dialog[open]")]
+      .find((dialog) => document.getElementById(dialog.getAttribute("aria-labelledby"))?.textContent === "File changed on disk");
+    const inPlace = await waitFor("the clean Editor external-change prompt", changeDialog);
+    const reload = (dialog) => [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Reload from disk");
+    reload(inPlace).click();
+    await mode(true, "Edited in place");
+    await record("a replaced document");
+    const replaced = await waitFor("the Editor prompt for a replaced file", changeDialog, { recordPhase: false });
+    reload(replaced).click();
+    key(await mode(true, "Replaced file"), "F10");
+    key(await mode(false, "Replaced file"), "F10");
     await waitFor("return to the file pane", () => document.activeElement === pane);
     key(pane, "F6");
     const rename = await waitFor("the unchanged file pane F6 shortcut", () => [...document.querySelectorAll("dialog[open]")]
