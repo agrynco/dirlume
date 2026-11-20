@@ -1,4 +1,4 @@
-async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
+async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScreenColor) => {
   const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
   const report = (error) => invoke("updater_fixture_result", { error });
   const record = (phase) => invoke("updater_fixture_phase", { phase });
@@ -107,6 +107,16 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
       await record("the shared alert colors");
       checkAlertColors();
       if (checkClipboard) await verifyClipboard();
+      if (checkScreenColor) {
+        await record("the native screen color cancellation");
+        if (await invoke("pick_screen_color") !== null) throw new Error("Escape did not cancel screen sampling.");
+        await record("the external screen color");
+        const color = await invoke("pick_screen_color");
+        const channels = color?.match(/[a-f\d]{2}/g)?.map((channel) => parseInt(channel, 16));
+        if (channels?.length !== 3 || channels.some((channel, index) => Math.abs(channel - [36, 89, 120][index]) > 1)) {
+          throw new Error(`The external screen color did not match the fixture. Received ${color}.`);
+        }
+      }
       await report(null);
       return;
     }
