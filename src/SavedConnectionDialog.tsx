@@ -153,7 +153,7 @@ export function RemoveConnectionDialog({ profile, onRemoved, onClose }: {
     </div>
     <footer className="dialog-footer">
       <Button type="button" data-initial-focus disabled={working} onClick={onClose}>{t("Cancel")}</Button>
-      <Button type="button" className="negative" disabled={working} onClick={() => { void remove(); }}>{t("Remove connection")}</Button>
+      <Button type="button" className="alert-confirm" disabled={working} onClick={() => { void remove(); }}>{t("Remove connection")}</Button>
     </footer>
   </Dialog>;
 }

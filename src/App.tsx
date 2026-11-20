@@ -2195,7 +2195,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             "Some editors have unsaved changes. Discard them and exit Dirlume?")}</p></div>
           <footer className="dialog-footer">
             <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Keep working")}</Button>
-            <Button type="button" className="negative" onClick={() => {
+            <Button type="button" className="alert-confirm" onClick={() => {
               if (modal.update) { installUpdate(modal.update); return; }
               exitConfirmed.current = true;
               void getCurrentWindow().close().catch((error: unknown) => {
@@ -2489,7 +2489,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   return (
     <>
-    <Dialog key={String(recursive)} title={recursive ? t(modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "destructive" : undefined}
+    <Dialog key={String(recursive)} title={recursive ? t(modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "warning" : undefined}
       onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
@@ -2523,7 +2523,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button>}
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
-          <Button type="submit" className={permanent ? "permanent-delete-button" : removing ? undefined : "primary"}
+          <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}
           </Button>

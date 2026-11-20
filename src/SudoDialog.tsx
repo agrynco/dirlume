@@ -56,7 +56,7 @@ export function SudoDialog({ address, path, operation, onConfirm, onClose }: {
       </div>
       <footer className="dialog-footer">
         <Button type="button" disabled={busy} onClick={onClose}>{t("Cancel")}</Button>
-        <Button type="submit" className="primary" disabled={busy}>{t(busy ? "Working…" : "Continue with sudo")}</Button>
+        <Button type="submit" className="alert-confirm" disabled={busy}>{t(busy ? "Working…" : "Continue with sudo")}</Button>
       </footer>
     </form>
   </Dialog>;

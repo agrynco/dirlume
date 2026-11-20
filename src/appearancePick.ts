@@ -80,9 +80,10 @@ export function resolvePick(element: Element): Target | null {
   if (dialog && !dialog.classList.contains("dialog-window")) {
     const warning = dialog.hasAttribute("data-tone");
     return match("input, select, textarea", { target: "dialogField", colors: ["dialog-input", "dialog-ink", "line", "accent"], font: "dialog" }) ??
+      match("button.alert-confirm", { target: "button", colors: ["danger-action", "on-danger-action", "accent"], font: "dialog" }) ??
       match("button.primary", { target: "button", colors: ["accent-fill", "on-accent", "accent"], font: "dialog" }) ??
       match(".dialog-heading, .dialog-footer", { target: "dialogHeader", colors: ["dialog-header", "dialog-ink", "dialog-muted", "line"], font: "dialog" }) ??
-      { element: dialog, pick: { target: "dialog", colors: ["dialog-bg", "dialog-ink", "dialog-muted", "line", ...(warning ? ["danger-bg", "danger"] as const : [])], font: "dialog" } };
+      { element: dialog, pick: { target: "dialog", colors: ["dialog-bg", "dialog-ink", "dialog-muted", "line", ...(warning ? ["danger"] as const : [])], font: "dialog" } };
   }
 
   const row = element.closest<HTMLElement>(".file-row");

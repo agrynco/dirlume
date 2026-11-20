@@ -39,7 +39,7 @@ export function McpRequests({ context }: { context: McpContext }) {
     finally { setApproval((current) => current?.id === approval.id ? null : current); }
   }
   const decline = () => { void decide(false).catch(() => {}); };
-  return <Dialog title={t("Confirm MCP request")} onClose={decline}>
+  return <Dialog title={t("Confirm MCP request")} tone="warning" onClose={decline}>
     <div className="dialog-body end-processes">
       <strong>{t(titles[approval.action])}</strong>
       <ul>{approval.targets.map((target) => <li key={target}>{target}</li>)}</ul>
@@ -48,7 +48,7 @@ export function McpRequests({ context }: { context: McpContext }) {
     </div>
     <footer className="dialog-footer">
       <Button type="button" data-initial-focus onClick={decline}>{t("Cancel")}</Button>
-      <Button type="button" className="negative" onClick={() => { void decide(true).catch(() => {}); }}>{t(titles[approval.action])}</Button>
+      <Button type="button" className="alert-confirm" onClick={() => { void decide(true).catch(() => {}); }}>{t(titles[approval.action])}</Button>
     </footer>
   </Dialog>;
 }

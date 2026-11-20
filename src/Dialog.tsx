@@ -31,7 +31,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
   standalone?: boolean;
   suspended?: boolean;
   dismissOnOutside?: boolean;
-  tone?: "warning" | "destructive";
+  tone?: "warning";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();

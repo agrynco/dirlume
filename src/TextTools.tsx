@@ -359,7 +359,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
         <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
-          <Button type="button" className="negative" onClick={onClose}>{t("Discard changes")}</Button>
+          <Button type="button" className="alert-confirm" onClick={onClose}>{t("Discard changes")}</Button>
         </footer>
       </Dialog>}
     </section>
@@ -683,7 +683,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
         </div>
       )}
     </Dialog>
-    {confirm && <Dialog title={t("Unsaved changes")} onClose={() => { if (!saving) setConfirm(false); }}>
+    {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => { if (!saving) setConfirm(false); }}>
       <div className="dialog-body transfer-body">
         {dirty.map((side) => <fieldset className="comparison-save" key={side} disabled={saving}>
           <legend>{t(side === "left" ? "Left file" : "Right file")} · {files[side].name}</legend>
@@ -702,7 +702,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       </div>
       <footer className="dialog-footer">
         <Button type="button" data-initial-focus disabled={saving} onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
-        <Button type="button" disabled={saving} onClick={onClose}>{t("Discard changes")}</Button>
+        <Button type="button" className="alert-confirm" disabled={saving} onClick={onClose}>{t("Discard changes")}</Button>
         <Button type="button" className="primary" disabled={saving || dirty.some((side) => destinations[side]?.trim() === "")}
           onClick={() => { void saveAndClose(); }}>{t(saving ? "Saving…" : "Save and close")}</Button>
       </footer>

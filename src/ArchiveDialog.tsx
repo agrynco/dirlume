@@ -240,11 +240,11 @@ export function ArchiveDialog({ directory, names, showHidden, onClose, onCreated
         </footer>
       </form>
     </Dialog>
-    {replace && <Dialog title={t("Replace archive?")} onClose={() => setReplace(false)}>
+    {replace && <Dialog title={t("Replace archive?")} tone="warning" onClose={() => setReplace(false)}>
       <div className="dialog-body"><p>{t(exists)}</p><p>{suggestedFile}</p></div>
       <footer className="dialog-footer">
         <Button type="button" data-initial-focus onClick={() => setReplace(false)}>{t("Cancel")}</Button>
-        <Button type="button" className="negative" onClick={() => { void submit(true); }}>{t("Overwrite")}</Button>
+        <Button type="button" className="alert-confirm" onClick={() => { void submit(true); }}>{t("Overwrite")}</Button>
       </footer>
     </Dialog>}
   </>;
