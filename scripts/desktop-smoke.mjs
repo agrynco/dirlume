@@ -2095,7 +2095,13 @@ try {
     assert.ok((light + 0.05) / (dark + 0.05) >= 4.5, `${foreground} on ${background} must be readable`);
   }
   await closeToolWindow(optionsPage, () => appearance.getByRole("button", { name: "Done", exact: true }).click());
-  await navigate("left", attributes);
+  const classicPane = page.getByRole("region", { name: "left pane", exact: true });
+  await classicPane.getByRole("navigation", { name: "left path breadcrumbs", exact: true }).hover();
+  await classicPane.getByRole("button", { name: "Edit left path", exact: true }).click();
+  const classicPath = classicPane.getByRole("combobox", { name: "left path", exact: true });
+  await classicPath.fill(attributes);
+  await classicPath.press("Enter");
+  await classicPane.getByRole("heading", { name: "attributes", exact: true }).waitFor({ state: "attached" });
   const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
   if (await showHidden.getAttribute("aria-pressed") === "false") await showHidden.click();
   const attributeList = page.getByRole("listbox", { name: "left files", exact: true });
