@@ -36,6 +36,15 @@ export async function testTerminalPaste() {
       });
       await page.goto("http://dirlume.test/");
       const list = page.getByRole("listbox", { name: "left files", exact: true });
+      if (!platform.startsWith("Windows")) {
+        await list.press("Alt+F1");
+        const sources = page.locator("#left-pane .location-popup");
+        const home = sources.getByRole("button", { name: "Home", exact: true });
+        assert.equal(await home.locator("kbd").count(), 0);
+        await sources.getByRole("button", { name: "SSH", exact: true }).waitFor();
+        await home.click();
+        await sources.waitFor({ state: "hidden" });
+      }
       const terminal = page.getByRole("region", { name: "Terminal", exact: true });
       const input = terminal.locator(".xterm-helper-textarea");
       const surface = terminal.locator(".terminal-surface");

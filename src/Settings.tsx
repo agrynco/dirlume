@@ -113,8 +113,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
       "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings", "Shortcut scheme");
-  const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
-    matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut)));
+  const visibleCommands = commandNames.filter((command) =>
+    (windowsClient || !/^drive[A-Z]Sources$/.test(command)) &&
+    (allShortcuts || matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut))));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
   const isAppearance = !feature && page !== "general" && page !== "shortcuts";
