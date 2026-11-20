@@ -3,9 +3,9 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { api, describeError } from "./api";
 import { errorText, t } from "./i18n";
-import type { Preferences } from "./preferences";
+import { preferenceGroups, type Preferences } from "./preferences";
 import {
-  exportSettings, prepareSettingsImport, settingsGroupIds, settingsGroups,
+  exportSettings, prepareSettingsImport, settingsGroupIds,
   type SettingsArchive, type SettingsSelection,
 } from "./settingsArchive";
 
@@ -72,7 +72,7 @@ export function SettingsArchiveDialog({ action, preferences, onImport, onClose }
           {groups.map((group, index) => <label className="field-checkbox" key={group}>
             <input type="checkbox" data-initial-focus={index === 0 || undefined} disabled={saving} checked={selection.groups.includes(group)}
               onChange={() => setSelection((current) => ({ ...current, groups: toggle(current.groups, group) }))} />
-            {t(settingsGroups[group].label)}
+            {t(preferenceGroups[group])}
           </label>)}
         </fieldset>}
         {schemes.length > 0 && <fieldset className="settings-archive-items">

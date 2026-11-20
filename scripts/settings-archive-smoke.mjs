@@ -19,6 +19,7 @@ try {
     const key = "dirlume.preferences.v1";
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({
       layout: "standard", mainMenuAlignment: "right", schemes: [local, evening], activeScheme: null,
+      kswitcher: "Fixture installation folder",
       activeShortcutScheme: "custom-keys", bindingDefaults: 7,
       shortcutSchemes: [{ id: "custom-keys", name: "My keys", bindings: { newFile: ["Ctrl+Alt+N"] } }],
     }));
@@ -79,6 +80,7 @@ try {
   const settingsFile = await exported();
   assert.deepEqual(Object.keys(settingsFile.groups).sort(), ["appearance", "filePanels", "general", "shortcuts", "terminal", "viewer"]);
   assert.deepEqual(settingsFile.schemes, []);
+  assert.equal(Object.hasOwn(settingsFile.groups.general, "kswitcher"), false);
   assert.deepEqual(settingsFile.groups.shortcuts.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
 
   await startImport(JSON.stringify(standalone));
@@ -123,6 +125,7 @@ try {
     ["{bad json", "The settings file is invalid."],
     [JSON.stringify({ ...themeFile, version: 2 }), "This settings file version is not supported."],
     [archive({ filePanels: { layout: "bad" } }, []), "The settings file is invalid."],
+    [archive({ terminal: { terminalResizeRows: 51 } }, []), "The settings file is invalid."],
   ]) {
     await startImport(input);
     await invalidDialog.getByRole("alert").getByText(message, { exact: true }).waitFor();
@@ -133,6 +136,34 @@ try {
   await button(options, "Import settings").waitFor();
   assert.equal(await importDialog.count(), 0);
   assert.deepEqual(await readPreferences(), after);
+
+  const legacy = JSON.parse(archive({
+    general: { menuPosition: "left", retiredOption: true, kswitcher: "Other installation folder" },
+    shortcuts: { shortcuts: { newFile: "Ctrl+Alt+M" } },
+    retiredGroup: { unknownValue: 12 },
+  }, []));
+  legacy.version = 0;
+  await startImport(JSON.stringify(legacy));
+  await importDialog.waitFor();
+  assert.deepEqual(await importDialog.getByRole("checkbox").evaluateAll((fields) => fields.map((field) => field.parentElement.textContent.trim())),
+    ["General", "Keyboard shortcuts"]);
+  await button(importDialog, "Import").click();
+  await importDialog.waitFor({ state: "hidden" });
+  const migrated = await readPreferences();
+  assert.equal(migrated.mainMenuAlignment, "left");
+  assert.equal(migrated.activeShortcutScheme, "my-shortcuts");
+  assert.deepEqual(migrated.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+M"]);
+  assert.equal(migrated.language, after.language);
+  assert.equal(migrated.kswitcher, "Fixture installation folder");
+  assert.equal(Object.hasOwn(migrated, "retiredOption"), false);
+
+  await startImport(archive({ filePanels: { layout: "classic", retiredOption: true } }, []));
+  await button(importDialog, "Import").click();
+  await importDialog.waitFor({ state: "hidden" });
+  const current = await readPreferences();
+  assert.equal(current.layout, "classic");
+  assert.equal(current.mainMenuAlignment, "left");
+  assert.equal(current.activeShortcutScheme, "my-shortcuts");
 
   await page.evaluate(() => localStorage.removeItem("dirlume.preferences.v1"));
   await page.reload();
@@ -151,7 +182,7 @@ try {
   const restored = await readPreferences();
   assert.equal(restored.activeShortcutScheme, "custom-keys");
   assert.deepEqual(restored.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
-  console.log("Verified selective settings export and import, theme round trips, replacement confirmation, restart, and cancel and error handling.");
+  console.log("Verified selective settings export and import, theme and shortcut round trips, legacy migration, retired settings, replacement confirmation, restart, and cancel and error handling.");
 } finally {
   await browser.close();
 }
