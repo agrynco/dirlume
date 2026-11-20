@@ -153,10 +153,10 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     const parentRow = right.getByRole("option", { name: /^\.\./ });
     await parentRow.click();
     await page.keyboard.press("Shift+ArrowDown");
-    assert.equal(await right.locator(".file-row.marked").count(), 1);
+    assert.equal(await right.locator(".file-row.marked").count(), 0);
     assert.equal(await parentRow.getAttribute("aria-selected"), "false");
     await page.keyboard.press("Shift+ArrowUp");
-    assert.equal(await right.locator(".file-row.marked").count(), 0);
+    assert.equal(await right.locator(".file-row.marked").count(), 1);
     await parentRow.dblclick();
     await right.getByRole("option", { name: /^start/ }).waitFor();
     assert.equal(await page.locator("#right-path").getAttribute("data-path"), "/");

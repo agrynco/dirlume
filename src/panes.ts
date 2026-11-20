@@ -30,7 +30,6 @@ export interface PaneState {
   entries: Entry[];
   selected: string | null;
   marked: string[];
-  keyboardRange?: { anchor: string; head: string; marking: boolean; changed: string[] };
   sizes: ReadonlyMap<string, SizeResult>;
   measuring: string[];
   history: Place[];
@@ -97,39 +96,25 @@ export function selectableRange(entries: readonly Entry[], first: number, last: 
     .map(({ name }) => name).filter((name) => name !== "..");
 }
 
-export function extendKeyboardRange(pane: PaneState, entries: readonly Entry[], from: number, to: number): PaneState {
-  if (from === to) return pane;
-  const previous = pane.keyboardRange;
-  const anchor = previous && previous.head === pane.selected ? entries.findIndex(({ name }) => name === previous.anchor) : -1;
-  const start = anchor < 0 ? from : anchor;
-  const head = entries[to].name;
-  const marking = anchor >= 0 && previous ? previous.marking : !pane.marked.includes(head);
-  const marked = new Set(pane.marked);
-  // Undo just the changes from the previous span, then apply the new span.
-  if (anchor >= 0 && previous) {
-    for (const name of previous.changed) {
-      if (marking) marked.delete(name);
-      else marked.add(name);
-    }
-  }
-  const changed = selectableRange(entries, start, to).filter((name) => marked.has(name) !== marking);
-  for (const name of changed) {
-    if (marking) marked.add(name);
-    else marked.delete(name);
-  }
-  return { ...pane, selected: head, marked: [...marked], keyboardRange: { anchor: entries[start].name, head, marking, changed } };
+export function markAndMoveCursor(pane: PaneState, entries: readonly Entry[], from: number, to: number): PaneState {
+  const { name } = entries[from];
+  return {
+    ...pane,
+    selected: entries[to].name,
+    marked: name === ".." || pane.marked.includes(name) ? pane.marked : [...pane.marked, name],
+  };
 }
 
 export function showSearchResults(pane: PaneState, mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {
   const previous = pane.search?.previous ?? { selected: pane.selected, marked: pane.marked, filter: pane.filter };
   return {
-    ...pane, selected, marked: [], keyboardRange: undefined, filter: "", error: "",
+    ...pane, selected, marked: [], filter: "", error: "",
     search: { mask, matches: new Map(matches.map((match) => [match.relativePath, match])), incomplete, previous },
   };
 }
 
 export function closeSearchResults(pane: PaneState): PaneState {
-  return pane.search ? { ...pane, ...pane.search.previous, keyboardRange: undefined, search: null } : pane;
+  return pane.search ? { ...pane, ...pane.search.previous, search: null } : pane;
 }
 
 export function paneItem(pane: PaneState, entry?: Entry): { place: FilePlace; entry: Entry } | null {
@@ -223,7 +208,7 @@ export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?:
 export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number): PaneState {
   if ((action === "refresh" || action === "background") && pane.search) {
     const updated = applyListing(closeSearchResults(pane), place, listing, action);
-    return { ...updated, selected: pane.selected, marked: pane.marked, keyboardRange: pane.keyboardRange, filter: pane.filter,
+    return { ...updated, selected: pane.selected, marked: pane.marked, filter: pane.filter,
       search: { ...pane.search, previous: { selected: updated.selected, marked: updated.marked, filter: updated.filter } } };
   }
   pane = closeSearchResults(pane);
@@ -236,7 +221,6 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
       ? [entry.name] : [];
   }) : []);
   const departed = action === "refresh" || action === "background" ? undefined : folderInAncestor(pane.place, place);
-  const keyboardRange = pane.keyboardRange;
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
     : pane.history;
@@ -248,7 +232,6 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     selected: samePlace && pane.selected &&
       (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
     marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
-    keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => current.has(name)) } : undefined,
     sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
     measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),
 
