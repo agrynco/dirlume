@@ -103,7 +103,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     await waitFor("descending file name order", () => current.getAttribute("aria-label").includes("Descending"));
     send(current, "+");
     await waitFor("ascending file name order", () => current.getAttribute("aria-label").includes("Ascending"));
-    send(current, "Escape");
+    popup.closest("dialog").querySelector('button[aria-label="Close dialog"]').click();
     await waitFor("focus back in the file pane", () => !document.querySelector(".sort-menu") && document.activeElement === pane);
   }
   async function checkDocumentMode() {

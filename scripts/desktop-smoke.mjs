@@ -858,9 +858,11 @@ try {
   await refreshSizeFixture.click();
   await measuredItem.getByText("1 B", { exact: true }).waitFor();
   const sizeSort = leftPane.getByRole("button", { name: /^Size\b/ });
+  const sizeOrder = () => left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   await sizeSort.click();
-  assert.deepEqual(await left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)),
-    ["..", "measured-item", "other.txt"]);
+  assert.deepEqual(await sizeOrder(), ["..", "other.txt", "measured-item"]);
+  await sizeSort.click();
+  assert.deepEqual(await sizeOrder(), ["..", "measured-item", "other.txt"]);
   await leftPane.getByRole("button", { name: /^Name\b/ }).click();
   await navigate("left", src);
   await page.getByRole("option", { name: /^notes.txt/ }).click();
@@ -2093,7 +2095,13 @@ try {
     assert.ok((light + 0.05) / (dark + 0.05) >= 4.5, `${foreground} on ${background} must be readable`);
   }
   await closeToolWindow(optionsPage, () => appearance.getByRole("button", { name: "Done", exact: true }).click());
-  await navigate("left", attributes);
+  const classicPane = page.getByRole("region", { name: "left pane", exact: true });
+  await classicPane.getByRole("navigation", { name: "left path breadcrumbs", exact: true }).hover();
+  await classicPane.getByRole("button", { name: "Edit left path", exact: true }).click();
+  const classicPath = classicPane.getByRole("combobox", { name: "left path", exact: true });
+  await classicPath.fill(attributes);
+  await classicPath.press("Enter");
+  await classicPane.getByRole("heading", { name: "attributes", exact: true }).waitFor({ state: "attached" });
   const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
   if (await showHidden.getAttribute("aria-pressed") === "false") await showHidden.click();
   const attributeList = page.getByRole("listbox", { name: "left files", exact: true });
