@@ -139,6 +139,32 @@ pub async fn updater_fixture_normal_window(app: AppHandle) -> DesktopResult<()> 
     main.set_size(LogicalSize::new(780, 480)).map_err(message)?;
     main.center().map_err(message)?;
     main.set_focus().map_err(message)?;
+    #[cfg(target_os = "macos")]
+    {
+        // Tauri reopens the updated app in the background. Activate the existing bundle before
+        // simulating a user working with its windows.
+        crate::desktop::blocking(|| {
+            let executable = std::env::current_exe().map_err(message)?;
+            let bundle = executable
+                .ancestors()
+                .nth(3)
+                .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
+                .ok_or("Missing the installed updater fixture bundle")?;
+            let result = std::process::Command::new("/usr/bin/open")
+                .arg(bundle)
+                .output()
+                .map_err(message)?;
+            if !result.status.success() {
+                return Err(String::from_utf8_lossy(&result.stderr).into_owned());
+            }
+            Ok(())
+        })
+        .await?;
+        wait_for_window("the installed application to activate", || {
+            main.is_focused().map_err(message)
+        })
+        .await?;
+    }
     wait_for_window("a resizable main window in its normal state", || {
         Ok(main.is_resizable().map_err(message)?
             && !main.is_maximized().map_err(message)?
