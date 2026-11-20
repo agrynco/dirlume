@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check for an existing stable release of this merge
+      - name: Check whether a stable release already includes this merge
         if: github.event.action == 'closed'
         id: published
         env:
@@ -48,11 +48,18 @@ jobs:
           fi
           refs=$(git ls-remote --tags origin 'v*')
           tags=$(awk -v sha="$GITHUB_SHA" '$1 == sha { sub(/^refs\/tags\//, "", $2); sub(/\^\{\}$/, "", $2); print $2 }' <<< "$refs")
-          if [[ -z "$tags" ]]; then exit 0; fi
           published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
-          if grep -Fxq -f <(printf '%s\n' "$tags") <<< "$published"; then
+          if [[ -n "$tags" ]] && grep -Fxq -f <(printf '%s\n' "$tags") <<< "$published"; then
             echo 'This merge already has a stable release.'
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/' <<< "$published" | sort -Vr | sed -n '1p')
+          if [[ -z "$latest" ]]; then exit 0; fi
+          comparison=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest" --jq .status)
+          if [[ "$comparison" == ahead || "$comparison" == identical ]]; then
+            echo 'The latest stable release already includes this merge.'
             echo 'skip=true' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
