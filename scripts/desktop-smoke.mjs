@@ -1684,6 +1684,17 @@ try {
   assert.equal(await actionBarDisplay(), "grid");
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
+  async function checkFeatureFontLayout() {
+    const fits = await featureDialog.locator(".font-setting:has(.feature-font-sizes)").evaluate((group) => {
+      const family = group.querySelector(".font-family").getBoundingClientRect();
+      const size = group.querySelector(".font-size-controls").getBoundingClientRect();
+      const details = group.querySelector(".feature-font-sizes").getBoundingClientRect();
+      return Math.abs(details.left - family.left) < 1 && Math.abs(details.right - size.right) < 1 &&
+        details.top >= Math.max(family.bottom, size.bottom);
+    });
+    assert.ok(fits, "Individual sizes should span both columns below the font family and size controls.");
+  }
+  await checkFeatureFontLayout();
   const featureFonts = [["Viewer", "Consolas", "21"], ["Editor", "Courier New", "19"], ["Terminal", "Arial", "17"]];
   for (const [name, family, size] of featureFonts) {
     await featureSearch.fill(`${name} font size`);
@@ -1692,6 +1703,7 @@ try {
     await featureDialog.getByRole("combobox", { name: `${name} font family`, exact: true }).fill(family);
     await featureDialog.getByRole("spinbutton", { name: `${name} font size`, exact: true }).fill(size);
     if (name === "Viewer") {
+      await checkFeatureFontLayout();
       await featureDialog.getByRole("spinbutton", { name: "Max width (px)", exact: true }).fill("640");
       await featureDialog.getByLabel("Viewer background hex", { exact: true }).fill("#142335");
       await featureDialog.getByLabel("Block background hex", { exact: true }).fill("#056767");
