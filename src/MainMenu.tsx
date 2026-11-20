@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { Fragment, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { BookOpen, Bug, CodeXml, Coffee, Package, X } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
@@ -19,6 +19,7 @@ interface MenuItem {
   label: string;
   shortcut?: string;
   disabled?: boolean;
+  separatorBefore?: boolean;
   run: () => void;
 }
 
@@ -126,16 +127,19 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
             shortcut={shortcut} aria-haspopup="menu" aria-expanded={shown} onFocus={() => setActive(index)}
             onClick={() => { if (shown) close(true); else open(index); }}>{t(label)}</Button>
           {shown && <div className="main-menu-dropdown" role="menu" aria-label={t(label)} data-tauri-drag-region="false">
-            {items.map(({ label, shortcut, disabled, run }, item) => (
-              <Button key={label} type="button" role="menuitem" tabIndex={-1} data-menu-item={item}
-                aria-disabled={disabled || undefined} shortcut={shortcut}
-                onFocus={() => setCursor(item)} onClick={() => {
-                  if (disabled) return;
-                  close(true);
-                  run();
-                }}>
-                <span>{t(label)}</span>{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
-              </Button>
+            {items.map(({ label, shortcut, disabled, separatorBefore, run }, item) => (
+              <Fragment key={label}>
+                {separatorBefore && <div className="main-menu-separator" role="separator" />}
+                <Button type="button" role="menuitem" tabIndex={-1} data-menu-item={item}
+                  aria-disabled={disabled || undefined} shortcut={shortcut}
+                  onFocus={() => setCursor(item)} onClick={() => {
+                    if (disabled) return;
+                    close(true);
+                    run();
+                  }}>
+                  <span>{t(label)}</span>{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
+                </Button>
+              </Fragment>
             ))}
           </div>}
         </div>;

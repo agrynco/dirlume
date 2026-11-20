@@ -1771,7 +1771,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
     paneMenu("right"),
     { label: "Help", items: [menuCommand("help"), { label: "About", run: () => setModal({ kind: "about" }) },
-      { label: "Open error log", run: () => void openErrorLog() }] },
+      { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
   return (
