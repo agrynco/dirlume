@@ -127,6 +127,9 @@ jobs:
       - name: Verify editable dropdowns in light and dark themes
         if: github.event.action != 'closed'
         run: node scripts/editable-dropdown-smoke.mjs
+      - name: Verify selective settings import and export
+        if: github.event.action != 'closed'
+        run: node scripts/settings-archive-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

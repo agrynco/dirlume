@@ -7,10 +7,12 @@ import { AppearanceSettings, OptionalNumberInput, ViewFontSettings, type Appeara
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { SettingsPreview } from "./SettingsPreview";
+import { SettingsArchiveDialog, type SettingsArchiveAction } from "./SettingsArchiveDialog";
+import { parseSettingsArchive } from "./settingsArchive";
 import { builtInThemes, colorGroups, fontGroups, mermaidColors, viewerColors } from "./appearance";
 import { MenuAlignmentSetting, menuAlignmentTerms } from "./MenuAlignmentSetting";
 import { matchesSettings, SettingSearchLabel, SettingsSearchTerms } from "./SettingSearchLabel";
-import { api, windowsClient } from "./api";
+import { api, describeError, windowsClient } from "./api";
 import {
   actionButtonWidths, assignShortcut, commandLabel, commandNames, commands, defaultBindings, captureShortcut, commandPanelMode, folderGroupCommand, maxTerminalResizeRows,
   panelLayouts, shortcutBindings, shortcutConflicts, showShortcut, wheelBindings, type ActionButtonWidth, type Bindings, type Command,
@@ -18,7 +20,7 @@ import {
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
-import { languages, locale, readLanguage, t } from "./i18n";
+import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
 import { SortGroupsSettings } from "./FileSortMenu";
@@ -92,6 +94,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [distinguishControl, setDistinguishControl] = useState(false);
   const [conflict, setConflict] = useState<{ key: string; owners: Command[] } | null>(null);
   const [schemeDialog, setSchemeDialog] = useState<ShortcutSchemeDialog | null>(null);
+  const [settingsArchive, setSettingsArchive] = useState<SettingsArchiveAction | null>(null);
+  const [loadingArchive, setLoadingArchive] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
   const [buildVersion, setBuildVersion] = useState("");
   const { shortcutSchemes, activeShortcutScheme } = preferences;
   const activeScheme = shortcutSchemes.find(({ id }) => id === activeShortcutScheme);
@@ -184,6 +189,29 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
 
   function apply() {
     if (hasChanges && !invalidModes.length && !invalidSettings) onChange(applyPreferences(preferences));
+  }
+
+  async function startImport() {
+    setLoadingArchive(true);
+    try {
+      const contents = await api.readSettingsArchive(t("Import settings"));
+      if (contents !== null) setSettingsArchive({ kind: "import", archive: parseSettingsArchive(contents) });
+    } catch (error) {
+      setArchiveError(errorText(describeError(error)));
+    } finally {
+      setLoadingArchive(false);
+    }
+  }
+
+  function applyImport(patch: Partial<Preferences>) {
+    const applied = applyPreferences({ ...saved, ...patch });
+    const draft = { ...applied };
+    for (const key of Object.keys(preferences) as (keyof Preferences)[]) {
+      if (!Object.hasOwn(patch, key) && JSON.stringify(preferences[key]) !== JSON.stringify(saved[key])) {
+        Object.assign(draft, { [key]: preferences[key] });
+      }
+    }
+    onChange(draft);
   }
 
   function saveLocation() {
@@ -282,6 +310,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
 
   return <SettingsSearchTerms value={terms}>
     <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
+      <div className="settings-archive-actions">
+        <Button type="button" disabled={loadingArchive} onClick={() => void startImport()}>{t("Import settings")}</Button>
+        <Button type="button" disabled={loadingArchive} onClick={() => setSettingsArchive({ kind: "export" })}>{t("Export settings")}</Button>
+      </div>
       {!selection && page === "shortcuts" && (
         <Button type="button" disabled={!activeScheme} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
           <RotateCcw /> {t("Restore defaults")}
@@ -513,6 +545,13 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </div>
       </div>
     </Dialog>
+    {settingsArchive && <SettingsArchiveDialog action={settingsArchive} preferences={saved}
+      onImport={applyImport} onClose={() => setSettingsArchive(null)} />}
+    {archiveError && <Dialog title={t("Could not import settings")} onClose={() => setArchiveError("")} footer={
+      <Button type="button" data-initial-focus onClick={() => setArchiveError("")}>{t("Close")}</Button>
+    }>
+      <div className="dialog-body"><p role="alert">{archiveError}</p></div>
+    </Dialog>}
     {schemeDialog && "name" in schemeDialog && <Dialog title={t(renameScheme ? "Rename shortcut scheme" : "New shortcut scheme")}
       onClose={() => setSchemeDialog(null)} footer={<>
         <Button type="button" onClick={() => setSchemeDialog(null)}>{t("Cancel")}</Button>
