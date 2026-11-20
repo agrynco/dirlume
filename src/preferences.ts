@@ -99,6 +99,10 @@ export const commands = {
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
   addSshProfile: { label: "Add SSH connection", key: "Shift+F4" },
   editSshProfile: { label: "Edit SSH connection", key: "F4" },
+  addSmbProfile: { label: "Add SMB connection", key: "Shift+F4" },
+  editSmbProfile: { label: "Edit SMB connection", key: "F4" },
+  addRemoteProfile: { label: "Add remote machine", key: "Shift+F4" },
+  editRemoteProfile: { label: "Edit remote machine", key: "F4" },
   folderShortcuts: { label: "Folder shortcuts", key: "" },
   addFolderShortcut: { label: "Bookmark current folder in group 8", key: "Ctrl+Shift+F8" },
   ...folderGroupCommands,
@@ -138,6 +142,8 @@ export function commandScope(command: Command) {
   if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
+  if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
+  if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
   if (command === "saveText" || command === "closeText" || command === "cancelText" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
@@ -153,7 +159,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if (leftScope === "wheel" || rightScope === "wheel") return false;
   if (leftScope === "global" || rightScope === "global") return true;
   const commands = [left, right];
-  if (commands.includes("open") && (leftScope === "ftp" || rightScope === "ftp")) return true;
+  if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
   return (leftScope === "text" || rightScope === "text" || leftScope === "viewer" || rightScope === "viewer") &&
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));

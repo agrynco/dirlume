@@ -106,6 +106,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
+  const catalog = pane.place?.kind === "connections";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const [locationsOpen, setLocationsOpen] = useState(false);
@@ -263,7 +264,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
-      <header className={`pane-heading${localFolder && !host && !processView && !search ? " local-heading" : ""}`}>
+      <header className={`pane-heading${(catalog || localFolder && !host) && !processView && !search ? " local-heading" : ""}`}>
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
@@ -275,7 +276,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
           <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
-          {!processView && pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
+          {!processView && pane.place && pane.place.kind !== "connections" && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
           {!processView && host && <span className="remote-name" data-tooltip={path}>SMB · {host}</span>}
@@ -314,9 +315,11 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       <div className="navigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
-        <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
-          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
+        <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
+        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-path={path}>
+          <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
+        </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
+          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
           if (!locationsOpen) return;
           const shortcut = eventShortcut(event);
@@ -404,7 +407,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           const top = event.currentTarget.scrollTop;
           setViewport((previous) => ({ ...previous, top }));
         }}
-        aria-multiselectable="true" aria-busy={pane.loading}
+        aria-multiselectable={!catalog} aria-busy={pane.loading}
         aria-activedescendant={selected >= 0 ? `${side}-file-${selected}` : undefined} tabIndex={0}>
         {virtual && <div ref={rowProbe} className="file-row-probe" aria-hidden="true" />}
         {indices.map((index, offset) => {

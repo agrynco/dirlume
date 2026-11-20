@@ -1494,11 +1494,31 @@ try {
   await page.getByRole("button", { name: "Close terminal" }).click();
 
   await withServer(async ({ invitation, config, bytes }) => {
-    await page.getByRole("button", { name: "Connect", exact: true }).click();
-    await page.getByLabel("Server invitation").fill(invitation);
-    await page.getByRole("dialog").getByRole("button", { name: "Connect", exact: true }).click();
     const remote = page.getByRole("listbox", { name: "left files", exact: true });
     const local = page.getByRole("listbox", { name: "right files", exact: true });
+    async function openRemoteConnections() {
+      await leftPane.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+      await leftPane.getByRole("button", { name: "Remote machine", exact: true }).click();
+      await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "Remote machine");
+    }
+    await openRemoteConnections();
+    assert.deepEqual(await remote.locator(".file-name-text").allTextContents(), [".."]);
+    await remote.press("Shift+F4");
+    const add = page.getByRole("dialog", { name: "Add remote machine", exact: true });
+    await add.getByLabel("Connection name").fill("Local test server");
+    await add.getByLabel("Server invitation").fill(invitation);
+    await add.getByRole("button", { name: "Save connection", exact: true }).click();
+    const savedServer = remote.getByRole("option", { name: /^Local test server/ });
+    await savedServer.click();
+    assert.doesNotMatch(await page.evaluate(() => localStorage.getItem("dirlume.remote-connections")), /dirlume-v1:/);
+    await remote.press("F4");
+    const edit = page.getByRole("dialog", { name: "Edit remote machine", exact: true });
+    assert.equal(await edit.getByLabel("Server invitation").inputValue(), "");
+    await edit.getByLabel("Connection name").fill("Saved test server");
+    await edit.getByRole("button", { name: "Save connection", exact: true }).click();
+    const renamedServer = remote.getByRole("option", { name: /^Saved test server/ });
+    await renamedServer.click();
+    await remote.press("Enter");
     await remote.getByRole("option", { name: /^folder/ }).click();
     await remote.press("Control+a");
     await properties.getByText("folder", { exact: true }).waitFor();
@@ -1533,6 +1553,14 @@ try {
     await back.click();
     await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "/");
     await back.click();
+    await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
+    await openRemoteConnections();
+    await renamedServer.click();
+    await remote.press("F8");
+    await page.getByRole("dialog", { name: "Remove connection", exact: true })
+      .getByRole("button", { name: "Remove connection", exact: true }).click();
+    await renamedServer.waitFor({ state: "detached" });
+    await remote.getByRole("option", { name: /^\.\./ }).dblclick();
     await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
   });
   await left.getByRole("option", { name: /^guide.md/ }).click({ modifiers: ["Control"] });

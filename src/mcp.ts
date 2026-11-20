@@ -1,7 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import {
   api, connectFtpLocation, placePath, readPlaceText, savePlaceText, textEncodingLabels, windowsClient,
-  type Entry, type Listing, type NamedFile, type Place, type RemotePlace, type TextDocument, type TextEncoding, type TransferEvent,
+  type Entry, type FileLocation, type Listing, type NamedFile, type Place, type RemotePlace, type TextDocument, type TextEncoding, type TransferEvent,
 } from "./api";
 import { baseThemes, builtInThemes, colorGroups, isHexColor, maxSchemeNameLength, type Palette } from "./appearance";
 import { sameFolderShortcut, shortcutFromPlace, type FolderShortcuts } from "./folderShortcuts";
@@ -34,12 +34,12 @@ function sameFile(a: NamedFile, b: NamedFile) {
     (a.place.kind === "local" || "id" in b.place && a.place.id === b.place.id);
 }
 
-function textFile(place: Place, entry: Entry): NamedFile {
+function textFile(place: FileLocation, entry: Entry): NamedFile {
   if (place.kind === "kswitcher" || place.kind === "smbRoot" || entry.directory || entry.link) throw new Error("Choose a regular text file.");
   return { place, name: entry.name };
 }
 
-async function transfer(place: Place, items: Entry[], destination: Place, moving: boolean) {
+async function transfer(place: FileLocation, items: Entry[], destination: Place, moving: boolean) {
   if (place.kind === "smbRoot" || !items.length || (moving && (place.kind !== "local" || destination.kind !== "local")) ||
       (destination.kind !== "local" && (destination.kind !== "ftp" || place.kind !== "local"))) {
     throw new Error("This transfer is unavailable for the selected sources.");
@@ -78,7 +78,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
     return value;
   };
   const requirePlace = () => {
-    if (!pane.place) throw new Error("Open a source in the selected pane.");
+    if (!pane.place || pane.place.kind === "connections") throw new Error("Open a source in the selected pane.");
     return pane.place;
   };
   const entries = async (place: Place) => (await readPlace(place)).listing.entries;
@@ -100,7 +100,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
     case "navigate_pane": {
       const current = pane.place;
       const path = string("path");
-      const place = !current || current.kind === "local" || current.kind === "smbRoot" ? filesystemPlace(path) :
+      const place = !current || current.kind === "local" || current.kind === "smbRoot" || current.kind === "connections" ? filesystemPlace(path) :
         current.kind === "kswitcher" ? { ...current, path } :
           path.startsWith("/") ? { ...current, segments: path.split("/").filter(Boolean) } : null;
       if (!place || !await context.load(side, place)) throw new Error("The pane could not open the path.");
