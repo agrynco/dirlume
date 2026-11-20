@@ -117,6 +117,30 @@ async fn wait_for_window(
 }
 
 #[tauri::command]
+pub async fn updater_fixture_normal_window(app: AppHandle) -> DesktopResult<()> {
+    read(&app).ok_or("Missing updater fixture configuration")?;
+    let main = app
+        .get_webview_window("main")
+        .ok_or("Missing main window")?;
+    wait_for_window("the main window to become visible", || {
+        main.is_visible().map_err(message)
+    })
+    .await?;
+    if main.is_maximized().map_err(message)? {
+        main.unmaximize().map_err(message)?;
+    }
+    main.set_size(LogicalSize::new(780, 480)).map_err(message)?;
+    main.center().map_err(message)?;
+    main.set_focus().map_err(message)?;
+    wait_for_window("a resizable main window in its normal state", || {
+        Ok(main.is_resizable().map_err(message)?
+            && !main.is_maximized().map_err(message)?
+            && !main.is_fullscreen().map_err(message)?)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()> {
     read(&app).ok_or("Missing updater fixture configuration")?;
     let main = app

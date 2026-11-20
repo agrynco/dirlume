@@ -48,6 +48,8 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
       await waitFor("the saved pane font size", () => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
       await waitFor("the migrated menu position", () => document.querySelector('.topbar[data-menu-position="right"]') &&
         JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").mainMenuAlignment === "right");
+      await record("the main window in its normal size");
+      await invoke("updater_fixture_normal_window");
       const resize = await waitFor("the main window resize marker", () => document.querySelector(".statusbar > .window-resize-marker"));
       const marker = resize.getBoundingClientRect();
       const status = resize.parentElement.getBoundingClientRect();
