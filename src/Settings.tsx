@@ -344,7 +344,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               }} />
           </label>
           {onPick && <Button ref={pickButton} type="button" className="icon-button" aria-label={t("Pick an element")}
-            tooltip={t("Pick an element")} onClick={() => { void pick(); }}><Crosshair /></Button>}
+            tooltip={t("Pick an element")} disabled={picking} onClick={() => { void pick(); }}><Crosshair /></Button>}
           </div>
           {pickError && <p role="alert" className="dialog-error">{t("Could not start the appearance picker.")}</p>}
           <nav className="settings-tree" aria-label={t("Options sections")}>

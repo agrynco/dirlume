@@ -22,6 +22,7 @@ export async function testNativeAppearancePicker(main) {
   });
   await pickerButton(tool).click();
   await overlay(main).waitFor();
+  assert.equal(await pickerButton(tool).isDisabled(), true);
   assert.equal(await windowState(tool, "is_visible"), false);
   assert.equal(await windowState(main, "is_focused"), true);
   await main.keyboard.press("Escape");
