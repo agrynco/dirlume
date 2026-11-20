@@ -1,21 +1,16 @@
-import { builtInThemes, readSchemes, type Scheme } from "./appearance";
-import { normalizePreferences, preferenceBindingVersion, type Preferences } from "./preferences";
+import { readSchemes, type Scheme } from "./appearance";
+import {
+  migratePreferenceValues, normalizePreferences, preferenceBindingVersion, preferenceDefinitions, preferenceGroups, preferenceKeys,
+  type PreferenceGroup, type Preferences,
+} from "./preferences";
 
-export const settingsGroups = {
-  general: { label: "General", keys: ["language", "mainMenuAlignment", "provider", "kswitcher"] },
-  appearance: { label: "Appearance", keys: ["theme", "activeScheme", "systemLightScheme", "systemDarkScheme", "showTitlebarScheme", "viewFontSizes"] },
-  shortcuts: { label: "Keyboard shortcuts", keys: ["activeShortcutScheme", "shortcutSchemes"] },
-  filePanels: { label: "Main File Panels", keys: ["layout", "panelModes", "sortSettings", "selectedPanelModes", "actionButtonWidth", "hidden"] },
-  terminal: { label: "Terminal", keys: ["refreshEnvironment", "terminalPasteOnRightClick", "terminalResizeRows"] },
-  viewer: { label: "Viewer", keys: ["viewerContentWidth"] },
-} as const satisfies Record<string, { label: string; keys: readonly (keyof Preferences)[] }>;
-
-export type SettingsGroup = keyof typeof settingsGroups;
-export const settingsGroupIds = Object.keys(settingsGroups) as SettingsGroup[];
+const portableKeys = preferenceKeys.filter((key) => preferenceDefinitions[key].portable === true);
+export const settingsGroupIds = (Object.keys(preferenceGroups) as PreferenceGroup[]).filter((group) =>
+  portableKeys.some((key) => preferenceDefinitions[key].group === group));
 type GroupValues = Record<string, unknown>;
-type Groups = Partial<Record<SettingsGroup, GroupValues>>;
+type Groups = Partial<Record<PreferenceGroup, GroupValues>>;
 export type SettingsArchive = { groups: Groups; schemes: Scheme[] };
-export type SettingsSelection = { groups: SettingsGroup[]; schemes: string[] };
+export type SettingsSelection = { groups: PreferenceGroup[]; schemes: string[] };
 
 const format = "dirlume-settings";
 const version = 1;
@@ -55,17 +50,9 @@ function schemeName(name: string) {
 export function exportSettings(preferences: Preferences, selection: SettingsSelection): string {
   const saved = normalizePreferences({ ...preferences, bindingDefaults: preferenceBindingVersion });
   const groups = Object.fromEntries(selection.groups.map((group) => [group,
-    Object.fromEntries(settingsGroups[group].keys.map((key) => [key, saved[key] ?? null]))]));
+    Object.fromEntries(portableKeys.filter((key) => preferenceDefinitions[key].group === group).map((key) => [key, saved[key] ?? null]))]));
   const schemes = saved.schemes.filter(({ id }) => selection.schemes.includes(id));
   return JSON.stringify({ format, version, groups, schemes }, null, 2) + "\n";
-}
-
-function validGroupValue(key: string, value: unknown, normalized: Preferences) {
-  if (key === "activeScheme") return value === null || typeof value === "string" && value.length > 0;
-  if (key === "systemLightScheme" || key === "systemDarkScheme") {
-    return typeof value === "string" && (Object.hasOwn(builtInThemes, value) && value !== "system" || /^custom:.+$/.test(value));
-  }
-  return sameValue(value, normalized[key as keyof Preferences] ?? null);
 }
 
 export function parseSettingsArchive(contents: string): SettingsArchive {
@@ -77,24 +64,29 @@ export function parseSettingsArchive(contents: string): SettingsArchive {
     if (Object.hasOwn(raw, "version")) throw new Error(invalidFile);
     return { groups: {}, schemes: [readArchiveScheme(raw)] };
   }
-  if (raw.format !== format || raw.version !== version) throw new Error("This settings file version is not supported.");
+  if (raw.format !== format || (raw.version !== version && raw.version !== 0)) throw new Error("This settings file version is not supported.");
   if (!isRecord(raw.groups) || !Array.isArray(raw.schemes)) throw new Error(invalidFile);
-  const groups: Groups = {};
-  const values: GroupValues = {};
+  const bindings = raw.version === 0 ? 0 : preferenceBindingVersion;
+  const values: GroupValues = Object.create(null);
   for (const [group, data] of Object.entries(raw.groups)) {
-    if (!Object.hasOwn(settingsGroups, group) || !isRecord(data) || !Object.keys(data).length) throw new Error(invalidFile);
-    const id = group as SettingsGroup;
-    const keys: readonly string[] = settingsGroups[id].keys;
-    if (Object.keys(data).some((key) => !keys.includes(key))) throw new Error(invalidFile);
+    if (!Object.hasOwn(preferenceGroups, group)) continue;
+    if (!isRecord(data)) throw new Error(invalidFile);
     Object.assign(values, data);
-    groups[id] = data;
   }
+  const migrated = migratePreferenceValues({ ...values, bindingDefaults: bindings });
   const schemes = raw.schemes.map(readArchiveScheme);
   if (new Set(schemes.map(({ id }) => id)).size !== schemes.length ||
-      new Set(schemes.map(({ name }) => schemeName(name))).size !== schemes.length ||
-      (!Object.keys(groups).length && !schemes.length)) throw new Error(invalidFile);
-  const normalized = normalizePreferences({ ...values, schemes, bindingDefaults: preferenceBindingVersion });
-  if (Object.entries(values).some(([key, value]) => !validGroupValue(key, value, normalized))) throw new Error(invalidFile);
+      new Set(schemes.map(({ name }) => schemeName(name))).size !== schemes.length) throw new Error(invalidFile);
+  const normalized = normalizePreferences({ ...migrated, schemes, bindingDefaults: bindings });
+  const groups: Groups = {};
+  for (const key of portableKeys) {
+    if (!Object.hasOwn(migrated, key)) continue;
+    const { group, acceptsReference } = preferenceDefinitions[key];
+    const valid = sameValue(migrated[key], normalized[key] ?? null) || acceptsReference?.(migrated[key]);
+    if (!valid) throw new Error(invalidFile);
+    (groups[group] ??= {})[key] = migrated[key];
+  }
+  if (!Object.keys(groups).length && !schemes.length) throw new Error("The settings file contains no supported settings or color schemes.");
   return { groups, schemes };
 }
 

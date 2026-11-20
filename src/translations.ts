@@ -254,6 +254,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Could not import settings": ["Не вдалося імпортувати налаштування", "Не удалось импортировать настройки"],
   "The settings file is invalid.": ["Файл налаштувань недійсний.", "Файл настроек недействителен."],
   "The settings file is too large.": ["Файл налаштувань завеликий.", "Файл настроек слишком большой."],
+  "The settings file contains no supported settings or color schemes.": ["Файл не містить підтримуваних налаштувань або колірних схем.", "Файл не содержит поддерживаемых настроек или цветовых схем."],
   "This settings file version is not supported.": ["Ця версія файлу налаштувань не підтримується.", "Эта версия файла настроек не поддерживается."],
   "The selected color schemes conflict with more than one local scheme.": ["Вибрані колірні схеми конфліктують із кількома локальними схемами.", "Выбранные цветовые схемы конфликтуют с несколькими локальными схемами."],
   "Replace color schemes?": ["Замінити колірні схеми?", "Заменить цветовые схемы?"],
