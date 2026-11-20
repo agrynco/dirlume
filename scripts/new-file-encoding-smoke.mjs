@@ -9,10 +9,10 @@ export async function testNewFileEncoding(page, root) {
   const encodingField = dialog.getByLabel("Encoding", { exact: true });
   const create = () => dialog.getByRole("button", { name: "Create", exact: true }).click();
   const cases = [
-    ["utf8", [], (text) => Buffer.from(text)],
-    ["utf8_bom", [0xef, 0xbb, 0xbf], (text) => Buffer.from(text)],
-    ["utf16_le", [0xff, 0xfe], (text) => Buffer.from(text, "utf16le")],
-    ["utf16_be", [0xfe, 0xff], (text) => Buffer.from(text, "utf16le").swap16()],
+    ["utf8", "UTF-8", [], (text) => Buffer.from(text)],
+    ["utf8_bom", "UTF-8 with BOM", [0xef, 0xbb, 0xbf], (text) => Buffer.from(text)],
+    ["utf16_le", "UTF-16 LE", [0xff, 0xfe], (text) => Buffer.from(text, "utf16le")],
+    ["utf16_be", "UTF-16 BE", [0xfe, 0xff], (text) => Buffer.from(text, "utf16le").swap16()],
   ];
 
   async function openNewFile(fromMenu = false) {
@@ -25,10 +25,9 @@ export async function testNewFileEncoding(page, root) {
     await dialog.waitFor();
   }
 
-  for (const [encoding, bom, encode] of cases) {
+  for (const [encoding, status, bom, encode] of cases) {
     const name = `${encoding}.txt`;
     const target = join(root, name);
-    const status = encoding.replaceAll("_", " ").toUpperCase();
     await openNewFile(encoding === "utf8_bom");
     assert.equal(await encodingField.inputValue(), "utf8");
     await nameField.fill(name);
@@ -41,9 +40,9 @@ export async function testNewFileEncoding(page, root) {
     let last;
     for (const text of ["Привіт, 世界 🦊", "Другий запис ✓"]) {
       await editor.fill(text);
-      await document.getByText(`${status} · Modified`, { exact: true }).waitFor();
+      await document.getByText("Modified", { exact: true }).waitFor();
       await editor.press("F2");
-      await document.getByText(status, { exact: true }).waitFor();
+      await document.locator(".document-modified").waitFor({ state: "hidden" });
       last = Buffer.concat([Buffer.from(bom), encode(text)]);
       assert.deepEqual(await readFile(target), last);
     }

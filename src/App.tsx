@@ -1636,11 +1636,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   const openingOptions = useRef(false);
-  function openSettings() {
-    if (!isTauri()) { setModal({ kind: "settings" }); return; }
+  function openSettings(page?: FeaturePage) {
+    if (!isTauri()) { setModal({ kind: "settings", page }); return; }
     if (openingOptions.current) return;
     openingOptions.current = true;
-    void api.openToolWindow(t("Options"), readDialogSize("options")).then(() => {
+    void api.openToolWindow(t("Options"), readDialogSize("options"), undefined, page).then(() => {
       setModal((current) => current?.kind === "connect" ? null : current);
     }).catch((error: unknown) => setStatus({ text: describeError(error), error: true })).finally(() => {
       openingOptions.current = false;
@@ -1900,7 +1900,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             viewerContentWidth={preferences.viewerContentWidth} colors={scheme?.colors}
             shortcuts={shortcuts} menuRef={activeDocument === id ? documentMenu : undefined}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
-            onOptions={() => setModal({ kind: "settings", page: editing ? "editor" : "viewer" })}
+            onOptions={() => openSettings(editing ? "editor" : "viewer")}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
             onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}
             onOpenDocument={(target, newTab, next, scrollTop) => {
@@ -2101,7 +2101,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         </FileContextMenu>;
       })()}
       {modal?.kind === "connect" && (
-        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={openSettings}
+        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => openSettings()}
           onConnect={(place, listing) => { routeLocation(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}
