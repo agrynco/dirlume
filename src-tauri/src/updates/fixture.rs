@@ -123,6 +123,28 @@ async fn wait_for_window(
     Err(format!("Timed out waiting for {action}."))
 }
 
+#[cfg(target_os = "macos")]
+async fn activate_installed_bundle() -> DesktopResult<()> {
+    // The updater reopens the bundle in the background on macOS.
+    crate::desktop::blocking(|| {
+        let executable = std::env::current_exe().map_err(message)?;
+        let bundle = executable
+            .ancestors()
+            .nth(3)
+            .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
+            .ok_or("Missing the installed updater fixture bundle")?;
+        let result = std::process::Command::new("/usr/bin/open")
+            .arg(bundle)
+            .output()
+            .map_err(message)?;
+        if !result.status.success() {
+            return Err(String::from_utf8_lossy(&result.stderr).into_owned());
+        }
+        Ok(())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn updater_fixture_normal_window(app: AppHandle) -> DesktopResult<()> {
     read(&app).ok_or("Missing updater fixture configuration")?;
@@ -141,25 +163,7 @@ pub async fn updater_fixture_normal_window(app: AppHandle) -> DesktopResult<()> 
     main.set_focus().map_err(message)?;
     #[cfg(target_os = "macos")]
     {
-        // Tauri reopens the updated app in the background. Activate the existing bundle before
-        // simulating a user working with its windows.
-        crate::desktop::blocking(|| {
-            let executable = std::env::current_exe().map_err(message)?;
-            let bundle = executable
-                .ancestors()
-                .nth(3)
-                .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
-                .ok_or("Missing the installed updater fixture bundle")?;
-            let result = std::process::Command::new("/usr/bin/open")
-                .arg(bundle)
-                .output()
-                .map_err(message)?;
-            if !result.status.success() {
-                return Err(String::from_utf8_lossy(&result.stderr).into_owned());
-            }
-            Ok(())
-        })
-        .await?;
+        activate_installed_bundle().await?;
         wait_for_window("the installed application to activate", || {
             main.is_focused().map_err(message)
         })
@@ -243,5 +247,16 @@ pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()>
     .await?;
     options.close().map_err(message)?;
     main.set_size(original_size).map_err(message)?;
-    main.set_position(original).map_err(message)
+    main.set_position(original).map_err(message)?;
+    #[cfg(target_os = "macos")]
+    {
+        activate_installed_bundle().await?;
+        main.set_focus().map_err(message)?;
+        wait_for_window(
+            "the main window to regain focus after closing Options",
+            || main.is_focused().map_err(message),
+        )
+        .await?;
+    }
+    Ok(())
 }
