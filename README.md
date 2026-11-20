@@ -51,7 +51,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | F1 | Open the offline Help guide in the current interface language. |
 | Alt or F9 | Open the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
-| Shift+↑ / Shift+↓ | Mark a range from the current row, or unmark it when the first row you move onto is already marked. Reverse direction to shrink the range. |
+| Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
