@@ -1,4 +1,4 @@
-async (upgraded, reject) => {
+async (upgraded, reject, portable, replacementFailure) => {
   async function waitFor(read) {
     for (let attempt = 0; attempt < 450; attempt++) {
       const value = read();
@@ -53,13 +53,25 @@ async (upgraded, reject) => {
       await report(null);
       return;
     }
-    const install = await waitFor(() => [...document.querySelectorAll("dialog[open] button")]
-      .find((button) => button.textContent === "Install and restart"));
+    const portableFailure = "The portable update failed. Your previous copy and settings are still available.";
+    const install = await waitFor(() => {
+      if (replacementFailure && document.querySelector(".statusbar [role=alert]")?.textContent === portableFailure) return portableFailure;
+      return [...document.querySelectorAll("dialog[open] button")].find((button) => button.textContent === "Install and restart");
+    });
+    if (install === portableFailure) {
+      if (JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").viewFontSizes?.left !== 23) throw new Error("The portable rollback lost preferences.");
+      await report(null);
+      return;
+    }
     const preferences = JSON.parse(localStorage.getItem(preferenceKey) ?? "{}");
     preferences.viewFontSizes = { ...preferences.viewFontSizes, left: 23 };
     delete preferences.mainMenuAlignment;
     preferences.menuPosition = "right";
     localStorage.setItem(preferenceKey, JSON.stringify(preferences));
+    if (portable) {
+      window.dispatchEvent(new StorageEvent("storage", { key: preferenceKey }));
+      await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
+    }
     install.click();
     // The signed candidate restarts the app. A rejected candidate leaves the old version running.
     const error = await waitFor(() => document.querySelector(".statusbar [role=alert]")?.textContent);

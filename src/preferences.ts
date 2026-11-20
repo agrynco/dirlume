@@ -2,8 +2,9 @@ import { readSchemes, readSystemScheme, readTheme, type Scheme, type Theme } fro
 import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
+import { isTauri } from "@tauri-apps/api/core";
 import { folderGroups, type FolderGroup } from "./folderShortcuts";
-import { windowsClient } from "./api";
+import { api, windowsClient } from "./api";
 
 type FolderGroupCommand = `addFolderGroup${FolderGroup}` | `openFolderGroup${FolderGroup}`;
 const macDocumentKeys = typeof navigator !== "undefined" && /Macintosh/.test(navigator.userAgent);
@@ -342,8 +343,43 @@ export function readPreferences(): Preferences {
   }
 }
 
+let portableSettings = false;
+let portableSnapshot: string | undefined;
+let pendingPortableWrite = Promise.resolve();
+
+export async function restorePortablePreferences(main: boolean) {
+  if (!windowsClient || !isTauri()) return null;
+  try {
+    const state = await api.readPortableState();
+    if (!state) return null;
+    portableSettings = !state.settingsError;
+    if (state.preferences) {
+      portableSnapshot = JSON.stringify(state.preferences);
+      if (main) localStorage.setItem(preferenceKey, portableSnapshot);
+    }
+    return state;
+  } catch (error) {
+    reportFrontendError("portable_settings", error);
+    return null;
+  }
+}
+
+export function flushPortablePreferences() {
+  return pendingPortableWrite;
+}
+
 export function persistPreferences(preferences: Preferences) {
-  localStorage.setItem(preferenceKey, JSON.stringify({ ...preferences, bindingDefaults: 6 }));
+  const settings = { ...preferences, bindingDefaults: 6 };
+  const snapshot = JSON.stringify(settings);
+  localStorage.setItem(preferenceKey, snapshot);
+  if (!portableSettings || portableSnapshot === snapshot) return;
+  portableSnapshot = snapshot;
+  pendingPortableWrite = pendingPortableWrite.then(() => api.savePortablePreferences(settings)).catch((error: unknown) => {
+    if (portableSnapshot === snapshot) portableSnapshot = undefined;
+    window.dispatchEvent(new CustomEvent("dirlume-portable-settings-error", {
+      detail: error instanceof Error ? error.message : String(error),
+    }));
+  });
 }
 
 export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {

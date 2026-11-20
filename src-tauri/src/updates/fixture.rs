@@ -12,6 +12,8 @@ pub struct UpdateFixture {
     result: PathBuf,
     expected: String,
     reject: bool,
+    #[serde(default)]
+    replacement_failure: bool,
     metadata: serde_json::Value,
 }
 
@@ -55,8 +57,15 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
         return;
     };
     let upgraded = app.package_info().version.to_string() == fixture.expected;
+    #[cfg(windows)]
+    let portable = crate::portable::root().is_some();
+    #[cfg(not(windows))]
+    let portable = false;
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
-    let _ = webview.eval(format!("({script})({upgraded}, {});", fixture.reject));
+    let _ = webview.eval(format!(
+        "({script})({upgraded}, {}, {portable}, {});",
+        fixture.reject, fixture.replacement_failure
+    ));
 }
 
 #[tauri::command]

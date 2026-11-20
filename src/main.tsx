@@ -7,14 +7,12 @@ import type { NamedFile } from "./api";
 import { installDiagnosticListeners, reportFrontendError } from "./diagnostics";
 import { setLanguage } from "./i18n";
 import { isFeaturePage } from "./featureOptions";
-import { readPreferences } from "./preferences";
+import { readPreferences, restorePortablePreferences } from "./preferences";
 import { installTooltips } from "./tooltips";
 import "./styles.css";
 
 installDiagnosticListeners();
 installTooltips();
-const preferences = readPreferences();
-setLanguage(preferences.language);
 const label = isTauri() ? getCurrentWindow().label : "main";
 const tool = window as Window & {
   __dirlumeComparison?: { left: NamedFile; right: NamedFile };
@@ -22,9 +20,13 @@ const tool = window as Window & {
 };
 const comparison = tool.__dirlumeComparison;
 const optionsPage = tool.__dirlumeOptionsPage;
-createRoot(document.getElementById("root")!, {
-  onCaughtError: (error) => reportFrontendError("react_render", error),
-  onRecoverableError: (error) => reportFrontendError("react_render", error),
-}).render(label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
-  optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
-  <App initialPreferences={preferences} />);
+void restorePortablePreferences(label === "main").then((portable) => {
+  const preferences = readPreferences();
+  setLanguage(preferences.language);
+  createRoot(document.getElementById("root")!, {
+    onCaughtError: (error) => reportFrontendError("react_render", error),
+    onRecoverableError: (error) => reportFrontendError("react_render", error),
+  }).render(label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
+    optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
+    <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError} />);
+});

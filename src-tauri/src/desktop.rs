@@ -1674,9 +1674,13 @@ async fn list_kswitcher(
 }
 
 pub fn run() {
+    #[cfg(windows)]
+    crate::portable::maybe_apply_update();
     let _ = rustls::crypto::ring::default_provider().install_default();
     #[cfg(windows)]
-    if requested_location().is_some() {
+    if let Some(directory) = crate::portable::root() {
+        crate::portable::initialize(directory);
+    } else if requested_location().is_some() {
         if let Some(base) = dirs::data_local_dir() {
             std::env::set_var(
                 "WEBVIEW2_USER_DATA_FOLDER",
@@ -1755,6 +1759,8 @@ pub fn run() {
         build_version,
         open_tool_window,
         crate::updates::check_for_update,
+        crate::updates::read_portable_state,
+        crate::updates::save_portable_preferences,
         crate::updates::install_update,
         #[cfg(feature = "ui-automation")]
         crate::updates::fixture::updater_fixture_result,
