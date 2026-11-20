@@ -43,6 +43,16 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     }
     pointer("pointerout");
   }
+  async function checkHeaderMenus() {
+    const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
+    for (const side of ["Right", "Left"]) {
+      const control = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === side);
+      control.click();
+      await waitFor(`the ${side} menu to open`, () => control.getAttribute("aria-expanded") === "true");
+      bar.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0 }));
+      await waitFor(`the ${side} menu to close`, () => control.getAttribute("aria-expanded") === "false");
+    }
+  }
   async function checkDocumentMode() {
     const fileName = "document-mode-fixture.txt";
     const key = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
@@ -143,6 +153,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
         .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
       await checkTooltip(ssh);
       locations.click();
+      await checkHeaderMenus();
       if (fixtureDirectory) await checkDocumentMode();
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();

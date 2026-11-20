@@ -113,10 +113,12 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
   useEffect(() => {
     if (expanded === null) return;
     function outside(event: PointerEvent) {
-      if (event.target instanceof Node && !bar.current?.contains(event.target)) setExpanded(null);
+      const group = event.target instanceof Element ? event.target.closest(".main-menu-group") : null;
+      // The menubar stretches across the header. Only its controls and dropdowns are menu content.
+      if (!group || !bar.current?.contains(group)) close(false);
     }
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
+    document.addEventListener("pointerdown", outside, true);
+    return () => document.removeEventListener("pointerdown", outside, true);
   }, [expanded]);
 
   function keyDown(event: KeyboardEvent<HTMLElement>) {
