@@ -135,9 +135,8 @@ pub(crate) async fn set_appearance_picker(window: WebviewWindow, picking: bool) 
         .get_webview_window("main")
         .ok_or("The main window is no longer open.")?;
     main.unminimize().map_err(message)?;
-    main.show().map_err(message)?;
     options.hide().map_err(message)?;
-    if let Err(error) = main.set_focus() {
+    if let Err(error) = main.show().and_then(|_| main.set_focus()) {
         let _ = options.show();
         let _ = options.set_focus();
         return Err(message(error));

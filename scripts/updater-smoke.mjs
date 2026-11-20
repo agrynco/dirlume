@@ -106,6 +106,16 @@ function startApp(executable) {
   return spawn(executable, ["--updater-fixture", fixtureFile], { env, stdio: "inherit", windowsHide: true });
 }
 
+async function startMacPainter() {
+  macPainter = spawn(macInput, [], { stdio: ["ignore", "pipe", "inherit"] });
+  const [output] = await Promise.race([
+    once(macPainter.stdout, "data"),
+    once(macPainter, "exit").then(([code]) => { throw new Error(`The macOS screen color fixture stopped (${code}).`); }),
+    delay(10000).then(() => { throw new Error("The macOS screen color fixture did not open."); }),
+  ]);
+  assert.match(String(output), /ready/);
+}
+
 async function reportedVersion() {
   const inputs = new Set();
   for (let attempt = 0; attempt < 180; attempt++) {
@@ -135,6 +145,7 @@ async function reportedVersion() {
         phase.endsWith("the external screen color") ? "click" : undefined;
       if (input && !inputs.has(input)) {
         inputs.add(input);
+        if (!macPainter) await startMacPainter();
         await delay(600);
         run(macInput, [input]);
       }
@@ -173,11 +184,6 @@ try {
     run("swiftc", ["scripts/screen-color-macos.swift", "-o", helper]);
     const access = spawnSync(helper, ["preflight"], { stdio: "inherit" });
     if (access.status === 0) {
-      macPainter = spawn(helper, [], { stdio: ["ignore", "pipe", "inherit"] });
-      const [output] = await Promise.race([once(macPainter.stdout, "data"), delay(10000).then(() => {
-        throw new Error("The macOS screen color fixture did not open.");
-      })]);
-      assert.match(String(output), /ready/);
       macInput = helper;
     } else if (access.status === 78) {
       console.log("The macOS runner does not permit interactive input for the external color fixture.");

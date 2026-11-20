@@ -16,9 +16,10 @@ default:
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let area = NSRect(x: 25, y: screen.frame.maxY - 155, width: 155, height: 105)
-    let window = NSWindow(contentRect: area, styleMask: .borderless, backing: .buffered, defer: false)
+    let window = NSPanel(contentRect: area, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     window.backgroundColor = NSColor(srgbRed: 36.0 / 255, green: 89.0 / 255, blue: 120.0 / 255, alpha: 1)
     window.level = .floating
+    window.hidesOnDeactivate = false
     window.orderFrontRegardless()
     FileHandle.standardOutput.write(Data("ready\n".utf8))
     app.run()
