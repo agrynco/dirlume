@@ -361,8 +361,22 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 
 .workspace { position: relative; display: grid; grid-template-columns: minmax(0, var(--left-pane-width, 50fr)) 10px minmax(0, var(--right-pane-width, 50fr)); padding: 8px 8px 6px; min-height: 0; }
 .workspace[hidden] { display: none; }
-#left-pane { grid-column: 1; grid-row: 1; }
-#right-pane { grid-column: 3; grid-row: 1; }
+#left-pane, .quick-view-left { grid-column: 1; grid-row: 1; }
+#right-pane, .quick-view-right { grid-column: 3; grid-row: 1; }
+.pane[inert] { visibility: hidden; }
+.quick-view { overflow: hidden; }
+.quick-view .pane-heading { min-height: 32px; }
+.quick-view .pane-title > svg { width: 16px; height: 16px; flex: none; }
+.quick-view-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--panel-muted); }
+.quick-view .pane-empty { margin: 0; overflow-wrap: anywhere; }
+.quick-view :is(.text-view, .markdown) { margin: 0; border: 0; border-radius: 0; }
+.quick-view-html { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--text-bg); }
+.quick-view-modes { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius); }
+.quick-view-modes button { min-height: 24px; padding-inline: 5px; font-size: .85em; white-space: nowrap; }
+.quick-view-image-tools { display: flex; align-items: center; gap: 3px; padding: 4px 6px; background: var(--raised); border-bottom: 1px solid var(--line); }
+.quick-view-image-canvas { display: flex; flex: 1; min-height: 0; overflow: auto; background: var(--text-bg); }
+.quick-view-image { position: relative; flex: none; margin: auto; }
+.quick-view-image img { position: absolute; top: 50%; left: 50%; }
 .pane-divider { grid-column: 2; grid-row: 1; cursor: col-resize; touch-action: none; user-select: none; border-radius: 6px; }
 .pane-divider:hover, .pane-divider:focus-visible { background: var(--hover); }
 .terminal-divider { position: absolute; inset: auto 12px 0; height: 8px; cursor: row-resize; touch-action: none; border-radius: 4px; }

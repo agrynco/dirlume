@@ -1469,6 +1469,115 @@ async fn read_server_text(
     decode_text(bytes.as_slice())
 }
 
+const PREVIEW_IMAGE_LIMIT: usize = 16 * 1024 * 1024;
+
+pub(crate) fn check_preview_image_size(length: u64) -> Result<()> {
+    if length > PREVIEW_IMAGE_LIMIT as u64 {
+        return Err("Quick View supports images up to 16 MiB.".into());
+    }
+    Ok(())
+}
+
+fn load_preview_image(path: &Path) -> Result<Vec<u8>> {
+    let file = open_regular_file(path)?;
+    check_preview_image_size(file.metadata().map_err(message)?.len())?;
+    let mut bytes = Vec::new();
+    file.take(PREVIEW_IMAGE_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(message)?;
+    check_preview_image_size(bytes.len() as u64)?;
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod preview_image_tests {
+    use super::{load_preview_image, PREVIEW_IMAGE_LIMIT};
+    use std::fs;
+
+    #[test]
+    fn returns_file_bytes_and_rejects_directories_and_oversized_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preview.png");
+        let bytes = b"\x89PNG\r\n\x1a\n";
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(load_preview_image(&path).unwrap(), bytes);
+        assert!(load_preview_image(directory.path()).is_err());
+
+        let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(PREVIEW_IMAGE_LIMIT as u64 + 1).unwrap();
+        drop(file);
+        assert_eq!(
+            load_preview_image(&path).unwrap_err(),
+            "Quick View supports images up to 16 MiB."
+        );
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum PreviewImageSource {
+    Local { directory: String, name: String },
+    Server { id: u32, segments: Vec<String> },
+    Ftp { id: u32, segments: Vec<String> },
+    Ssh { id: u32, segments: Vec<String> },
+    Archive { id: u32, segments: Vec<String> },
+}
+
+#[tauri::command]
+async fn read_preview_image(
+    source: PreviewImageSource,
+    servers: State<'_, Connections>,
+    ftp: State<'_, ftp::FtpState>,
+    ssh: State<'_, ssh::SshState>,
+    archives: State<'_, crate::archives::Archives>,
+) -> Result<tauri::ipc::Response> {
+    let bytes = match source {
+        PreviewImageSource::Local { directory, name } => {
+            blocking(move || load_preview_image(&selected(&directory, &name).map_err(message)?))
+                .await?
+        }
+        PreviewImageSource::Server { id, segments } => {
+            let response = servers
+                .get(id)?
+                .request(
+                    "v1/download",
+                    RemotePath { segments },
+                    Duration::from_secs(45),
+                )
+                .await?;
+            collect_response(response, PREVIEW_IMAGE_LIMIT + 1).await?
+        }
+        PreviewImageSource::Ftp { id, segments } => {
+            let connection = ftp.connection(id)?;
+            blocking(move || {
+                let mut session = connection.open()?;
+                let length = session.regular(&segments)?.size() as u64;
+                check_preview_image_size(length)?;
+                session.read_limited(&segments, 0, length, length)
+            })
+            .await?
+        }
+        PreviewImageSource::Ssh { id, segments } => {
+            let connection = ssh.connection(id)?;
+            blocking(move || {
+                let mut session = connection.open()?;
+                let entry = session.regular(&segments)?;
+                let length = remote_transfer::Entry::size(&entry)
+                    .ok_or("The SSH server did not report the file size.")?;
+                check_preview_image_size(length)?;
+                session.read_limited(&segments, 0, length)
+            })
+            .await?
+        }
+        PreviewImageSource::Archive { id, segments } => {
+            let archive = archives.get(id)?;
+            blocking(move || archive.lock().map_err(message)?.preview_image(&segments)).await?
+        }
+    };
+    check_preview_image_size(bytes.len() as u64)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 async fn read_bytes(directory: String, name: String, offset: u64) -> Result<BytePage> {
     blocking(move || {
@@ -2000,6 +2109,7 @@ pub fn run() {
         read_ssh_bytes,
         save_ssh_text,
         read_text,
+        read_preview_image,
         resolve_text_link,
         open_web_link,
         read_server_text,

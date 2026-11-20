@@ -16,7 +16,8 @@ use uuid::Uuid;
 use crate::{
     archive_engine::{self, archive_args, Engine, Limited},
     desktop::{
-        blocking, decode_text, encode_text, message, Encoding, Result, TextDocument, TEXT_LIMIT,
+        blocking, check_preview_image_size, decode_text, encode_text, message, Encoding, Result,
+        TextDocument, TEXT_LIMIT,
     },
     local,
     local_transfer::{self, Conflict, Decision, FileRevision, Options},
@@ -323,6 +324,12 @@ impl Archive {
         )?;
         self.verify()?;
         Ok(sink)
+    }
+
+    pub(crate) fn preview_image(&self, segments: &[String]) -> Result<Vec<u8>> {
+        let entry = self.file(segments)?;
+        check_preview_image_size(entry.size)?;
+        self.extract(entry, Vec::new(), |_| Ok(()))
     }
 
     pub fn copy_to(

@@ -442,6 +442,12 @@ export function readPlaceText(file: NamedFile, sudoPassword?: string) {
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
 }
 
+export function readPlacePreviewImage({ place, name }: NamedFile) {
+  const source = place.kind === "local" ? { kind: place.kind, directory: place.path, name }
+    : { kind: place.kind, id: place.id, segments: [...place.segments, name] };
+  return invoke<ArrayBuffer>("read_preview_image", { source });
+}
+
 export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {
   if (place.kind === "archive") {
     if (!place.writable || !document.revision) throw new Error("The archive is read-only.");
