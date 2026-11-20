@@ -100,7 +100,7 @@ fn relative_path(path: RemotePath) -> io::Result<PathBuf> {
 
 // Use a directory capability for every path access so that links cannot escape the share.
 fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
-    #[cfg(windows)]
+    #[cfg(any(unix, windows))]
     use cap_std::fs::MetadataExt;
 
     let directory = share.root.open_dir(relative_path(path)?)?;
@@ -133,14 +133,22 @@ fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
         let attributes = local::EntryAttributes::from_windows(metadata.file_attributes());
         #[cfg(not(windows))]
         let attributes = local::EntryAttributes::default();
-        entries.push(Entry::new(
+        let item = Entry::new(
             name,
             directory,
             link,
             attributes,
             file.then_some(metadata.len()),
             metadata.modified().ok().map(|time| time.into_std()),
-        ));
+        );
+        #[cfg(unix)]
+        let item = {
+            let mut item = item;
+            item.owner = Some(metadata.uid().to_string());
+            item.hard_links = (file && !link).then(|| metadata.nlink());
+            item
+        };
+        entries.push(item);
     }
     Ok(RemoteListing { entries, omitted })
 }

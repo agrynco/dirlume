@@ -53,6 +53,38 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       await waitFor(`the ${side} menu to close`, () => control.getAttribute("aria-expanded") === "false");
     }
   }
+  async function checkPanelModes() {
+    const pane = await waitFor("the left file pane", () => document.querySelector('#left-files[aria-busy="false"]'));
+    const panel = pane.closest(".pane");
+    const right = document.getElementById("right-pane");
+    const originalRight = right.dataset.panelMode;
+    const key = (type, key, code, ctrlKey) => pane.dispatchEvent(new KeyboardEvent(type, {
+      key, code, ctrlKey, bubbles: true, cancelable: true,
+    }));
+    const chord = (side, digit) => {
+      key("keydown", "Control", `Control${side}`, true);
+      key("keydown", String(digit), `Digit${digit}`, true);
+      key("keyup", "Control", `Control${side}`, false);
+    };
+    pane.focus();
+    for (const [digit, id] of [[1, "brief"], [2, "medium"], [3, "full"], [4, "wide"], [8, "owners"], [9, "links"], [0, "alternativeFull"]]) {
+      chord("Left", digit);
+      await waitFor(`the ${id} panel mode`, () => panel.dataset.panelMode === id);
+      if (right.dataset.panelMode !== originalRight) throw new Error("A panel mode changed both panes.");
+      if (digit === 1 || digit === 2) {
+        const columnHeaders = panel.querySelectorAll(".file-column-group");
+        if (columnHeaders.length !== (digit === 1 ? 3 : 2)) throw new Error("The grouped mode showed the wrong number of headings.");
+      }
+    }
+    for (let digit = 0; digit < 10; digit++) {
+      chord("Right", digit);
+      await waitFor(`bookmark group ${digit}`, () =>
+        document.querySelector(".statusbar")?.textContent.includes(`No folder shortcuts in group ${digit}.`));
+      if (panel.dataset.panelMode !== "alternativeFull") throw new Error("A bookmark shortcut changed the panel mode.");
+    }
+    chord("Left", 3);
+    await waitFor("the restored Full panel mode", () => panel.dataset.panelMode === "full");
+  }
   async function checkDocumentMode() {
     const fileName = "document-mode-fixture.txt";
     const key = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
@@ -154,6 +186,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       await checkTooltip(ssh);
       locations.click();
       await checkHeaderMenus();
+      await checkPanelModes();
       if (fixtureDirectory) await checkDocumentMode();
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();

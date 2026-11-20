@@ -5,7 +5,7 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { errorText, t } from "./i18n";
 import { PathField } from "./PathField";
-import { eventShortcut, showShortcut } from "./preferences";
+import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { ElevationButton } from "./ProcessTools";
 import { timestampSeconds, useTimestamps } from "./useTimestamps";
 
@@ -93,7 +93,7 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
       event.preventDefault();
       event.stopPropagation();
       closeHistory();
-    } else if (!waiting && history.length && historyShortcut.includes(eventShortcut(event))) {
+    } else if (!waiting && history.length && bindingMatches(historyShortcut, eventShortcut(event))) {
       event.preventDefault();
       event.stopPropagation();
       if (historyOpen) closeHistory();

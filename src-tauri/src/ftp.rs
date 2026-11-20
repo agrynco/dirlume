@@ -400,14 +400,16 @@ impl Entries {
 }
 
 fn listing_entry(file: File) -> local::Entry {
-    local::Entry::new(
+    let mut entry = local::Entry::new(
         file.name().to_owned(),
         file.is_directory(),
         file.is_symlink(),
         local::EntryAttributes::default(),
         file.is_file().then_some(file.size() as u64),
-        Some(file.modified()),
-    )
+        (file.modified() != std::time::UNIX_EPOCH).then_some(file.modified()),
+    );
+    entry.owner = file.uid().map(|uid| uid.to_string());
+    entry
 }
 
 pub fn valid_name(name: &str) -> bool {

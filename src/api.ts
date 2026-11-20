@@ -10,6 +10,8 @@ export interface Entry {
   size: number | null;
   modified: number | null;
   connection?: SavedConnection;
+  owner?: string | null;
+  hardLinks?: number | null;
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -26,6 +28,18 @@ export interface FileAttributes {
   modified: number | null;
   owner: string | null;
   mode: string | null;
+}
+
+export interface PanelMetadataRequest {
+  directory: string;
+  name: string;
+  owner: boolean;
+  links: boolean;
+}
+
+export interface PanelMetadata {
+  owner: string | null;
+  hardLinks: number | null;
 }
 
 export interface Listing {
@@ -253,6 +267,7 @@ export const api = {
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
   processIcons: (ids: ProcessId[]) => invoke<(string | null)[]>("process_icons", { ids }),
+  panelMetadata: (items: PanelMetadataRequest[]) => invoke<PanelMetadata[]>("panel_metadata", { items }),
   fileIcons: (items: { directory: string; name: string }[]) => invoke<(string | null)[]>("file_icons", { items }),
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
   lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),

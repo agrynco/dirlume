@@ -14,6 +14,7 @@ import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
@@ -2127,6 +2128,7 @@ try {
   await themeRoot().waitFor();
   assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
   console.log("Verified Classic blue colors, selection contrast, preview, and custom and built-in theme persistence.");
+  page = await testPanelModes({ page, startDesktop, exitDesktop, root: temp });
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);

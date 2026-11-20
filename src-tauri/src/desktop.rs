@@ -208,6 +208,37 @@ fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
     Ok(local::absolute(directory)?.join(local::name_component(name)?))
 }
 
+#[derive(serde::Deserialize)]
+struct PanelMetadataRequest {
+    directory: String,
+    name: String,
+    owner: bool,
+    links: bool,
+}
+
+#[tauri::command]
+async fn panel_metadata(
+    items: Vec<PanelMetadataRequest>,
+) -> Result<Vec<crate::file_attributes::PanelMetadata>> {
+    blocking(move || {
+        if items.len() > 64 {
+            return Err("Too many file metadata requests.".into());
+        }
+        Ok(items
+            .into_iter()
+            .map(|item| {
+                selected(&item.directory, &item.name).map_or_else(
+                    |_| crate::file_attributes::PanelMetadata::default(),
+                    |path| {
+                        crate::file_attributes::PanelMetadata::read(&path, item.owner, item.links)
+                    },
+                )
+            })
+            .collect())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn file_attributes(
     directory: String,
@@ -1830,6 +1861,7 @@ pub fn run() {
         list_directory,
         disk_space,
         crate::timestamps::format_timestamps,
+        panel_metadata,
         file_attributes,
         update_file_attributes,
         operate,

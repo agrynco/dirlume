@@ -8,11 +8,12 @@ import type { NamedFile } from "./api";
 import { installDiagnosticListeners, reportFrontendError } from "./diagnostics";
 import { setLanguage } from "./i18n";
 import { isFeaturePage } from "./featureOptions";
-import { readPreferences, restorePortablePreferences } from "./preferences";
+import { readPreferences, restorePortablePreferences, trackControlKeys } from "./preferences";
 import { installTooltips } from "./tooltips";
 import "./styles.css";
 
 installDiagnosticListeners();
+trackControlKeys();
 installTooltips();
 const label = isTauri() ? getCurrentWindow().label : "main";
 const tool = window as Window & {
