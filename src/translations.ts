@@ -652,6 +652,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Right files": ["Файли правої панелі", "Файлы правой панели"],
   "Locations for left pane": ["Джерела для лівої панелі", "Источники для левой панели"],
   "Locations for right pane": ["Джерела для правої панелі", "Источники для правой панели"],
+  "Select drive {0} in the sources menu": ["Вибрати диск {0} у меню джерел", "Выбрать диск {0} в меню источников"],
   "Filter left folder": ["Фільтрувати папку в лівій панелі", "Фильтровать папку в левой панели"],
   "Filter right folder": ["Фільтрувати папку в правій панелі", "Фильтровать папку в правой панели"],
   "Open another location to continue.": ["Відкрийте інше місце, щоб продовжити.", "Откройте другое расположение, чтобы продолжить."],

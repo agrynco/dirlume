@@ -51,7 +51,7 @@ import {
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
+import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
@@ -2035,6 +2035,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                 }
                 void load(side, { ...place, segments: path.split("/").filter(Boolean) });
               } else void load(side, filesystemPlace(path));
+            }}
+            onLocalLocation={(location) => {
+              const other = panes[opposite(side)].place;
+              const otherDrive = other?.kind === "local" && /^([a-z]:)(?:[\\/]|$)/i.exec(other.path)?.[1]?.toUpperCase();
+              const path = driveSourceCommand(location) && other?.kind === "local" && otherDrive === location.label.toUpperCase()
+                ? other.path : location.path;
+              showProcesses(side, false);
+              void load(side, filesystemPlace(path));
             }}
             onPathAncestor={(place) => { showProcesses(side, false); void load(side, place); }}
             onCopyPath={copyPath}

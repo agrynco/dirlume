@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 
 export async function testSmbNavigation() {
   const browser = await chromium.launch({ channel: "chrome" });
@@ -27,8 +28,8 @@ export async function testSmbNavigation() {
         transformCallback: () => 1,
         invoke: async (command, args) => {
           switch (command) {
-            case "locations": return [{ label: "Home", path: home }];
-            case "list_directory": return { path: home, parent: null, entries: [], omitted: 0 };
+            case "locations": return [{ label: "Home", path: home }, { label: "C:", path: "C:\\" }, { label: "D:", path: "D:\\" }];
+            case "list_directory": return { path: args.path, parent: null, entries: [], omitted: 0 };
             case "file_icons": return args.items.map(() => null);
             case "ssh_profiles": return sshProfile ? [sshProfile] : [];
             case "save_ssh_profile": {
@@ -169,8 +170,75 @@ export async function testSmbNavigation() {
     await sshTerminal.getByRole("button", { name: "Close terminal", exact: true }).click();
     await terminalHint.waitFor({ state: "hidden" });
     await pathIs("left", projects);
+
+    const localProjects = "C:\\Projects";
+    async function navigateLocal(side, path) {
+      const address = await editPaneAddress(page, side);
+      await address.fill(path);
+      await address.press("Enter");
+      await pathIs(side, path);
+    }
+    const menu = (side) => pane(side).locator(".location-popup").filter({ has: page.getByRole("group", { name: "Sources", exact: true }) });
+    const drive = (side, letter) => menu(side).getByRole("button", { name: letter + ":", exact: true });
+    async function openDriveMenu(side, hotkey) {
+      await fileList(side).press(hotkey);
+      await menu(side).waitFor();
+    }
+    async function reconnectLeftSsh() {
+      await openSsh("left");
+      await left.getByRole("option", { name: /^Edited SSH/ }).dblclick();
+      await verify.getByRole("button", { name: "Trust and connect", exact: true }).click();
+      await pathIs("left", "/home");
+    }
+    await navigateLocal("left", localProjects);
+    await openDriveMenu("right", "Alt+F2");
+    assert.equal(await drive("right", "C").locator("kbd").textContent(), "C");
+    await page.keyboard.press("c");
+    await menu("right").waitFor({ state: "hidden" });
+    await pathIs("right", localProjects);
+    await pathIs("left", localProjects);
+
+    await reconnectLeftSsh();
+    await openDriveMenu("left", "Alt+F1");
+    await drive("left", "C").click();
+    await pathIs("left", localProjects);
+    await pathIs("right", localProjects);
+
+    await navigateLocal("left", "D:\\Other");
+    await openDriveMenu("right", "Alt+F2");
+    await page.keyboard.press("C");
+    await pathIs("right", "C:\\");
+    await pathIs("left", "D:\\Other");
+    await reconnectLeftSsh();
+    await openDriveMenu("right", "Alt+F2");
+    await page.keyboard.press("z");
+    await menu("right").waitFor();
+    await pathIs("right", "C:\\");
+    await page.keyboard.press("d");
+    await pathIs("right", "D:\\");
+    await pathIs("left", "/home");
+
+    const options = page.getByRole("dialog", { name: "Options", exact: true });
+    await page.getByRole("button", { name: "Options", exact: true }).click();
+    await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+    await options.getByRole("button", { name: "Change C for Select drive C: in the sources menu", exact: true }).click();
+    await options.getByRole("textbox", { name: "New shortcut to replace C for Select drive C: in the sources menu", exact: true }).press("Control+Shift+x");
+    await options.getByRole("button", { name: "Remove D from Select drive D: in the sources menu", exact: true }).click();
+    await options.getByRole("button", { name: "Done", exact: true }).click();
+    await openDriveMenu("right", "Alt+F2");
+    assert.equal(await drive("right", "C").locator("kbd").textContent(), "Ctrl+Shift+X");
+    assert.equal(await drive("right", "D").locator("kbd").count(), 0);
+    await page.keyboard.press("C");
+    await menu("right").waitFor();
+    await page.keyboard.press("Control+Shift+x");
+    await pathIs("right", "C:\\");
+    const address = await editPaneAddress(page, "right");
+    await address.fill("C:\\");
+    await address.press("End");
+    await address.press("c");
+    assert.equal(await address.inputValue(), "C:\\c");
     assert.deepEqual(errors, []);
-    console.log("Verified saved SMB and SSH connections, edit forms, parent navigation, and authentication.");
+    console.log("Verified saved SMB and SSH connections, authentication, and configurable Windows drive selection in both panes.");
   } finally {
     await browser.close();
   }

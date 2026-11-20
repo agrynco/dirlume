@@ -329,6 +329,21 @@ try {
   }
   await navigate("left", src);
   await navigate("right", dst);
+  const driveName = /^[a-z]:/i.exec(parse(src).root)?.[0]?.toUpperCase();
+  assert.ok(driveName, "The Windows test folders must be on a lettered drive.");
+  const leftDrive = page.locator("#left-pane .location-popup").getByRole("button", { name: driveName, exact: true });
+  await page.locator("#left-files").press("Alt+F1");
+  await leftDrive.waitFor();
+  await page.keyboard.press(driveName[0]);
+  await leftDrive.waitFor({ state: "hidden" });
+  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, dst);
+  assert.equal(await panePath("right"), dst);
+  await navigate("left", src);
+  await page.locator("#right-files").press("Alt+F2");
+  await page.locator("#right-pane .location-popup").getByRole("button", { name: driveName, exact: true }).click();
+  await page.waitForFunction((path) => document.getElementById("right-path")?.dataset.path === path, src);
+  assert.equal(await panePath("left"), src);
+  await navigate("right", dst);
   const branchFolder = join(src, "breadcrumb-branch");
   const branchLeaf = join(branchFolder, "breadcrumb-leaf");
   await mkdir(branchLeaf, { recursive: true });

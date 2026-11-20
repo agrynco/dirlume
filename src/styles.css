@@ -493,7 +493,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .path-suggestions span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .location-menu { position: relative; }
 .location-source-group { border-block-start: 1px solid var(--line); padding-block-start: 4px; margin-block-start: 4px; }
-.location-source-group kbd { min-inline-size: 2ch; padding: 0; text-align: center; background: transparent; font-size: .85em; }
+.location-popup kbd { min-inline-size: 2ch; margin-inline-start: auto; padding: 0; text-align: center; background: transparent; font-size: .85em; }
 .location-trigger { width: 38px; gap: 2px; border-color: var(--line); }
 .location-trigger svg:last-child { width: 11px; }
 .location-popup, .file-column-menu {
