@@ -49,6 +49,10 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
       return expected.every((name, index) => displayed[index] === name);
     }, expected);
   }
+  const currentSort = () => active().locator("[data-sort-mode][aria-checked=true]").getAttribute("aria-label");
+  await openSort("Right");
+  const originalRightSort = await currentSort();
+  await closeSort();
   await left().focus();
   await left().press("Control+F12");
   await active().waitFor();
@@ -134,7 +138,7 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
   await left().press("Shift+F12");
   await expectStart(["..", "a spaced.txt", "alpha-2.zz"]);
   await openSort("Right");
-  assert.match(await name("name").getAttribute("aria-label"), /Ascending/);
+  assert.equal(await currentSort(), originalRightSort);
   await closeSort();
   if (startDesktop && exitDesktop) {
     await exitDesktop(page);
