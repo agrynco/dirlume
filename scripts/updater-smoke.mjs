@@ -9,7 +9,22 @@ import { setTimeout as delay } from "node:timers/promises";
 const windows = process.platform === "win32";
 const linux = process.platform === "linux";
 if (linux && !process.env.DISPLAY) {
-  run("xvfb-run", ["-a", process.execPath, ...process.argv.slice(1)]);
+  run("xvfb-run", ["-a", "dbus-run-session", "--", "sh", "-c", `
+    set -eu
+    openbox --sm-disable &
+    manager=$!
+    trap 'kill "$manager" 2>/dev/null || true' EXIT
+    attempt=0
+    until xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 'window id'; do
+      attempt=$((attempt + 1))
+      if [ "$attempt" -ge 50 ]; then
+        echo "The X11 window manager did not start." >&2
+        exit 1
+      fi
+      sleep 0.1
+    done
+    GDK_BACKEND=x11 "$@"
+  `, "dirlume-updater-display", process.execPath, ...process.argv.slice(1)]);
   process.exit(0);
 }
 const targetName = { win32: "windows", linux: "linux", darwin: "darwin" }[process.platform];

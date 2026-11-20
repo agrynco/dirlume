@@ -77,14 +77,17 @@ pub fn updater_fixture_result(app: AppHandle, error: Option<String>) -> Result<(
     Ok(())
 }
 
-async fn wait_for_window(mut ready: impl FnMut() -> DesktopResult<bool>) -> DesktopResult<()> {
-    for _ in 0..100 {
+async fn wait_for_window(
+    action: &str,
+    mut ready: impl FnMut() -> DesktopResult<bool>,
+) -> DesktopResult<()> {
+    for _ in 0..200 {
         if ready()? {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    Err("The native Options window did not reach the expected state.".to_owned())
+    Err(format!("Timed out waiting for {action}."))
 }
 
 #[tauri::command]
@@ -93,7 +96,7 @@ pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()>
     let main = app
         .get_webview_window("main")
         .ok_or("Missing main window")?;
-    wait_for_window(|| {
+    wait_for_window("the native Options window to appear", || {
         app.get_webview_window("options")
             .map_or(Ok(false), |window| window.is_visible().map_err(message))
     })
@@ -118,7 +121,7 @@ pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()>
     options
         .set_position(PhysicalPosition::new(origin.x + 32, origin.y + 96))
         .map_err(message)?;
-    wait_for_window(|| {
+    wait_for_window("Options to move beyond the main window", || {
         let position = options.outer_position().map_err(message)?;
         let main_position = main.outer_position().map_err(message)?;
         Ok(
@@ -131,7 +134,7 @@ pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()>
     let moved = options.outer_position().map_err(message)?;
     main.set_position(PhysicalPosition::new(origin.x + 248, origin.y + 48))
         .map_err(message)?;
-    wait_for_window(|| {
+    wait_for_window("the main window to move independently of Options", || {
         Ok(main
             .outer_position()
             .map_err(message)?
