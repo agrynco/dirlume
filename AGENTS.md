@@ -7,4 +7,5 @@
 - For implementation tasks, default to a work branch based on the latest `origin/prerelease` and a pull request targeting `prerelease`.
 - When the task is complete, run the relevant local checks in [the README](README.md), push the work branch, open the pull request, and squash-merge it into `prerelease` once ready. Link the task in the pull request when the user has provided a reference. GitHub Actions runs the full checks on the release pull request.
 - Open a separate `prerelease` → `main` pull request to release a batch. Confirm its required GitHub Actions checks before merging. Use a merge commit to preserve the shared branch history. GitHub Actions publishes the release after the merge.
+- Follow the [Dirlume Issue Writer](.agents/skills/dirlume-issue-writer/SKILL.md) conventions for issue types and readiness when drafting, publishing, or revising Dirlume GitHub issues.
 - Use [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md) when asked to process the GitHub backlog through release as one batch. Run that skill in the current checkout without worktrees.
