@@ -33,6 +33,7 @@ export async function testArchives(page, root) {
   const badge = (name) => page.locator("[data-tooltip=" + JSON.stringify(name) + "]").filter({ hasText: name });
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
+  const parentFolder = () => button(page.getByRole("region", { name: "left pane", exact: true }), "Parent folder").click();
   const options = dialog("Create archive");
   async function archive(format, filename) {
     await row("folder").click();
@@ -83,11 +84,9 @@ export async function testArchives(page, root) {
   await row("keep.txt").waitFor({ state: "detached" });
   assert.notDeepEqual(await readFile(join(source, "fixture.zip")), before);
 
-  await left.focus();
-  await page.keyboard.press("Backspace");
+  await parentFolder();
   await row("folder").waitFor();
-  await left.focus();
-  await page.keyboard.press("Backspace");
+  await parentFolder();
   await badge("Archive").waitFor({ state: "hidden" });
   await row("fixture.zip").dblclick();
   await badge("Archive").waitFor();
@@ -100,8 +99,7 @@ export async function testArchives(page, root) {
   await returnToFiles();
   assert.equal(await row("keep.txt").count(), 0);
   for (let index = 0; index < 2; index++) {
-    await left.focus();
-    await page.keyboard.press("Backspace");
+    await parentFolder();
     await row(index ? "fixture.zip" : "folder").waitFor();
   }
 
@@ -134,8 +132,7 @@ export async function testArchives(page, root) {
   await document.waitFor({ state: "hidden" });
   await returnToFiles();
   for (let depth = 0; depth < 2; depth++) {
-    await left.focus();
-    await page.keyboard.press("Backspace");
+    await parentFolder();
     await row(depth ? "encrypted.7z" : "folder").waitFor();
   }
   console.log("Verified ZIP creation, overwrite cancellation, copying, editing, removal, and encrypted 7z browsing with the Windows desktop app.");

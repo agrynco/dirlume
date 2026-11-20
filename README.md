@@ -135,7 +135,7 @@ On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dir
 
 Install the [7-Zip command-line tools](https://www.7-zip.org/download.html) to create and browse local archives. Dirlume looks for `7zz`, `7z`, or `7za` on the executable search path and in common installation directories. Select local items and press **Shift+F1** to create a ZIP, 7z, TAR, or WIM archive when the installed tool supports the format. The dialog supports compression profiles, AES encryption, split volumes, and a self-extracting option when the Windows SFX module is installed. Profiles store compression options without passwords.
 
-Press **Enter** on an archive to open it in a pane. Use **F5** to extract selected members to a local folder with the normal copy conflict prompts, **F3** to view files, or **Backspace** to go up. A writable archive supports editing text files with **F4** and removing selected members with **F8**. Encrypted, split, and other formats without update support open read-only. Dirlume skips unsafe member paths and refuses to extract links.
+Press **Enter** on an archive to open it in a pane. Use **F5** to extract selected members to a local folder with the normal copy conflict prompts, **F3** to view files, or the **Parent folder** button to go up. A writable archive supports editing text files with **F4** and removing selected members with **F8**. Encrypted, split, and other formats without update support open read-only. Dirlume skips unsafe member paths and refuses to extract links.
 
 ## Remote sources
 

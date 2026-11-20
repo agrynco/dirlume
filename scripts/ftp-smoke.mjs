@@ -303,7 +303,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await left.getByRole("option", { name: /^notes.txt/ }).click();
     await remoteRow("renamed.md").click();
     const window = await openToolWindow(page, () => page.keyboard.press("Shift+F11"), "Compare files");
-    const comparison = window.getByRole("dialog", { name: "Compare files", exact: true });
+    const comparison = window.getByLabel("File differences", { exact: true });
     await comparison.getByText("# Changed externally", { exact: true }).waitFor();
     await closeToolWindow(window);
 
