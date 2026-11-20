@@ -17,6 +17,7 @@ import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
+import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
@@ -47,6 +48,7 @@ const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 if (process.env.CI) {
   await testSmbNavigation();
   await testFolderMeasurement();
+  await testFolderNavigationHeader();
   await testSyntaxMenu();
   await testTerminalPaste();
   await testAppearancePicker();
