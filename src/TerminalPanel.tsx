@@ -51,7 +51,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  onCommandsQueued, rowHeight, onCommandSubmitted, onClose }: {
+  onCommandsQueued, rowHeight, onCommandSubmitted, focusRequested, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -62,8 +62,10 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
   rowHeight: { current: number };
+  focusRequested: { current: number | null };
   onClose: () => void;
 }) {
+  const remoteTerminal = session.kind === "ssh";
   const container = useRef<HTMLDivElement>(null);
   const instance = useRef<{ term: Terminal; fit: () => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
@@ -114,10 +116,13 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let nextDirectory: string | null = null;
     let queued = Promise.resolve();
     let resizing = Promise.resolve();
+    const remote = session.kind === "ssh";
+    const windows = !remote && windowsClient;
+    let installedPrompt = false;
     const promptToken = `Dirlume-${crypto.getRandomValues(new Uint32Array(4)).join("-")}`;
     const promptPrefix = promptToken + ":";
     const decoder = new TextDecoder();
-    const internalPrefix = windowsClient ? "$null = '" + promptToken + "'; " : ": '" + promptToken + "'; ";
+    const internalPrefix = windows ? "$null = '" + promptToken + "'; " : ": '" + promptToken + "'; ";
     let lastCommand = 0;
     const submitted = new Map<string, { original: string; pending: number }>();
     const applicationQueue: Exclude<TerminalCommand, null>[] = [];
@@ -128,7 +133,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (!entry) return false;
       const { command, directory } = entry;
       const prefix = tracksPrompt ? internalPrefix : "";
-      const text = prefix + changeShellDirectory(directory) + (windowsClient ? "; " : " && ") + (tracksPrompt ? shellCommand(command) : command);
+      const text = prefix + changeShellDirectory(directory, windows) + (windows ? "; " : " && ") + (tracksPrompt ? shellCommand(command) : command);
       const prior = submitted.get(text);
       if (submitted.size >= 1000 && !prior) {
         const oldest = submitted.keys().next().value;
@@ -142,7 +147,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     function shellCommand(command: string) {
       if (!/\p{Cc}/u.test(command)) return command;
       const encoded = btoa(Array.from(new TextEncoder().encode(command), (byte) => String.fromCharCode(byte)).join(""));
-      if (windowsClient) return ". ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "'))))";
+      if (windows) return ". ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "'))))";
       return "__dirlume_command=$(printf '%s' '" + encoded + "' | base64 -d; printf .); eval -- \"${__dirlume_command%.}\"";
     }
 
@@ -169,13 +174,22 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       reportCommand(decode(encoded));
     }
     function synchronize() {
-      if (!atPrompt || draft || closed || stopped || nextDirectory === null) return;
+      if (!atPrompt || draft || closed || stopped) return;
+      if (nextDirectory === null) return;
       const next = nextDirectory;
       nextDirectory = null;
-      if (currentDirectory !== next) send(internalPrefix + changeShellDirectory(next) + "\r");
+      if (currentDirectory !== next) send(internalPrefix + changeShellDirectory(next, windows) + "\r");
     }
     function prompt(title: string) {
       if (!title.startsWith(promptPrefix)) return false;
+      if (remote && title === promptPrefix + "init") {
+        if (!installedPrompt) {
+          installedPrompt = true;
+          const mark = `printf '\\033]2;${promptToken}:0:%s\\007' "$(printf '%s' "$PWD" | base64 | tr -d '\\n')"`;
+          send(`__dirlume_prompt() { ${mark}; }; if [ -n "$BASH_VERSION" ]; then eval 'PROMPT_COMMAND+=(__dirlume_prompt)'; elif [ -n "$ZSH_VERSION" ]; then eval 'precmd_functions+=(__dirlume_prompt)'; else PS1='$(__dirlume_prompt)'"$PS1"; fi\r`);
+        }
+        return true;
+      }
       const separator = title.indexOf(":", promptPrefix.length);
       if (separator < 0) return false;
       const path = title.slice(separator + 1);
@@ -233,6 +247,10 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       runQueuedCommand();
     };
     const data = term.onData(send);
+    const keys = term.onKey(({ domEvent }) => {
+      // xterm can leave a WebView function-key default enabled in screen reader mode.
+      if (/^F\d+$/.test(domEvent.key)) domEvent.preventDefault();
+    });
     const resized = term.onResize(({ rows, cols }) => {
       resizing = resizing.then(async () => {
         await opening;
@@ -247,6 +265,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       enqueue.current = null;
       moveTo.current = null;
       data.dispose();
+      keys.dispose();
       resized.dispose();
       titles.forEach((title) => title.dispose());
       resize.disconnect();
@@ -254,13 +273,16 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       term.dispose();
       void opening.then(() => api.closeTerminal(session.id)).catch(() => {});
     };
-  }, [session.id, session.path, rowHeight]);
+  }, [session, rowHeight]);
 
   useEffect(() => {
     if (!visible || !instance.current) return;
     instance.current.fit();
-    if (!document.querySelector("dialog[open]")) instance.current.term.focus();
-  }, [visible]);
+    if (focusRequested.current === session.id) {
+      focusRequested.current = null;
+      if (!document.querySelector("dialog[open]")) instance.current.term.focus();
+    }
+  }, [visible, session.id, focusRequested]);
 
   useEffect(() => { moveTo.current?.(directory); }, [directory]);
 
@@ -287,7 +309,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
 
   return (
     <section className="terminal-card" aria-label={t("Terminal")} hidden={!visible}>
-      <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}><h2>{t("Terminal")}</h2><span data-tooltip={shellDirectory}>{shellDirectory}</span>
+      <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}><h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2><span data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
       {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">

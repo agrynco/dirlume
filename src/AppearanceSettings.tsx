@@ -214,10 +214,10 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
         </div>
       ))}
       {fontGroup === "viewer" && <>
-        <fieldset className="view-font-group">
+        <fieldset className="view-font-group reading-area-settings">
           <legend>{t("Reading area")}</legend>
-          <label className="setting"><span>{t("Maximum content width (px)")}</span>
-            <OptionalNumberInput label={t("Maximum content width (px)")} size={preferences.viewerContentWidth} fallback={t("Full width")}
+          <label className="setting unit-setting"><span>{t("Max width (px)")}</span>
+            <OptionalNumberInput label={t("Max width (px)")} size={preferences.viewerContentWidth} fallback={t("Full width")}
               min={minViewerContentWidth} max={maxViewerContentWidth}
               onChange={(viewerContentWidth) => onChange({ ...preferences, viewerContentWidth })} />
           </label>
@@ -276,13 +276,15 @@ function FontFields({ group, font, inherited, installed, disabled, onChange, chi
       <legend>{t(label)}</legend>
       <FontFamilyField label={label} value={font?.family ?? ""} fallback={inherited.family} installed={installed} builtIn={disabled}
         onChange={(family) => onChange({ ...font, family: family || undefined })} />
-      <label className="field font-size-label">{t("Size (px)")}
-        <FontSizeInput label={label} size={font?.size} fallback={inherited.size} min={minFontSize} max={maxFontSize}
-          onChange={(size) => onChange({ ...font, size })} />
-      </label>
-      <Button type="button" className="icon-button" aria-label={t("Reset {0} font", t(label).toLocaleLowerCase())}
-        tooltip={t("Reset font")} disabled={disabled || (!font?.family && !font?.size)}
-        onClick={() => onChange()}><RotateCcw /></Button>
+      <div className="font-size-controls">
+        <label className="field font-size-field">{t("Size (px)")}
+          <FontSizeInput label={label} size={font?.size} fallback={inherited.size} min={minFontSize} max={maxFontSize}
+            onChange={(size) => onChange({ ...font, size })} />
+        </label>
+        <Button type="button" className="icon-button" aria-label={t("Reset {0} font", t(label).toLocaleLowerCase())}
+          tooltip={t("Reset font")} disabled={disabled || (!font?.family && !font?.size)}
+          onClick={() => onChange()}><RotateCcw /></Button>
+      </div>
       {children}
     </fieldset>
   );

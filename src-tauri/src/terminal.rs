@@ -12,7 +12,7 @@ use tauri::{ipc::Channel, State};
 use crate::{
     desktop::{blocking, message, Result},
     diagnostics::{failure, FailureCode},
-    local,
+    local, ssh,
 };
 
 #[cfg(windows)]
@@ -100,7 +100,11 @@ impl Drop for Terminal {
     }
 }
 
-type SharedTerminal = Arc<Mutex<Terminal>>;
+#[derive(Clone)]
+enum SharedTerminal {
+    Local(Arc<Mutex<Terminal>>),
+    Ssh(Arc<ssh::RemoteTerminal>),
+}
 
 #[derive(Default)]
 pub struct Terminals(Mutex<HashMap<u32, SharedTerminal>>);
@@ -141,6 +145,13 @@ pub struct OpenTerminal {
     rows: u16,
     cols: u16,
     refresh_environment: bool,
+    ssh: Option<SshSource>,
+}
+
+#[derive(Deserialize)]
+struct SshSource {
+    connection: u32,
+    segments: Vec<String>,
 }
 
 pub fn shell_program() -> std::ffi::OsString {
@@ -154,7 +165,7 @@ pub fn shell_program() -> std::ffi::OsString {
     }
 }
 
-fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(SharedTerminal, bool)> {
+fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<Terminal>>, bool)> {
     let cwd = local::absolute(&request.directory).map_err(message)?;
     let pair = native_pty_system()
         .openpty(size(request.rows, request.cols))
@@ -232,9 +243,32 @@ pub async fn open_terminal(
     request: OpenTerminal,
     output: Channel<Output>,
     state: State<'_, Terminals>,
+    ssh_state: State<'_, ssh::SshState>,
 ) -> Result<bool> {
     let id = request.id;
-    let (terminal, tracks_prompt) = blocking(move || create(request, output)).await?;
+    let connection = request
+        .ssh
+        .as_ref()
+        .map(|source| ssh_state.connection(source.connection))
+        .transpose()?;
+    let (terminal, tracks_prompt) = blocking(move || {
+        if let (Some(source), Some(connection)) = (&request.ssh, connection) {
+            let dimensions = size(request.rows, request.cols);
+            let terminal = ssh::open_shell(
+                &connection,
+                &source.segments,
+                &request.prompt_token,
+                dimensions.rows,
+                dimensions.cols,
+                output,
+            )?;
+            Ok((SharedTerminal::Ssh(Arc::new(terminal)), true))
+        } else {
+            create(request, output)
+                .map(|(terminal, tracks_prompt)| (SharedTerminal::Local(terminal), tracks_prompt))
+        }
+    })
+    .await?;
     state.0.lock().map_err(message)?.insert(id, terminal);
     Ok(tracks_prompt)
 }
@@ -242,13 +276,16 @@ pub async fn open_terminal(
 #[tauri::command]
 pub async fn write_terminal(id: u32, data: String, state: State<'_, Terminals>) -> Result<()> {
     let terminal = state.get(id)?;
-    blocking(move || {
-        let mut terminal = terminal.lock().map_err(message)?;
-        terminal
-            .writer
-            .write_all(data.as_bytes())
-            .map_err(message)?;
-        terminal.writer.flush().map_err(message)
+    blocking(move || match terminal {
+        SharedTerminal::Local(terminal) => {
+            let mut terminal = terminal.lock().map_err(message)?;
+            terminal
+                .writer
+                .write_all(data.as_bytes())
+                .map_err(message)?;
+            terminal.writer.flush().map_err(message)
+        }
+        SharedTerminal::Ssh(terminal) => terminal.write(data),
     })
     .await
 }
@@ -261,13 +298,15 @@ pub async fn resize_terminal(
     state: State<'_, Terminals>,
 ) -> Result<()> {
     let terminal = state.get(id)?;
-    blocking(move || {
-        terminal
+    let size = size(rows, cols);
+    blocking(move || match terminal {
+        SharedTerminal::Local(terminal) => terminal
             .lock()
             .map_err(message)?
             .master
-            .resize(size(rows, cols))
-            .map_err(message)
+            .resize(size)
+            .map_err(message),
+        SharedTerminal::Ssh(terminal) => terminal.resize(size.rows, size.cols),
     })
     .await
 }
@@ -312,6 +351,7 @@ mod tests {
                 rows: 25,
                 cols: 120,
                 refresh_environment: false,
+                ssh: None,
             },
             output,
         )

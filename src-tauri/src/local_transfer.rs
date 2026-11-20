@@ -36,6 +36,19 @@ pub struct EntryDetails {
 }
 
 impl EntryDetails {
+    pub fn network(size: Option<u64>, modified: Option<SystemTime>, directory: bool) -> Self {
+        Self {
+            size: size.unwrap_or(0),
+            modified: modified.and_then(|value| {
+                value
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|time| time.as_secs())
+            }),
+            directory,
+        }
+    }
+
     fn from(metadata: &fs::Metadata) -> Self {
         Self {
             size: metadata.len(),
@@ -80,14 +93,28 @@ impl Conflict {
         existing: &suppaftp::list::File,
         replaceable: bool,
     ) -> Self {
+        Self::network(
+            path.to_owned(),
+            incoming,
+            EntryDetails::from_ftp(existing),
+            replaceable,
+        )
+    }
+
+    pub fn network(
+        path: String,
+        incoming: &fs::Metadata,
+        existing: EntryDetails,
+        replaceable: bool,
+    ) -> Self {
         Self {
-            path: path.to_owned(),
-            directory: existing.is_directory(),
+            path,
+            directory: existing.directory,
             read_only: false,
             replaceable,
             allow_remember: replaceable,
             incoming: Some(EntryDetails::from(incoming)),
-            existing: EntryDetails::from_ftp(existing),
+            existing,
         }
     }
 

@@ -17,13 +17,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
-import { api, connectFtpLocation, describeError, folderLabel, isLockError, isPermissionError, placePath, smbHost, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult } from "./api";
+import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
 import { reportFrontendError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { FtpDialog } from "./FtpDialog";
+import { SshDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
+import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
@@ -44,7 +46,7 @@ import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
   applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, visibleEntries,
-  type PaneState, type Side, type SortColumn,
+  type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
@@ -56,6 +58,7 @@ import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const previousTerminalHeights = [28, 28, 38, 48, 58];
+const noCommands: TerminalCommand[] = [];
 
 function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
   return Promise.race([listing, new Promise<undefined>((resolve) => {
@@ -64,7 +67,7 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
   })]);
 }
 
-type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" }>;
+type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
 type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
 type RowRename = { side: Side; place: RenameLocation; name: string };
 
@@ -76,17 +79,18 @@ function sameRenameLocation(current: Place | null, place: RenameLocation) {
 type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[] }
-) & { ftp?: FtpPlace; archive?: ArchivePlace };
+) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace };
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
-  | { kind: "connect" | "ftp" | "smb"; side: Side }
+  | { kind: "connect" | "ftp" | "smb" | "ssh"; side: Side }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
+  | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
   | { kind: "about" | "commandHistory" | "mcp" }
@@ -105,6 +109,10 @@ function isRangeCommand(command: Command) {
   return command === "selectUpRow" || command === "selectDownRow";
 }
 
+function isTerminalInput(target: EventTarget | null) {
+  return target instanceof Element && target.closest(".terminal-surface") !== null;
+}
+
 function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | null, editing: boolean | undefined): HelpTopic {
   if (modal === "settings") return "general";
   if (modal === "search") return "search";
@@ -113,11 +121,12 @@ function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | nu
 }
 
 function sameConnection(left: Place | null, right: Place) {
-  return (left?.kind === "server" || left?.kind === "ftp" || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
+  return (left?.kind === "server" || isFileServer(left) || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
 }
 
 function disconnect(place: NetworkPlace) {
-  void (place.kind === "ftp" ? api.disconnectFtp(place.id) : api.disconnect(place.id)).catch(() => {});
+  const close = place.kind === "ssh" ? api.disconnectSsh : place.kind === "ftp" ? api.disconnectFtp : api.disconnect;
+  void close(place.id).catch(() => {});
 }
 
 export default function App({ initialPreferences }: { initialPreferences: Preferences }) {
@@ -151,7 +160,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const dirtyDocuments = useRef(new Set<number>());
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
-  const [terminal, setTerminal] = useState<TerminalSession | null>(null);
+  const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
   const [terminalShare, setTerminalShare] = useState(0);
   const [terminalHeight, setTerminalHeight] = useState(() => {
     const height = startup?.terminalHeight;
@@ -159,12 +168,13 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return previousTerminalHeights[startup?.terminalHeightStep ?? 1] ?? 28;
   });
   const terminalRowHeight = useRef(0);
+  const terminalFocus = useRef<number | null>(null);
   const terminalDrag = useRef<{ y: number; height: number; available: number; minimum: number; maximum: number } | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
   const terminalVisible = panelsHidden || terminalShare > 0;
   const [split, setSplit] = useState(Number.isFinite(startup?.split) ? clampSplit(startup!.split) : 50);
   const [commandLine, setCommandLine] = useState("");
-  const [pendingCommands, setPendingCommands] = useState<TerminalCommand[]>([]);
+  const [pendingCommands, setPendingCommands] = useState<Record<number, TerminalCommand[]>>({});
   const commandInput = useRef<HTMLTextAreaElement>(null);
   const [historyItems, setHistoryItems] = useState(readCommandHistory);
   const commandTexts = useMemo(() => historyItems.map(({ text }) => text), [historyItems]);
@@ -196,9 +206,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const current = currentRow?.name === ".." ? undefined : currentRow;
   const currentItem = paneItem(pane, current);
   const local = pane.place?.kind === "local" ? pane.place : null;
+  const terminalPlace = pane.place?.kind === "ssh" ? pane.place : local;
+  const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
+  const terminal = terminalKey ? terminals[terminalKey] : undefined;
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
-  const otherFtp = !other.search && other.place?.kind === "ftp";
+  const fileServer = isFileServer(pane.place) ? pane.place : undefined;
+  const permanentDelete = Boolean(fileServer || smbHost(local));
+  const otherFileServer = !other.search && isFileServer(other.place);
   const canTransfer = Boolean(current && pane.place);
   const shortcuts = shortcutBindings(preferences);
   const helpShortcut = shortcuts.help;
@@ -240,7 +255,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     function openHelp(event: WindowEventMap["keydown"]) {
       if (event.defaultPrevented || event.isComposing || !helpShortcut.includes(eventShortcut(event))) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest("[data-shortcut-capture], .terminal-card")) return;
+      if (isTerminalInput(target) || target?.closest("[data-shortcut-capture]")) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.repeat) return;
@@ -319,32 +334,40 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return cancelledLoading || cancelledMeasurement;
   }
 
-  const load = useCallback(async (side: Side, place: Place, action: "push" | "refresh" | "background" | number = "push", reveal?: string) => {
+  const load = useCallback(async (side: Side, place: Place, action: ListingAction | "background" = "push", reveal?: string, sudoPassword?: string) => {
     const background = action === "background";
-    if (background && pendingListings.current[side]) return false;
+    const elevated = sudoPassword !== undefined;
+    if (background && (pendingListings.current[side] || latest.current[side].sudoListing)) return false;
     if (action !== "refresh" && !background) cancelScan(side);
     const { ticket, signal } = beginListing(side);
     if (!background) updatePane(side, (pane) => ({
       ...pane, loading: true, loadingPath: placePath(place), error: "", elevationPath: undefined,
+      deniedSshListing: elevated ? pane.deniedSshListing : undefined,
     }));
     try {
-      const result = await waitForListing(readPlace(place), signal);
+      const result = await waitForListing(readPlace(place, sudoPassword, !background), signal);
       if (!result || ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const found = reveal === ".." ? hasParentRow(result.place) :
         reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
-        const listing = applyListing(pane, result.place, result.listing, action);
+        const listing = { ...applyListing(pane, result.place, result.listing, action), sudoListing: result.elevated };
+        if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
       });
       return true;
     } catch (error) {
       if (ticket === request.current[side]) {
         const text = describeError(error);
-        updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined, error: text,
-          elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined }));
+        updatePane(side, (pane) => background && pane.error ? pane : {
+          ...pane, loading: false, loadingPath: undefined, error: text,
+          elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined,
+          deniedSshListing: elevated ? pane.deniedSshListing : place.kind === "ssh" && isPermissionError(text)
+            ? { place, action: background ? "refresh" : action, reveal } : undefined,
+        });
       }
+      if (elevated) throw error;
       return false;
     } finally {
       if (request.current[side] === ticket) delete pendingListings.current[side];
@@ -540,7 +563,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, []);
 
   useEffect(() => {
-    if (isTauri()) {
+    if (isTauri() && !windowsClient) {
+      // On Windows the native window theme also controls WebView2's system color query.
       const nativeTheme = followSystem ? null : theme === "light" ? "light" : "dark";
       void getCurrentWindow().setTheme(nativeTheme).catch(() => {});
     }
@@ -611,9 +635,19 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   const workspaceKeys = useEffectEvent((event: globalThis.KeyboardEvent) => {
-    if (modal || helpTopic || event.defaultPrevented || event.isComposing) return;
-    if (event.target instanceof Element && event.target.closest("dialog[open], [role=menu], .terminal-card")) return;
+    if (modal || helpTopic || event.defaultPrevented || event.isComposing || isTerminalInput(event.target)) return;
+    if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
+    const settingsMatch = shortcuts.settings.includes(shortcut) ||
+      (shortcuts.settings.includes(commands.settings.key) && event.code === "KeyS" &&
+        !event.getModifierState("AltGraph") && eventShortcut(event, "S") === commands.settings.key);
+    if (settingsMatch) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) openSettings();
+      return;
+    }
+    if (event.target instanceof Element && event.target.closest("[role=menu]")) return;
     if (shortcuts.cancelMeasure.includes(shortcut) && activeDocument === null &&
         !panelsHidden && cancelFolderOperation(active)) {
       event.preventDefault();
@@ -636,7 +670,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const hasModifier = event.ctrlKey || event.altKey || event.metaKey || /^F\d+$/.test(event.key);
     if ((!noControl && (!inTitlebar || !hasModifier)) ||
         !shortcut || !commandNames.some((command) => shortcuts[command].includes(shortcut))) return;
-    const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".xterm-helper-textarea" : `#${active}-files`;
+    const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".terminal-card:not([hidden])" : `#${active}-files`;
     const target = document.querySelector(selector);
     if (target && !target.dispatchEvent(new globalThis.KeyboardEvent("keydown", {
       key: event.key, code: event.code, altKey: event.altKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, metaKey: event.metaKey,
@@ -697,22 +731,34 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function documentKeys(event: KeyboardEvent) {
-    if (modal || helpTopic || event.nativeEvent.isComposing) return;
-    if ((event.target as HTMLElement).closest("dialog[open], .terminal-card")) return;
+    if (modal || helpTopic || event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if ((event.target as HTMLElement).closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
-    if (shortcuts.menu.includes(shortcut)) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!event.repeat) perform("menu");
-      return;
-    }
     const resize = shortcuts.expandTerminal.includes(shortcut) ? 1 : shortcuts.collapseTerminal.includes(shortcut) ? -1 : 0;
     if (resize && activeDocument === null) {
       event.preventDefault();
       event.stopPropagation();
       resizeTerminal(resize);
       return;
+    }
+    if (isTerminalInput(event.target)) {
+      // Only terminal layout shortcuts need to intercept keys before xterm processes them.
+      const toggle = shortcuts.toggleTerminal.includes(shortcut);
+      if (toggle || shortcuts.terminal.includes(shortcut)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) {
+          if (toggle) toggleTerminal();
+          else perform("terminal");
+        }
+      }
+      return;
+    }
+    if (shortcuts.menu.includes(shortcut)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) perform("menu");
     }
   }
 
@@ -722,8 +768,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     invalidateListing(side);
     delete failedFtp.current[side];
     const previous = connected.current[side];
-    if (previous && !documents.some(({ file }) => sameConnection(file.place, previous))) disconnect(previous);
-    connected.current[side] = place.kind === "ftp" || place.kind === "server" ? place : null;
+    if (previous && !sameConnection(previous, place) && !sameConnection(connected.current[opposite(side)], previous)) {
+      if (previous.kind === "ssh") dropTerminal("ssh:" + previous.id);
+      if (!documents.some(({ file }) => sameConnection(file.place, previous))) disconnect(previous);
+    }
+    connected.current[side] = place.kind === "server" || isFileServer(place) ? place : null;
     setActive(side);
     updatePane(side, (pane) => {
       const history = pane.history.slice(0, pane.position + 1).filter((location) => location.kind === "local");
@@ -738,7 +787,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const { place, entry: file } = item;
     if (file.directory) {
       void load(side, childPlace(place, file.name));
-    } else if ((place.kind === "ftp" || place.kind === "archive") && !file.link) {
+    } else if ((isFileServer(place) || place.kind === "archive") && !file.link) {
       openDocument({ place, name: file.name }, false);
     } else if (place.kind === "local") {
       if (!file.link && isArchiveName(file.name)) {
@@ -810,6 +859,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   async function openFolderShortcut(side: Side, entry: FolderShortcut) {
+    if (entry.remote) {
+      await openNetworkFolderShortcut(side, entry.remote, entry.path);
+      return;
+    }
     const state = latest.current[side];
     const savedPath = (path: string) => windowsClient ? path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase() : path;
     if (!state.search && !state.loading && !processPanels[side] && state.place) {
@@ -841,6 +894,55 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (processPanels[side]) showProcesses(side, false);
     else focus(side);
     await load(side, place, "push", "..");
+  }
+
+  async function openNetworkFolderShortcut(side: Side, remote: NonNullable<FolderShortcut["remote"]>, path: string) {
+    const segments = path.split("/").filter(Boolean);
+    const existing = connected.current[side];
+    const matches = (place: NetworkPlace | null) => place?.kind === remote.kind &&
+      (place.kind === "server" ? place.share : place.profileId) === remote.id;
+    if (processPanels[side]) showProcesses(side, false);
+    else focus(side);
+    if (existing && matches(existing)) {
+      await load(side, { ...existing, segments });
+      return;
+    }
+
+    const { ticket, signal } = beginListing(side);
+    updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: path, error: "", elevationPath: undefined }));
+    try {
+      let place: NetworkPlace;
+      let listing: Listing;
+      if (remote.kind === "ftp") {
+        ({ place, listing } = await connectFtpLocation(remote.id, segments));
+      } else if (remote.kind === "ssh") {
+        const result = await api.connectSsh(remote.id, undefined, segments);
+        if (result.kind === "verifyHost") throw new Error(t("Verify the host key in SSH connections before opening this shortcut."));
+        place = { kind: "ssh", id: result.id, profileId: remote.id, address: result.address, segments: result.segments };
+        listing = result.listing;
+      } else {
+        const shared = connected.current[opposite(side)];
+        if (shared?.kind !== "server" || !matches(shared)) {
+          throw new Error(t("Connect to the Dirlume server at {0} before opening this shortcut.", remote.name));
+        }
+        place = { ...shared, segments };
+        listing = await api.listServer(shared.id, segments);
+        if (!sameConnection(connected.current[opposite(side)], shared)) {
+          throw new Error(t("Connect to the Dirlume server at {0} before opening this shortcut.", remote.name));
+        }
+      }
+      if (signal.aborted || ticket !== request.current[side]) {
+        if (place.kind !== "server") disconnect(place);
+        return;
+      }
+      routeLocation(side, place, listing);
+    } catch (error) {
+      if (!signal.aborted && ticket === request.current[side]) {
+        updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined, error: describeError(error) }));
+      }
+    } finally {
+      if (ticket === request.current[side]) delete pendingListings.current[side];
+    }
   }
 
   function history(side: Side, offset: number) {
@@ -917,8 +1019,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   function openTransfer(kind: Transfer["kind"], source: Place, items: Transfer["items"], target: Place | null, chooseOperation = false) {
     if (!items.length) return;
-    if (target?.kind === "ftp" && source.kind !== "local") {
-      setStatus({ text: "Choose a local source for the FTP upload.", error: true });
+    const remoteDestination = isFileServer(target) ? target : undefined;
+    if (remoteDestination && source.kind !== "local") {
+      setStatus({ text: remoteDestination.kind === "ssh" ? "Choose a local source for the SSH upload." :
+        "Choose a local source for the FTP upload.", error: true });
       return;
     }
     if (source.kind !== "local" && items.some(({ entry }) => entry.link || (source.kind === "kswitcher" && entry.directory))) {
@@ -927,8 +1031,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     setModal({ kind: "transfer", transfer: {
       kind, source, items, chooseOperation,
-      target: target?.kind === "local" || target?.kind === "ftp" ? placePath(target) : "",
-      ftpDestination: target?.kind === "ftp" ? target.id : undefined,
+      target: target?.kind === "local" || isFileServer(target) ? placePath(target) : "",
+      remoteDestination,
     } });
   }
 
@@ -940,10 +1044,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     if (kind === "move" && (pane.search || (source.kind !== "local" && source.kind !== "ftp"))) return;
     if (kind === "move" && source.kind === "ftp") {
-      setModal({ kind: "rename", path: placePath(source), name: current.name, ftp: source });
+      setModal({ kind: "rename", path: placePath(source), name: current.name, remote: source });
       return;
     }
-    openTransfer(kind, source, transferItems(active, current), other.search || (kind === "move" && otherFtp) ? null : other.place);
+    openTransfer(kind, source, transferItems(active, current), other.search || (kind === "move" && otherFileServer) ? null : other.place);
   }
 
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
@@ -961,7 +1065,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((side !== "left" && side !== "right") || side === source || modal || helpTopic || activeDocument !== null) return null;
     const pane = panes[side];
     return !pane.search && !pane.loading && !processPanels[side] &&
-      (pane.place?.kind === "local" || (local && pane.place?.kind === "ftp")) ? side : null;
+      (pane.place?.kind === "local" || (local && isFileServer(pane.place))) ? side : null;
   }
 
   function moveDrag(event: PointerEvent<HTMLDivElement>) {
@@ -1095,15 +1199,30 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
   }
 
-  function openTerminal() {
-    if (terminal) return true;
-    if (!local) {
-      setStatus({ text: "Choose a local folder to open a terminal.", error: true });
-      return false;
+  function openTerminal(moveFocus = true, place = terminalPlace) {
+    if (!place) {
+      setStatus({ text: "Choose a local or SSH folder to open a terminal.", error: true });
+      return;
     }
-    setTerminal({ id: ++nextSession.current, path: local.path, refreshEnvironment: preferences.refreshEnvironment });
-    return true;
+    const key = place.kind === "ssh" ? "ssh:" + place.id : "local";
+    const existing = terminals[key];
+    if (existing) {
+      if (moveFocus) terminalFocus.current = existing.id;
+      return existing;
+    }
+    const common = { id: ++nextSession.current, path: placePath(place), refreshEnvironment: preferences.refreshEnvironment };
+    const session: TerminalSession = place.kind === "ssh"
+      ? { ...common, kind: "ssh", connection: place.id, address: place.address, segments: place.segments }
+      : { ...common, kind: "local" };
+    if (moveFocus) terminalFocus.current = session.id;
+    setTerminals((current) => ({ ...current, [key]: session }));
+    return session;
   }
+
+  const followTerminal = useEffectEvent(() => { openTerminal(false); });
+  useEffect(() => {
+    if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
+  }, [terminalVisible, terminalKey, terminal, activeDocument]);
 
   function showCommandLine(moveFocus = true) {
     setTerminalShare(0);
@@ -1111,10 +1230,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (moveFocus) requestAnimationFrame(() => commandInput.current?.focus());
   }
 
-  function closeTerminal() {
-    setTerminal(null);
-    setPendingCommands([]);
-    showCommandLine();
+  function dropTerminal(key: string) {
+    const session = terminals[key];
+    if (!session) return;
+    setTerminals(({ [key]: _closed, ...remaining }) => remaining);
+    setPendingCommands(({ [session.id]: _closed, ...remaining }) => remaining);
   }
 
   function toggleTerminal() {
@@ -1123,7 +1243,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function terminalBounds() {
-    const card = document.querySelector<HTMLElement>(".terminal-card");
+    const card = document.querySelector<HTMLElement>(".terminal-card:not([hidden])");
     const surface = card?.querySelector<HTMLElement>(".terminal-surface");
     const workspace = document.querySelector(".workspace");
     if (!card || !surface || !workspace) return;
@@ -1176,23 +1296,26 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (!commandLine.trim()) {
-      if (panelsHidden && terminal) setPendingCommands((commands) => [...commands, null]);
+      if (panelsHidden && terminal) setPendingCommands((commands) => ({ ...commands, [terminal.id]: [...(commands[terminal.id] ?? []), null] }));
       else if (currentRow) open(active, currentRow);
       return;
     }
-    if (!local || !openTerminal()) return;
+    const session = openTerminal();
+    if (!session || !terminalPlace) return;
     setTerminalShare(terminalHeight);
-    setPendingCommands((commands) => [...commands, { command: commandLine, directory: local.path }]);
+    setPendingCommands((commands) => ({
+      ...commands, [session.id]: [...(commands[session.id] ?? []), { command: commandLine, directory: placePath(terminalPlace) }],
+    }));
     recordCommand(commandLine);
     setCommandLine("");
   }
 
-  function insertCommand(value: string) {
+  function insertCommand(value: string, windows = windowsClient) {
     const input = commandInput.current;
     if (!input) return;
     const start = input.selectionStart ?? commandLine.length;
     const end = input.selectionEnd ?? start;
-    const quoted = /^[\p{Letter}\p{Number}_.:/\\-]+$/u.test(value) ? value : shellArgument(value);
+    const quoted = /^[\p{Letter}\p{Number}_.:/\\-]+$/u.test(value) ? value : shellArgument(value, windows);
     setCommandLine(commandLine.slice(0, start) + quoted + commandLine.slice(end));
     showCommandLine(false);
     requestAnimationFrame(() => {
@@ -1211,6 +1334,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return item && item.place.kind !== "kswitcher" && !item.entry.directory && !item.entry.link
       ? { place: item.place, name: item.entry.name } : null;
   }
+
+  const comparisonMarked = pane.marked.length < 2 ? [] : entries[active]
+    .filter(({ name }) => pane.marked.includes(name))
+    .map((entry) => fileFor(active, entry))
+    .filter((file): file is NamedFile => file !== null);
+  const comparisonLeft = comparisonMarked.length === 2 ? comparisonMarked[0] : fileFor("left");
+  const comparisonRight = comparisonMarked.length === 2 ? comparisonMarked[1] : fileFor("right");
+  const comparison = comparisonLeft && comparisonRight ? { left: comparisonLeft, right: comparisonRight } : null;
 
   const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && pane.marked.includes(entry.name));
   const canMeasure = Boolean(local || ftp) && !pane.search;
@@ -1348,13 +1479,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           else showCommandLine();
         } else if (openTerminal()) {
           setPanelsHidden(true);
-          requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".terminal-surface .xterm-helper-textarea")?.focus());
+          requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".terminal-card:not([hidden]) .xterm-helper-textarea")?.focus());
         }
         break;
       case "commandPath":
       case "commandName":
-        if (currentItem?.place.kind === "local") insertCommand(command === "commandPath"
-          ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name);
+        if (currentItem && (currentItem.place.kind === "local" || currentItem.place.kind === "ssh")) {
+          insertCommand(command === "commandPath"
+            ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name,
+          currentItem.place.kind === "local" && windowsClient);
+        }
         break;
       case "copyFullPath":
         if (currentFullPath !== null) copyPath(currentFullPath);
@@ -1411,14 +1545,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       }
       case "delete":
       case "recycle": {
-        const writable = local ?? ftp ?? (archive?.writable ? archive : undefined);
+        const writable = local ?? fileServer ?? (archive?.writable ? archive : undefined);
         if (writable && !pane.search && current && !busy && !pane.loading) {
           const marked = entries[active].filter(({ name }) => pane.marked.includes(name));
           const selected = marked.length ? marked : [current];
           setModal({
-            kind: ftp || archive ? "delete" : command, path: placePath(writable), ftp, archive,
+            kind: permanentDelete || archive ? "delete" : command, path: placePath(writable), remote: fileServer, archive,
             names: selected.map(({ name }) => name),
-            directories: ftp ? selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name) : undefined,
+            directories: fileServer ? selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name) : undefined,
           });
         }
         break;
@@ -1438,19 +1572,12 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         break;
       }
       case "compare": {
-        const marked = entries[active].filter((entry) => pane.marked.includes(entry.name)).flatMap((entry) => {
-          const file = fileFor(active, entry);
-          return file ? [file] : [];
-        });
-        const left = marked.length === 2 ? marked[0] : fileFor("left");
-        const right = marked.length === 2 ? marked[1] : fileFor("right");
-        if (left && right) {
-          if (isTauri()) {
-            void api.openToolWindow(t("Compare files"), undefined, { left, right })
-              .catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
-          } else setModal({ kind: "compare", left, right });
-        }
-        else setStatus({ text: "Choose a text file in each pane to compare.", error: true });
+        if (!comparison) {
+          setStatus({ text: "Choose a text file in each pane to compare.", error: true });
+        } else if (isTauri()) {
+          void api.openToolWindow(t("Compare files"), undefined, comparison)
+            .catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
+        } else setModal({ kind: "compare", ...comparison });
         break;
       }
     }
@@ -1473,7 +1600,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if ((event.target as HTMLElement).closest(".inline-rename")) return;
     if (modal || helpTopic || event.defaultPrevented || native.isComposing) return;
     const target = event.target as HTMLElement;
-    if (target.closest("dialog[open], .terminal-card")) return;
+    if (target.closest("dialog[open]") || isTerminalInput(target)) return;
     if (target === commandInput.current && event.ctrlKey && !event.altKey && !event.metaKey &&
         (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
     const shortcut = eventShortcut(event);
@@ -1481,15 +1608,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     // Use the physical letter for these defaults when the keyboard layout changes.
     const physical = /^Key[A-Z]$/.test(event.code) && !event.getModifierState("AltGraph")
       ? eventShortcut(event, event.code.slice(3)) : "";
-    const command = commandNames.find((command) => shortcut && commandScope(command) === "main" &&
-      shortcuts[command].includes(shortcut)) ?? (["settings", "hidden", "attributes", "copyFullPath"] as const).find((command) =>
+    const command = commandNames.find((command) => shortcut && command !== "settings" && commandScope(command) === "main" &&
+      shortcuts[command].includes(shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
       commands[command].key === physical && shortcuts[command].includes(physical)) ??
       physicalFolderBinding(native, shortcuts);
-    if (command === "settings") {
-      event.preventDefault();
-      if (!event.repeat) perform(command);
-      return;
-    }
     if (activeDocument !== null) return;
     const inCommandLine = target === commandInput.current;
     const onFiles = target.closest(".file-list");
@@ -1503,7 +1625,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       document.getElementById(active + "-pane")?.dispatchEvent(new CustomEvent("dirlume-quick-search", { detail: seed }));
       return;
     }
-    if (inField && (event.key === "Delete" || command === "copyClipboard" || command === "pasteClipboard")) return;
+    if (inField && (event.key === "Backspace" || event.key === "Delete" || command === "copyClipboard" || command === "pasteClipboard")) return;
     if (command === "copyFullPath" && (!onFiles || inField || currentFullPath === null)) return;
     if (command === "attributes" && (!onFiles || inField || panelsHidden || processPanels[active])) return;
     if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
@@ -1528,13 +1650,13 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
     { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !writableTextPlace(currentFile.place) },
-    { command: "copy", label: local || ftp || archive ? "Copy" : "Download", Icon: local || ftp || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
+    { command: "copy", label: local || fileServer || archive ? "Copy" : "Download", Icon: local || fileServer || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp) || !!pane.search || !current || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
-    { command: "recycle", label: ftp || archive ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !ftp && !archive?.writable) || !!pane.search || !current || busy },
-    { command: "compare", label: "Compare", Icon: FileDiff, disabled: !pane.place || pane.place.kind === "kswitcher" },
+    { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !fileServer && !archive?.writable) || !!pane.search || !current || busy },
+    { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const panesAvailable = !panelsHidden && activeDocument === null;
@@ -1580,10 +1702,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       ...(windowsClient ? [menuCommand("lockingProcesses", !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
-      ...(ftp || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
+      ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
     ] },
     { label: "Commands", items: [
       menuCommand("search", !filesAvailable || !pane.place),
+      menuCommand("compare", !filesAvailable || comparison === null),
       menuCommand("copyFullPath", currentFullPath === null),
       menuCommand("connect", activeDocument !== null, "Connect"),
       menuCommand("swap", !panesAvailable || !canSwapPanes),
@@ -1602,7 +1725,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   return (
     <div className={`app${terminalVisible ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
-      onKeyDown={(event) => keyDown(event)} onKeyDownCapture={documentKeys}
+      onKeyDown={keyDown} onKeyDownCapture={documentKeys}
       onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"}
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
@@ -1653,9 +1776,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
               showProcesses(side, false);
-              if (place?.kind === "ftp") {
+              if (isFileServer(place)) {
                 if (!path.startsWith("/")) {
-                  setStatus({ text: "Enter an absolute FTP path starting with /.", error: true });
+                  setStatus({ text: place.kind === "ssh" ? "Enter an absolute SSH path starting with /." :
+                    "Enter an absolute FTP path starting with /.", error: true });
                   return;
                 }
                 void load(side, { ...place, segments: path.split("/").filter(Boolean) });
@@ -1664,6 +1788,13 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             onPathAncestor={(place) => { showProcesses(side, false); void load(side, place); }}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
+            onDismissError={() => {
+              updatePane(side, (pane) => ({ ...pane, error: "", elevationPath: undefined, deniedSshListing: undefined }));
+              requestAnimationFrame(() => focus(side));
+            }} onRetryWithSudo={() => {
+              const target = panes[side].deniedSshListing;
+              if (target) setModal({ kind: "sudoBrowse", side, target });
+            }}
             onCancelFolderOperation={() => {
               if (cancelFolderOperation(side)) requestAnimationFrame(() => focus(side));
             }} cancelFolderShortcut={shortcuts.cancelMeasure}
@@ -1677,6 +1808,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter, keyboardRange: undefined }))} onSort={(column) => sort(side, column)}
             onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
+            onSsh={() => setModal({ kind: "ssh", side })}
             onSmb={() => setModal({ kind: "smb", side })}
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
@@ -1724,26 +1856,36 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               if (dirty) dirtyDocuments.current.add(id);
               else dirtyDocuments.current.delete(id);
             }}
-            onSaved={() => { refresh("left"); refresh("right"); }} onClose={() => closeDocument(id)} />
+            onSaved={() => {
+              for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
+            }} onClose={() => closeDocument(id)} />
         ))}
       </div>
-      {terminal && (
-        <Suspense fallback={terminalVisible ? <div className="terminal-card pane-empty" role="status">{t("Opening terminal…")}</div> : null}>
-          <TerminalPanel key={terminal.id} session={terminal} directory={processPanels[active] ? null : local?.path ?? null}
-            visible={terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
-            rowHeight={terminalRowHeight}
-            watchEnvironment={preferences.refreshEnvironment}
-            pendingCommands={pendingCommands} onCommandsQueued={(count) => setPendingCommands((commands) => commands.slice(count))}
-            onCommandSubmitted={recordCommand} onClose={closeTerminal} />
-        </Suspense>
-      )}
+      <Suspense fallback={terminalVisible && activeDocument === null ?
+        <div className="terminal-card pane-empty" role="status">{t("Opening terminal…")}</div> : null}>
+        {Object.entries(terminals).map(([key, session]) => (
+          <TerminalPanel key={session.id} session={session}
+            directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
+            visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
+            rowHeight={terminalRowHeight} focusRequested={terminalFocus}
+            watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
+            pendingCommands={pendingCommands[session.id] ?? noCommands}
+            onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
+              [session.id]: (commands[session.id] ?? []).slice(count),
+            }))}
+            onCommandSubmitted={recordCommand} onClose={() => { dropTerminal(key); showCommandLine(); }} />
+        ))}
+      </Suspense>
+      {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
+        {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
+      </div>}
       <form className="command-bar" hidden={terminalVisible} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>
         <span data-tooltip={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] ? null : local?.path ?? null}
-          history={commandTexts} refreshEnvironment={terminal?.refreshEnvironment ?? preferences.refreshEnvironment}
+          history={commandTexts} refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
       <nav ref={actionbar} className="actionbar" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
@@ -1852,7 +1994,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             requestAnimationFrame(() => focus(side));
           }} />
       )}
-      {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} />}
+      {modal?.kind === "about" && <AboutDialog onClose={() => setModal(null)} onOpenGuide={() => {
+        setModal(null);
+        setHelpTopic("files");
+      }} />}
+      {modal?.kind === "sudoBrowse" && <SudoDialog operation="browse" address={modal.target.place.address}
+        path={placePath(modal.target.place)} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
+        onConfirm={async (password) => {
+          const { place, action, reveal } = modal.target;
+          await load(modal.side, place, action, reveal, password);
+        }} />}
       {modal?.kind === "mcp" && <McpDialog onClose={() => setModal(null)} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); showCommandLine(); }} />}
@@ -1866,7 +2017,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               openTransfer("copy", item.place, transferItems(side, entry!, state.marked.includes(entry!.name)),
-                target.search || (item.place.kind !== "local" && target.place?.kind === "ftp") ? null : target.place);
+                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null : target.place);
             }}>{t("Copy")}</Button>
             {item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
@@ -1922,6 +2073,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             requestAnimationFrame(() => focus(modal.side));
           }} />
       )}
+      {modal?.kind === "ssh" && (
+        <SshDialog shortcuts={shortcuts} onClose={() => {
+          setModal(null);
+          requestAnimationFrame(() => focus(modal.side));
+        }} onConnect={(place, listing) => {
+          routeLocation(modal.side, place, listing);
+          setModal(null);
+          requestAnimationFrame(() => focus(modal.side));
+        }} />
+      )}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} onClose={() => setModal(null)} />}
       {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
@@ -1936,16 +2097,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         onOpen={async (password) => { await openArchive(modal.side, modal.path, password); setModal(null); }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
-          hasNonemptyFolders={modal.ftp && "names" in modal ? async () => {
-            const ftp = modal.ftp!;
+          hasNonemptyFolders={modal.remote && "names" in modal ? async () => {
+            const remote = modal.remote!;
+            const list = remote.kind === "ssh" ? api.listSsh : api.listFtp;
             for (const name of modal.directories ?? []) {
-              const listing = await api.listFtp(ftp.id, [...ftp.segments, name]);
+              const listing = await list(remote.id, [...remote.segments, name]);
               if (listing.entries.length || listing.omitted) return true;
             }
             return false;
           } : undefined}
           onSubmit={async (operation, recursive) => {
-          const ftp = modal.ftp;
+          const remote = modal.remote;
           if ("names" in modal && modal.archive) {
             const archive = modal.archive;
             await api.deleteArchiveEntries(archive.id, modal.names.map((name) => [...archive.segments, name]));
@@ -1953,15 +2115,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
             refresh("right");
           } else if ("names" in modal) {
             try {
-              await batch(modal.names, (name) => ftp
-                ? api.deleteFtp(ftp.id, [...ftp.segments, name], recursive && (modal.directories?.includes(name) ?? false))
+              const remove = remote?.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
+              await batch(modal.names, (name) => remote
+                ? remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false))
                 : api.operate(modal.path, { kind: modal.kind, name }));
             } finally {
               refresh("left");
               refresh("right");
             }
           } else if (operation) {
-            if (operation.kind === "rename") await renameItem(ftp ?? localPath(modal.path), operation.name, operation.new_name);
+            if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);
             refresh("left");
             refresh("right");
@@ -2049,7 +2212,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   return (
     <>
-    <Dialog key={String(recursive)} title={recursive ? t("Delete FTP folder contents") : title} tone={permanent ? "destructive" : undefined}
+    <Dialog key={String(recursive)} title={recursive ? t(modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "destructive" : undefined}
       onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
@@ -2057,7 +2220,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ? <div className={permanent ? "permanent-delete-message" : "trash-confirmation"}>
               {permanent ? <Trash2 aria-hidden="true" /> : <CircleHelp aria-hidden="true" />}
               <div>
-                <p>{recursive ? t("Permanently delete the selected FTP folders and all their contents?") :
+                <p>{recursive ? t(modal.remote?.kind === "ssh" ? "Permanently delete the selected SSH folders and all their contents?" :
+                  "Permanently delete the selected FTP folders and all their contents?") :
                   <Message text={permanent ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
                     <strong>{modal.names.length === 1 ? modal.names[0] : countText(modal.names.length, "item")}</strong>
                   </Message>}</p>
@@ -2075,10 +2239,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             </select>
           </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          {!modal.ftp && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
+          {!modal.remote && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
         </div>
         <div className="dialog-footer">
-          {!modal.ftp && windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
+          {!modal.remote && windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button>}
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
@@ -2141,8 +2305,8 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
           onClose();
         }
       } else {
-        const { id, address, listing } = await api.connect(value);
-        onConnect({ kind: "server", id, address, segments: [] }, listing);
+        const { id, address, share, listing } = await api.connect(value);
+        onConnect({ kind: "server", id, address, share, segments: [] }, listing);
       }
     } catch (error) {
       setError(describeError(error));

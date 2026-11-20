@@ -32,8 +32,12 @@ mod mcp;
 #[cfg(feature = "desktop")]
 mod processes;
 mod protocol;
+#[cfg(feature = "desktop")]
+mod remote_transfer;
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "desktop")]
+mod ssh;
 #[cfg(feature = "desktop")]
 mod terminal;
 #[cfg(feature = "desktop")]

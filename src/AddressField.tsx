@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Copy, Pencil } from "lucide-react";
-import { folderLabel, placePath, smbHost, windowsClient, type Place } from "./api";
+import { folderLabel, isFileServer, placePath, smbHost, windowsClient, type Place } from "./api";
 import { Button } from "./Button";
 import { t } from "./i18n";
 import { parentPlace, type Side } from "./panes";
@@ -48,8 +48,8 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   focusFiles: () => void;
 }) {
   const path = place ? placePath(place) : "";
-  const ftp = place?.kind === "ftp" ? place.id : undefined;
-  const editable = !place || place.kind === "local" || place.kind === "ftp";
+  const server = isFileServer(place) ? place : undefined;
+  const editable = !place || place.kind === "local" || !!server;
   const location = place ? placeKey(place) : "";
   const addressKey = JSON.stringify([side, location]);
   const root = useRef<HTMLDivElement>(null);
@@ -127,7 +127,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   }}>
     {editing ? <PathField id={side + "-address"} label={label}
       suggestionLabel={t(side === "left" ? "left path suggestions" : "right path suggestions")}
-      value={draft} showHidden={showHidden} ftp={ftp} browse="folder" selectOnFocus
+      value={draft} showHidden={showHidden} server={server} browse="folder" selectOnFocus
       onChange={setDraft} onCommit={(value) => {
         setEditing(false);
         if (value !== path) onNavigate(value);
