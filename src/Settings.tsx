@@ -86,7 +86,6 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     const terms = feature === "filePanels" ? [
       "Show hidden files", "Panel layout", "Action button width",
       ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
-      ...Object.values(colorGroups.files.colors),
     ] :
       feature === "viewer" ? ["Reading area", "Max width (px)", "Maximum content width (px)", "Full width", "Mermaid diagrams",
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
@@ -137,8 +136,19 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   saveLocationRef.current = saveLocation;
   useEffect(() => {
     if (!standalone) return;
-    const listener = getCurrentWindow().onCloseRequested(() => saveLocationRef.current());
-    return () => { void listener.then((unlisten) => unlisten()).catch(() => {}); };
+    const window = getCurrentWindow();
+    const listeners = [
+      window.onCloseRequested(() => saveLocationRef.current()),
+      window.listen<string>("dirlume:options-page", ({ payload }) => {
+        if (!isFeaturePage(payload)) return;
+        setPage(payload);
+        setQuery("");
+        setCapture(null);
+        setConflict(null);
+        if (pageBody.current) pageBody.current.scrollTop = 0;
+      }),
+    ];
+    return () => { listeners.forEach((listener) => { void listener.then((unlisten) => unlisten()).catch(() => {}); }); };
   }, [standalone]);
 
   function close() {

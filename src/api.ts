@@ -228,8 +228,9 @@ export const api = {
   buildVersion: () => invoke<string>("build_version"),
   errorLog: () => invoke<string | null>("error_log"),
   checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
-  openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile }) =>
-    invoke<void>("open_tool_window", { title, ...size, comparison }),
+  openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },
+    initialPage?: import("./featureOptions").FeaturePage) =>
+    invoke<void>("open_tool_window", { title, ...size, comparison, initialPage }),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),

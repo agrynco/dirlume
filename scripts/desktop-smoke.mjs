@@ -1211,6 +1211,11 @@ try {
   assert.ok(await diagram.evaluate((image) => image.complete && image.naturalWidth > 0));
   const markdownSurface = ".text-window:not([hidden]) .markdown";
   assert.equal(await fontSize(markdownSurface), linkedMarkdownFont, "Unrelated Markdown files should open with the same saved preview size.");
+  await showOptions(() => page.getByRole("button", { name: "Viewer options", exact: true }).click());
+  await optionsDialog.getByRole("heading", { name: "Viewer", exact: true }).waitFor();
+  await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("open_tool_window", { title: "Options", initialPage: "editor" }));
+  await optionsDialog.getByRole("heading", { name: "Editor", exact: true }).waitFor();
+  await closeToolWindow(optionsPage);
   await showOptions(() => page.keyboard.press("Control+Alt+S"));
   await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).click();
   const textFontFamily = optionsDialog.getByLabel("Editor, viewer, and terminal font family");

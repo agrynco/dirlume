@@ -15,6 +15,8 @@ async (upgraded, reject) => {
       await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
       await waitFor(() => document.querySelector('.topbar[data-menu-position="right"]') &&
         JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").mainMenuAlignment === "right");
+      document.querySelector('.topbar button[aria-label="Options"]').click();
+      await window.__TAURI_INTERNALS__.invoke("updater_fixture_options_window");
       const updates = await waitFor(() => {
         const commands = [...document.querySelectorAll(".main-menu [data-menu-group]")].find((button) => button.textContent === "Commands");
         if (commands?.getAttribute("aria-expanded") === "false") commands.click();
