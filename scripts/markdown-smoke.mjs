@@ -103,7 +103,7 @@ export async function testMarkdown(page, source, wheelFont) {
 
   const external = updated + "\r\nExternal changes.\r\n";
   await writeFile(catalogue, external);
-  await catalogueViewer.getByText("External changes.", { exact: true }).waitFor();
+  await catalogueViewer.locator(".markdown").getByText("External changes.", { exact: true }).waitFor();
   await task("Main task", true).waitFor();
   assert.equal(await readFile(catalogue, "utf8"), external);
   await catalogueViewer.getByRole("button", { name: "Close document", exact: true }).click();
