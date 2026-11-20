@@ -6,7 +6,9 @@ import { join } from "node:path";
 export async function testFilenameRendering(page, root) {
   const folder = join(root, "filename-rendering-fixture");
   await mkdir(folder);
-  const sample = "Invoice №123 (Example OÜ,Name) (1).pdf";
+  const baseName = "Invoice №123 (Example OÜ,Name) (1)";
+  const extension = "pdf";
+  const sample = `${baseName}.${extension}`;
   const forms = [sample, sample.normalize("NFD")];
   for (const name of forms) await writeFile(join(folder, name), "");
   assert.deepEqual(new Set(await readdir(folder)), new Set(forms));
@@ -22,7 +24,7 @@ export async function testFilenameRendering(page, root) {
     range.selectNodeContents(field);
     const { fontFamily, fontSize, textOverflow, direction } = getComputedStyle(field);
     return {
-      content: field.textContent,
+      parts: Array.from(field.children, (part) => part.textContent),
       width: range.getBoundingClientRect().width,
       visibleWidth: field.clientWidth,
       overflowing: [field, ...field.children].some((part) => part.scrollWidth > part.clientWidth),
@@ -45,7 +47,7 @@ export async function testFilenameRendering(page, root) {
       assert.equal(value.fontSize, "15px");
       assert.match(value.fontFamily, /GoMono Nerd Font Mono/);
       assert.equal(value.selected, value.expected);
-      assert.equal(value.content, sample);
+      assert.deepEqual(value.parts, [baseName, extension]);
       assert.equal(value.textOverflow, "ellipsis");
       assert.equal(value.direction, "ltr");
       assert.equal(value.overflowing, false, `The ${value.width}px filename should fit in ${value.visibleWidth}px.`);

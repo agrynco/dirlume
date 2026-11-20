@@ -17,6 +17,7 @@ import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
+import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
@@ -47,6 +48,7 @@ const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 if (process.env.CI) {
   await testSmbNavigation();
   await testFolderMeasurement();
+  await testFolderNavigationHeader();
   await testSyntaxMenu();
   await testTerminalPaste();
   await testAppearancePicker();
@@ -373,6 +375,9 @@ try {
   const parentRow = '[role="option"][data-tooltip=".."]';
   const emptyFolder = join(temp, "empty");
   await mkdir(emptyFolder);
+  const populatedFolder = join(temp, "enter-navigation");
+  await mkdir(populatedFolder);
+  await writeFile(join(populatedFolder, "first.txt"), "Enter navigation fixture");
   for (const [side, list] of [["left", leftList], ["right", rightList]]) {
     const pane = page.getByRole("region", { name: `${side} pane`, exact: true });
     const otherSide = side === "left" ? "right" : "left";
@@ -401,6 +406,14 @@ try {
     await list.press("Enter");
     await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
     await list.locator('[data-current="true"][data-tooltip="empty"]').waitFor();
+    const populatedRow = list.locator('[role="option"][data-tooltip="enter-navigation"]');
+    await populatedRow.click();
+    await list.press("Enter");
+    await list.locator('[role="option"][data-tooltip="first.txt"]').waitFor();
+    await list.locator(`${parentRow}[data-current="true"]`).waitFor();
+    assert.equal(await list.evaluate((element) => document.activeElement === element), true);
+    await list.press("Enter");
+    await populatedRow.and(list.locator('[data-current="true"]')).waitFor();
     assert.equal(await panePath(otherSide), otherPath);
     await navigate(side, parse(temp).root);
     assert.equal(await list.locator(parentRow).count(), 0);

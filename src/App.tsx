@@ -867,7 +867,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     });
   }
 
-  function open(side: Side, entry: Entry) {
+  function open(side: Side, entry: Entry, selectParent = false) {
     if (entry.name === "..") { parent(side); return; }
     const pane = panes[side];
     if (pane.loading) return;
@@ -883,7 +883,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!item) return;
     const { place, entry: file } = item;
     if (file.directory) {
-      void load(side, childPlace(place, file.name));
+      void load(side, childPlace(place, file.name), "push", selectParent && place.kind === "local" ? ".." : undefined);
     } else if ((isFileServer(place) || place.kind === "archive") && !file.link) {
       openDocument({ place, name: file.name }, false);
     } else if (place.kind === "local") {
@@ -1752,7 +1752,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         document.getElementById(`${active}-path`)?.dispatchEvent(new Event("dirlume-edit-path"));
         break;
       }
-      case "open": if (currentRow) open(active, currentRow); break;
+      case "open": if (currentRow) open(active, currentRow, true); break;
       case "attributes":
         if (currentItem && !pane.loading && !busy) setModal({ kind: "attributes", item: currentItem });
         break;

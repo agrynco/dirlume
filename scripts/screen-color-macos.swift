@@ -5,12 +5,23 @@ switch CommandLine.arguments.dropFirst().first {
 case "preflight":
     exit(CGPreflightPostEventAccess() ? 0 : 78)
 case "escape":
-    CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
-    CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
+    guard let source = CGEventSource(stateID: .combinedSessionState),
+          let down = CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: true),
+          let up = CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: false) else { exit(1) }
+    down.post(tap: .cgSessionEventTap)
+    Thread.sleep(forTimeInterval: 0.08)
+    up.post(tap: .cgSessionEventTap)
 case "click":
     let point = CGPoint(x: 85, y: 105)
-    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-    CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+    guard let source = CGEventSource(stateID: .combinedSessionState),
+          let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
+          let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { exit(1) }
+    move.post(tap: .cgSessionEventTap)
+    Thread.sleep(forTimeInterval: 0.08)
+    down.post(tap: .cgSessionEventTap)
+    Thread.sleep(forTimeInterval: 0.08)
+    up.post(tap: .cgSessionEventTap)
 default:
     guard let screen = NSScreen.screens.first else { exit(1) }
     let app = NSApplication.shared

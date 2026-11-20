@@ -119,8 +119,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     address.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise(requestAnimationFrame);
     key(address, "Enter");
-    const row = await waitFor("the document mode fixture", () => [...pane.querySelectorAll(".file-row")]
-      .find((row) => row.querySelector(".file-name-text")?.textContent === fileName));
+    const row = await waitFor("the document mode fixture", () => pane.querySelector(`[role="option"][data-tooltip="${fileName}"]`));
     row.click();
     await waitFor("the selected document mode fixture", () => row.dataset.current === "true" && document.activeElement === pane);
     key(pane, "F3");
