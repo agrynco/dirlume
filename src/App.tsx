@@ -17,7 +17,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
-import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
+import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
@@ -39,17 +39,19 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
+import { AppearancePicker } from "./AppearancePicker";
+import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
 import { applyAppearance, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownLocation, MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, markAndMoveCursor, opposite, paneCursorIndex, paneItem, parentPlace,
-  readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, visibleEntries,
+  applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
+import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
@@ -134,6 +136,12 @@ function sameConnection(left: Place | null, right: Place) {
   return (left?.kind === "server" || isFileServer(left) || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
 }
 
+function sameDocumentFile(left: NamedFile, right: NamedFile) {
+  return left.name === right.name && left.place.kind === right.place.kind &&
+    placePath(left.place) === placePath(right.place) &&
+    (right.place.kind === "local" || sameConnection(left.place, right.place));
+}
+
 function disconnect(place: NetworkPlace) {
   const close = place.kind === "ssh" ? api.disconnectSsh : place.kind === "ftp" ? api.disconnectFtp : api.disconnect;
   void close(place.id).catch(() => {});
@@ -160,6 +168,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
+  const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
   const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
@@ -175,6 +184,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [terminalInputFocused, setTerminalInputFocused] = useState(false);
   const [terminalShare, setTerminalShare] = useState(0);
   const [terminalHeight, setTerminalHeight] = useState(() => {
     const height = startup?.terminalHeight;
@@ -200,7 +210,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const request = useRef({ left: 0, right: 0 });
   const pendingListings = useRef<Partial<Record<Side, AbortController>>>({});
   const nextSession = useRef(0);
-  const watchId = useRef(0);
   const measureId = useRef(0);
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
   const drag = useRef<{ side: Side; source: Transfer["source"]; items: Transfer["items"]; pointer: number; x: number; y: number; moving: boolean } | null>(null);
@@ -227,6 +236,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const terminalPlace = pane.place?.kind === "ssh" ? pane.place : local;
   const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
   const terminal = terminalKey ? terminals[terminalKey] : undefined;
+  const terminalFocusHint = terminalInputFocused && terminalVisible && terminal && activeDocument === null
+    ? t(panelsHidden ? "File shortcuts paused. Use the Terminal button to return to files."
+      : "File shortcuts paused. Click a file pane to use them.")
+    : "";
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
@@ -485,27 +498,23 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const locations = [["left", leftPath], ["right", rightPath]] as const;
     const stopWatching = locations.map(([side, path]) => {
       if (!path) return () => {};
-      const id = ++watchId.current;
       let stopped = false;
       let timer: number | undefined;
-      const changes = new Channel<null>();
       const refreshWatchedFolder = () => {
         const current = latest.current[side];
         if (stopped || current.place?.kind !== "local" || current.place.path !== path) return;
         if (pendingListings.current[side]) timer = window.setTimeout(refreshWatchedFolder, 150);
         else void load(side, current.place, "background");
       };
-      changes.onmessage = () => {
+      const watch = watchDirectory(path, () => {
         window.clearTimeout(timer);
         timer = window.setTimeout(refreshWatchedFolder, 150);
-      };
-      const started = api.watchDirectory(id, path, changes);
-      void started.catch(() => {});
+      });
+      void watch.ready.catch(() => {});
       return () => {
         stopped = true;
-        changes.onmessage = () => {};
         window.clearTimeout(timer);
-        void started.then(() => api.unwatchDirectory(id)).catch(() => {});
+        watch.stop();
       };
     });
     return () => stopWatching.forEach((stop) => stop());
@@ -726,10 +735,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, []);
 
   function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition) {
-    const existing = documents.find((item) =>
-      item.editing === editing && item.file.name === file.name &&
-      item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
-      (file.place.kind === "local" || sameConnection(item.file.place, file.place)));
+    const existing = documents.find((item) => item.editing === editing && sameDocumentFile(item.file, file));
     const id = existing?.id ?? ++nextDocument.current;
     if (!existing) {
       setDocuments((current) => [...current, { id, file, editing, position }]);
@@ -1416,8 +1422,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   useEffect(() => {
     if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
   }, [terminalVisible, terminalKey, terminal, activeDocument]);
+  useEffect(() => {
+    const syncFocus = () => setTerminalInputFocused(document.hasFocus() && isTerminalInput(document.activeElement));
+    window.addEventListener("focus", syncFocus);
+    window.addEventListener("blur", syncFocus);
+    return () => {
+      window.removeEventListener("focus", syncFocus);
+      window.removeEventListener("blur", syncFocus);
+    };
+  }, []);
 
   function showCommandLine(moveFocus = true) {
+    setTerminalInputFocused(false);
     setTerminalShare(0);
     setPanelsHidden(false);
     if (moveFocus) requestAnimationFrame(() => commandInput.current?.focus());
@@ -1637,7 +1653,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       updatePane(active, (pane) => {
         const index = paneCursorIndex(pane, items);
         const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
-        return isRangeCommand(command) ? markAndMoveCursor(pane, items, index, next) : { ...pane, selected: items[next].name };
+        return isRangeCommand(command) ? toggleMarkAndMoveCursor(pane, items, index, next) : { ...pane, selected: items[next].name };
       });
       return;
     }
@@ -1954,6 +1970,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     <div className={`app${terminalVisible ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
+      onFocusCapture={(event) => setTerminalInputFocused(isTerminalInput(event.target))}
+      onBlurCapture={(event) => {
+        if (isTerminalInput(event.target) && !isTerminalInput(event.relatedTarget)) setTerminalInputFocused(false);
+      }}
       onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"}
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
@@ -2013,6 +2033,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                 }
                 void load(side, { ...place, segments: path.split("/").filter(Boolean) });
               } else void load(side, filesystemPlace(path));
+            }}
+            onLocalLocation={(location) => {
+              const other = panes[opposite(side)].place;
+              const otherDrive = other?.kind === "local" && /^([a-z]:)(?:[\\/]|$)/i.exec(other.path)?.[1]?.toUpperCase();
+              const path = driveSourceCommand(location) && other?.kind === "local" && otherDrive === location.label.toUpperCase()
+                ? other.path : location.path;
+              showProcesses(side, false);
+              void load(side, filesystemPlace(path));
             }}
             onPathAncestor={(place) => { showProcesses(side, false); void load(side, place); }}
             onCopyPath={copyPath}
@@ -2076,6 +2104,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             shortcuts={shortcuts} menuRef={activeDocument === id ? documentMenu : undefined}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
+            onSwitchMode={() => openDocument(file, !editing)}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
             onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}
             onOpenDocument={(target, newTab, next, scrollTop) => {
@@ -2088,6 +2117,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
+              if (editing && file.place.kind !== "local") {
+                // A remote Viewer reloads after a save because it has no local directory watch.
+                setDocuments((current) => current.map((tab) => !tab.editing && sameDocumentFile(tab.file, file)
+                  ? { ...tab, file: { ...tab.file } } : tab));
+              }
               for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
             }} onClose={() => closeDocument(id)} />
         ))}
@@ -2146,26 +2180,34 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </>}
       </nav>
       <footer className={`statusbar${status.error ? " danger" : ""}`}>
-        <span role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
+        <span className="statusbar-message" role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
           {errorText(status.text)}
         </span>
-        <span>{pane.place?.kind === "connections" ? t("Saved connections") : pane.place?.kind === "archive" ? t(pane.place.address) :
+        <span className="statusbar-terminal-hint" role="status" aria-live="polite" data-tooltip={terminalFocusHint || undefined}>
+          {terminalFocusHint}
+        </span>
+        <span className="statusbar-location">{pane.place?.kind === "connections" ? t("Saved connections") : pane.place?.kind === "archive" ? t(pane.place.address) :
           pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
             smbHost(pane.place) ?? t("Local file system")}</span>
         <WindowResizeMarker />
       </footer>
-      {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences} onChange={(next) => {
+      {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences}
+        onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={(next) => {
         setLanguage(next.language);
         setPreferences(next);
         return next;
       }} onClose={() => setModal(null)} />}
+      {localAppearancePick && <AppearancePicker onFinish={(pick) => {
+        setLocalAppearancePick(null);
+        localAppearancePick(pick);
+      }} />}
       {modal?.kind === "exit" && (
         <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setModal(modal.update ? { kind: "update", update: modal.update } : null)}>
           <div className="dialog-body"><p>{t(modal.update ? "Some editors have unsaved changes. Discard them and install the update?" :
             "Some editors have unsaved changes. Discard them and exit Dirlume?")}</p></div>
           <footer className="dialog-footer">
             <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Keep working")}</Button>
-            <Button type="button" className="negative" onClick={() => {
+            <Button type="button" className="alert-confirm" onClick={() => {
               if (modal.update) { installUpdate(modal.update); return; }
               exitConfirmed.current = true;
               void getCurrentWindow().close().catch((error: unknown) => {
@@ -2459,7 +2501,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   return (
     <>
-    <Dialog key={String(recursive)} title={recursive ? t(modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "destructive" : undefined}
+    <Dialog key={String(recursive)} title={recursive ? t(modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "warning" : undefined}
       onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
@@ -2493,7 +2535,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button>}
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
-          <Button type="submit" className={permanent ? "permanent-delete-button" : removing ? undefined : "primary"}
+          <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}
           </Button>

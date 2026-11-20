@@ -78,6 +78,8 @@ export const colorGroups = {
       "dialog-muted": "Secondary dialog text",
       "danger-bg": "Warning background",
       danger: "Warning text",
+      "danger-action": "Alert confirmation background",
+      "on-danger-action": "Alert confirmation text",
     },
   },
   text: {

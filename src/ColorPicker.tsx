@@ -5,6 +5,9 @@ import { Pipette } from "lucide-react";
 import { isHexColor } from "./appearance";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { isTauri } from "@tauri-apps/api/core";
+import { api } from "./api";
+import { reportFrontendError } from "./diagnostics";
 
 type Color = { hue: number; saturation: number; brightness: number };
 type ScreenColorPicker = new () => { open(): Promise<{ sRGBHex: string }> };
@@ -47,6 +50,7 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
   const [sampling, setSampling] = useState(false);
   const [sampleError, setSampleError] = useState(false);
   const EyeDropper = (window as Window & { EyeDropper?: ScreenColorPicker }).EyeDropper;
+  const desktop = isTauri();
   const current = toHex(color);
   const valid = isHexColor(hex);
 
@@ -59,14 +63,17 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
   }
 
   async function sampleScreen() {
-    if (!EyeDropper || sampling) return;
+    if ((!desktop && !EyeDropper) || sampling) return;
     setSampling(true);
     setSampleError(false);
     try {
-      const { sRGBHex } = await new EyeDropper().open();
-      changeHex(sRGBHex);
+      const selected = desktop ? await api.pickScreenColor() : EyeDropper && (await new EyeDropper().open()).sRGBHex;
+      if (selected) changeHex(selected);
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setSampleError(true);
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setSampleError(true);
+        reportFrontendError("screen_color", error, "native_error");
+      }
     } finally {
       setSampling(false);
     }
@@ -89,8 +96,8 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
   }
 
   return (
-    <Dialog title={t("{0} color", t(label))} onClose={onCancel}>
-      <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); if (valid) onCommit(); }}>
+    <Dialog title={t("{0} color", t(label))} onClose={() => { if (!sampling) onCancel(); }}>
+      <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); if (valid && !sampling) onCommit(); }}>
         <div className="dialog-body color-picker">
           <div className="color-plane" role="group" aria-label={t("Saturation and brightness. Use arrow keys to adjust.")}
             tabIndex={0} style={{ backgroundColor: "hsl(" + color.hue + " 100% 50%)" }}
@@ -127,16 +134,17 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
               <span data-tooltip={t("Original color {0}", initial)} style={{ "--swatch": initial } as CSSProperties} />
               <span data-tooltip={t("Selected color {0}", current)} style={{ "--swatch": current } as CSSProperties} />
             </div>
-            {EyeDropper && <Button type="button" className="icon-button"
+            {(desktop || EyeDropper) && <Button type="button" className="icon-button"
               aria-label={t("Pick a color from the screen")} disabled={sampling} onClick={() => { void sampleScreen(); }}>
               <Pipette />
             </Button>}
           </div>
+          {sampling && <p role="status">{t("Click a visible color anywhere on the screen. Press Esc to cancel.")}</p>}
           {sampleError && <p role="alert">{t("Could not pick a color from the screen.")}</p>}
         </div>
         <footer className="dialog-footer">
-          <Button type="button" onClick={onCancel}>{t("Cancel")}</Button>
-          <Button type="submit" className="primary" disabled={!valid}>{t("Use color")}</Button>
+          <Button type="button" onClick={onCancel} disabled={sampling}>{t("Cancel")}</Button>
+          <Button type="submit" className="primary" disabled={!valid || sampling}>{t("Use color")}</Button>
         </footer>
       </form>
     </Dialog>

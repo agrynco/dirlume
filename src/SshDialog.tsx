@@ -22,7 +22,7 @@ export function VerifyHostDialog({ verification, testing, onCancel, onApprove }:
     </div>
     <footer className="dialog-footer">
       <Button type="button" data-initial-focus onClick={onCancel}>{t("Cancel")}</Button>
-      <Button type="button" className="primary" onClick={onApprove}>{t(testing ? "Verify and test" : "Trust and connect")}</Button>
+      <Button type="button" className="alert-confirm" onClick={onApprove}>{t(testing ? "Verify and test" : "Trust and connect")}</Button>
     </footer>
   </Dialog>;
 }

@@ -17,6 +17,8 @@ pub struct UpdateFixture {
     replacement_failure: bool,
     #[serde(default)]
     check_clipboard: bool,
+    #[serde(default)]
+    check_screen_color: bool,
     metadata: serde_json::Value,
 }
 
@@ -69,9 +71,14 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
     #[cfg(not(windows))]
     let portable = false;
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
+    let directory =
+        serde_json::to_string(&fixture.result.parent()).unwrap_or_else(|_| "null".into());
     let _ = webview.eval(format!(
-        "({script})({upgraded}, {}, {portable}, {}, {});",
-        fixture.reject, fixture.replacement_failure, fixture.check_clipboard
+        "({script})({upgraded}, {}, {portable}, {}, {}, {}, {directory});",
+        fixture.reject,
+        fixture.replacement_failure,
+        fixture.check_clipboard,
+        fixture.check_screen_color
     ));
 }
 
@@ -132,6 +139,32 @@ pub async fn updater_fixture_normal_window(app: AppHandle) -> DesktopResult<()> 
     main.set_size(LogicalSize::new(780, 480)).map_err(message)?;
     main.center().map_err(message)?;
     main.set_focus().map_err(message)?;
+    #[cfg(target_os = "macos")]
+    {
+        // Tauri reopens the updated app in the background. Activate the existing bundle before
+        // simulating a user working with its windows.
+        crate::desktop::blocking(|| {
+            let executable = std::env::current_exe().map_err(message)?;
+            let bundle = executable
+                .ancestors()
+                .nth(3)
+                .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
+                .ok_or("Missing the installed updater fixture bundle")?;
+            let result = std::process::Command::new("/usr/bin/open")
+                .arg(bundle)
+                .output()
+                .map_err(message)?;
+            if !result.status.success() {
+                return Err(String::from_utf8_lossy(&result.stderr).into_owned());
+            }
+            Ok(())
+        })
+        .await?;
+        wait_for_window("the installed application to activate", || {
+            main.is_focused().map_err(message)
+        })
+        .await?;
+    }
     wait_for_window("a resizable main window in its normal state", || {
         Ok(main.is_resizable().map_err(message)?
             && !main.is_maximized().map_err(message)?
@@ -198,6 +231,16 @@ pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()>
     {
         return Err("Options did not stay visible in its independent position.".to_owned());
     }
+    crate::desktop::set_appearance_picker(options.clone(), true).await?;
+    wait_for_window("the appearance picker to focus the main window", || {
+        Ok(!options.is_visible().map_err(message)? && main.is_focused().map_err(message)?)
+    })
+    .await?;
+    crate::desktop::set_appearance_picker(main.clone(), false).await?;
+    wait_for_window("the appearance picker to return focus to Options", || {
+        Ok(options.is_visible().map_err(message)? && options.is_focused().map_err(message)?)
+    })
+    .await?;
     options.close().map_err(message)?;
     main.set_size(original_size).map_err(message)?;
     main.set_position(original).map_err(message)

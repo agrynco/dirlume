@@ -12,7 +12,7 @@ import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, p
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
-import { eventShortcut, showShortcut, type Bindings, type PanelLayout } from "./preferences";
+import { driveSourceCommand, eventShortcut, showShortcut, type Bindings, type DriveSourceCommand, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
@@ -33,6 +33,7 @@ interface PaneProps {
   onQuickMatch: (name: string) => void;
   onOpen: (entry: Entry) => void;
   onPath: (path: string) => void;
+  onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
   onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
@@ -48,7 +49,7 @@ interface PaneProps {
   onFtp: () => void;
   onSsh: () => void;
   onSmb: () => void;
-  sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "sshSources" | "smbSources" | "remoteSources">;
+  sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "sshSources" | "smbSources" | "remoteSources" | DriveSourceCommand>;
   zoomShortcut: readonly string[];
   fontSize?: number;
   onZoom: ZoomViewFont;
@@ -99,7 +100,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, layout, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath,
+export function Pane({ side, active, layout, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo }: PaneProps) {
@@ -236,6 +237,15 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
     ...(windowsClient ? [{ label: "SMB", key: sourceBindings.smbSources, Icon: Server, open: onSmb }] : []),
     { label: t("Remote machine"), key: sourceBindings.remoteSources, Icon: Server, open: onRemote },
   ];
+  const localLocations = locations.map((location) => {
+    const command = driveSourceCommand(location);
+    return { location, bindings: command ? sourceBindings[command] : [] };
+  });
+  function openLocalLocation(location: QuickLocation) {
+    setLocationsOpen(false);
+    onLocalLocation(location);
+    list.current?.focus();
+  }
   const folderItems = entries.filter(({ name }) => name !== "..");
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
@@ -268,7 +278,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
-              onClick={() => { onPath(location.path); list.current?.focus(); }}>
+              onClick={() => openLocalLocation(location)}>
               {twin && (/^[a-z]:$/i.test(location.label) ? <HardDrive aria-hidden="true" /> : <Folder aria-hidden="true" />)}{t(location.label)}
             </Button>
           ))}
@@ -321,8 +331,15 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
-          if (!locationsOpen) return;
+          if (!locationsOpen || event.defaultPrevented || event.nativeEvent.isComposing) return;
           const shortcut = eventShortcut(event);
+          const localLocation = shortcut && localLocations.find(({ bindings }) => bindings.includes(shortcut));
+          if (localLocation) {
+            event.preventDefault();
+            event.stopPropagation();
+            openLocalLocation(localLocation.location);
+            return;
+          }
           const source = shortcut && sources.find(({ key }) => key.includes(shortcut));
           if (source) {
             event.preventDefault();
@@ -350,9 +367,9 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
             aria-expanded={locationsOpen} onClick={() => setLocationsOpen(!locationsOpen)}><HardDrive /><ChevronDown /></Button>
           {locationsOpen && (
             <div className="location-popup">
-              {locations.map((location) => (
-                <Button key={location.path} tooltip={location.path} onClick={() => { onPath(location.path); setLocationsOpen(false); list.current?.focus(); }}>
-                  <Folder /> {t(location.label)}
+              {localLocations.map(({ location, bindings }) => (
+                <Button key={location.path} tooltip={location.path} shortcut={showShortcut(bindings[0])} onClick={() => openLocalLocation(location)}>
+                  <Folder /> <span>{t(location.label)}</span>{bindings.length > 0 && <kbd aria-hidden="true">{showShortcut(bindings[0])}</kbd>}
                 </Button>
               ))}
               <div className="location-source-group" role="group" aria-label={t("Sources")}>

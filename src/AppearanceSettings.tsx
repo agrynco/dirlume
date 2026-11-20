@@ -17,6 +17,7 @@ import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFon
 import { featureOptions } from "./featureOptions";
 import { MenuAlignmentSetting } from "./MenuAlignmentSetting";
 import { SettingSearchLabel } from "./SettingSearchLabel";
+import { colorLabels, type AppearancePick } from "./appearancePick";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const sharedFonts = ["ui", "panel", "dialog", "mono"] as const;
@@ -54,12 +55,13 @@ export function ViewFontSettings({ preferences, onChange, views }: {
   </div>;
 }
 
-export function AppearanceSettings({ section, preferences, onChange, fontGroup, views }: {
+export function AppearanceSettings({ section, preferences, onChange, fontGroup, views, selection }: {
   section: AppearanceSection;
   preferences: Preferences;
   onChange: (value: Preferences) => void;
   fontGroup?: FontGroup;
   views?: readonly ViewFont[];
+  selection?: AppearancePick;
 }) {
   const [deleting, setDeleting] = useState(false);
   const system = useSystemTheme();
@@ -70,9 +72,9 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   const { scheme: applied, theme } = resolveAppearance(preferences, system);
   const base = theme;
   const overrides = applied?.colors;
-  const groups = fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : [];
+  const groups = selection ? selection.font ? [selection.font] : [] : fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : [];
   const showingFonts = groups.length > 0;
-  const colorSections = section === "fonts" ? [] : section === "panels" && fontGroup === "panel" ? ["panels", "files"] as const : [section];
+  const colorSections = selection || section === "fonts" ? [] : section === "panels" && fontGroup === "panel" ? ["panels", "files"] as const : [section];
 
   useLayoutEffect(() => setPalette(basePalette(base, overrides)), [base, overrides]);
 
@@ -151,7 +153,8 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
 
   return (
     <div className="dialog-body appearance-settings">
-      {section === "window" && <>
+      {selection && <p className="appearance-hint">{t("Color and font settings on this page also affect elements that share them.")}</p>}
+      {!selection && section === "window" && <>
         <div className="appearance-header">
           <label className="field"><SettingSearchLabel label="Color scheme" aliases={Object.values(builtInThemes)} />
             <select aria-label={t("Color scheme")} value={active ? `custom:${active.id}` : preferences.theme} onChange={(event) => select(event.target.value)}>
@@ -217,7 +220,10 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           {colorFields(colorGroups[colorSection].colors)}
         </div>
       ))}
-      {fontGroup === "viewer" && <>
+      {selection && <div className="color-settings">
+        {colorFields(Object.fromEntries(selection.colors.map((color) => [color, colorLabels[color]])))}
+      </div>}
+      {!selection && fontGroup === "viewer" && <>
         <fieldset className="view-font-group reading-area-settings">
           <legend><SettingSearchLabel label="Reading area" /></legend>
           <label className="setting unit-setting"><SettingSearchLabel label="Max width (px)" aliases={["Maximum content width (px)", "Full width"]} />

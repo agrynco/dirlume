@@ -1,7 +1,7 @@
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Crosshair, Pencil, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { AppearanceSettings, OptionalNumberInput, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
 import { PathField } from "./PathField";
@@ -19,6 +19,7 @@ import {
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
 import { languages, locale, readLanguage, t } from "./i18n";
+import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
 type Page = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
@@ -51,10 +52,11 @@ function readOptionsLocation(): OptionsLocation {
   } catch { return defaults; }
 }
 
-export function Settings({ preferences: saved, onChange: applyPreferences, onClose, initialPage, standalone = false }: {
+export function Settings({ preferences: saved, onChange: applyPreferences, onClose, onPick, initialPage, standalone = false }: {
   preferences: Preferences;
   onChange: (value: Preferences) => Preferences;
   onClose: () => void;
+  onPick?: () => Promise<AppearancePick | null>;
   standalone?: boolean;
   initialPage?: FeaturePage;
 }) {
@@ -68,6 +70,19 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const pageBody = useRef<HTMLDivElement>(null);
   const schemeSelect = useRef<HTMLSelectElement>(null);
   const [preferences, onChange] = useState(saved);
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState(false);
+  const [selection, setSelection] = useState<PickHistoryEntry | null>(null);
+  const [pickHistory, setPickHistory] = useState(readPickHistory);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const pickButton = useRef<HTMLButtonElement>(null);
+  const historyDates = new Map<string, PickHistoryEntry[]>();
+  for (const entry of pickHistory) {
+    const date = localPickDate(entry.time);
+    const entries = historyDates.get(date);
+    if (entries) entries.push(entry);
+    else historyDates.set(date, [entry]);
+  }
   const [capture, setCapture] = useState<ShortcutCapture | null>(null);
   const [conflict, setConflict] = useState<{ key: string; owners: Command[] } | null>(null);
   const [schemeDialog, setSchemeDialog] = useState<ShortcutSchemeDialog | null>(null);
@@ -98,8 +113,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
       "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings", "Shortcut scheme");
-  const visibleCommands = allShortcuts ? commandNames : commandNames.filter((command) =>
-    matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut)));
+  const visibleCommands = commandNames.filter((command) =>
+    (windowsClient || !/^drive[A-Z]Sources$/.test(command)) &&
+    (allShortcuts || matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut))));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
   const isAppearance = !feature && page !== "general" && page !== "shortcuts";
@@ -117,10 +133,41 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }, [page, buildVersion]);
 
   function select(next: Page) {
-    if (next !== page && pageBody.current) pageBody.current.scrollTop = 0;
+    if ((next !== page || selection) && pageBody.current) pageBody.current.scrollTop = 0;
+    setSelection(null);
     setPage(next);
     setCapture(null);
     setConflict(null);
+  }
+
+  function openPick(entry: PickHistoryEntry) {
+    if (pageBody.current) pageBody.current.scrollTop = 0;
+    setCapture(null);
+    setConflict(null);
+    setQuery("");
+    setSelection(entry);
+    setHistoryExpanded(true);
+  }
+
+  async function pick() {
+    if (!onPick || picking) return;
+    setPickError(false);
+    setPicking(true);
+    try {
+      const result = await onPick();
+      if (!result) return;
+      const time = Date.now();
+      const entry = { ...result, id: `${time}-${pickHistory.length}`, time };
+      const history = [entry, ...pickHistory];
+      savePickHistory(history);
+      setPickHistory(history);
+      openPick(entry);
+    } catch {
+      setPickError(true);
+    } finally {
+      setPicking(false);
+      requestAnimationFrame(() => pickButton.current?.focus());
+    }
   }
 
   function apply() {
@@ -141,6 +188,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       window.onCloseRequested(() => saveLocationRef.current()),
       window.listen<string>("dirlume:options-page", ({ payload }) => {
         if (!isFeaturePage(payload)) return;
+        setSelection(null);
         setPage(payload);
         setQuery("");
         setCapture(null);
@@ -215,8 +263,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
 
   return <SettingsSearchTerms value={terms}>
-    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} footer={<>
-      {page === "shortcuts" && (
+    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
+      {!selection && page === "shortcuts" && (
         <Button type="button" disabled={!activeScheme} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
           <RotateCcw /> {t("Restore defaults")}
         </Button>
@@ -227,9 +275,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     </>}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
+          <div className="settings-search-actions">
           <label className="settings-search"><Search aria-hidden="true" />
             <HistoryField historyKey="settings-search" type="search" aria-label={t("Search settings")} placeholder={t("Search settings")} value={query}
-              data-initial-focus onValueChange={(value) => { setQuery(value); setCapture(null); }}
+              data-initial-focus onValueChange={(value) => { setQuery(value); setCapture(null); setSelection(null); }}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || !searching) return;
                 event.preventDefault();
@@ -239,37 +288,55 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 else if (showShortcuts) select("shortcuts");
               }} />
           </label>
+          {onPick && <Button ref={pickButton} type="button" className="icon-button" aria-label={t("Pick an element")}
+            tooltip={t("Pick an element")} onClick={() => { void pick(); }}><Crosshair /></Button>}
+          </div>
+          {pickError && <p role="alert" className="dialog-error">{t("Could not start the appearance picker.")}</p>}
           <nav className="settings-tree" aria-label={t("Options sections")}>
-            {showGeneral && <Button type="button" aria-pressed={page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
-            {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={page === id} onClick={() => select(id)}>
+            {showGeneral && <Button type="button" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
+            {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
             </Button>)}
             {appearanceMatches.length > 0 && (
               <>
                 <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
                   onClick={() => {
-                    if (!isAppearance) { select(appearanceMatches[0].id); setExpanded(true); }
+                    if (!isAppearance || selection) { select(appearanceMatches[0].id); setExpanded(true); }
                     else setExpanded(!expanded);
                   }}>
                   {expanded || searching ? <ChevronDown /> : <ChevronRight />} {t("Appearance")}
                 </Button>
                 <div id="options-appearance-pages" className="settings-tree-branch" hidden={!expanded && !searching}>
                   {appearanceMatches.map(({ id, label }) => (
-                    <Button key={id} type="button" aria-pressed={page === id} onClick={() => select(id)}>{t(label)}</Button>
+                    <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>{t(label)}</Button>
                   ))}
                 </div>
               </>
             )}
-            {showShortcuts && <Button type="button" aria-pressed={page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
+            {showShortcuts && <Button type="button" aria-pressed={!selection && page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
+            {!searching && onPick && <>
+              <Button type="button" aria-expanded={historyExpanded} aria-controls="options-picker-history"
+                onClick={() => setHistoryExpanded(!historyExpanded)}>
+                {historyExpanded ? <ChevronDown /> : <ChevronRight />} {t("Picker history")}
+              </Button>
+              <div id="options-picker-history" className="settings-tree-branch picker-history" hidden={!historyExpanded}>
+                {!pickHistory.length && <p>{t("Picked elements will appear here.")}</p>}
+                {[...historyDates].map(([date, entries]) => <section key={date} aria-label={date}>
+                  <h4>{date}</h4>
+                  {entries.map((entry) => <Button key={entry.id} type="button" aria-pressed={selection?.id === entry.id}
+                    onClick={() => openPick(entry)}>{pickLabel(entry)}</Button>)}
+                </section>)}
+              </div>
+            </>}
             {!showGeneral && !featureMatches.length && !appearanceMatches.length && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
           <header className="settings-page-heading">
-            {isAppearance && <><span>{t("Appearance")}</span><ChevronRight aria-hidden="true" /></>}
-            <h3>{t(title ?? "General")}</h3>
+            {(isAppearance || selection) && <><span>{t("Appearance")}</span><ChevronRight aria-hidden="true" /></>}
+            <h3>{selection ? pickLabel(selection) : t(title ?? "General")}</h3>
           </header>
-          {page === "shortcuts" && <div className="shortcut-scheme-bar">
+          {!selection && page === "shortcuts" && <div className="shortcut-scheme-bar">
             <label><SettingSearchLabel label="Shortcut scheme" aliases={["keymap", "bindings"]} />
               <select ref={schemeSelect} value={activeShortcutScheme ?? ""} onChange={(event) => {
                 setCapture(null);
@@ -286,7 +353,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               onClick={() => openSchemeDialog({ kind: "delete" })}><Trash2 aria-hidden="true" /></Button>
           </div>}
           <div className="settings-page-body" ref={pageBody}>
-      {page === "general" ? (
+      {selection ? <AppearanceSettings key={selection.id} section="fonts" selection={selection}
+        views={selection.view ? [selection.view] : undefined} preferences={preferences} onChange={onChange} /> : page === "general" ? (
         <div className="dialog-body settings-general">
           <label className="setting"><SettingSearchLabel label="Language" aliases={Object.values(languages)} />
             <select aria-label={t("Language")} value={preferences.language}
@@ -388,7 +456,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </>
       )}
           </div>
-          <SettingsPreview page={page} preferences={preferences} />
+          <SettingsPreview page={page} preferences={preferences} pick={selection ?? undefined} />
         </div>
       </div>
     </Dialog>
@@ -419,7 +487,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     {schemeDialog?.kind === "delete" && activeScheme && <Dialog title={t("Delete shortcut scheme")} tone="warning"
       onClose={() => setSchemeDialog(null)} footer={<>
         <Button type="button" data-initial-focus onClick={() => setSchemeDialog(null)}>{t("Cancel")}</Button>
-        <Button type="button" className="negative" onClick={() => {
+        <Button type="button" className="alert-confirm" onClick={() => {
           onChange({ ...preferences, activeShortcutScheme: null, shortcutSchemes: shortcutSchemes.filter(({ id }) => id !== activeScheme.id) });
           setSchemeDialog(null);
           requestAnimationFrame(() => schemeSelect.current?.focus());
@@ -427,9 +495,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       </>}>
       <div className="dialog-body"><p>{t("Delete the shortcut scheme {0}?", activeScheme.name)}</p></div>
     </Dialog>}
-    {capture && conflict && <Dialog title={t("Shortcut conflict")} onClose={() => setConflict(null)} footer={<>
+    {capture && conflict && <Dialog title={t("Shortcut conflict")} tone="warning" onClose={() => setConflict(null)} footer={<>
       <Button type="button" data-initial-focus onClick={() => setConflict(null)}>{t("Choose another shortcut")}</Button>
-      <Button type="button" className="primary" onClick={() => saveShortcut(conflict.key, capture)}>{t("Reassign shortcut")}</Button>
+        <Button type="button" className="alert-confirm" onClick={() => saveShortcut(conflict.key, capture)}>{t("Reassign shortcut")}</Button>
     </>}>
       <div className="dialog-body">
         <p>{t("{0} is assigned to {1}.", showShortcut(conflict.key), new Intl.ListFormat(locale()).format(conflict.owners.map(commandLabel)))}</p>

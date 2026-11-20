@@ -22,10 +22,14 @@ import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testTerminalPaste } from "./terminal-paste-smoke.mjs";
+import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-picker-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
-import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testScreenColor } from "./screen-color-smoke.mjs";
+import { testDocumentMode } from "./document-mode-smoke.mjs";
+import { testDocumentWatch } from "./document-watch-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -41,6 +45,8 @@ if (process.env.CI) {
   await testFolderMeasurement();
   await testSyntaxMenu();
   await testTerminalPaste();
+  await testAppearancePicker();
+  await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
@@ -246,6 +252,7 @@ try {
   await checkTooltip(homeLocation, homePath);
   await checkTooltip(sshSource);
   await locationsTrigger.click();
+  await testNativeAppearancePicker(page);
   async function editAddress(side) {
     const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
     if (!await input.isVisible()) {
@@ -324,6 +331,21 @@ try {
     }
   }
   await navigate("left", src);
+  await navigate("right", dst);
+  const driveName = /^[a-z]:/i.exec(parse(src).root)?.[0]?.toUpperCase();
+  assert.ok(driveName, "The Windows test folders must be on a lettered drive.");
+  const leftDrive = page.locator("#left-pane .location-popup").getByRole("button", { name: driveName, exact: true });
+  await page.locator("#left-files").press("Alt+F1");
+  await leftDrive.waitFor();
+  await page.keyboard.press(driveName[0]);
+  await leftDrive.waitFor({ state: "hidden" });
+  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, dst);
+  assert.equal(await panePath("right"), dst);
+  await navigate("left", src);
+  await page.locator("#right-files").press("Alt+F2");
+  await page.locator("#right-pane .location-popup").getByRole("button", { name: driveName, exact: true }).click();
+  await page.waitForFunction((path) => document.getElementById("right-path")?.dataset.path === path, src);
+  assert.equal(await panePath("left"), src);
   await navigate("right", dst);
   const branchFolder = join(src, "breadcrumb-branch");
   const branchLeaf = join(branchFolder, "breadcrumb-leaf");
@@ -681,6 +703,13 @@ try {
   await left.locator('.file-row[data-current="true"][data-tooltip="file-1004.tmp"]').waitFor();
   assert.equal(await left.locator(".file-row.marked").count(), 2);
   assert.ok(await left.getByRole("option").count() < 100);
+  await left.press("ArrowLeft");
+  const firstResult = left.locator('.file-row[data-current="true"][data-tooltip="file-0.tmp"]');
+  await firstResult.waitFor();
+  await left.press("Shift+ArrowUp");
+  await firstResult.and(left.locator(".marked")).waitFor();
+  await left.press("Shift+ArrowUp");
+  await firstResult.and(left.locator(":not(.marked)")).waitFor();
   await leftPane.getByRole("button", { name: "Close search results" }).click();
   await leftPane.getByRole("heading", { name: "bulk" }).waitFor({ state: "attached" });
   await navigate("left", src);
@@ -695,21 +724,22 @@ try {
   const orderedRows = await left.locator(".file-row").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   const guideIndex = orderedRows.indexOf("guide.md");
   const nextAfterGuide = orderedRows[guideIndex + 1];
-  const markedRows = () => left.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
+  const markedRows = (list) => list.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   assert.ok(guideIndex > 1 && guideIndex + 2 < orderedRows.length);
   await page.keyboard.press("Shift+ArrowDown");
   await page.keyboard.press("Shift+ArrowDown");
-  assert.deepEqual(await markedRows(), ["guide.md", nextAfterGuide]);
+  assert.deepEqual(await markedRows(left), ["guide.md", nextAfterGuide]);
   const activeRow = (list) => list.locator('.file-row[data-current="true"]').getAttribute("data-tooltip");
   assert.equal(await activeRow(left), orderedRows[guideIndex + 2]);
   await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), orderedRows.slice(guideIndex, guideIndex + 3));
+  assert.deepEqual(await markedRows(left), orderedRows.slice(guideIndex, guideIndex + 3));
   assert.equal(await activeRow(left), nextAfterGuide);
 
   const keyboardFolder = join(temp, "keyboard-marking");
   const singleItemFolder = join(keyboardFolder, "single");
   await mkdir(singleItemFolder, { recursive: true });
-  for (const name of ["a.txt", "b.txt", "c.txt"]) await writeFile(join(keyboardFolder, name), "");
+  const adjacentNames = ["a.txt", "b.txt", "c.txt", "d.txt"];
+  for (const name of adjacentNames) await writeFile(join(keyboardFolder, name), "");
   await writeFile(join(singleItemFolder, "only.txt"), "");
   const rightBefore = await page.locator("#right-path").getAttribute("data-path");
   await navigate("right", keyboardFolder);
@@ -717,10 +747,10 @@ try {
   await right.press("Shift+ArrowUp");
   assert.equal(await activeRow(right), "a.txt");
   assert.equal(await right.locator(".file-row.marked").getAttribute("data-tooltip"), "b.txt");
-  await right.getByRole("option", { name: /^c\.txt/ }).click();
+  await right.getByRole("option", { name: /^d\.txt/ }).click();
   await right.press("Shift+ArrowDown");
-  assert.equal(await activeRow(right), "c.txt");
-  assert.equal(await right.locator(".file-row.marked").getAttribute("data-tooltip"), "c.txt");
+  assert.equal(await activeRow(right), "d.txt");
+  assert.deepEqual(await markedRows(right), ["d.txt"]);
   await navigate("right", singleItemFolder);
   await right.getByRole("option", { name: /^only\.txt/ }).click();
   await right.press("Shift+ArrowDown");
@@ -740,12 +770,35 @@ try {
     await list.press("Control+Insert");
     await clipboardIs("a.txt\nc.txt");
     assert.equal(await activeRow(list), "b.txt");
-    assert.deepEqual(await list.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)), ["a.txt", "c.txt"]);
+    assert.deepEqual(await markedRows(list), ["a.txt", "c.txt"]);
     await row("b.txt").click();
     await list.press("Control+Insert");
     await clipboardIs("b.txt");
     await list.press("Control+Shift+c");
     await clipboardIs(join(keyboardFolder, "b.txt"));
+    for (const name of adjacentNames) await row(name).click({ modifiers: ["Control"] });
+    await list.press("ArrowUp");
+    await list.press("ArrowUp");
+    assert.equal(await activeRow(list), "b.txt");
+    await list.press("Shift+ArrowDown");
+    assert.equal(await activeRow(list), "c.txt");
+    assert.deepEqual(await markedRows(list), ["a.txt", "c.txt", "d.txt"]);
+    await list.press("Shift+ArrowDown");
+    assert.equal(await activeRow(list), "d.txt");
+    assert.deepEqual(await markedRows(list), ["a.txt", "d.txt"]);
+    await list.press("Shift+ArrowDown");
+    assert.equal(await activeRow(list), "d.txt");
+    assert.deepEqual(await markedRows(list), ["a.txt"]);
+
+    for (const name of adjacentNames.slice(1)) await row(name).click({ modifiers: ["Control"] });
+    await list.press("ArrowUp");
+    assert.equal(await activeRow(list), "c.txt");
+    await list.press("Shift+ArrowUp");
+    assert.equal(await activeRow(list), "b.txt");
+    assert.deepEqual(await markedRows(list), ["a.txt", "b.txt", "d.txt"]);
+    await list.press("Shift+ArrowUp");
+    assert.equal(await activeRow(list), "a.txt");
+    assert.deepEqual(await markedRows(list), ["a.txt", "d.txt"]);
   }
   await navigate("left", leftBefore);
   await navigate("right", rightBefore);
@@ -1140,6 +1193,8 @@ try {
   await mkdir(encodedFiles);
   await navigate("left", encodedFiles);
   await testNewFileEncoding(page, encodedFiles);
+  await testDocumentMode(page, temp);
+  await testDocumentWatch(page, temp);
   await navigate("left", src);
   await left.focus();
   await page.keyboard.press("Shift+F4");
@@ -1358,6 +1413,7 @@ try {
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const toggleTerminal = page.getByRole("button", { name: "Toggle terminal", exact: true });
   const terminalInput = page.locator(".xterm-helper-textarea");
+  const terminalFocusHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
   const paneHeight = () => left.evaluate((pane) => pane.getBoundingClientRect().height);
   const compactHeight = await paneHeight();
   await page.locator("#left-files").press("Control+ArrowRight");
@@ -1365,6 +1421,7 @@ try {
   await commandLine.fill("preserved draft");
   await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
+  await terminalFocusHint.waitFor();
   await commandLine.waitFor({ state: "hidden" });
   const firstHeight = await paneHeight();
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
@@ -1381,10 +1438,12 @@ try {
   assert.ok(expandedHeight < firstHeight, "Ctrl+Up should make more room for the terminal.");
   await terminalInput.press("F12");
   await terminal.waitFor({ state: "hidden" });
+  await terminalFocusHint.waitFor({ state: "hidden" });
   await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
   assert.equal(await paneHeight(), expandedHeight);
   await page.locator("#left-files").press("Control+ArrowDown");
+  await terminalFocusHint.waitFor({ state: "hidden" });
   assert.ok(Math.abs(await paneHeight() - firstHeight) <= 2);
   const terminalDivider = page.getByRole("separator", { name: "Resize terminal" });
   const terminalBounds = await terminalDivider.boundingBox();
@@ -2084,6 +2143,7 @@ try {
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await testSystemTheme(page);
+  await testScreenColor(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

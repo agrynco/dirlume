@@ -36,6 +36,10 @@ Use **Options → Appearance → Window → New scheme** to save your own colors
 
 Use **Search settings** above the Options tree to find a setting or shortcut. **Main File Panels** contains hidden-file visibility, pane fonts and sizes, and panel colors. **Viewer**, **Editor**, and **Terminal** each have their own font settings. They inherit the scheme's shared text font and size until you set their own values. **General** contains the interface language and remote connection settings, and **Appearance** contains shared themes and styles.
 
+Use **Pick an element** beside **Search settings** to find the appearance controls for something visible on screen. Options hides while you point at the element. Click the highlight to return to Options with its colors, fonts, and sizes together. Press **Esc** to return to the same page and keep your draft. **Picker history** lists successful picks by local date and reopens them with current values. The history stores appearance categories and states.
+
+In a color dialog, choose **Pick a color from the screen** and click a visible pixel in any application. **Use color** accepts the sample. **Esc** cancels the sample and keeps the previous color. Wayland sessions use the desktop's color picker portal.
+
 In **Options → Keyboard shortcuts**, use **Add shortcut** to give a command another binding. Click an existing binding to replace it or its **×** to remove it. If the shortcut is already assigned in the same context, choose **Reassign shortcut** to move just that binding, or **Choose another shortcut** to keep entering a different combination. Commands in separate contexts can share a shortcut.
 
 Choose a **Shortcut scheme** to switch the full set of bindings. **New scheme** copies the selected scheme. Editing **Default** creates a personal scheme, and existing custom shortcuts move to **My shortcuts** on upgrade. **Restore defaults** resets the selected personal scheme. Choose **Apply** or **Done** to use the selected scheme and save your changes.
@@ -51,14 +55,15 @@ Drag the Options title bar to position it independently of the main window. Drag
 | F1 | Open the offline Help guide in the current interface language. |
 | Alt or F9 | Open the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
-| Shift+↑ / Shift+↓ | Mark a range from the current row, or unmark it when the first row you move onto is already marked. Reverse direction to shrink the range. |
-| Alt+F1 / Alt+F2 | Open sources for the left or right pane. |
+| Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
+| Alt+F1 / Alt+F2 | Open sources for the left or right pane. On Windows, select a drive by letter to open the other pane's local folder on that drive, or open the drive root. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
 | Ctrl+Wheel | Change the font size of the file pane, viewer, or editor under the pointer. |
 | Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
 | Esc / F10 inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
+| F6 inside the viewer or editor | Switch to the other mode for the current file. Unsaved edits stay in the Editor. |
 | Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |
 | F5 / F6 | Open the Copy or Rename or move dialog. |
 | Ctrl+Alt+S | Open Options. |
@@ -81,7 +86,7 @@ In **New folder**, enable **Process multiple names** to separate names with comm
 
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH panel sets the working directory when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
 
-The shell receives keystrokes while its input has focus. Click a file pane to use its shortcuts. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
+The shell receives keystrokes while its input has focus. The status bar reminds you to click a file pane to use its shortcuts, or click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 
 Type in the command line to see matching history and completions for the active local folder. On Windows, PowerShell supplies completions, including options for Windows tools and installed Git and .NET commands. On macOS and Linux, Dirlume uses available Bash or Zsh completions and can also complete executable names and paths. Use **↑/↓** to choose a suggestion, **Tab** or **Enter** to insert it, and **Esc** to dismiss the list. **Enter** runs the draft when no suggestion is selected. **Shift+Enter** runs it with the list open.
 
@@ -98,6 +103,10 @@ In **New file** (**Shift+F4**), choose UTF-8, UTF-8 with BOM, UTF-16 LE, or UTF-
 In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Use **Back** and **Forward** to revisit documents and restore reading positions in the current tab. **Search** finds text in the rendered document. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
 
 The Viewer and Editor have document-specific menus and a shortcut strip. The header shows the active file's full path and document status. Choose **Options** beside the document menu to open the settings for that mode.
+
+Use **F6** or the document's **File** menu to switch modes for the current file. The Viewer shows the saved file, and the Editor keeps its unsaved changes when you return. Change or disable the shortcut in **Options → Keyboard shortcuts**. In the file panes, **F6** still opens **Rename or move**.
+
+The Viewer refreshes an open local file when it changes on disk. The Editor offers **Reload from disk** to open the updated file or **Keep editing** to retain the current buffer. Reloading discards any unsaved edits. Saving still checks that the disk contents match the version originally opened or last saved by the Editor.
 
 Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing a scheme’s font size clears wheel adjustments for views that use that size. A custom Viewer family also applies to Markdown.
 

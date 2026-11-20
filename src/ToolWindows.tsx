@@ -10,6 +10,7 @@ import { eventShortcut, persistPreferences, preferenceKey, readPreferences, shor
 import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
+import { pickFromDesktop } from "./AppearancePicker";
 import { windowsClient, type NamedFile } from "./api";
 
 export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
@@ -82,7 +83,7 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
     event.preventDefault();
     setHelp(true);
   }}>
-    <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onChange={(draft) => {
+    <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {
       const next = readPreferences();
       for (const key of Object.keys(draft) as (keyof Preferences)[]) {
         if (JSON.stringify(draft[key]) !== JSON.stringify(preferences[key])) Object.assign(next, { [key]: draft[key] });

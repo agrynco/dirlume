@@ -3,6 +3,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { ToolWindow } from "./ToolWindows";
+import { NativeAppearancePicker } from "./AppearancePicker";
 import type { NamedFile } from "./api";
 import { installDiagnosticListeners, reportFrontendError } from "./diagnostics";
 import { setLanguage } from "./i18n";
@@ -26,7 +27,10 @@ void restorePortablePreferences(label === "main").then((portable) => {
   createRoot(document.getElementById("root")!, {
     onCaughtError: (error) => reportFrontendError("react_render", error),
     onRecoverableError: (error) => reportFrontendError("react_render", error),
-  }).render(label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
-    optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
-    <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError} />);
+  }).render(<>
+    {label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
+      optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
+      <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError} />}
+    {label !== "options" && isTauri() && <NativeAppearancePicker />}
+  </>);
 });

@@ -329,7 +329,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
         </div>
         <footer className="dialog-footer">
           {conflict.replaceable && (
-            <Button type="button" className={conflict.directory ? "primary" : "negative"} disabled={answering === conflict}
+            <Button type="button" className="alert-confirm" disabled={answering === conflict}
               onClick={() => { void resolve("overwrite"); }}>{t("Overwrite")}</Button>
           )}
           <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>{t("Skip")}</Button>

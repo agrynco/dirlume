@@ -4,7 +4,7 @@ import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
 import { isTauri } from "@tauri-apps/api/core";
 import { folderGroups, type FolderGroup } from "./folderShortcuts";
-import { api, windowsClient } from "./api";
+import { api, windowsClient, type QuickLocation } from "./api";
 
 type FolderGroupCommand = `addFolderGroup${FolderGroup}` | `openFolderGroup${FolderGroup}`;
 const macDocumentKeys = typeof navigator !== "undefined" && /Macintosh/.test(navigator.userAgent);
@@ -13,6 +13,17 @@ const folderGroupCommands = Object.fromEntries(folderGroups.flatMap((group) => [
   [`addFolderGroup${group}`, { label: "Add folder shortcut to group {0}", key: `Ctrl+Shift+${group}` }],
   [`openFolderGroup${group}`, { label: "Open folder shortcut group {0}", key: `Ctrl+${group}` }],
 ])) as Record<FolderGroupCommand, { label: string; key: string }>;
+const driveLetters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+  "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"] as const;
+export type DriveSourceCommand = `drive${typeof driveLetters[number]}Sources`;
+const driveSourceCommands = Object.fromEntries(driveLetters.map((letter) => [
+  `drive${letter}Sources`, { label: "Select drive {0} in the sources menu", key: windowsClient ? letter : "" },
+])) as Record<DriveSourceCommand, { label: string; key: string }>;
+
+export function driveSourceCommand({ path, label }: QuickLocation): DriveSourceCommand | undefined {
+  const letter = windowsClient && /^([a-z]):[\\/]$/i.exec(path)?.[1]?.toUpperCase();
+  return letter && label.toUpperCase() === `${letter}:` ? `drive${letter}Sources` as DriveSourceCommand : undefined;
+}
 
 export const commands = {
   switchPane: { label: "Switch pane", key: "Tab" },
@@ -78,6 +89,7 @@ export const commands = {
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
+  switchDocumentMode: { label: "Switch between Viewer and Editor", key: "F6" },
   saveText: { label: "Save text", key: "Ctrl+S" },
   closeText: { label: "Close the viewer or editor", key: "F10" },
   cancelText: { label: "Exit the viewer or editor", key: "Escape" },
@@ -98,6 +110,7 @@ export const commands = {
   smbSources: { label: "Select SMB in the sources menu", key: "3" },
   remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
   sshSources: { label: "Select SSH in the sources menu", key: "5" },
+  ...driveSourceCommands,
   addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
   editFtpProfile: { label: "Edit FTP connection", key: "F4" },
   addSshProfile: { label: "Add SSH connection", key: "Shift+F4" },
@@ -136,6 +149,8 @@ export function folderGroupCommand(command: Command) {
 
 export function commandLabel(command: Command) {
   const folder = folderGroupCommand(command);
+  const drive = /^drive([A-Z])Sources$/.exec(command)?.[1];
+  if (drive) return t(commands[command].label, `${drive}:`);
   return folder ? t(commands[command].label, folder.group) : t(commands[command].label);
 }
 
@@ -149,7 +164,8 @@ export function commandScope(command: Command) {
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
-  if (command === "saveText" || command === "closeText" || command === "cancelText" || command.startsWith("document")) return "text";
+  if (command === "switchDocumentMode" || command === "saveText" || command === "closeText" ||
+      command === "cancelText" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";

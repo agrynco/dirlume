@@ -1,4 +1,4 @@
-async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
+async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScreenColor, fixtureDirectory) => {
   const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
   const report = (error) => invoke("updater_fixture_result", { error });
   const record = (phase) => invoke("updater_fixture_phase", { phase });
@@ -43,6 +43,84 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
     }
     pointer("pointerout");
   }
+  async function checkDocumentMode() {
+    const fileName = "document-mode-fixture.txt";
+    const key = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
+      key, bubbles: true, cancelable: true, ...modifiers,
+    }));
+    const pane = await waitFor("the left file pane", () => document.querySelector('#left-files[aria-busy="false"]'));
+    const breadcrumbs = await waitFor("the left path breadcrumbs", () => document.querySelector('#left-path .address-breadcrumbs[data-editable="true"]'));
+    breadcrumbs.click();
+    const address = await waitFor("the editable left path", () => document.querySelector("input#left-address"));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(address, fixtureDirectory);
+    address.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise(requestAnimationFrame);
+    key(address, "Enter");
+    const row = await waitFor("the document mode fixture", () => [...pane.querySelectorAll(".file-row")]
+      .find((row) => row.querySelector(".file-name-text")?.textContent === fileName));
+    row.click();
+    await waitFor("the selected document mode fixture", () => row.dataset.current === "true" && document.activeElement === pane);
+    key(pane, "F3");
+    const mode = (editing, text = "Document mode fixture", recordPhase = true) => waitFor(editing ? "the same file in Editor" : "the same file in Viewer", () => {
+      const view = document.querySelector(`.text-window[data-editing="${editing}"][aria-label="${fileName}"]:not([hidden])`);
+      return view?.querySelector(".cm-content")?.textContent === text && view;
+    }, { recordPhase });
+    const viewer = await mode(false);
+    key(viewer, "F6");
+    const editor = await mode(true);
+    key(editor, "F6");
+    if (await mode(false) !== viewer) throw new Error("F6 duplicated the existing Viewer.");
+    await record("an in-place document update");
+    await mode(false, "Edited in place", false);
+    key(viewer, "F6");
+    await mode(true);
+    const changeDialog = () => [...document.querySelectorAll("dialog[open]")]
+      .find((dialog) => document.getElementById(dialog.getAttribute("aria-labelledby"))?.textContent === "File changed on disk");
+    const inPlace = await waitFor("the clean Editor external-change prompt", changeDialog);
+    const reload = (dialog) => [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Reload from disk");
+    reload(inPlace).click();
+    await mode(true, "Edited in place");
+    await record("a replaced document");
+    const replaced = await waitFor("the Editor prompt for a replaced file", changeDialog, { recordPhase: false });
+    reload(replaced).click();
+    key(await mode(true, "Replaced file"), "F10");
+    key(await mode(false, "Replaced file"), "F10");
+    await waitFor("return to the file pane", () => document.activeElement === pane);
+    key(pane, "F6");
+    const rename = await waitFor("the unchanged file pane F6 shortcut", () => [...document.querySelectorAll("dialog[open]")]
+      .find((dialog) => document.getElementById(dialog.getAttribute("aria-labelledby"))?.textContent === "Rename or move"));
+    rename.querySelector('button[aria-label="Close dialog"]').click();
+    await waitFor("the rename dialog to close", () => !rename.open);
+  }
+  function checkAlertColors() {
+    const root = document.documentElement;
+    const theme = root.getAttribute("data-theme");
+    const ordinary = document.createElement("dialog");
+    ordinary.className = "dialog";
+    ordinary.setAttribute("open", "");
+    ordinary.innerHTML = '<header class="dialog-heading"></header><div class="dialog-body"></div><footer class="dialog-footer"><button>Cancel</button><button class="primary">Copy</button></footer>';
+    const alert = ordinary.cloneNode(true);
+    alert.dataset.tone = "warning";
+    alert.querySelector(".primary").className = "alert-confirm";
+    document.body.append(ordinary, alert);
+    try {
+      for (const mode of ["light", "dark", "classic-blue"]) {
+        root.dataset.theme = mode;
+        const surfaces = (dialog) => [dialog, ...dialog.querySelectorAll(".dialog-heading, .dialog-footer, button:first-child")]
+          .map((element) => getComputedStyle(element).backgroundColor);
+        const action = getComputedStyle(alert.querySelector(".alert-confirm"));
+        if (JSON.stringify(surfaces(alert)) !== JSON.stringify(surfaces(ordinary)) ||
+            action.backgroundColor !== "rgb(163, 35, 55)" || action.color !== "rgb(255, 255, 255)") {
+          throw new Error(`The ${mode} alert did not use standard surfaces and a red confirmation button.`);
+        }
+      }
+    } finally {
+      ordinary.remove();
+      alert.remove();
+      if (theme === null) root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", theme);
+    }
+  }
   try {
     if (upgraded) {
       await waitFor("the saved pane font size", () => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
@@ -65,6 +143,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
         .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
       await checkTooltip(ssh);
       locations.click();
+      if (fixtureDirectory) await checkDocumentMode();
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();
       await invoke("updater_fixture_options_window");
@@ -75,7 +154,19 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
       });
       updates.click();
       await waitFor("the up-to-date message", () => [...document.querySelectorAll("dialog[open] p")].some((text) => text.textContent === "Dirlume is up to date."));
+      await record("the shared alert colors");
+      checkAlertColors();
       if (checkClipboard) await verifyClipboard();
+      if (checkScreenColor) {
+        await record("the native screen color cancellation");
+        if (await invoke("pick_screen_color") !== null) throw new Error("Escape did not cancel screen sampling.");
+        await record("the external screen color");
+        const color = await invoke("pick_screen_color");
+        const channels = color?.match(/[a-f\d]{2}/g)?.map((channel) => parseInt(channel, 16));
+        if (channels?.length !== 3 || channels.some((channel, index) => Math.abs(channel - [36, 89, 120][index]) > 1)) {
+          throw new Error(`The external screen color did not match the fixture. Received ${color}.`);
+        }
+      }
       await report(null);
       return;
     }

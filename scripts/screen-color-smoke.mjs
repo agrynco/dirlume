@@ -1,0 +1,119 @@
+import assert from "node:assert/strict";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { promisify } from "node:util";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+
+const run = promisify(execFile);
+const command = (script) => ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand",
+  Buffer.from(script, "utf16le").toString("base64")];
+
+export async function testScreenColor(page) {
+  const painter = spawn("powershell.exe", command(`
+    $ErrorActionPreference = 'Stop'
+    Add-Type -AssemblyName PresentationFramework
+    $window = [Windows.Window]::new()
+    $window.Title = 'Dirlume screen color fixture'
+    $window.Width = 200
+    $window.Height = 130
+    $window.Left = 5
+    $window.Top = 40
+    $window.WindowStyle = 'None'
+    $window.ResizeMode = 'NoResize'
+    $window.Topmost = $true
+    $brush = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(36, 89, 120))
+    $window.Background = $brush
+    $surface = [Windows.Controls.Border]::new()
+    $surface.Background = $brush
+    $window.Content = $surface
+    $window.Show()
+    [Console]::WriteLine(('ready {0}' -f [Windows.Interop.WindowInteropHelper]::new($window).Handle.ToInt64()))
+    [Console]::Out.Flush()
+    [Windows.Threading.Dispatcher]::Run()
+  `), { windowsHide: true });
+  let output = "";
+  const windowHandle = new Promise((resolve, reject) => {
+    painter.once("error", reject);
+    painter.once("exit", (code) => reject(new Error(`The screen color fixture stopped (${code}). ${output}`)));
+    painter.stdout.on("data", (chunk) => {
+      output += chunk;
+      const match = output.match(/ready (\d+)\r?\n/);
+      if (match) resolve(match[1]);
+    });
+    painter.stderr.on("data", (chunk) => { output += chunk; });
+  });
+  let timeout;
+  try {
+    const fixtureHandle = await Promise.race([windowHandle, new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(`The external color window did not open. ${output}`)), 20000);
+    })]);
+    clearTimeout(timeout);
+    const tool = await openOptionsWindow(page);
+    const options = tool.getByRole("dialog", { name: "Options", exact: true });
+    await options.getByRole("button", { name: "Viewer", exact: true }).click();
+    await options.getByRole("button", { name: "Block background color", exact: true }).click();
+    const color = tool.getByRole("dialog", { name: "Block background color", exact: true });
+    const hex = color.getByRole("textbox", { name: "HEX", exact: true });
+    const previous = await hex.inputValue();
+    const eyedropper = color.getByRole("button", { name: "Pick a color from the screen", exact: true });
+    const hint = color.getByText("Click a visible color anywhere on the screen. Press Esc to cancel.", { exact: true });
+    const input = (action) => run("powershell.exe", command(`
+      $ErrorActionPreference = 'Stop'
+      Add-Type @"
+        using System.Runtime.InteropServices;
+        public static class SampleInput {
+          [StructLayout(LayoutKind.Sequential)] public struct Point { public int X; public int Y; }
+          [DllImport("user32.dll")] public static extern bool SetPhysicalCursorPos(int x, int y);
+          [DllImport("user32.dll")] public static extern bool GetPhysicalCursorPos(out Point point);
+          [DllImport("user32.dll")] public static extern System.IntPtr WindowFromPhysicalPoint(Point point);
+          [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint process);
+          [DllImport("user32.dll")] public static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr context);
+          [DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr window, System.IntPtr after, int x, int y, int width, int height, uint flags);
+          [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, System.UIntPtr extra);
+          [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
+        }
+"@
+      ${action === "click" ? `
+        $null = [SampleInput]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
+        $fixture = [IntPtr]::new([long]${fixtureHandle})
+        [uint32]$owner = 0
+        $null = [SampleInput]::GetWindowThreadProcessId($fixture, [ref]$owner)
+        if ($owner -ne ${painter.pid}) { throw "Could not find the external color window." }
+        if (![SampleInput]::SetWindowPos($fixture, [IntPtr]::new(-1), 20, 100, 175, 125, 0x50)) { throw "Could not reveal the external color window." }
+        if (![SampleInput]::SetPhysicalCursorPos(100, 150)) { throw "Could not place the test pointer." }
+        $point = New-Object SampleInput+Point
+        $null = [SampleInput]::GetPhysicalCursorPos([ref]$point)
+        $null = [SampleInput]::GetWindowThreadProcessId([SampleInput]::WindowFromPhysicalPoint($point), [ref]$owner)
+        if ($owner -ne ${painter.pid}) { throw "The external color window is covered." }
+        [SampleInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+        [SampleInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+      ` : `
+        [SampleInput]::keybd_event(27, 0, 0, [UIntPtr]::Zero)
+        [SampleInput]::keybd_event(27, 0, 2, [UIntPtr]::Zero)
+      `}
+    `), { windowsHide: true }).catch((error) => { throw new Error((error.stderr || error.message).slice(-1100)); });
+    await eyedropper.click();
+    await hint.waitFor();
+    await input("escape");
+    await hint.waitFor({ state: "hidden" });
+    assert.equal(await hex.inputValue(), previous);
+
+    await eyedropper.click();
+    await hint.waitFor();
+    await input("click");
+    await hint.waitFor({ state: "hidden" });
+    assert.equal(await hex.inputValue(), "#245978");
+    await color.locator('[data-tooltip="Selected color #245978"]').waitFor();
+    await color.getByRole("button", { name: "Use color", exact: true }).click();
+    assert.equal(await options.getByRole("textbox", { name: "Block background hex", exact: true }).inputValue(), "#245978");
+    await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
+    console.log("Verified the native eyedropper sampled an external Windows application and Esc preserved the previous color.");
+  } finally {
+    clearTimeout(timeout);
+    if (painter.exitCode === null) {
+      const exited = once(painter, "exit").catch(() => {});
+      painter.kill();
+      await exited;
+    }
+  }
+}

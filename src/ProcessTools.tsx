@@ -77,7 +77,7 @@ function EndProcesses({ items, onClose, onFinished, onAttempted }: {
       </div>
       <footer className="dialog-footer">
         <Button type="button" data-initial-focus disabled={working} onClick={onClose}>{t("Cancel")}</Button>
-        <Button type="button" className="negative" disabled={working} onClick={() => { void end(); }}>
+        <Button type="button" className="alert-confirm" disabled={working} onClick={() => { void end(); }}>
           {items.length === 1 ? t("End process") : t("End {0}", countText(items.length, "process"))}
         </Button>
       </footer>

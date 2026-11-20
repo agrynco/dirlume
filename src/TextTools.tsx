@@ -1,11 +1,11 @@
 import { errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
@@ -26,8 +26,12 @@ import { PathField } from "./PathField";
 const CodeSurface = lazy(() => import("./CodeSurface"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
 
+function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
+  return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
+}
+
 export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, fontSizes, viewerContentWidth, colors,
-  onZoom, onOptions, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+  onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -39,6 +43,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   colors?: Palette;
   onZoom: ZoomViewFont;
   onOptions: () => void;
+  onSwitchMode: () => void;
   position?: MarkdownPosition;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -65,7 +70,14 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const [saving, setSaving] = useState(false);
   const [sudoAction, setSudoAction] = useState<"read" | "save" | null>(null);
   const [deniedWrite, setDeniedWrite] = useState<string | null>(null);
-  const writing = useRef(false);
+  const diskBusy = useRef(false);
+  const diskOperation = useRef(0);
+  const lastDiskContents = useRef<TextDocument | null>(null);
+  const [externalChange, setExternalChange] = useState(false);
+  const [reloadingDisk, setReloadingDisk] = useState(false);
+  const [reloadError, setReloadError] = useState("");
+  const [sourceRevision, setSourceRevision] = useState(0);
+  const [hexRevision, setHexRevision] = useState(0);
   const [confirm, setConfirm] = useState(false);
   const dirty = Boolean(document && normalized(document.text) !== text);
   const markdownSource = document && !dirty ? document.text : text;
@@ -113,30 +125,106 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   reportDirty.current = onDirtyChange;
   useEffect(() => { reportDirty.current(dirty); }, [dirty]);
 
+  function replaceDocument(value: TextDocument) {
+    lastDiskContents.current = value;
+    setExternalChange(false);
+    setDocument(value);
+    setText(normalized(value.text));
+    setReadError("");
+    setError("");
+  }
+
+  const observeDisk = useEffectEvent((value: TextDocument) => {
+    setReadError("");
+    if (sameDiskContents(lastDiskContents.current, value)) return;
+    if (!editing || !document) replaceDocument(value);
+    else {
+      lastDiskContents.current = value;
+      setExternalChange(!sameDiskContents(document, value));
+    }
+  });
+
   useEffect(() => {
-    let cancelled = false;
-    readPlaceText(file).then((value) => {
-      if (!cancelled) {
-        setDocument(value);
-        setText(normalized(value.text));
+    let stopped = false;
+    let reading = false;
+    let timer: number | undefined;
+    let fallback: number | undefined;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void refresh(), 150);
+    };
+    async function refresh() {
+      if (stopped) return;
+      if (reading || diskBusy.current) { schedule(); return; }
+      const operation = diskOperation.current;
+      reading = true;
+      try {
+        const value = await readPlaceText(file);
+        if (!stopped && operation === diskOperation.current) observeDisk(value);
+      } catch (error) {
+        if (!stopped && operation === diskOperation.current) {
+          if (!editing) {
+            lastDiskContents.current = null;
+            setDocument(null);
+          }
+          setReadError(describeError(error));
+        }
+      } finally {
+        reading = false;
+        if (!stopped && operation !== diskOperation.current) schedule();
+        else if (!stopped && !editing && file.place.kind === "local") setHexRevision((revision) => revision + 1);
       }
-    }, (error: unknown) => {
-      if (cancelled) return;
-      setReadError(describeError(error));
-    });
-    return () => { cancelled = true; };
-  }, [file]);
+    }
+    const watch = file.place.kind === "local" ? watchDirectory(file.place.path, schedule, file.name) : undefined;
+    if (watch) {
+      void watch.ready.then(refresh, () => {
+        if (stopped) return;
+        fallback = window.setInterval(schedule, 2000);
+        void refresh();
+      });
+    } else void refresh();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      window.clearInterval(fallback);
+      watch?.stop();
+    };
+  }, [file, editing]);
+
+  function keepEditing() {
+    if (diskBusy.current) return;
+    setExternalChange(false);
+    setReloadError("");
+  }
+
+  async function reloadFromDisk() {
+    if (diskBusy.current) return;
+    diskBusy.current = true;
+    diskOperation.current++;
+    setReloadingDisk(true);
+    setReloadError("");
+    try {
+      replaceDocument(await readPlaceText(file));
+      setSourceRevision((revision) => revision + 1);
+      setSourceStatus({ line: 1, column: 1, canUndo: false, canRedo: false });
+    } catch (error) {
+      setReloadError(describeError(error));
+    } finally {
+      diskBusy.current = false;
+      setReloadingDisk(false);
+    }
+  }
 
   async function write(updated: string, sudoPassword?: string) {
-    if (!document || writing.current || !writable) return;
-    writing.current = true;
+    if (!document || diskBusy.current || !writable) return;
+    diskBusy.current = true;
+    diskOperation.current++;
     setSaving(true);
     setError("");
     if (sudoPassword === undefined) setDeniedWrite(null);
     try {
       const saved = await savePlaceText(file, document, updated, sudoPassword);
-      setDocument(saved);
-      setText(normalized(saved.text));
+      replaceDocument(saved);
       setDeniedWrite(null);
       onSaved();
     } catch (error) {
@@ -145,7 +233,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       if (sudoPassword !== undefined) throw error;
       if (file.place.kind === "ssh" && isPermissionError(message)) setDeniedWrite(updated);
     } finally {
-      writing.current = false;
+      diskBusy.current = false;
       setSaving(false);
     }
   }
@@ -157,7 +245,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   }
 
   function toggleTask({ start, end }: TaskMarker, checked: boolean) {
-    if (writing.current || !writable) return;
+    if (diskBusy.current || !writable) return;
     const updated = markdownSource.slice(0, start) + (checked ? "x" : " ") + markdownSource.slice(end);
     if (editing && dirty) setText(updated);
     else void write(updated);
@@ -212,7 +300,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const forward = action("Forward", "documentForward", () => navigate("forward"), !canGoForward);
   const searchAction = action("Search", "documentSearch", find);
   const hexAction = action("Hex", "viewAsHex", () => setHex(!hex));
-  const fileActions = [...(editing ? [saveAction] : []), closeAction];
+  const switchMode = action(editing ? "Open in Viewer" : "Open in Editor", "switchDocumentMode", onSwitchMode,
+    saving || sudoAction !== null || (!editing && (!writable || !document)));
+  const fileActions = [...(editing ? [saveAction] : []), switchMode, closeAction];
   const selectionActions = [
     ...(editing && sourceVisible ? [
       action("Undo", "documentUndo", () => sourceActions.current?.undo(), saving || !sourceStatus.canUndo),
@@ -238,7 +328,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
         items: syntaxOptions.map((name) => ({ label: name, run: () => setSyntax(name) })) },
     ] }] : []),
   ];
-  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), closeAction];
+  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), switchMode, closeAction];
 
   return (
     <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
@@ -248,7 +338,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest("[role=menubar]")) return;
+      if (target?.closest("[role=menubar], dialog[open]")) return;
       const cancel = shortcuts.cancelText.includes(shortcut);
       if (cancel && target?.hasAttribute("data-history-open")) return;
       const action = [
@@ -259,7 +349,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       event.preventDefault();
       event.stopPropagation();
       if (cancel) (searchOpen && markdownViewer ? closeSearch : close)();
-      else if (action && !action.disabled) action.run();
+      else if (action && !action.disabled && !(action === switchMode && event.repeat)) action.run();
     }}>
       <header className="document-heading">
         <div className="document-menu">
@@ -320,7 +410,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
           : !error && isPermissionError(readError) &&
             <Button type="button" onClick={() => setSudoAction("read")}>{t("Open with sudo…")}</Button>)}
       </div>}
-      {hex ? <HexViewer file={file} onSize={setHexSize} /> :
+      {hex ? <HexViewer file={file} revision={hexRevision} onSize={setHexSize} /> :
         !document && !readError && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
         {preview && !hex && (
@@ -333,7 +423,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
         )}
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
-            <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
+            <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
               fontSize={fontSize} value={text} syntaxTarget={sourceVisible ? syntaxTarget : null} onChange={setText}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax}
               onSyntaxOptions={setSyntaxOptions} />
@@ -348,10 +438,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
         path={path} onClose={() => setSudoAction(null)}
         onConfirm={async (password) => {
           if (sudoAction === "read") {
-            const opened = await readPlaceText(file, password);
-            setDocument(opened);
-            setText(normalized(opened.text));
-            setReadError("");
+            replaceDocument(await readPlaceText(file, password));
           } else if (editing) await save(password);
           else if (deniedWrite !== null) await write(deniedWrite, password);
         }} />}
@@ -359,8 +446,19 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
         <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
-          <Button type="button" className="negative" onClick={onClose}>{t("Discard changes")}</Button>
+          <Button type="button" className="alert-confirm" onClick={onClose}>{t("Discard changes")}</Button>
         </footer>
+      </Dialog>}
+      {active && externalChange && !confirm && !saving && <Dialog title={t("File changed on disk")} tone="warning" onClose={keepEditing}
+        footer={<>
+          <Button type="button" data-initial-focus disabled={reloadingDisk} onClick={keepEditing}>{t("Keep editing")}</Button>
+          <Button type="button" className="alert-confirm" disabled={reloadingDisk} onClick={() => void reloadFromDisk()}>{t("Reload from disk")}</Button>
+        </>}>
+        <div className="dialog-body">
+          <p><Message text="{0} was changed outside Dirlume."><strong>{file.name}</strong></Message></p>
+          <p>{t(dirty ? "Reloading will discard your unsaved edits." : "Reload to open the version currently on disk.")}</p>
+          {reloadError && <p className="dialog-error" role="alert">{errorText(reloadError)}</p>}
+        </div>
       </Dialog>}
     </section>
   );
@@ -683,7 +781,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
         </div>
       )}
     </Dialog>
-    {confirm && <Dialog title={t("Unsaved changes")} onClose={() => { if (!saving) setConfirm(false); }}>
+    {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => { if (!saving) setConfirm(false); }}>
       <div className="dialog-body transfer-body">
         {dirty.map((side) => <fieldset className="comparison-save" key={side} disabled={saving}>
           <legend>{t(side === "left" ? "Left file" : "Right file")} · {files[side].name}</legend>
@@ -702,7 +800,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       </div>
       <footer className="dialog-footer">
         <Button type="button" data-initial-focus disabled={saving} onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
-        <Button type="button" disabled={saving} onClick={onClose}>{t("Discard changes")}</Button>
+        <Button type="button" className="alert-confirm" disabled={saving} onClick={onClose}>{t("Discard changes")}</Button>
         <Button type="button" className="primary" disabled={saving || dirty.some((side) => destinations[side]?.trim() === "")}
           onClick={() => { void saveAndClose(); }}>{t(saving ? "Saving…" : "Save and close")}</Button>
       </footer>

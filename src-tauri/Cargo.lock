@@ -1513,6 +1513,7 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.22.1",
+ "block2",
  "cap-std",
  "clap",
  "clipboard-rs",
@@ -1526,6 +1527,7 @@ dependencies = [
  "keyring",
  "libc",
  "notify",
+ "objc2-app-kit",
  "open",
  "openssh-sftp-client",
  "png",
@@ -1555,6 +1557,8 @@ dependencies = [
  "uuid",
  "windows 0.62.2",
  "windows-sys 0.61.2",
+ "x11rb",
+ "zbus",
  "zeroize",
  "zip",
 ]
@@ -7097,8 +7101,10 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -8631,6 +8637,7 @@ dependencies = [
  "serde_repr",
  "sha1 0.10.7",
  "static_assertions",
+ "tokio",
  "tracing",
  "uds_windows",
  "windows-sys 0.52.0",
