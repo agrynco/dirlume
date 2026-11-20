@@ -32,6 +32,14 @@ pub struct Entry {
     pub(crate) owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) hard_links: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) created: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) accessed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) changed: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) allocated: Option<u64>,
 }
 
 #[derive(Default)]
@@ -76,6 +84,10 @@ impl Entry {
             size,
             owner: None,
             hard_links: None,
+            created: None,
+            accessed: None,
+            changed: None,
+            allocated: None,
             modified: modified.and_then(|value| {
                 value
                     .duration_since(UNIX_EPOCH)

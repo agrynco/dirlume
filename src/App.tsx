@@ -39,6 +39,9 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
+import { SortCriteriaDialog, SortMenu } from "./FileSortMenu";
+import { defaultSortCriteria, sortMode, sortModes, type SortMode } from "./fileSort";
+import { useFileSortMetadata } from "./useFileSortMetadata";
 import { panelModeIds, panelModeName, type PanelModeId } from "./panelModes";
 import { AppearancePicker } from "./AppearancePicker";
 import type { AppearancePick } from "./appearancePick";
@@ -52,7 +55,7 @@ import {
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand,
+import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
@@ -106,6 +109,8 @@ type Modal =
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
+  | { kind: "sortMenu"; side: Side }
+  | { kind: "sortCriteria"; side: Side; mode: SortMode }
   | { kind: "about" | "commandHistory" | "mcp" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
@@ -227,10 +232,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
   const canSwapPanes = !panes.left.loading && !panes.right.loading && !busy;
-  const entries = useMemo(() => ({
-    left: visibleEntries(panes.left, preferences.hidden),
-    right: visibleEntries(panes.right, preferences.hidden),
-  }), [panes, preferences.hidden]);
+  const showingSortMenu = modal?.kind === "sortMenu" ? modal.side : undefined;
+  const leftSort = useFileSortMetadata(panes.left, preferences.sortSettings, showingSortMenu === "left");
+  const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
+  const leftCanSort = leftSort.canSort;
+  const rightCanSort = rightSort.canSort;
+  const entries = {
+    left: useMemo(() => visibleEntries(panes.left, preferences.hidden, preferences.sortSettings, leftCanSort,
+      leftSort.metadata, leftSort.descriptions, leftSort.pending),
+    [panes.left, preferences.hidden, preferences.sortSettings, leftCanSort, leftSort.metadata, leftSort.descriptions, leftSort.pending]),
+    right: useMemo(() => visibleEntries(panes.right, preferences.hidden, preferences.sortSettings, rightCanSort,
+      rightSort.metadata, rightSort.descriptions, rightSort.pending),
+    [panes.right, preferences.hidden, preferences.sortSettings, rightCanSort, rightSort.metadata, rightSort.descriptions, rightSort.pending]),
+  };
+  const sorts = { left: leftSort, right: rightSort };
   const currentRow = entries[active][paneCursorIndex(pane, entries[active])];
   const current = currentRow?.name === ".." ? undefined : currentRow;
   const currentItem = paneItem(pane, current);
@@ -1192,10 +1207,31 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (place && !loading) void load(side, place, "refresh");
   }
 
-  function sort(side: Side, column: SortColumn) {
+  function sort(side: Side, column: SortColumn, fromHeading = false) {
+    const mode = sortMode(column);
+    const catalog = panes[side].place?.kind === "connections";
+    if ((!canSelectPanelMode(side) && !(fromHeading && catalog)) || !sorts[side].canSort(mode)) return;
     updatePane(side, (pane) => ({
-      ...pane, sort: { column, asc: column !== pane.sort.column || !pane.sort.asc },
+      ...pane, sort: { ...pane.sort, column, asc: mode === sortMode(pane.sort.column) ? !pane.sort.asc : sortModes[mode].asc },
     }));
+  }
+
+  function showSortMenu(side: Side) {
+    if (canSelectPanelMode(side)) setModal({ kind: "sortMenu", side });
+  }
+
+  function changeSortDirection(side: Side, asc: boolean) {
+    updatePane(side, (pane) => ({ ...pane, sort: { ...pane.sort, asc } }));
+  }
+
+  function toggleSortPriority(side: Side, field: "directoriesFirst" | "markedFirst" | "groups") {
+    if (!canSelectPanelMode(side)) return;
+    updatePane(side, (pane) => ({ ...pane, sort: { ...pane.sort, [field]: !pane.sort[field] } }));
+  }
+
+  function closeSortMenu(side: Side) {
+    setModal(null);
+    requestAnimationFrame(() => focus(side));
   }
 
   async function batch(items: string[], action: (name: string) => Promise<void>) {
@@ -1616,6 +1652,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function perform(command: Command, groupStep = 0) {
+    if (command === "sortMenu") {
+      showSortMenu(active);
+      return;
+    }
+    if (command === "sortGroups" || command === "sortMarkedFirst" || command === "sortDirectoriesFirst") {
+      toggleSortPriority(active, command === "sortGroups" ? "groups" : command === "sortMarkedFirst" ? "markedFirst" : "directoriesFirst");
+      return;
+    }
+    const sortCriterion = commandSortMode(command);
+    if (sortCriterion) {
+      sort(active, sortCriterion);
+      return;
+    }
     const mode = commandPanelMode(command);
     if (mode) {
       setPanelMode(active, mode);
@@ -1875,6 +1924,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (activeDocument !== null) return;
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
     if (command && (commandPanelMode(command) || (folderGroupCommand(command)?.add === false)) &&
         (inField || target.closest("[role=menu]") || (commandPanelMode(command) && !canSelectPanelMode(active)))) return;
     if (!command || command === "quickSearch") {
@@ -1898,7 +1948,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
     if (!event.repeat || (!["hidden", "attributes", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
-        !folderGroupCommand(command) && !commandPanelMode(command))) {
+        !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
       const groupStep = onFiles && shortcut === "ArrowLeft" && command === "firstRow" ? -rowsPerGroup.current[active] :
         onFiles && shortcut === "ArrowRight" && command === "lastRow" ? rowsPerGroup.current[active] : 0;
       perform(command, groupStep);
@@ -1962,7 +2012,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           disabled: !canSelectPanelMode(side),
           run: () => setPanelMode(side, id),
         })),
-        { ...menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"), separatorBefore: true },
+        { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
+        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
@@ -2055,6 +2106,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <Pane key={side} side={side} active={active === side} layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
+            sortAvailable={!sorts[side].pending && sorts[side].canSort(sortMode(panes[side].sort.column))} sortPending={sorts[side].pending}
             onGroupRows={(rows) => { rowsPerGroup.current[side] = rows; }}
             rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
               ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
@@ -2101,7 +2153,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               const item = paneItem(panes[side], entry);
               if (item) revealResult(side, item.place, item.entry.name);
             }}
-            onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
+            onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column, true)}
             onRemote={() => openConnections(side, "remote")} onFtp={() => openConnections(side, "ftp")}
             onSsh={() => openConnections(side, "ssh")} onSmb={() => openConnections(side, "smb")}
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
@@ -2389,6 +2441,21 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       )}
       {modal?.kind === "attributes" && <AttributesDialog item={modal.item} onClose={() => setModal(null)}
         onApplied={() => { refresh("left"); refresh("right"); }} />}
+      {modal?.kind === "sortMenu" && <SortMenu sort={panes[modal.side].sort} mode={sortMode(panes[modal.side].sort.column)}
+        bindings={shortcuts} available={sorts[modal.side].canSort} onClose={() => closeSortMenu(modal.side)}
+        onMode={(mode) => { sort(modal.side, mode); closeSortMenu(modal.side); }}
+        onDirection={(asc) => changeSortDirection(modal.side, asc)}
+        onToggle={(field) => toggleSortPriority(modal.side, field)}
+        onCriteria={(mode) => setModal({ kind: "sortCriteria", side: modal.side, mode })} />}
+      {modal?.kind === "sortCriteria" && <SortCriteriaDialog mode={modal.mode}
+        criteria={preferences.sortSettings.criteria[modal.mode] ?? defaultSortCriteria(modal.mode)}
+        onSave={(criteria) => {
+          setPreferences((before) => ({ ...before, sortSettings: {
+            ...before.sortSettings, criteria: { ...before.sortSettings.criteria, [modal.mode]: criteria },
+          } }));
+          setModal({ kind: "sortMenu", side: modal.side });
+        }}
+        onClose={() => setModal({ kind: "sortMenu", side: modal.side })} />}
       {modal?.kind === "folderShortcuts" && <FolderShortcutsDialog screen={modal.screen} shortcuts={folderShortcuts}
         currentFolder={currentFolderShortcut(modal.side)} bridgeDirectory={preferences.kswitcher} bindings={shortcuts}
         onScreen={(screen) => setModal({ ...modal, screen })}
