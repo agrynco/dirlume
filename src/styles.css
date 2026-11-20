@@ -334,6 +334,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .main-menu-dropdown kbd { flex: none; white-space: nowrap; }
 .main-menu-dropdown button:focus-visible { outline-offset: -2px; }
 .main-menu-dropdown button[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: default; }
+.main-menu-separator { margin: 4px 2px; border-top: 1px solid var(--line); }
 .sudo-body { display: grid; gap: 8px; }
 .sudo-body small { color: var(--dialog-muted); }
 .brand { gap: 9px; }
