@@ -375,7 +375,9 @@ export function documentPath({ place, name }: NamedFile) {
     const [host, ...segments] = uncParts(place.path);
     if (host && segments.length) return "smb://" + host + "/" + [...segments, name].map(encodeURIComponent).join("/");
   }
-  return placePath(place);
+  const folder = placePath(place);
+  const separator = place.kind === "local" && windowsClient ? "\\" : "/";
+  return folder.replace(/[\\/]$/, "") + separator + name;
 }
 
 export function smbLocation(result: Exclude<SmbConnection, { kind: "credentials_required" }>): { place: SmbPlace; listing: Listing } {

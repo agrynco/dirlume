@@ -1,5 +1,5 @@
 import { t } from "./i18n";
-import { createContext, isValidElement, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode } from "react";
+import { createContext, isValidElement, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode, type RefObject } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
@@ -7,12 +7,10 @@ import { toString } from "mdast-util-to-string";
 import type { Parent, PhrasingContent, Root } from "mdast";
 import { visit } from "unist-util-visit";
 import { api, describeError, type NamedFile } from "./api";
-import { isMarkdownFile } from "./markdown";
+import { isMarkdownFile, type MarkdownPosition, type OpenMarkdownLink } from "./markdown";
 import { MermaidDiagram } from "./MermaidDiagram";
 import type { Palette } from "./appearance";
 
-export type MarkdownAnchor = { fragment: string };
-export type OpenMarkdownLink = (file: NamedFile, newTab: boolean, anchor?: MarkdownAnchor) => void;
 export type TaskMarker = { start: number; end: number };
 type Task = TaskMarker & { label: string };
 const TaskContext = createContext<Task | null>(null);
@@ -169,11 +167,14 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
   return { place: { ...place, segments }, name };
 }
 
-export function MarkdownPreview({ file, source, active, anchor, light, colors, writable, saving, htmlFormatting, onToggleTask, onOpenDocument, onError }: {
+export function MarkdownPreview({ file, source, active, position, scroll, onContent, light, colors, writable, saving, htmlFormatting,
+  onToggleTask, onOpenDocument, onError }: {
   file: NamedFile;
   source: string;
   active: boolean;
-  anchor: MarkdownAnchor | null;
+  position?: MarkdownPosition;
+  scroll: RefObject<HTMLDivElement | null>;
+  onContent: (element: HTMLDivElement | null) => void;
   light: boolean;
   colors?: Palette;
   writable: boolean;
@@ -183,26 +184,28 @@ export function MarkdownPreview({ file, source, active, anchor, light, colors, w
   onOpenDocument: OpenMarkdownLink;
   onError: (message: string) => void;
 }) {
-  const preview = useRef<HTMLDivElement>(null);
-  const handledAnchor = useRef<MarkdownAnchor | null>(null);
+  const handledPosition = useRef<MarkdownPosition | undefined>(undefined);
   const prefix = "dirlume-markdown-" + useId() + "-";
 
   function scrollToFragment(fragment: string) {
     if (!fragment) {
-      preview.current?.scrollTo({ top: 0 });
+      scroll.current?.scrollTo({ top: 0 });
       return;
     }
-    const headings = preview.current?.querySelectorAll<HTMLElement>("[id]");
+    const headings = scroll.current?.querySelectorAll<HTMLElement>("[id]");
     const target = Array.from(headings ?? []).find((element) => element.id === prefix + fragment || element.id === fragment);
-    target?.scrollIntoView({ block: "start" });
+    if (target && scroll.current) {
+      scroll.current.scrollTop += target.getBoundingClientRect().top - scroll.current.getBoundingClientRect().top;
+    }
   }
 
   useLayoutEffect(() => {
-    if (active && anchor && anchor !== handledAnchor.current) {
-      handledAnchor.current = anchor;
-      scrollToFragment(anchor.fragment);
+    if (active && position && position !== handledPosition.current) {
+      handledPosition.current = position;
+      if ("fragment" in position) scrollToFragment(position.fragment);
+      else scroll.current?.scrollTo({ top: position.scrollTop });
     }
-  }, [active, anchor, prefix]);
+  }, [active, position, prefix, scroll]);
 
   async function followLink(href: string, newTab: boolean) {
     onError("");
@@ -215,11 +218,11 @@ export function MarkdownPreview({ file, source, active, anchor, light, colors, w
       const fragment = hash < 0 ? undefined : decodeURIComponent(href.slice(hash + 1));
       const destination = (hash < 0 ? href : href.slice(0, hash)).split("?")[0];
       if (!destination) {
-        if (fragment !== undefined) scrollToFragment(fragment);
+        if (fragment !== undefined) onOpenDocument(file, false, { fragment });
         return;
       }
       const linked = await resolveFileLink(file, destination);
-      if (!preview.current) return;
+      if (!scroll.current) return;
       const markdown = isMarkdownFile(linked.name);
       const target = markdown || fragment !== undefined ? { fragment: fragment ?? "" } : undefined;
       onOpenDocument(linked, newTab || !markdown || saving, target);
@@ -229,11 +232,13 @@ export function MarkdownPreview({ file, source, active, anchor, light, colors, w
   }
 
   return (
-    <div ref={preview} className="markdown">
-      <PreviewContext.Provider value={{ writable, saving, light, colors, onToggleTask, followLink }}>
-        <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
-          skipHtml components={components}>{source}</Markdown>
-      </PreviewContext.Provider>
+    <div ref={scroll} className="markdown" tabIndex={0}>
+      <div className="markdown-content" ref={onContent}>
+        <PreviewContext.Provider value={{ writable, saving, light, colors, onToggleTask, followLink }}>
+          <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
+            skipHtml components={components}>{source}</Markdown>
+        </PreviewContext.Provider>
+      </div>
     </div>
   );
 }

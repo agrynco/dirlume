@@ -184,7 +184,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
 
     await remoteRow("guide.md").dblclick();
     await page.getByRole("heading", { name: "FTP Markdown", exact: true }).waitFor();
-    const documentAddress = page.locator(".text-window:not([hidden]) .text-toolbar > span");
+    const documentAddress = page.locator(".text-window:not([hidden]) .document-heading h2");
     const ftpOrigin = "ftp://127.0.0.1:" + ftpPort;
     assert.equal(await documentAddress.textContent(), ftpOrigin + "/start/guide.md");
     await page.getByRole("checkbox", { name: "FTP task", exact: true }).click();
@@ -214,7 +214,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("F2");
     await page.waitForFunction(() => {
       const active = document.querySelector(".text-window:not([hidden])");
-      return active?.querySelector("[role=alert]") || active?.querySelector(".document-encoding")?.textContent.trim() === "UTF8";
+      return active && (active.querySelector("[role=alert]") || !active.querySelector(".document-modified"));
     });
     const saveError = page.locator(".text-window:not([hidden])").getByRole("alert");
     if (await saveError.count()) throw new Error(await saveError.innerText());
