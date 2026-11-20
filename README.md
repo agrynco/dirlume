@@ -38,6 +38,8 @@ Use **Search settings** above the Options tree to find a setting or shortcut. **
 
 Use **Pick an element** beside **Search settings** to find the appearance controls for something visible on screen. Options hides while you point at the element. Click the highlight to return to Options with its colors, fonts, and sizes together. Press **Esc** to return to the same page and keep your draft. **Picker history** lists successful picks by local date and reopens them with current values. The history stores appearance categories and states.
 
+In a color dialog, choose **Pick a color from the screen** and click a visible pixel in any application. **Use color** accepts the sample. **Esc** cancels the sample and keeps the previous color. Wayland sessions use the desktop's color picker portal.
+
 In **Options → Keyboard shortcuts**, use **Add shortcut** to give a command another binding. Click an existing binding to replace it or its **×** to remove it. If the shortcut is already assigned in the same context, choose **Reassign shortcut** to move just that binding, or **Choose another shortcut** to keep entering a different combination. Commands in separate contexts can share a shortcut.
 
 Choose a **Shortcut scheme** to switch the full set of bindings. **New scheme** copies the selected scheme. Editing **Default** creates a personal scheme, and existing custom shortcuts move to **My shortcuts** on upgrade. **Restore defaults** resets the selected personal scheme. Choose **Apply** or **Done** to use the selected scheme and save your changes.

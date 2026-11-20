@@ -246,6 +246,7 @@ export const api = {
     initialPage?: import("./featureOptions").FeaturePage) =>
     invoke<void>("open_tool_window", { title, ...size, comparison, initialPage }),
   setAppearancePicker: (picking: boolean) => invoke<void>("set_appearance_picker", { picking }),
+  pickScreenColor: () => invoke<string | null>("pick_screen_color"),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),

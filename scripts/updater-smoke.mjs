@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -51,6 +52,8 @@ const bundle = windows ? "nsis" : linux ? "appimage" : "app";
 const extension = windows ? "-setup.exe" : linux ? ".AppImage" : ".app.tar.gz";
 let server;
 let child;
+let macPainter;
+let macInput;
 
 function run(file, args, options = {}) {
   const result = spawnSync(file, args, { stdio: "inherit", ...options });
@@ -103,6 +106,7 @@ function startApp(executable) {
 }
 
 async function reportedVersion() {
+  const inputs = new Set();
   for (let attempt = 0; attempt < 180; attempt++) {
     try {
       const result = JSON.parse(await readFile(resultFile, "utf8"));
@@ -110,6 +114,19 @@ async function reportedVersion() {
       return result.version;
     } catch (error) {
       if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+    }
+    if (macInput) {
+      const phase = await readFile(phaseFile, "utf8").catch((error) => {
+        if (error.code !== "ENOENT") throw error;
+        return "";
+      });
+      const input = phase.endsWith("the native screen color cancellation") ? "escape" :
+        phase.endsWith("the external screen color") ? "click" : undefined;
+      if (input && !inputs.has(input)) {
+        inputs.add(input);
+        await delay(600);
+        run(macInput, [input]);
+      }
     }
     await delay(500);
   }
@@ -140,6 +157,23 @@ try {
     executable = join(install, `${product}.app`, "Contents", "MacOS", "dirlume");
   }
   assert.ok((await stat(executable)).isFile());
+  if (process.platform === "darwin" && process.env.CI === "true") {
+    const helper = join(work, "screen-color-fixture");
+    run("swiftc", ["scripts/screen-color-macos.swift", "-o", helper]);
+    const access = spawnSync(helper, ["preflight"], { stdio: "inherit" });
+    if (access.status === 0) {
+      macPainter = spawn(helper, [], { stdio: ["ignore", "pipe", "inherit"] });
+      const [output] = await Promise.race([once(macPainter.stdout, "data"), delay(10000).then(() => {
+        throw new Error("The macOS screen color fixture did not open.");
+      })]);
+      assert.match(String(output), /ready/);
+      macInput = helper;
+    } else if (access.status === 78) {
+      console.log("The macOS runner does not permit interactive input for the external color fixture.");
+    } else {
+      throw access.error ?? new Error("The macOS input preflight failed.");
+    }
+  }
 
   let bytes = await readFile(after.path);
   let reject = true;
@@ -167,6 +201,7 @@ try {
       result: resultFile, phase: phaseFile, expected: nextVersion, reject, metadata,
       replacement_failure: replacementFailure,
       check_clipboard: process.env.CI === "true" && !target.endsWith("-portable"),
+      check_screen_color: !!macInput,
     }));
     child = startApp(executable);
     const version = await Promise.race([
@@ -180,6 +215,7 @@ try {
     console.log(reject ? `Rejected a modified ${target} package.` : replacementFailure
       ? `Restored ${installedVersion} after a replacement failure on ${target}.`
       : `Installed ${nextVersion} over ${installedVersion} and restored saved pane settings on ${target}.`);
+    if (macInput && !reject) console.log("Verified macOS screen color sampling from another app and Escape cancellation.");
   }
   await exercise(executable, target, after.signature, { tampered: true });
   await exercise(executable, target, after.signature);
@@ -214,6 +250,11 @@ try {
   }
 } finally {
   child?.kill();
+  if (macPainter?.exitCode === null && macPainter.pid) {
+    const stopped = once(macPainter, "exit");
+    macPainter.kill();
+    await stopped;
+  }
   server?.close();
   const resolvedWork = await realpath(work);
   assert.equal(dirname(resolvedWork), scratch);

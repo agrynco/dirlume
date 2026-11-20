@@ -27,6 +27,7 @@ import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
 import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -2138,6 +2139,7 @@ try {
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await testSystemTheme(page);
+  await testScreenColor(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

@@ -302,6 +302,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Align center": ["Посередині", "По центру"],
   "Align right": ["Праворуч", "Справа"],
   "Could not pick a color from the screen.": ["Не вдалося зчитати колір з екрана.", "Не удалось считать цвет с экрана."],
+  "Click a visible color anywhere on the screen. Press Esc to cancel.": ["Натисніть на потрібний колір будь-де на екрані. Esc скасовує вибір.", "Нажмите на нужный цвет в любом месте экрана. Esc отменяет выбор."],
   "Filter this folder": ["Фільтрувати цю папку", "Фильтровать эту папку"],
   "Close filter": ["Закрити фільтр", "Закрыть фильтр"],
   "Link": ["Посилання", "Ссылка"],

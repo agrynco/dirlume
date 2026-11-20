@@ -1815,6 +1815,7 @@ pub fn run() {
         crate::file_clipboard::clipboard_files,
         crate::file_clipboard::copy_path,
         crate::file_clipboard::clipboard_text,
+        crate::screen_color::pick_screen_color,
         crate::file_clipboard::dropped_files,
         #[cfg(windows)]
         crate::windows_shell::windows_item_menu,

@@ -36,6 +36,8 @@ mod processes;
 mod protocol;
 #[cfg(feature = "desktop")]
 mod remote_transfer;
+#[cfg(feature = "desktop")]
+mod screen_color;
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "desktop")]
