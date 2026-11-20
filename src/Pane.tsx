@@ -27,6 +27,8 @@ interface PaneProps {
   layout: PanelLayout;
   modeId: PanelModeId;
   mode: PanelMode;
+  sortAvailable: boolean;
+  sortPending: boolean;
   onGroupRows: (rows: number) => void;
   showHidden: boolean;
   pane: PaneState;
@@ -105,7 +107,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, layout, modeId, mode, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
+export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo }: PaneProps) {
@@ -494,7 +496,7 @@ export function Pane({ side, active, layout, modeId, mode, onGroupRows, showHidd
         </label>
       )}
       <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks}
-        visibility={visibility} sort={pane.sort} onSort={onSort}
+        visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
         onVisibility={(column, visible) => {
           const next = { ...visibility, [column]: visible };
           setModeVisibility((before) => ({ ...before, [layoutMode]: next }));
@@ -591,7 +593,7 @@ export function Pane({ side, active, layout, modeId, mode, onGroupRows, showHidd
           <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
             shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
         </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
-          search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
+          sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
         {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
           <span className="pane-free-full">{freeLabel}</span>
           <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>

@@ -1,5 +1,6 @@
 import type { FtpPlace, NamedFile, Place } from "./api";
 import { reportFrontendError } from "./diagnostics";
+import { readFileSort } from "./fileSort";
 import { closeSearchResults, emptyPane, type PaneState, type Side } from "./panes";
 
 export type DocumentWindow = { id: number; file: NamedFile; editing: boolean };
@@ -47,7 +48,7 @@ export function readWorkspace(): Workspace | null {
 }
 
 export function restorePane(saved?: SavedPane): PaneState {
-  if (!saved || !isLocal(saved.place)) return emptyPane;
+  if (!saved || !isLocal(saved.place)) return { ...emptyPane, sort: readFileSort(saved?.sort) };
   const history = Array.isArray(saved.history) ? saved.history.filter(isLocal) : [saved.place];
   const position = Number.isInteger(saved.position) && saved.position >= 0 && saved.position < history.length
     ? saved.position : history.findIndex(({ path }) => path === saved.place?.path);
@@ -56,7 +57,7 @@ export function restorePane(saved?: SavedPane): PaneState {
     selected: typeof saved.selected === "string" ? saved.selected : null,
     marked: Array.isArray(saved.marked) ? saved.marked.filter((name) => typeof name === "string") : [],
     filter: typeof saved.filter === "string" ? saved.filter : "",
-    sort: ["name", "size", "modified", "time"].includes(saved.sort?.column) ? saved.sort : emptyPane.sort,
+    sort: readFileSort(saved.sort),
   };
 }
 

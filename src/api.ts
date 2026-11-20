@@ -1,7 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
 
-export interface Entry {
+export interface Entry extends Partial<PanelMetadata> {
   name: string;
   directory: boolean;
   link: boolean;
@@ -10,8 +10,7 @@ export interface Entry {
   size: number | null;
   modified: number | null;
   connection?: SavedConnection;
-  owner?: string | null;
-  hardLinks?: number | null;
+  description?: string | null;
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -30,14 +29,17 @@ export interface FileAttributes {
   mode: string | null;
 }
 
+export type SortMetadataField = "created" | "accessed" | "changed" | "allocated" | "streamCount" | "streamSize";
+
 export interface PanelMetadataRequest {
   directory: string;
   name: string;
   owner: boolean;
   links: boolean;
+  sortFields?: SortMetadataField[];
 }
 
-export interface PanelMetadata {
+export interface PanelMetadata extends Partial<Record<SortMetadataField, number | null>> {
   owner: string | null;
   hardLinks: number | null;
 }
@@ -267,6 +269,7 @@ export const api = {
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
   processIcons: (ids: ProcessId[]) => invoke<(string | null)[]>("process_icons", { ids }),
+  streamSortSupported: (directory: string) => invoke<boolean>("stream_sort_supported", { directory }),
   panelMetadata: (items: PanelMetadataRequest[]) => invoke<PanelMetadata[]>("panel_metadata", { items }),
   fileIcons: (items: { directory: string; name: string }[]) => invoke<(string | null)[]>("file_icons", { items }),
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),

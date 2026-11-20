@@ -1440,3 +1440,19 @@ button.color-swatch {
 .panel-mode-field-actions .icon-button { width: 28px; min-width: 0; padding: 0; }
 .shortcut-capture { display: grid; gap: 4px; }
 .shortcut-capture label { display: flex; align-items: center; gap: 4px; }
+
+.sort-menu { gap: 6px; }
+.sort-menu-list, .sort-menu-modes { display: grid; grid-template-columns: 1fr; gap: 1px; min-width: 0; }
+.sort-menu-list button { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; gap: 6px; padding: 2px 7px; text-align: start; min-height: 24px; }
+.sort-menu-list button[aria-disabled=true] { opacity: .55; cursor: default; }
+.sort-menu-list button[aria-checked=true] { color: var(--accent); }
+.sort-menu-marker svg { width: 1rem; height: 1rem; }
+.sort-mode-note { color: var(--muted); margin: 3px 0; }
+.sort-menu-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.sort-sequence { gap: 8px; align-items: start; }
+.sort-sequence .sort-sequence-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: end; }
+.sort-sequence-row label { display: grid; gap: 4px; min-width: 0; }
+.sort-sequence-row :is(input, select) { width: 100%; min-width: 0; }
+.sort-sequence-row > p { grid-column: 1 / -1; }
+.sort-sequence-actions { display: flex; gap: 2px; }
+.sort-sequence-actions .icon-button { min-width: 25px; width: 27px; padding: 0; }

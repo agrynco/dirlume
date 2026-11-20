@@ -85,6 +85,27 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     chord("Left", 3);
     await waitFor("the restored Full panel mode", () => panel.dataset.panelMode === "full");
   }
+  async function checkFileSort() {
+    const pane = await waitFor("the file pane for sorting", () => document.querySelector('#left-files[aria-busy="false"]'));
+    const send = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
+      key, bubbles: true, cancelable: true, ...modifiers,
+    }));
+    pane.focus();
+    send(pane, "F12", { ctrlKey: true });
+    const popup = await waitFor("the Sort by menu", () => document.querySelector(".sort-menu"));
+    const entries = popup.querySelectorAll("[data-sort-mode]");
+    if (entries.length !== 15 || entries[0].dataset.sortMode !== "name" || entries[14].dataset.sortMode !== "streamSize") {
+      throw new Error("The Sort by menu omitted a sort mode.");
+    }
+    const current = popup.querySelector('button[data-sort-mode="name"]');
+    if (current.getAttribute("aria-checked") !== "true") throw new Error("Name was not the initial selection.");
+    send(current, "-");
+    await waitFor("descending file name order", () => current.getAttribute("aria-label").includes("Descending"));
+    send(current, "+");
+    await waitFor("ascending file name order", () => current.getAttribute("aria-label").includes("Ascending"));
+    send(current, "Escape");
+    await waitFor("focus back in the file pane", () => !document.querySelector(".sort-menu") && document.activeElement === pane);
+  }
   async function checkDocumentMode() {
     const fileName = "document-mode-fixture.txt";
     const key = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
@@ -187,6 +208,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       locations.click();
       await checkHeaderMenus();
       await checkPanelModes();
+      await checkFileSort();
       if (fixtureDirectory) await checkDocumentMode();
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();

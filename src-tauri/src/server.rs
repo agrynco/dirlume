@@ -141,13 +141,31 @@ fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
             file.then_some(metadata.len()),
             metadata.modified().ok().map(|time| time.into_std()),
         );
+        let mut item = item;
+        item.created = metadata.created().ok().and_then(|time| {
+            time.into_std()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|value| value.as_secs())
+        });
+        item.accessed = metadata.accessed().ok().and_then(|time| {
+            time.into_std()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|value| value.as_secs())
+        });
         #[cfg(unix)]
-        let item = {
-            let mut item = item;
+        {
             item.owner = Some(metadata.uid().to_string());
             item.hard_links = (file && !link).then(|| metadata.nlink());
-            item
-        };
+            item.changed = Some(
+                metadata
+                    .ctime()
+                    .saturating_mul(10_000_000)
+                    .saturating_add(metadata.ctime_nsec() / 100),
+            );
+            item.allocated = metadata.blocks().checked_mul(512);
+        }
         entries.push(item);
     }
     Ok(RemoteListing { entries, omitted })

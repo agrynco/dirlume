@@ -7,6 +7,23 @@ import { folderGroups, type FolderGroup } from "./folderShortcuts";
 import { api, windowsClient, type QuickLocation } from "./api";
 import { defaultPanelModes, isPanelMode, panelModeDigits, panelModeIds, panelModeNames, readPanelModes, type PanelModeId, type PanelModes } from "./panelModes";
 
+import { defaultSortSettings, isSortMode, readSortSettings, sortModeIds, sortModes, type SortMode, type SortSettings } from "./fileSort";
+
+type SortModeCommand = `sortMode-${SortMode}`;
+const sortModeCommands = Object.fromEntries(sortModeIds.map((mode) =>
+  [sortModeCommand(mode), { label: "Sort by {0}", key: sortModes[mode].key }],
+)) as Record<SortModeCommand, { label: string; key: string }>;
+
+export function sortModeCommand(mode: SortMode): SortModeCommand {
+  return `sortMode-${mode}`;
+}
+
+export function commandSortMode(command: Command): SortMode | undefined {
+  if (!command.startsWith("sortMode-")) return;
+  const mode = command.slice("sortMode-".length);
+  if (isSortMode(mode)) return mode;
+}
+
 type FolderGroupCommand = `addFolderGroup${FolderGroup}` | `openFolderGroup${FolderGroup}`;
 export type PanelModeCommand = `panelMode-${PanelModeId}`;
 const panelModeCommands = Object.fromEntries(panelModeIds.map((id) =>
@@ -138,6 +155,15 @@ export const commands = {
   addFolderShortcut: { label: "Bookmark current folder in group 8", key: "Ctrl+Shift+F8" },
   ...folderGroupCommands,
   ...panelModeCommands,
+  ...sortModeCommands,
+  sortMenu: { label: "Sort modes", key: "Ctrl+F12" },
+  sortGroups: { label: "Use sort groups", key: "" },
+  sortMarkedFirst: { label: "Show selected first", key: "Shift+F12" },
+  sortDirectoriesFirst: { label: "Show directories first", key: "" },
+  sortAscending: { label: "Sort ascending", key: "+" },
+  sortDescending: { label: "Sort descending", key: "-" },
+  sortReverse: { label: "Reverse sort direction", key: "*" },
+  sortEditCriteria: { label: "Edit sort tie-breakers", key: "F4" },
   pickerAddFolder: { label: "Add a folder shortcut from the picker", key: "Insert" },
   pickerEditFolder: { label: "Edit the selected folder shortcut", key: "F4" },
   pickerRemoveFolder: { label: "Remove the selected folder shortcut", key: "Delete" },
@@ -151,6 +177,8 @@ export type ShortcutScheme = { id: string; name: string; bindings: Bindings };
 export type Provider = "server" | "kswitcher";
 
 const alternateDefaults: Partial<Record<Command, { oldCommand: string; key: string }>> = {
+  sortAscending: { oldCommand: "sortAscendingAlternate", key: "Shift++" },
+  sortReverse: { oldCommand: "sortReverseAlternate", key: "Shift+*" },
   firstRow: { oldCommand: "firstRowAlternate", key: "Home" },
   lastRow: { oldCommand: "lastRowAlternate", key: "End" },
   refresh: { oldCommand: "refreshAlternate", key: "" },
@@ -167,6 +195,8 @@ export function commandLabel(command: Command) {
   const folder = folderGroupCommand(command);
   const drive = /^drive([A-Z])Sources$/.exec(command)?.[1];
   if (drive) return t(commands[command].label, `${drive}:`);
+  const sort = commandSortMode(command);
+  if (sort) return t(commands[command].label, t(sortModes[sort].label).toLocaleLowerCase());
   const mode = commandPanelMode(command);
   if (mode) return t(commands[command].label, t(panelModeNames[mode]));
   return folder ? t(commands[command].label, folder.group) : t(commands[command].label);
@@ -187,6 +217,7 @@ export function commandScope(command: Command) {
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
+  if (command === "sortAscending" || command === "sortDescending" || command === "sortReverse" || command === "sortEditCriteria") return "sortMenu";
   return "main";
 }
 
@@ -236,6 +267,7 @@ export interface Preferences {
   theme: Theme;
   layout: PanelLayout;
   panelModes: PanelModes;
+  sortSettings: SortSettings;
   selectedPanelModes: Record<"left" | "right", PanelModeId>;
   actionButtonWidth: ActionButtonWidth;
   mainMenuAlignment: MenuPosition;
@@ -269,7 +301,7 @@ export const defaultBindings = Object.fromEntries<readonly string[]>(commandName
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
     command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" &&
-    !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
+    !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
   return [command, [key, alternateDefaults[command]?.key].filter((value): value is string => Boolean(value))];
 })) as Bindings;
@@ -341,6 +373,7 @@ export function readPreferences(): Preferences {
   const defaults: Preferences = {
     theme: "system", layout: "standard", actionButtonWidth: "compact", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
     mainMenuAlignment: "center", activeShortcutScheme: null, shortcutSchemes: [],
+    sortSettings: defaultSortSettings,
     panelModes: defaultPanelModes, selectedPanelModes: { left: "full", right: "full" },
     viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
     terminalResizeRows: 1, terminalPasteOnRightClick: true,
@@ -370,6 +403,7 @@ export function readPreferences(): Preferences {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
       layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
+      sortSettings: readSortSettings(saved.sortSettings),
       panelModes: readPanelModes(saved.panelModes),
       selectedPanelModes: {
         left: isPanelMode(saved.selectedPanelModes?.left) ? saved.selectedPanelModes.left : "full",

@@ -63,25 +63,61 @@ pub fn read(path: &Path) -> io::Result<Attributes> {
     })
 }
 
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SortField {
+    Created,
+    Accessed,
+    Changed,
+    Allocated,
+    StreamCount,
+    StreamSize,
+}
+
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PanelMetadata {
     owner: Option<String>,
     hard_links: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accessed: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allocated: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_size: Option<u64>,
 }
 
 impl PanelMetadata {
-    pub fn read(path: &Path, owner: bool, links: bool) -> Self {
+    pub fn read(path: &Path, owner: bool, links: bool, fields: &[SortField]) -> Self {
         let Ok(metadata) = fs::symlink_metadata(path) else {
             return Self::default();
         };
-        Self {
+        let mut result = Self {
             owner: owner.then(|| platform::owner(path, &metadata)).flatten(),
             hard_links: (links && metadata.is_file() && !crate::local::is_link(&metadata))
                 .then(|| platform::hard_links(path, &metadata))
                 .flatten(),
+            ..Self::default()
+        };
+        if fields.contains(&SortField::Created) {
+            result.created = seconds(metadata.created());
         }
+        if fields.contains(&SortField::Accessed) {
+            result.accessed = seconds(metadata.accessed());
+        }
+        platform::read_sort_fields(path, &metadata, fields, &mut result);
+        result
     }
+}
+
+pub fn stream_sort_supported(directory: &Path) -> bool {
+    platform::stream_sort_supported(directory)
 }
 
 pub fn update(path: &Path, changes: &[Change]) -> io::Result<Attributes> {
@@ -152,6 +188,123 @@ mod platform {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect()
+    }
+
+    fn metadata_handle(path: &Path) -> io::Result<fs::File> {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        };
+        fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+    }
+
+    pub(super) fn stream_sort_supported(path: &Path) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
+
+        let Ok(file) = metadata_handle(path) else {
+            return false;
+        };
+        let mut flags = 0;
+        let success = unsafe {
+            GetVolumeInformationByHandleW(
+                file.as_raw_handle(),
+                ptr::null_mut(),
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut flags,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        const FILE_NAMED_STREAMS: u32 = 0x0004_0000;
+        success != 0 && flags & FILE_NAMED_STREAMS != 0
+    }
+
+    pub(super) fn read_sort_fields(
+        path: &Path,
+        metadata: &fs::Metadata,
+        fields: &[SortField],
+        out: &mut PanelMetadata,
+    ) {
+        use std::{mem::size_of_val, os::windows::io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileBasicInfo, FileStandardInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
+            FILE_STANDARD_INFO,
+        };
+
+        let needs_handle =
+            fields.contains(&SortField::Changed) || fields.contains(&SortField::Allocated);
+        if let Some(file) = needs_handle.then(|| metadata_handle(path).ok()).flatten() {
+            if fields.contains(&SortField::Changed) {
+                let mut info = FILE_BASIC_INFO::default();
+                let success = unsafe {
+                    GetFileInformationByHandleEx(
+                        file.as_raw_handle(),
+                        FileBasicInfo,
+                        (&mut info as *mut FILE_BASIC_INFO).cast(),
+                        size_of_val(&info) as u32,
+                    )
+                };
+                if success != 0 && info.ChangeTime > 0 {
+                    out.changed = Some(info.ChangeTime - 116_444_736_000_000_000);
+                }
+            }
+            if fields.contains(&SortField::Allocated) {
+                let mut info = FILE_STANDARD_INFO::default();
+                let success = unsafe {
+                    GetFileInformationByHandleEx(
+                        file.as_raw_handle(),
+                        FileStandardInfo,
+                        (&mut info as *mut FILE_STANDARD_INFO).cast(),
+                        size_of_val(&info) as u32,
+                    )
+                };
+                if success != 0 {
+                    out.allocated = u64::try_from(info.AllocationSize).ok();
+                }
+            }
+        }
+        let needs_streams = metadata.is_file()
+            && !crate::local::is_link(metadata)
+            && (fields.contains(&SortField::StreamCount)
+                || fields.contains(&SortField::StreamSize));
+        if let Some((count, size)) = needs_streams.then(|| streams(path)).flatten() {
+            out.stream_count = Some(count);
+            out.stream_size = Some(size);
+        }
+    }
+
+    fn streams(path: &Path) -> Option<(u64, u64)> {
+        use windows_sys::Win32::{
+            Foundation::{GetLastError, ERROR_HANDLE_EOF, INVALID_HANDLE_VALUE},
+            Storage::FileSystem::{
+                FindClose, FindFirstStreamW, FindNextStreamW, FindStreamInfoStandard,
+                WIN32_FIND_STREAM_DATA,
+            },
+        };
+        let mut info = WIN32_FIND_STREAM_DATA::default();
+        let path = wide_path(path);
+        let target = (&mut info as *mut WIN32_FIND_STREAM_DATA).cast();
+        let search = unsafe { FindFirstStreamW(path.as_ptr(), FindStreamInfoStandard, target, 0) };
+        if search == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut count = 0;
+        let mut total = 0u64;
+        let complete = loop {
+            count += 1;
+            total = total.saturating_add(info.StreamSize.max(0) as u64);
+            if unsafe { FindNextStreamW(search, target) } == 0 {
+                break unsafe { GetLastError() } == ERROR_HANDLE_EOF;
+            }
+        };
+        unsafe { FindClose(search) };
+        complete.then_some((count, total))
     }
 
     pub(super) fn hard_links(path: &Path, _: &fs::Metadata) -> Option<u64> {
@@ -295,6 +448,29 @@ mod platform {
     use super::*;
 
     const OWNER_WRITE: u32 = 0o200;
+
+    pub(super) fn stream_sort_supported(_: &Path) -> bool {
+        false
+    }
+
+    pub(super) fn read_sort_fields(
+        _: &Path,
+        metadata: &fs::Metadata,
+        fields: &[SortField],
+        out: &mut PanelMetadata,
+    ) {
+        if fields.contains(&SortField::Changed) {
+            out.changed = Some(
+                metadata
+                    .ctime()
+                    .saturating_mul(10_000_000)
+                    .saturating_add(metadata.ctime_nsec() / 100),
+            );
+        }
+        if fields.contains(&SortField::Allocated) {
+            out.allocated = metadata.blocks().checked_mul(512);
+        }
+    }
 
     pub(super) fn hard_links(_: &Path, metadata: &fs::Metadata) -> Option<u64> {
         Some(metadata.nlink())

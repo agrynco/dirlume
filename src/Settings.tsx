@@ -21,10 +21,11 @@ import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOption
 import { languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
+import { SortGroupsSettings } from "./FileSortMenu";
 import { PanelModeSettings, panelModeSettingsLabels } from "./PanelModeSettings";
 import { defaultPanelModes, isPanelMode, panelModeIds, panelModeName, panelModeNames, validPanelMode, type PanelModeId } from "./panelModes";
 
-type Page = AppearanceSection | FeaturePage | PanelModeId | "viewFonts" | "general" | "shortcuts";
+type Page = AppearanceSection | FeaturePage | PanelModeId | "sortGroups" | "viewFonts" | "general" | "shortcuts";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
 type ShortcutCapture = { command: Command; replacing?: string };
 type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
@@ -43,7 +44,7 @@ function readOptionsLocation(): OptionsLocation {
   try {
     const saved = JSON.parse(localStorage.getItem(optionsLocationKey) ?? "null") as Partial<OptionsLocation> | null;
     const page = saved?.page;
-    if (!page || (page !== "general" && page !== "shortcuts" && !isFeaturePage(page) &&
+    if (!page || (page !== "general" && page !== "shortcuts" && page !== "sortGroups" && !isFeaturePage(page) &&
         !isPanelMode(page) && !appearancePages.some(({ id }) => id === page))) return defaults;
     const scrollTop = saved.scrollTop;
     return {
@@ -119,6 +120,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const modesMatch = panelModeIds.filter((id) => matches("Panel modes", panelModeNames[id],
     panelModeName(id, preferences.panelModes), ...panelModeSettingsLabels));
+  const showSortGroups = matches("Sort groups", "Use sort groups", "Filename mask", "Before unmatched items", "After unmatched items");
+  const invalidSettings = preferences.sortSettings.groups.some(({ mask }) => !mask.trim());
   const modePage = isPanelMode(page) ? page : undefined;
   const invalidModes = panelModeIds.filter((id) => !validPanelMode(preferences.panelModes[id]));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings", "Shortcut scheme");
@@ -127,8 +130,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     (allShortcuts || matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut))));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
-  const isAppearance = !feature && !isPanelMode(page) && page !== "general" && page !== "shortcuts";
-  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : "Keyboard shortcuts");
+  const isAppearance = !feature && page !== "sortGroups" && !isPanelMode(page) && page !== "general" && page !== "shortcuts";
+  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : page === "sortGroups" ? "Sort groups" : "Keyboard shortcuts");
 
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
@@ -180,7 +183,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   function apply() {
-    if (hasChanges && !invalidModes.length) onChange(applyPreferences(preferences));
+    if (hasChanges && !invalidModes.length && !invalidSettings) onChange(applyPreferences(preferences));
   }
 
   function saveLocation() {
@@ -288,8 +291,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         ...preferences, panelModes: { ...preferences.panelModes, [modePage]: defaultPanelModes[modePage] },
       })}><RotateCcw /> {t("Reset")}</Button>}
       {(standalone || modePage) && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
-      <Button type="button" disabled={!hasChanges || invalidModes.length > 0} onClick={apply}>{t("Apply")}</Button>
-      <Button type="button" className="primary" disabled={invalidModes.length > 0} onClick={() => { apply(); close(); }}>{t("Done")}</Button>
+      <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={apply}>{t("Apply")}</Button>
+      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => { apply(); close(); }}>{t("Done")}</Button>
     </>}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
@@ -303,6 +306,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 if (showGeneral) select("general");
                 else if (featureMatches.length) select(featureMatches[0]);
                 else if (modesMatch.length) select(modesMatch[0]);
+                else if (showSortGroups) select("sortGroups");
                 else if (appearanceMatches.length) select(appearanceMatches[0].id);
                 else if (showShortcuts) select("shortcuts");
               }} />
@@ -316,6 +320,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
             </Button>)}
+            {showSortGroups && <Button type="button" aria-pressed={!selection && page === "sortGroups"} onClick={() => select("sortGroups")}>
+              {t("Sort groups")}
+            </Button>}
             {modesMatch.length > 0 && <>
               <Button type="button" aria-expanded={modesExpanded || searching} aria-controls="options-panel-modes"
                 onClick={() => {
@@ -361,7 +368,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </section>)}
               </div>
             </>}
-            {!showGeneral && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
+            {!showGeneral && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showSortGroups && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
@@ -449,6 +456,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}
             views={featureOptions[page].views} preferences={preferences} onChange={onChange} />
         </>
+      ) : page === "sortGroups" ? (
+        <SortGroupsSettings groups={preferences.sortSettings.groups} onChange={(groups) =>
+          onChange({ ...preferences, sortSettings: { ...preferences.sortSettings, groups } })} />
       ) : isPanelMode(page) ? (
         <PanelModeSettings key={page} mode={preferences.panelModes[page]} defaultName={t(panelModeNames[page])}
           onChange={(mode) => onChange({ ...preferences, panelModes: { ...preferences.panelModes, [page]: mode } })} />
@@ -499,7 +509,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </>
       )}
           </div>
-                    {(!isPanelMode(page) || selection) && <SettingsPreview page={isPanelMode(page) ? "general" : page} preferences={preferences} pick={selection ?? undefined} />}
+          {((!isPanelMode(page) && page !== "sortGroups") || selection) && <SettingsPreview page={isPanelMode(page) || page === "sortGroups" ? "general" : page} preferences={preferences} pick={selection ?? undefined} />}
         </div>
       </div>
     </Dialog>

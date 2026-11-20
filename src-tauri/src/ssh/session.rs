@@ -35,6 +35,7 @@ pub struct Entry {
     kind: Option<FileType>,
     size: Option<u64>,
     modified: Option<SystemTime>,
+    accessed: Option<u64>,
     permissions: Option<Permissions>,
     uid: Option<u32>,
     gid: Option<u32>,
@@ -47,6 +48,12 @@ impl Entry {
             kind: metadata.file_type(),
             size: metadata.len(),
             modified: metadata.modified().map(|time| time.as_system_time()),
+            accessed: metadata.accessed().and_then(|time| {
+                time.as_system_time()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|value| value.as_secs())
+            }),
             permissions: metadata.permissions(),
             uid: metadata.uid(),
             gid: metadata.gid(),
@@ -131,6 +138,7 @@ impl Session {
                     entry.modified,
                 );
                 result.owner = entry.uid.map(|uid| uid.to_string());
+                result.accessed = entry.accessed;
                 result
             })
             .collect();

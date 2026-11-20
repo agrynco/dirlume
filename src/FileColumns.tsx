@@ -7,7 +7,7 @@ import { formatDate, type PaneState, type Side, type SortColumn } from "./panes"
 import { isNameField, panelFields, type PanelColumn, type PanelField, type PanelModeId } from "./panelModes";
 
 const sorts: Partial<Record<PanelField, SortColumn>> = {
-  name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified", time: "time",
+  name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified", time: "time", owner: "owner", links: "hardLinks",
 };
 export const fieldClass: Record<PanelField, string> = {
   name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified",
