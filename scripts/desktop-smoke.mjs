@@ -7,6 +7,7 @@ import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
+import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
 import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
@@ -36,6 +37,7 @@ const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 if (process.env.CI) {
   await testSmbNavigation();
   await testFolderMeasurement();
+  await testSyntaxMenu();
 }
 const temp = await fixture("desktop-");
 const src = join(temp, "from");

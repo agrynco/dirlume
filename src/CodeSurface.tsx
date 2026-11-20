@@ -18,6 +18,7 @@ const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: tags.invalid, class: "syntax-invalid" },
 ]));
 const languageChoices = [...languages].sort((a, b) => a.name.localeCompare(b.name));
+const syntaxOptions = languageChoices.map(({ name }) => name);
 const externalEdit = Annotation.define<boolean>();
 export type SourceStatus = { line: number; column: number; canUndo: boolean; canRedo: boolean };
 export type SourceActions = {
@@ -31,7 +32,7 @@ export type SourceActions = {
 const managedCommands: Command[] = [selectAll, cursorDocStart, cursorDocEnd];
 
 export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, syntaxTarget, onChange,
-  ref, syntaxOverride, onSyntaxChange, onSourceStatus }: {
+  ref, syntaxOverride, onSyntaxChange, onSyntaxOptions, onSourceStatus }: {
   fileName: string;
   editing: boolean;
   locked: boolean;
@@ -43,6 +44,7 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   ref?: Ref<SourceActions>;
   syntaxOverride?: string;
   onSyntaxChange?: (syntax: string) => void;
+  onSyntaxOptions?: (options: readonly string[]) => void;
   onSourceStatus?: (status: SourceStatus) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -59,6 +61,7 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   const language = syntax === "auto" ? LanguageDescription.matchFilename(languages, fileName) :
     languageChoices.find(({ name }) => name === syntax);
   const managed = Boolean(ref);
+  useEffect(() => { onSyntaxOptions?.(syntaxOptions); }, [onSyntaxOptions]);
 
   useImperativeHandle(ref, () => ({
     selection: () => editor.current?.state.sliceDoc(editor.current.state.selection.main.from, editor.current.state.selection.main.to) ?? "",

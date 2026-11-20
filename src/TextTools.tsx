@@ -12,7 +12,7 @@ import { HexViewer } from "./HexViewer";
 import { isMarkdownFile, type MarkdownPosition } from "./markdown";
 import type { TaskMarker } from "./MarkdownPreview";
 import { useMarkdownSearch } from "./MarkdownSearch";
-import { MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { MainMenu, type MainMenuHandle, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
 import { eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import type { BaseTheme, Palette } from "./appearance";
@@ -55,6 +55,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const [hex, setHex] = useState(false);
   const [syntaxTarget, setSyntaxTarget] = useState<HTMLDivElement | null>(null);
   const [syntax, setSyntax] = useState("auto");
+  const [syntaxOptions, setSyntaxOptions] = useState<readonly string[]>([]);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ line: 1, column: 1, canUndo: false, canRedo: false });
   const [hexSize, setHexSize] = useState<number>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -199,7 +200,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     }
   }
 
-  type Action = MenuGroup["items"][number] & { command?: Command };
+  type Action = MenuAction & { command?: Command };
   const key = (command: Command) => showShortcut(shortcuts[command][0]);
   const action = (label: string, command: Command, run: () => void, disabled = false): Action =>
     ({ label, command, run, disabled, shortcut: key(command) });
@@ -224,7 +225,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     action("Go to start", "documentStart", () => sourceActions.current?.goToStart()),
     action("Go to end", "documentEnd", () => sourceActions.current?.goToEnd()),
   ] : [];
-  const menuGroups = [
+  const menuGroups: MenuGroup[] = [
     { label: "File", items: fileActions },
     { label: editing ? "Edit" : "Selection", items: selectionActions },
     ...(navigationActions.length || !editing ? [
@@ -233,7 +234,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     ...(sourceVisible ? [{ label: "Syntax", items: [
       { label: "Automatic", run: () => setSyntax("auto") },
       { label: "Plain text", run: () => setSyntax("plain") },
-      { label: "Choose syntax…", run: () => syntaxTarget?.querySelector("select")?.focus() },
+      { label: "Choose syntax…", disabled: !syntaxOptions.length,
+        items: syntaxOptions.map((name) => ({ label: name, run: () => setSyntax(name) })) },
     ] }] : []),
   ];
   const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), closeAction];
@@ -333,7 +335,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
               fontSize={fontSize} value={text} syntaxTarget={sourceVisible ? syntaxTarget : null} onChange={setText}
-              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax} />
+              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax}
+              onSyntaxOptions={setSyntaxOptions} />
           </Suspense>
         </div>
       </>}
