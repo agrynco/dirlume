@@ -2,6 +2,10 @@ export async function openToolWindow(main, trigger, title) {
   const [tool] = await Promise.all([main.context().waitForEvent("page", { timeout: 8000 }), trigger()]);
   tool.setDefaultTimeout(8000);
   await tool.getByRole("dialog", { name: title, exact: true }).waitFor();
+  await tool.waitForFunction(() => {
+    const tauri = window.__TAURI_INTERNALS__;
+    return tauri.invoke("plugin:window|is_visible", { label: tauri.metadata.currentWindow.label });
+  });
   return tool;
 }
 

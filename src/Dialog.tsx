@@ -6,7 +6,7 @@ import { ResizeGrip, WindowResizeGrip } from "./ResizeGrip";
 
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
-const resizeEdges = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as const;
+const resizeEdges = ["n", "ne", "e", "s", "sw", "w", "nw"] as const;
 
 export function readDialogSize(key: string | undefined): Dimensions | undefined {
   if (!key) return;

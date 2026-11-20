@@ -92,6 +92,7 @@ async function startDesktop() {
         : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
       WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
       DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
+      DIRLUME_SSH_TEST_CONFIG: join(temp, "ssh-config"),
       DIRLUME_TEST_DIAGNOSTICS_DIR: diagnostics,
     },
   });
@@ -329,6 +330,7 @@ try {
     assert.equal(await list.getByRole("option").count(), 1);
     await up.click();
     await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
+    await list.locator('[data-current="true"][data-tooltip="empty"]').waitFor();
     const column = pane.getByRole("button", { name: /^Name/ });
     await column.click();
     await pane.getByRole("button", { name: "Filter folder", exact: true }).click();
@@ -345,6 +347,7 @@ try {
     assert.equal(await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Copy", exact: true }).isEnabled(), false);
     await list.press("Enter");
     await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
+    await list.locator('[data-current="true"][data-tooltip="empty"]').waitFor();
     assert.equal(await panePath(otherSide), otherPath);
     await navigate(side, parse(temp).root);
     assert.equal(await list.locator(parentRow).count(), 0);
@@ -839,7 +842,7 @@ try {
   await wheelFont("#left-files", -120, "Alt");
   assert.ok(await fontSize("#left-pane") > leftFont);
   await wheelFont("#left-files", 120, "Alt");
-  await showOptions(() => page.locator("#left-files").press("Alt+Control+S"));
+  await showOptions(() => page.locator("#right-files").press("Alt+Control+S"));
   assert.equal(await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).getAttribute("aria-pressed"), "true");
   assert.equal(await searchSettings.inputValue(), "keyboard shortcuts");
   assert.equal(await optionsContent.evaluate((content) => content.scrollTop), shortcutScroll);
@@ -1293,16 +1296,16 @@ try {
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
   const terminalSplit = await paneSplit();
   for (const key of ["ArrowUp", "ArrowDown", "Control+ArrowLeft", "Control+ArrowRight",
-    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "Control+ArrowUp", "F1", "F5", "F8", "F12"]) {
+    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "F1", "F5", "F8", "Alt+F7"]) {
     await terminalInput.press(key);
   }
   assert.equal(await paneSplit(), terminalSplit);
   assert.equal(await paneHeight(), firstHeight);
   assert.equal(await page.getByRole("dialog").count(), 0);
-  await page.locator("#left-files").press("Control+ArrowUp");
+  await terminalInput.press("Control+ArrowUp");
   const expandedHeight = await paneHeight();
   assert.ok(expandedHeight < firstHeight, "Ctrl+Up should make more room for the terminal.");
-  await toggleTerminal.click();
+  await terminalInput.press("F12");
   await terminal.waitFor({ state: "hidden" });
   await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
@@ -1667,24 +1670,35 @@ try {
     ["standard", "twin", "classic"]);
   const actionButtonWidth = featureDialog.getByRole("combobox", { name: "Action button width" });
   const actionBarDisplay = () => page.locator(".actionbar").evaluate((bar) => getComputedStyle(bar).display);
-  assert.equal(await actionButtonWidth.inputValue(), "full");
-  assert.equal(await actionBarDisplay(), "grid");
-  await actionButtonWidth.selectOption("compact");
+  assert.equal(await actionButtonWidth.inputValue(), "compact");
+  assert.equal(await actionBarDisplay(), "flex");
+  await actionButtonWidth.selectOption("full");
   const leftDrives = page.getByRole("navigation", { name: "Drives and places for left pane", exact: true });
   for (const layout of ["twin", "classic"]) {
     await layoutSelect.selectOption(layout);
     await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
     assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
     assert.ok(await leftDrives.getByRole("button").count() > 0);
-    assert.equal(await actionBarDisplay(), "flex");
+    assert.equal(await actionBarDisplay(), "grid");
   }
   await layoutSelect.selectOption("standard");
   await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
   assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
   assert.equal(await leftDrives.count(), 0);
-  assert.equal(await actionBarDisplay(), "flex");
+  assert.equal(await actionBarDisplay(), "grid");
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
+  async function checkFeatureFontLayout() {
+    const fits = await featureDialog.locator(".font-setting:has(.feature-font-sizes)").evaluate((group) => {
+      const family = group.querySelector(".font-family").getBoundingClientRect();
+      const size = group.querySelector(".font-size-controls").getBoundingClientRect();
+      const details = group.querySelector(".feature-font-sizes").getBoundingClientRect();
+      return Math.abs(details.left - family.left) < 1 && Math.abs(details.right - size.right) < 1 &&
+        details.top >= Math.max(family.bottom, size.bottom);
+    });
+    assert.ok(fits, "Individual sizes should span both columns below the font family and size controls.");
+  }
+  await checkFeatureFontLayout();
   const featureFonts = [["Viewer", "Consolas", "21"], ["Editor", "Courier New", "19"], ["Terminal", "Arial", "17"]];
   for (const [name, family, size] of featureFonts) {
     await featureSearch.fill(`${name} font size`);
@@ -1693,7 +1707,8 @@ try {
     await featureDialog.getByRole("combobox", { name: `${name} font family`, exact: true }).fill(family);
     await featureDialog.getByRole("spinbutton", { name: `${name} font size`, exact: true }).fill(size);
     if (name === "Viewer") {
-      await featureDialog.getByRole("spinbutton", { name: "Maximum content width (px)", exact: true }).fill("640");
+      await checkFeatureFontLayout();
+      await featureDialog.getByRole("spinbutton", { name: "Max width (px)", exact: true }).fill("640");
       await featureDialog.getByLabel("Viewer background hex", { exact: true }).fill("#142335");
       await featureDialog.getByLabel("Block background hex", { exact: true }).fill("#056767");
     }
@@ -1703,7 +1718,7 @@ try {
   await exitDesktop(page);
   page = await startDesktop();
   await page.getByRole("button", { name: "Options", exact: true }).waitFor();
-  assert.equal(await page.locator(".actionbar").getAttribute("data-button-width"), "compact");
+  assert.equal(await page.locator(".actionbar").getAttribute("data-button-width"), "full");
   const featureValues = await page.locator("html").evaluate((root) => {
     const style = getComputedStyle(root);
     return ["viewer", "editor", "terminal"].map((view) => [style.getPropertyValue(`--${view}-font`), style.getPropertyValue(`--${view}-size`)]);
@@ -1814,6 +1829,11 @@ try {
   await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
   await about.getByRole("button", { name: "Donate via monobank", exact: true }).waitFor();
   assert.ok(await about.locator("img").evaluate((image) => image.complete && image.naturalWidth > 0));
+  await about.getByText("bitcodepro", { exact: true }).waitFor();
+  await about.getByRole("button", { name: "Report an issue", exact: true }).waitFor();
+  await about.getByRole("button", { name: "Releases", exact: true }).waitFor();
+  await about.getByRole("button", { name: "User guide", exact: true }).click();
+  await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
   await group("Files").click();
   const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });

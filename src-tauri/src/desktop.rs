@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     diagnostics, ftp, ftp_transfer, kswitcher, local, local_transfer,
     protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
-    terminal, watch,
+    remote_transfer, ssh, terminal, watch,
 };
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
@@ -564,6 +564,10 @@ enum TransferSource {
         archive: u32,
         segments: Vec<String>,
     },
+    Ssh {
+        connection: u32,
+        segments: Vec<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -572,6 +576,7 @@ struct TransferRequest {
     source: TransferSource,
     destination: String,
     ftp_destination: Option<u32>,
+    ssh_destination: Option<u32>,
     multiple: bool,
     moving: bool,
     policy: local_transfer::Policy,
@@ -667,7 +672,29 @@ fn transfer_target(
     Ok(destination)
 }
 
+fn upload_remote<S: remote_transfer::Session>(
+    mut remote: S,
+    request: &TransferRequest,
+    name: &str,
+    source: &Path,
+    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let target = remote_transfer::upload_destination(
+        &mut remote,
+        &request.destination,
+        name,
+        request.multiple,
+    )?;
+    remote_transfer::upload(&mut remote, source, &target, request.policy, progress, ask)
+        .map(transfer_outcome)
+}
+
 #[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri injects the independently managed transfer sources"
+)]
 async fn transfer_item(
     id: u32,
     request: TransferRequest,
@@ -676,6 +703,7 @@ async fn transfer_item(
     connections: State<'_, Connections>,
     ftp_state: State<'_, ftp::FtpState>,
     archives: State<'_, crate::archives::Archives>,
+    ssh_state: State<'_, ssh::SshState>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
     let connection = match &request.source {
@@ -690,10 +718,21 @@ async fn transfer_item(
         TransferSource::Archive { archive, .. } => Some(archives.get(*archive)?),
         _ => None,
     };
+    let ssh_source = match &request.source {
+        TransferSource::Ssh { connection, .. } => Some(ssh_state.connection(*connection)?),
+        _ => None,
+    };
     let ftp_destination = request
         .ftp_destination
         .map(|id| ftp_state.connection(id))
         .transpose()?;
+    let ssh_destination = request
+        .ssh_destination
+        .map(|id| ssh_state.connection(id))
+        .transpose()?;
+    if ftp_destination.is_some() && ssh_destination.is_some() {
+        return Err("Choose a single remote connection for the copy.".to_owned());
+    }
     blocking(move || {
         let (name, source) = match &request.source {
             TransferSource::Local { directory, name } => (
@@ -702,6 +741,7 @@ async fn transfer_item(
             ),
             TransferSource::Server { segments, .. }
             | TransferSource::Ftp { segments, .. }
+            | TransferSource::Ssh { segments, .. }
             | TransferSource::Archive { segments, .. } => (
                 segments.last().ok_or("Choose a remote item.")?.as_str(),
                 None,
@@ -752,12 +792,42 @@ async fn transfer_item(
             )?;
             return Ok(transfer_outcome(complete));
         }
+        if ssh_destination.is_some() {
+            let protocol = if ssh_destination.is_some() {
+                "SSH"
+            } else {
+                "FTP"
+            };
+            if request.moving
+                || !matches!(
+                    request.policy,
+                    local_transfer::Policy::Ask
+                        | local_transfer::Policy::Skip
+                        | local_transfer::Policy::Overwrite
+                )
+            {
+                return Err(format!("Choose a supported {protocol} copy option."));
+            }
+            let source = source
+                .as_deref()
+                .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
+            if let Some(connection) = ssh_destination {
+                return upload_remote(
+                    connection.open()?,
+                    &request,
+                    name,
+                    source,
+                    &mut progress,
+                    &mut ask,
+                );
+            }
+        }
         let target = transfer_target(
             &request.destination,
             name,
             source.as_deref(),
             request.multiple,
-            source.is_some() || ftp_source.is_some() || archive.is_some(),
+            source.is_some() || ftp_source.is_some() || ssh_source.is_some() || archive.is_some(),
         )
         .map_err(message)?;
         let options = local_transfer::Options {
@@ -791,6 +861,22 @@ async fn transfer_item(
             return ftp_transfer::download(&mut ftp, segments, &target, &options, progress, ask)
                 .map(transfer_outcome);
         }
+        if let Some(connection) = ssh_source {
+            if request.moving {
+                return Err("Use Copy to download SSH items.".to_owned());
+            }
+            if let TransferSource::Ssh { segments, .. } = &request.source {
+                return remote_transfer::download(
+                    &mut connection.open()?,
+                    segments,
+                    &target,
+                    &options,
+                    progress,
+                    ask,
+                )
+                .map(transfer_outcome);
+            }
+        }
         if let Some(source) = source {
             return local_transfer::transfer(&source, &target, &options, progress, ask)
                 .map(transfer_outcome)
@@ -816,6 +902,7 @@ async fn transfer_item(
         match request.source {
             TransferSource::Local { .. }
             | TransferSource::Ftp { .. }
+            | TransferSource::Ssh { .. }
             | TransferSource::Archive { .. } => {
                 return Err("Choose a supported transfer source.".to_owned())
             }
@@ -874,6 +961,7 @@ struct Connected {
     id: u32,
     address: String,
     origin: String,
+    share: String,
     listing: RemoteListing,
 }
 
@@ -889,6 +977,12 @@ async fn connect_server(invitation: String, state: State<'_, Connections>) -> Re
         .unwrap_or_default()
         .to_owned();
     let origin = connection.invitation.address.origin().ascii_serialization();
+    let identity = format!(
+        "{}\n{}",
+        connection.invitation.address, connection.invitation.certificate
+    );
+    let digest = ring::digest::digest(&ring::digest::SHA256, identity.as_bytes());
+    let share = URL_SAFE_NO_PAD.encode(digest.as_ref());
     state
         .connections
         .lock()
@@ -898,6 +992,7 @@ async fn connect_server(invitation: String, state: State<'_, Connections>) -> Re
         id,
         address,
         origin,
+        share,
         listing,
     })
 }
@@ -1249,6 +1344,114 @@ fn ftp_text_revision(entry: &suppaftp::list::File, bytes: &[u8]) -> String {
     format!("{:?}:{}", entry.modified(), URL_SAFE_NO_PAD.encode(digest))
 }
 
+fn ssh_text_revision(entry: &ssh::Entry, bytes: &[u8]) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    format!("{entry:?}:{}", URL_SAFE_NO_PAD.encode(digest))
+}
+
+fn load_ssh_text(
+    session: &mut ssh::Session,
+    segments: &[String],
+) -> Result<(TextDocument, ssh::Entry)> {
+    let before = session.regular(segments)?;
+    let length = remote_transfer::Entry::size(&before)
+        .ok_or("The SSH server did not report the file size.")?;
+    if length > TEXT_LIMIT {
+        return Err("Text files can be at most 8 MiB.".to_owned());
+    }
+    let bytes = session.read_limited(segments, 0, length)?;
+    if session.regular(segments)? != before {
+        return Err("The SSH file changed while it was being opened.".to_owned());
+    }
+    let mut document = decode_text(bytes.as_slice())?;
+    document.revision = Some(ssh_text_revision(&before, &bytes));
+    Ok((document, before))
+}
+
+#[tauri::command]
+async fn read_ssh_text(
+    id: u32,
+    segments: Vec<String>,
+    sudo_password: Option<String>,
+    state: State<'_, ssh::SshState>,
+) -> Result<TextDocument> {
+    let sudo_password = sudo_password.map(zeroize::Zeroizing::new);
+    let connection = state.connection(id)?;
+    blocking(move || {
+        connection.text_operation(sudo_password, true, |session| {
+            load_ssh_text(session, &segments).map(|(document, _)| document)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_ssh_bytes(
+    id: u32,
+    segments: Vec<String>,
+    offset: u64,
+    state: State<'_, ssh::SshState>,
+) -> Result<BytePage> {
+    let connection = state.connection(id)?;
+    blocking(move || {
+        let mut session = connection.open()?;
+        let before = session.regular(&segments)?;
+        let length = remote_transfer::Entry::size(&before)
+            .ok_or("The SSH server did not report the file size.")?;
+        let data = session.read_limited(
+            &segments,
+            offset.min(length),
+            crate::protocol::BYTE_PAGE_SIZE.min(length.saturating_sub(offset)),
+        )?;
+        if session.regular(&segments)? != before {
+            return Err("The SSH file changed during the read.".to_owned());
+        }
+        Ok(BytePage { length, data })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn save_ssh_text(
+    id: u32,
+    segments: Vec<String>,
+    revision: String,
+    text: String,
+    sudo_password: Option<String>,
+    state: State<'_, ssh::SshState>,
+) -> Result<TextDocument> {
+    let sudo_password = sudo_password.map(zeroize::Zeroizing::new);
+    let connection = state.connection(id)?;
+    blocking(move || {
+        let (encoding, revision) = connection.text_operation(sudo_password, false, |session| {
+            let (document, original) = load_ssh_text(session, &segments)?;
+            let changed = "The SSH file changed on the server. Reopen it before saving.";
+            if document.revision.as_deref() != Some(revision.as_str()) {
+                return Err(changed.to_owned());
+            }
+            let bytes = encode_text(document.encoding, &text)?;
+            session.replace_text(&segments, &original, &bytes, |session| {
+                if load_ssh_text(session, &segments)?.0.revision == document.revision {
+                    Ok(())
+                } else {
+                    Err(changed.to_owned())
+                }
+            })?;
+            let revision = session
+                .regular(&segments)
+                .ok()
+                .map(|entry| ssh_text_revision(&entry, &bytes));
+            Ok((document.encoding, revision))
+        })?;
+        Ok(TextDocument {
+            text,
+            encoding,
+            revision,
+        })
+    })
+    .await
+}
+
 fn load_ftp_text(session: &mut ftp::Session, segments: &[String]) -> Result<TextDocument> {
     let before = session.regular(segments)?;
     let length = before.size() as u64;
@@ -1465,6 +1668,7 @@ pub fn run() {
         .manage(crate::archives::Archives::default())
         .manage(crate::archive_create::ArchiveJobs::default())
         .manage(ftp::FtpState::default())
+        .manage(ssh::SshState::default())
         .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
@@ -1551,9 +1755,20 @@ pub fn run() {
         ftp::cancel_ftp_search,
         ftp::rename_ftp,
         ftp::delete_ftp,
+        ssh::profiles::ssh_profiles,
+        ssh::profiles::save_ssh_profile,
+        ssh::profiles::remove_ssh_profile,
+        ssh::connect_ssh,
+        ssh::test_ssh_connection,
+        ssh::disconnect_ssh,
+        ssh::list_ssh,
+        ssh::delete_ssh,
         read_ftp_text,
         read_ftp_bytes,
         save_ftp_text,
+        read_ssh_text,
+        read_ssh_bytes,
+        save_ssh_text,
         read_text,
         resolve_text_link,
         open_web_link,

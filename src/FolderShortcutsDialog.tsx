@@ -78,10 +78,12 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
   const [title, setTitle] = useState(entry.title);
   const [path, setPath] = useState(entry.path);
   const [error, setError] = useState("");
+  const host = entry.remote?.name ?? entry.peer?.name;
+  const pathLabel = host ? t("Path on {0}", host) : t("Path");
 
   function save(event: FormEvent) {
     event.preventDefault();
-    const normalized = normalizeFolderPath(path, !!entry.peer);
+    const normalized = normalizeFolderPath(path, !!entry.peer, !!entry.remote);
     if (!normalized) {
       setError(t("Enter an absolute folder path on the original computer."));
       return;
@@ -97,10 +99,12 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
           <HistoryField historyKey="folder-shortcut-title" aria-label={t("Title (optional)")} type="text" data-initial-focus
             maxLength={255} value={title} onValueChange={setTitle} />
         </label>
-        <label className="field" htmlFor={id}>{entry.peer ? t("Path on {0}", entry.peer.name) : t("Path")}</label>
-        <PathField id={id} historyKey="folder-shortcut-path" label={entry.peer ? t("Path on {0}", entry.peer.name) : t("Path")}
-          value={path} onChange={setPath} browse={entry.peer ? undefined : "folder"}
-          kswitcher={entry.peer ? { directory: bridgeDirectory, peer: entry.peer.id } : undefined} required />
+        <label className="field" htmlFor={id}>{pathLabel}</label>
+        {entry.remote ? <HistoryField id={id} historyKey={"folder-shortcut-path." + entry.remote.id}
+          spellCheck={false} value={path} onValueChange={setPath} required /> :
+          <PathField id={id} historyKey="folder-shortcut-path" label={pathLabel}
+            value={path} onChange={setPath} browse={entry.peer ? undefined : "folder"}
+            kswitcher={entry.peer ? { directory: bridgeDirectory, peer: entry.peer.id } : undefined} required />}
         {error && <p className="dialog-error" role="alert">{error}</p>}
       </div>
       <footer className="dialog-footer">
@@ -185,8 +189,10 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
         aria-label={t("Folder shortcuts in group {0}", group)} aria-activedescendant={entries.length ? `${id}-${selection}` : undefined}
         onKeyDown={navigate}>
         {entries.map((entry, index) => {
-          const path = entry.peer ? `${entry.peer.name} · ${entry.path}` : entry.path;
-          return <div key={`${entry.peer?.id || ""}:${entry.path}`} id={`${id}-${index}`} role="option"
+          const host = entry.remote?.name ?? entry.peer?.name;
+          const path = host ? host + " · " + entry.path : entry.path;
+          const key = [entry.remote?.kind, entry.remote?.id ?? entry.peer?.id, entry.path].join(":");
+          return <div key={key} id={`${id}-${index}`} role="option"
             className="folder-shortcut-row" aria-selected={index === selection} data-tooltip={path}
             onClick={() => { select(index); list.current?.focus({ preventScroll: true }); }}
             onDoubleClick={() => onOpen(entry)}>

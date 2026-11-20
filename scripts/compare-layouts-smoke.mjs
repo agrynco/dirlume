@@ -25,6 +25,23 @@ export async function testCompareLayouts(page, root) {
   await row("left", "original.txt").click();
   await row("right", "revised.txt").click();
 
+  async function checkAction(trigger) {
+    const comparison = await openToolWindow(page, trigger, "Compare files");
+    const differences = comparison.getByLabel("File differences", { exact: true });
+    await differences.getByText("switch = 100;", { exact: true }).waitFor();
+    await differences.getByText("switch = 999;", { exact: true }).waitFor();
+    await closeToolWindow(comparison);
+  }
+  const actions = page.getByRole("navigation", { name: "File actions", exact: true });
+  await checkAction(() => actions.getByRole("button", { name: "Compare", exact: true }).click());
+  const menubar = page.getByRole("menubar", { name: "Main menu", exact: true });
+  for (const [group, label] of [["Files", "Compare"], ["Commands", "Compare files"]]) {
+    await menubar.getByRole("menuitem", { name: group, exact: true }).click();
+    const entry = menubar.getByRole("menu", { name: group, exact: true }).getByRole("menuitem", { name: label, exact: true });
+    assert.match(await entry.getAttribute("data-tooltip"), /Shift\+F11/);
+    await checkAction(() => entry.click());
+  }
+  await row("right", "revised.txt").focus();
   const compare = () => openToolWindow(page, () => page.keyboard.press("Shift+F11"), "Compare files");
   let window = await compare();
   const currentDialog = () => window.getByRole("dialog", { name: "Compare files", exact: true });

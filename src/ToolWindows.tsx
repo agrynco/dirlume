@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
 import { applyAppearance, resolveAppearance, useSystemTheme } from "./appearance";
+import { reportFrontendError } from "./diagnostics";
 import { saveDialogSize } from "./Dialog";
 import { HelpDialog } from "./HelpDialog";
 import { setLanguage, t } from "./i18n";
@@ -33,6 +34,13 @@ export function ToolWindow({ initialPreferences, comparison }: {
     void windowHandle.setTheme(theme === "light" ? "light" : "dark").catch(() => {});
     void windowHandle.setTitle(title).catch(() => {});
   }, [theme, title]);
+
+  useEffect(() => {
+    const window = getCurrentWindow();
+    void window.show().then(() => window.setFocus()).catch((error: unknown) => {
+      reportFrontendError("show_tool_window", error, "native_error");
+    });
+  }, []);
 
   useEffect(() => {
     if (!comparison) {

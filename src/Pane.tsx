@@ -38,14 +38,17 @@ interface PaneProps {
   onHistory: (offset: number) => void;
   onParent: () => void;
   onRefresh: () => void;
+  onDismissError: () => void;
+  onRetryWithSudo: () => void;
   onCancelFolderOperation: () => void;
   cancelFolderShortcut: readonly string[];
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
   onRemote: () => void;
   onFtp: () => void;
+  onSsh: () => void;
   onSmb: () => void;
-  sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "smbSources" | "remoteSources">;
+  sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "sshSources" | "smbSources" | "remoteSources">;
   zoomShortcut: readonly string[];
   fontSize?: number;
   onZoom: ZoomViewFont;
@@ -97,9 +100,9 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 }
 
 export function Pane({ side, active, layout, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath,
-  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
+  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onCopyPath }: PaneProps) {
+  onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
@@ -227,6 +230,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const sources = [
     { label: t("Processes"), key: sourceBindings.processSources, Icon: Activity, open: () => onProcesses(true) },
     { label: "FTP", key: sourceBindings.ftpSources, Icon: Server, open: onFtp },
+    { label: "SSH", key: sourceBindings.sshSources, Icon: Server, open: onSsh },
     ...(windowsClient ? [{ label: "SMB", key: sourceBindings.smbSources, Icon: Server, open: onSmb }] : []),
     { label: t("Remote machine"), key: sourceBindings.remoteSources, Icon: Server, open: onRemote },
   ];
@@ -448,7 +452,12 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         onChange={setQuickSearch} onMatch={onQuickMatch}
         onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
         onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
-      {pane.error && <p className="pane-error" role="alert">{errorText(pane.error)}</p>}
+      {pane.error && <div className="pane-error">
+        <span role="alert">{errorText(pane.error)}</span>
+        {pane.deniedSshListing && !pane.loading &&
+          <Button type="button" onClick={onRetryWithSudo}>{t("Open with sudo…")}</Button>}
+        <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>
+      </div>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
       {classic && <div className="pane-details" aria-live="off">
         <span className="pane-details-name">{current ? matches?.get(current.name)?.entry.name ?? current.name : ""}</span>

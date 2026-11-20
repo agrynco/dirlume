@@ -5,6 +5,33 @@ use url::Url;
 pub const INVITATION_PREFIX: &str = "dirlume-v1:";
 pub const MAX_INVITATION_LENGTH: usize = 8192;
 
+#[cfg(feature = "desktop")]
+pub(crate) fn file_server_origin(scheme: &str, host: &str, port: u16, default_port: u16) -> String {
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+    if port == default_port {
+        format!("{scheme}://{host}")
+    } else {
+        format!("{scheme}://{host}:{port}")
+    }
+}
+
+#[cfg(all(test, feature = "desktop"))]
+#[test]
+fn formats_file_server_origins_with_ipv6_and_non_default_ports() {
+    assert_eq!(
+        file_server_origin("ftp", "files.example", 21, 21),
+        "ftp://files.example"
+    );
+    assert_eq!(
+        file_server_origin("sftp", "2001:db8::1", 2222, 22),
+        "sftp://[2001:db8::1]:2222"
+    );
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct Invitation {
     pub address: Url,

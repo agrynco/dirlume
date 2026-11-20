@@ -4,8 +4,9 @@ import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, documentPath, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
+import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
 import { isMarkdownFile } from "./markdown";
 import type { MarkdownAnchor, OpenMarkdownLink, TaskMarker } from "./MarkdownPreview";
@@ -52,6 +53,8 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
   const [readError, setReadError] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sudoAction, setSudoAction] = useState<"read" | "save" | null>(null);
+  const [deniedWrite, setDeniedWrite] = useState<string | null>(null);
   const writing = useRef(false);
   const [confirm, setConfirm] = useState(false);
   const dirty = Boolean(document && normalized(document.text) !== text);
@@ -94,28 +97,33 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
     return () => { cancelled = true; };
   }, [file]);
 
-  async function write(updated: string) {
+  async function write(updated: string, sudoPassword?: string) {
     if (!document || writing.current || !writable) return;
     writing.current = true;
     setSaving(true);
     setError("");
+    if (sudoPassword === undefined) setDeniedWrite(null);
     try {
-      const saved = await savePlaceText(file, document, updated);
+      const saved = await savePlaceText(file, document, updated, sudoPassword);
       setDocument(saved);
       setText(normalized(saved.text));
+      setDeniedWrite(null);
       onSaved();
     } catch (error) {
-      setError(describeError(error));
+      const message = describeError(error);
+      setError(message);
+      if (sudoPassword !== undefined) throw error;
+      if (file.place.kind === "ssh" && isPermissionError(message)) setDeniedWrite(updated);
     } finally {
       writing.current = false;
       setSaving(false);
     }
   }
 
-  async function save() {
+  async function save(sudoPassword?: string) {
     if (!document || !dirty) return;
     const eol = document.text.includes("\r\n") ? "\r\n" : document.text.includes("\r") ? "\r" : "\n";
-    await write(text.replaceAll("\n", eol));
+    await write(text.replaceAll("\n", eol), sudoPassword);
   }
 
   function toggleTask({ start, end }: TaskMarker, checked: boolean) {
@@ -174,9 +182,15 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
         {!editing && <Button shortcut={showShortcut(hexShortcut[0])} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
         <Button type="button" onClick={onOptions}><Settings2 /> {t("Settings")}</Button>
       </div>
-      {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-      {hex ? <HexViewer file={file} /> : readError ? <p className="dialog-error" role="alert">{errorText(readError)}</p> :
-        !document && <div className="dialog-body">{t("Loading…")}</div>}
+      {(error || (readError && !hex)) && <div className="pane-error">
+        <span role="alert">{errorText(error || readError)}</span>
+        {file.place.kind === "ssh" && !saving && (deniedWrite !== null && (!editing || dirty)
+          ? <Button type="button" onClick={() => setSudoAction("save")}>{t("Save with sudo…")}</Button>
+          : !error && isPermissionError(readError) &&
+            <Button type="button" onClick={() => setSudoAction("read")}>{t("Open with sudo…")}</Button>)}
+      </div>}
+      {hex ? <HexViewer file={file} /> :
+        !document && !readError && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
         {preview && !hex && (
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
@@ -192,6 +206,17 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
           </Suspense>
         </div>
       </>}
+      {sudoAction && file.place.kind === "ssh" && <SudoDialog operation={sudoAction} address={file.place.address}
+        path={`${path.replace(/\/$/, "")}/${file.name}`} onClose={() => setSudoAction(null)}
+        onConfirm={async (password) => {
+          if (sudoAction === "read") {
+            const opened = await readPlaceText(file, password);
+            setDocument(opened);
+            setText(normalized(opened.text));
+            setReadError("");
+          } else if (editing) await save(password);
+          else if (deniedWrite !== null) await write(deniedWrite, password);
+        }} />}
       {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setConfirm(false)}>
         <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>
         <footer className="dialog-footer">

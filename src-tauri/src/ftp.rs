@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::{
     desktop::{blocking, message, Result},
     local,
-    protocol::RemoteListing,
+    protocol::{file_server_origin, RemoteListing},
 };
 
 const TIMEOUT: Duration = Duration::from_secs(12);
@@ -348,18 +348,7 @@ pub async fn connect_ftp(
         Ok((connection, segments, listing))
     }).await?;
     let address = connection.profile.label.clone();
-    let host = &connection.profile.host;
-    let host = if host.contains(':') {
-        format!("[{host}]")
-    } else {
-        host.clone()
-    };
-    let port = connection.profile.port;
-    let origin = if port == 21 {
-        format!("ftp://{host}")
-    } else {
-        format!("ftp://{host}:{port}")
-    };
+    let origin = file_server_origin("ftp", &connection.profile.host, connection.profile.port, 21);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
         .connections

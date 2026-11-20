@@ -1,8 +1,15 @@
-import { api, smbLocation, uncParts, windowsClient, type Entry, type FilePlace, type Listing, type Place, type SizeResult } from "./api";
+import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
 
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified" | "time";
+export type ListingAction = "push" | "refresh" | number;
+
+export interface DeniedSshListing {
+  place: SshPlace;
+  action: ListingAction;
+  reveal?: string;
+}
 
 export interface SearchMatch {
   directory: Place;
@@ -34,6 +41,8 @@ export interface PaneState {
   omitted: number;
   error: string;
   elevationPath?: string;
+  deniedSshListing?: DeniedSshListing;
+  sudoListing?: boolean;
   search: SearchResults | null;
   sort: { column: SortColumn; asc: boolean };
 }
@@ -78,8 +87,7 @@ export function visibleEntries(pane: PaneState, hidden: boolean) {
 export function paneCursorIndex(pane: PaneState, entries: readonly Entry[]) {
   const selected = entries.findIndex((entry) => entry.name === pane.selected);
   if (selected >= 0 || !entries.length) return selected;
-  // Keep the initial cursor on the first item in existing non-FTP listings.
-  return entries[0].name === ".." && entries.length > 1 && pane.place?.kind !== "ftp" ? 1 : 0;
+  return entries[0].name === ".." && entries.length > 1 && !isFileServer(pane.place) ? 1 : 0;
 }
 
 export function selectableRange(entries: readonly Entry[], first: number, last: number) {
@@ -143,7 +151,7 @@ export function filesystemPlace(path: string): Place {
 }
 
 export function childPlace(place: Place, name: string): Place {
-  if (place.kind === "server" || place.kind === "ftp" || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
+  if (place.kind === "server" || isFileServer(place) || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
     return { ...place, path, parent: null };
@@ -155,7 +163,7 @@ export function childPlace(place: Place, name: string): Place {
 export function parentPlace(place: Place): Place | null {
   if (place.kind === "archive") return place.segments.length
     ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
-  if (place.kind === "server" || place.kind === "ftp") {
+  if (place.kind === "server" || isFileServer(place)) {
     return place.segments.length ? { ...place, segments: place.segments.slice(0, -1) } : null;
   }
   if (place.kind === "kswitcher") return place.parent === null ? null : { ...place, path: place.parent, parent: null };
@@ -169,9 +177,27 @@ export class SmbCredentialsRequired extends Error {
   constructor() { super(t("Enter your SMB credentials.")); }
 }
 
-export async function readPlace(place: Place): Promise<{ place: Place; listing: Listing }> {
+function folderInAncestor(from: Place | null, to: Place) {
+  if (!from || from.kind !== to.kind) return;
+  if ((to.kind === "server" || isFileServer(to)) && (!("id" in from) || from.id !== to.id)) return;
+  if (to.kind === "kswitcher" && (from.kind !== "kswitcher" || from.peer !== to.peer || from.directory !== to.directory)) return;
+  const windowsPath = to.kind === "local" && windowsClient;
+  const parts = (place: Place) => placePath(place).split(windowsPath ? /[\\/]/ : "/").filter(Boolean);
+  const source = parts(from);
+  const ancestor = parts(to);
+  if (ancestor.length >= source.length) return;
+  if (ancestor.every((part, index) => windowsPath ? part.toLowerCase() === source[index].toLowerCase() : part === source[index])) {
+    return source[ancestor.length];
+  }
+}
+
+export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<{ place: Place; listing: Listing; elevated?: boolean }> {
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
+  if (place.kind === "ssh") {
+    const { elevated, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo);
+    return { place, listing, elevated };
+  }
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
     const listing = await api.listKSwitcher(place.directory, place.peer, place.path);
@@ -202,6 +228,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     return entry.directory && !entry.link && next?.directory && !next.link && next.modified === entry.modified
       ? [entry.name] : [];
   }) : []);
+  const departed = action === "refresh" || action === "background" ? undefined : folderInAncestor(pane.place, place);
   const keyboardRange = pane.keyboardRange;
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
@@ -212,11 +239,12 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     entries: listing.entries,
     omitted: listing.omitted,
     selected: samePlace && pane.selected &&
-      (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : null,
+      (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
     marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
     keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => current.has(name)) } : undefined,
     sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
     measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),
+
     filter: samePlace ? pane.filter : "",
     history,
     position: typeof action === "number" ? action : history === pane.history ? pane.position : history.length - 1,
@@ -224,6 +252,8 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     loadingPath: undefined,
     error: "",
     elevationPath: undefined,
+    deniedSshListing: undefined,
+    sudoListing: undefined,
   };
 }
 

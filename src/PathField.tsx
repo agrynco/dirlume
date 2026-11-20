@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { File, Folder, FolderOpen } from "lucide-react";
-import { api, windowsClient, type Entry } from "./api";
+import { api, windowsClient, type Entry, type FileServer } from "./api";
 import { Button } from "./Button";
 import { reportFrontendError } from "./diagnostics";
 import { t } from "./i18n";
@@ -28,7 +28,7 @@ function splitPath(value: string, windows: boolean, baseDirectory?: string) {
 }
 
 export function PathField({ id, label, suggestionLabel, value, onChange, onCommit, onEscape, historyKey = id,
-  ftp, kswitcher, includeFiles = false, showHidden = false, readOnly = false, required = false,
+  server, kswitcher, includeFiles = false, showHidden = false, readOnly = false, required = false,
   initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value, baseDirectory }: {
   id: string;
   historyKey?: string;
@@ -38,7 +38,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   onChange: (path: string) => void;
   onCommit?: (path: string) => void;
   onEscape?: () => void;
-  ftp?: number;
+  server?: FileServer;
   kswitcher?: { directory: string; peer: string };
   includeFiles?: boolean;
   showHidden?: boolean;
@@ -61,9 +61,11 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   const [browseFailed, setBrowseFailed] = useState(false);
   const peer = kswitcher?.peer;
   const directory = kswitcher?.directory;
-  const source = kswitcher ? JSON.stringify(kswitcher) : ftp === undefined ? "local" : `ftp:${ftp}`;
+  const serverId = server?.id;
+  const serverKind = server?.kind;
+  const source = kswitcher ? JSON.stringify(kswitcher) : server ? `${server.kind}:${server.id}` : "local";
   const historyScope = historyKey + "." + source;
-  const parts = !readOnly && editing && !showHistory ? splitPath(value, ftp === undefined && (windowsClient || !!peer), baseDirectory) : null;
+  const parts = !readOnly && editing && !showHistory ? splitPath(value, !server && (windowsClient || !!peer), baseDirectory) : null;
   const parent = parts?.lookup;
   const popup = id + "-suggestions";
   const entries = lookup?.parent === parent && lookup?.source === source ? lookup.entries : undefined;
@@ -72,7 +74,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
     if (!parent) return;
     let current = true;
     const timer = window.setTimeout(() => {
-      const listing = ftp !== undefined ? api.listFtp(ftp, parent.split("/").filter(Boolean)) :
+      const listing = serverId !== undefined ? (serverKind === "ssh" ? api.listSsh : api.listFtp)(serverId, parent.split("/").filter(Boolean)) :
         peer && directory !== undefined ? api.listKSwitcher(directory, peer, parent) : api.listLocal(parent);
       void listing.then(({ entries }) => {
         if (current) setLookup({ parent, source, entries });
@@ -84,7 +86,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
       current = false;
       window.clearTimeout(timer);
     };
-  }, [parent, source, ftp, peer, directory]);
+  }, [parent, source, serverId, serverKind, peer, directory]);
 
   const fragment = parts?.fragment;
   const suggestions = useMemo(() => {
@@ -219,7 +221,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
         if (showHistory) closeSuggestions();
         else { setShowHistory(true); setSelection(-1); }
       }} />}
-      {browse && !readOnly && ftp === undefined && isTauri() &&
+      {browse && !readOnly && !server && isTauri() &&
         <Button type="button" className="icon-button path-browse" aria-label={browseLabel} disabled={browsing} onClick={() => void pickPath()}>
           <FolderOpen aria-hidden="true" />
         </Button>}
