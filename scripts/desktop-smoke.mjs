@@ -620,7 +620,9 @@ try {
   await page.getByRole("menubar").getByRole("menuitem", { name: "Left", exact: true }).focus();
   await leftList.focus();
   await page.keyboard.press("F5");
-  await copySetup.getByRole("button", { name: "Choose a file destination", exact: true }).waitFor();
+  const browseDestination = copySetup.getByRole("button", { name: "Choose a file destination", exact: true });
+  await browseDestination.waitFor();
+  assert.equal(await browseDestination.evaluate((button) => button.previousElementSibling?.matches(".editable-dropdown")), true);
   await destination.fill(join(temp, "t"));
   await destinationSuggestions.getByRole("option", { name: "to", exact: true }).waitFor();
   await destination.press("Tab");
