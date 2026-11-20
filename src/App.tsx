@@ -319,11 +319,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     window.addEventListener("keyup", up, true);
     window.addEventListener("blur", reset);
     window.addEventListener("pointerdown", reset, true);
+    window.addEventListener("wheel", reset, true);
     return () => {
       window.removeEventListener("keydown", down, true);
       window.removeEventListener("keyup", up, true);
       window.removeEventListener("blur", reset);
       window.removeEventListener("pointerdown", reset, true);
+      window.removeEventListener("wheel", reset, true);
     };
   }, [shortcuts.menuAlternate, modal, helpTopic]);
 
