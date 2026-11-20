@@ -21,7 +21,7 @@ export async function testCompareLayouts(page, root) {
     await address.fill(path);
     await address.press("Enter");
   }
-  const row = (side, name) => page.locator(`#${side}-files`).getByRole("option").filter({ hasText: name });
+  const row = (side, name) => page.locator(`#${side}-files`).locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`);
   await row("left", "original.txt").click();
   await row("right", "revised.txt").click();
 

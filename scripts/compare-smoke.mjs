@@ -22,7 +22,7 @@ export async function testCompareWorker(page, sameLeft, sameRight) {
 
   async function compare(name) {
     for (const side of ["left", "right"]) {
-      await page.locator(`#${side}-files`).getByRole("option").filter({ hasText: name }).click();
+      await page.locator(`#${side}-files`).locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`).click();
     }
     window = await openToolWindow(page, () => page.keyboard.press("Shift+F11"), "Compare files");
     dialog = window.getByRole("dialog", { name: "Compare files", exact: true });
