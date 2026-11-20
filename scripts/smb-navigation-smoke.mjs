@@ -43,6 +43,7 @@ export async function testSmbNavigation() {
               return { kind: "connected", id: 17, address: sshVerification.host, origin: "sftp://fixture.example",
                 segments: ["home"], listing: sshListing };
             case "list_ssh": return { ...sshListing, elevated: false };
+            case "open_terminal": return false;
             case "read_text":
               if (args.directory !== documents || args.name !== file.name) throw new Error("Unexpected SMB file");
               return { text: "Fixture", encoding: "utf8" };
@@ -155,6 +156,18 @@ export async function testSmbNavigation() {
     await verify.getByRole("button", { name: "Trust and connect", exact: true }).click();
     await pathIs("right", "/home");
     await right.getByRole("option", { name: /^ssh-notes/ }).waitFor();
+    await right.press("F12");
+    const sshTerminal = page.locator(".terminal-card").filter({ has: page.getByRole("heading", { name: "SSH terminal", exact: true }) });
+    const terminalHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
+    await sshTerminal.waitFor();
+    await terminalHint.waitFor();
+    await right.focus();
+    await terminalHint.waitFor({ state: "hidden" });
+    assert.equal(await sshTerminal.isVisible(), true);
+    await sshTerminal.locator(".xterm-helper-textarea").focus();
+    await terminalHint.waitFor();
+    await sshTerminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await terminalHint.waitFor({ state: "hidden" });
     await pathIs("left", projects);
     assert.deepEqual(errors, []);
     console.log("Verified saved SMB and SSH connections, edit forms, parent navigation, and authentication.");
