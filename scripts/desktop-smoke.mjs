@@ -2081,7 +2081,9 @@ try {
         return getComputedStyle(probe).color;
       };
       const pairs = [["panel-ink", "panel-bg"], ["panel-muted", "panel-bg"], ["panel-selected-ink", "panel-selection"],
-        ["ink", "surface"], ["dialog-ink", "dialog-bg"], ["text-ink", "text-bg"]].map(([ink, background]) => [value(ink), value(background)]);
+        ["ink", "surface"], ["dialog-ink", "dialog-bg"], ["text-ink", "text-bg"],
+        ...["source", "text", "document", "image", "media", "archive", "config", "executable", "hidden", "system"]
+          .flatMap((group) => [[`file-${group}`, "panel-bg"], [`file-${group}`, "hover"]])].map(([ink, background]) => [value(ink), value(background)]);
       probe.remove();
       return { pairs, colorScheme: getComputedStyle(root).colorScheme,
         radius: getComputedStyle(root.querySelector("#left-pane")).borderTopLeftRadius };
