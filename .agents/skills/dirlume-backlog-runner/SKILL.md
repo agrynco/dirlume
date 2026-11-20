@@ -1,6 +1,6 @@
 ---
 name: dirlume-backlog-runner
-description: Run the Dirlume GitHub Issues backlog sequentially in one checkout, merge completed tasks into prerelease, and promote the completed batch through main to a GitHub Release. Use when asked to process the backlog as a batch through release.
+description: Process open Dirlume GitHub issues created by agrynco in one checkout, merge completed work into prerelease, and promote the batch through main to a GitHub Release. Use when asked to process the backlog as a batch through release.
 ---
 
 # Run the Dirlume backlog
@@ -11,7 +11,8 @@ Use the configured GitHub remote and read [AGENTS.md](../../../AGENTS.md) and th
 
 - Work in the current checkout throughout. Use one issue branch at a time and preserve existing user changes. If switching branches would overwrite user work, stop and identify the affected paths. Use neither new nor existing auxiliary worktrees.
 - Fetch `origin/main` and `origin/prerelease`. Confirm the prerelease branch exists and the release workflows are installed on `main` before starting.
-- Use open issues in the repository configured as `origin`. Read enough pages to establish the full queue. Take the oldest actionable issue first, using the issue number to break ties. Honor an explicit user-provided order, filter, or limit.
+- Build the queue from open issues in the repository configured as `origin` using `is:issue is:open author:agrynco`. Verify that the GitHub issue creator's login is `agrynco` before acting, including when following dependencies, resuming work, or using an explicit issue list. If search results omit the creator, read the issue metadata from GitHub. Leave issues by other authors for the user to handle separately.
+- Read enough pages to establish the full eligible queue. Take the oldest actionable issue first, using the issue number to break ties. Apply any explicit user-provided order, filter, or limit within the eligible queue.
 - Read the issue and its comments before acting. Defer issues explicitly marked blocked or `Ready for Dev: No`, and work on a dependency first when it is also in scope. An issue with clear acceptance criteria can be actionable without a readiness label. Leave work already owned by another contributor with that contributor.
 - Check for an existing issue branch or PR before starting. Treat the issue as staged if its task PR's squash commit is in `origin/prerelease` and has yet to reach `origin/main`. Reassess reopened issues whose previous fix has already shipped.
 
@@ -24,6 +25,6 @@ Use the configured GitHub remote and read [AGENTS.md](../../../AGENTS.md) and th
 
 ## Promote the batch and verify publication
 
-1. Re-fetch both branches and confirm the selected queue is exhausted. If work in the selected queue is still blocked or in progress, report it and hold promotion unless the user authorizes releasing the completed subset. When `prerelease` has changes to promote, create or reuse one PR from the repository's `prerelease` into `main`. Include the staged work PRs and `Closes #…` for issues fully resolved by the batch. If the batch has already merged, resume watching that release.
-2. Let both GitHub Actions workflows run on the promotion PR. Wait for the required checks on the latest PR head. Diagnose failures and land fixes through `prerelease`. If the head changes, review the updated diff, refresh the issue list in the PR, and wait for the new head's checks. When checks pass, automatically merge using **Create a merge commit** and provide the expected head SHA.
+1. Re-fetch both branches and confirm the selected queue is exhausted. If work in the selected queue is still blocked or in progress, report it and hold promotion unless the user authorizes releasing the completed subset. Check the promotion diff for staged work tied to issues by other authors. If it includes such work, report it and hold automatic promotion for the user's separate handling. When `prerelease` has changes to promote, create or reuse one PR from the repository's `prerelease` into `main`. Include the staged work PRs and `Closes #…` for eligible issues fully resolved by the batch. If the batch has already merged, resume watching that release.
+2. Let both GitHub Actions workflows run on the promotion PR. Wait for the required checks on the latest PR head. Diagnose failures and land fixes through `prerelease`. If the head changes, review the updated diff for work tied to issues by other authors, refresh the issue list in the PR, and wait for the new head's checks. When checks pass, automatically merge using **Create a merge commit** and provide the expected head SHA.
 3. After the merge, watch the automatic **CI and releases** run through packaging and publication. Confirm the published GitHub Release tag points to the promotion's merge commit. Use the post-merge run for recoverable retries. Report the task PRs, promotion PR, required check results, and published release, or the specific blocker if publication cannot finish.
