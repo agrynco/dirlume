@@ -15,7 +15,7 @@ import { useMarkdownSearch } from "./MarkdownSearch";
 import { MainMenu, type MainMenuHandle, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
-import type { BaseTheme, Palette } from "./appearance";
+import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
 import { normalized } from "./textFormat";
@@ -104,7 +104,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];
   useFontZoom(section, shortcuts.zoomFont, fontView, onZoom);
-  const light = theme === "light";
+  const light = isLightTheme(theme);
 
   useLayoutEffect(() => {
     if (active) section.current?.focus({ preventScroll: true });

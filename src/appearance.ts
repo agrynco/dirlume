@@ -8,6 +8,12 @@ export const builtInThemes = {
   light: "Light",
   slate: "Slate",
   "classic-blue": "Classic blue",
+  lavender: "Lavender",
+  emerald: "Emerald",
+  aurora: "Aurora",
+  midnight: "Midnight blue",
+  sunrise: "Sunrise",
+  graphite: "Graphite",
 } as const;
 
 export type Theme = keyof typeof builtInThemes;
@@ -22,6 +28,12 @@ function isBaseTheme(value: unknown): value is BaseTheme {
 }
 
 export const baseThemes = Object.keys(builtInThemes).filter(isBaseTheme);
+
+const lightThemes = new Set<BaseTheme>(["light", "lavender", "sunrise"]);
+// These themes share rounded cards, glowing backgrounds and chip-style key buttons.
+const modernThemes = new Set<BaseTheme>(["lavender", "emerald", "aurora", "midnight", "sunrise", "graphite"]);
+
+export const isLightTheme = (theme: BaseTheme) => lightThemes.has(theme);
 export const readTheme = (value: unknown): Theme => isTheme(value) ? value : "system";
 
 export const colorGroups = {
@@ -195,7 +207,7 @@ export function useSystemTheme() {
 }
 
 export function schemeFits(base: BaseTheme, mode: "light" | "dark") {
-  return (base === "light") === (mode === "light");
+  return isLightTheme(base) === (mode === "light");
 }
 
 export function readSystemScheme(value: unknown, schemes: Scheme[], fallback: "light" | "dark"): string {
@@ -246,7 +258,10 @@ export function readSchemes(value: unknown): Scheme[] {
 }
 
 export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = document.documentElement) {
-  root.dataset.theme = scheme?.base ?? theme;
+  const base = scheme?.base ?? theme;
+  root.dataset.theme = base;
+  if (modernThemes.has(base)) root.dataset.look = "modern";
+  else delete root.dataset.look;
   for (const color of colors) {
     const value = scheme?.colors[color];
     if (value) root.style.setProperty(`--${color}`, value);

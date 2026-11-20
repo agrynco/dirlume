@@ -2059,6 +2059,46 @@ try {
     await windowSection.click();
     return settings;
   }
+  // The modern themes share rounded panes and must keep text readable on every surface.
+  const contrast = (foreground, background) => {
+    const [light, dark] = [foreground, background].map((rgb) => rgb.match(/\d+/g).slice(0, 3).map((value) => {
+      const channel = Number(value) / 255;
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0)).sort((a, b) => b - a);
+    return (light + 0.05) / (dark + 0.05);
+  };
+  const modernAppearance = await openAppearance();
+  for (const [modernTheme, colorScheme] of [["lavender", "light"], ["emerald", "dark"], ["aurora", "dark"], ["midnight", "dark"],
+    ["sunrise", "light"], ["graphite", "dark"]]) {
+    await modernAppearance.getByLabel("Color scheme", { exact: true }).selectOption(modernTheme);
+    await modernAppearance.locator(`.preview-frame[data-theme=${modernTheme}]`).waitFor();
+    await modernAppearance.getByRole("button", { name: "Apply", exact: true }).click();
+    const modernRoot = page.locator(`html[data-theme=${modernTheme}][data-look=modern]`);
+    await modernRoot.waitFor();
+    const modern = await modernRoot.evaluate((root) => {
+      const probe = document.createElement("span");
+      probe.hidden = true;
+      document.body.append(probe);
+      const value = (name) => {
+        probe.style.color = `var(--${name})`;
+        return getComputedStyle(probe).color;
+      };
+      const pairs = [["panel-ink", "panel-bg"], ["panel-muted", "panel-bg"], ["panel-selected-ink", "panel-selection"],
+        ["ink", "surface"], ["dialog-ink", "dialog-bg"], ["text-ink", "text-bg"],
+        ...["source", "text", "document", "image", "media", "archive", "config", "executable", "hidden", "system"]
+          .flatMap((group) => [[`file-${group}`, "panel-bg"], [`file-${group}`, "hover"]])].map(([ink, background]) => [value(ink), value(background)]);
+      probe.remove();
+      return { pairs, colorScheme: getComputedStyle(root).colorScheme,
+        radius: getComputedStyle(root.querySelector("#left-pane")).borderTopLeftRadius };
+    });
+    assert.equal(modern.colorScheme, colorScheme);
+    assert.equal(modern.radius, "14px");
+    for (const [foreground, background] of modern.pairs) {
+      assert.ok(contrast(foreground, background) >= 4.5, `${modernTheme}: ${foreground} on ${background} must be readable`);
+    }
+  }
+  await closeToolWindow(optionsPage, () => modernAppearance.getByRole("button", { name: "Done", exact: true }).click());
+  console.log("Verified the Lavender, Emerald, Aurora, Midnight blue, Sunrise, and Graphite themes.");
   const themeRoot = () => page.locator("html[data-theme=classic-blue]");
   const appearance = await openAppearance();
   await appearance.getByLabel("Color scheme", { exact: true }).selectOption("classic-blue");
@@ -2066,6 +2106,7 @@ try {
   assert.equal(await themeRoot().count(), 0);
   await appearance.getByRole("button", { name: "Apply", exact: true }).click();
   await themeRoot().waitFor();
+  assert.equal(await page.locator("html[data-look]").count(), 0);
   const { paneColors, pairs } = await themeRoot().evaluate((root) => {
     const probe = document.createElement("span");
     probe.hidden = true;

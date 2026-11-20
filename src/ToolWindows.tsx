@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
-import { applyAppearance, resolveAppearance, useSystemTheme } from "./appearance";
+import { applyAppearance, isLightTheme, resolveAppearance, useSystemTheme } from "./appearance";
 import { reportFrontendError } from "./diagnostics";
 import { saveDialogSize } from "./Dialog";
 import { HelpDialog } from "./HelpDialog";
@@ -35,7 +35,7 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
 
   useEffect(() => {
     // Forcing a native Windows theme also overrides the system color query in WebView2.
-    if (!windowsClient) void windowHandle.setTheme(theme === "light" ? "light" : "dark").catch(() => {});
+    if (!windowsClient) void windowHandle.setTheme(isLightTheme(theme) ? "light" : "dark").catch(() => {});
     void windowHandle.setTitle(title).catch(() => {});
   }, [theme, title]);
 
