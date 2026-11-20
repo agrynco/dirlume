@@ -46,7 +46,7 @@ import { panelModeIds, panelModeName, type PanelModeId } from "./panelModes";
 import { AppearancePicker } from "./AppearancePicker";
 import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
-import { applyAppearance, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
+import { applyAppearance, isLightTheme, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownLocation, MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
@@ -631,7 +631,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   useEffect(() => {
     if (isTauri() && !windowsClient) {
       // On Windows the native window theme also controls WebView2's system color query.
-      const nativeTheme = followSystem ? null : theme === "light" ? "light" : "dark";
+      const nativeTheme = followSystem ? null : isLightTheme(theme) ? "light" : "dark";
       void getCurrentWindow().setTheme(nativeTheme).catch(() => {});
     }
   }, [followSystem, theme]);
@@ -2082,10 +2082,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             shortcut={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
           <Button className="icon-button" aria-label={t("Toggle terminal")} aria-pressed={terminalVisible}
             shortcut={keyLabel("toggleTerminal")} disabled={activeDocument !== null} onClick={toggleTerminal}><TerminalIcon /></Button>
-          <Button className="icon-button" aria-label={t(theme === "light" ? "Switch to favorite dark scheme" : "Switch to favorite light scheme")}
+          <Button className="icon-button" aria-label={t(isLightTheme(theme) ? "Switch to favorite dark scheme" : "Switch to favorite light scheme")}
             onClick={() => setPreferences((current) => selectAppearance(current,
-              theme === "light" ? current.systemDarkScheme : current.systemLightScheme))}>
-            {theme === "light" ? <Moon /> : <Sun />}
+              isLightTheme(theme) ? current.systemDarkScheme : current.systemLightScheme))}>
+            {isLightTheme(theme) ? <Moon /> : <Sun />}
           </Button>
           {preferences.showTitlebarScheme && <select className="topbar-scheme" aria-label={t("Color scheme")}
             data-tooltip={scheme?.name}
@@ -2248,7 +2248,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <nav ref={actionbar} className="actionbar" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
           fileActions.map(({ command, label, Icon, disabled }) => (
-          <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
+          <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
             aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
             {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
             <Icon /><span>{t(label)}</span>

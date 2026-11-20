@@ -6,6 +6,8 @@ Choose English, Ukrainian, or Russian in **Options → General → Language**. A
 
 Choose **Classic blue** in **Options → Appearance → Window → Color scheme** for vivid blue file panes, cyan borders, yellow column headings, and a teal selection. You can use it as the base for a custom scheme.
 
+**Lavender**, **Emerald**, **Aurora**, and **Midnight blue** give the window a modern look: rounded file panes on a soft gradient or glowing background, chip-style drive and key buttons, and the main window font in the file lists. Lavender is a light scheme, the other three are dark. They look closest to their design in the **Twin panels** layout and work with every layout. A font set in **Appearance → Fonts** still takes precedence.
+
 Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
