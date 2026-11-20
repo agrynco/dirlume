@@ -15,7 +15,7 @@ export function installTooltips() {
   if (typeof tooltip.showPopover === "function") tooltip.popover = "manual";
 
   let trigger: HTMLElement | null = null;
-  let pointerX: number | undefined;
+  let pointerX = 0;
   let timer: number | undefined;
 
   function position(anchor: HTMLElement) {
@@ -24,12 +24,11 @@ export function installTooltips() {
     tooltip.style.maxHeight = preferAbove ? `${Math.max(16, bounds.top - 2 * viewportMargin)}px` : "";
     const width = tooltip.offsetWidth;
     const height = tooltip.offsetHeight;
-    const center = pointerX ?? bounds.left + bounds.width / 2;
     const below = bounds.bottom + viewportMargin;
     const above = bounds.top - height - viewportMargin;
     const maxTop = window.innerHeight - height - viewportMargin;
     const top = preferAbove || (below > maxTop && above >= viewportMargin) ? above : below;
-    tooltip.style.left = `${Math.max(viewportMargin, Math.min(center - width / 2, window.innerWidth - width - viewportMargin))}px`;
+    tooltip.style.left = `${Math.max(viewportMargin, Math.min(pointerX - width / 2, window.innerWidth - width - viewportMargin))}px`;
     tooltip.style.top = `${Math.max(viewportMargin, Math.min(top, maxTop))}px`;
   }
 
@@ -54,8 +53,8 @@ export function installTooltips() {
     trigger = null;
   }
 
-  function show(anchor: HTMLElement, x?: number) {
-    if (trigger === anchor && (x !== undefined || pointerX === undefined)) return;
+  function show(anchor: HTMLElement, x: number) {
+    if (trigger === anchor) return;
     hide();
     trigger = anchor;
     pointerX = x;
@@ -68,7 +67,7 @@ export function installTooltips() {
       position(anchor);
       anchor.setAttribute("aria-describedby", [anchor.getAttribute("aria-describedby"), tooltipId].filter(Boolean).join(" "));
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tooltip", "hidden", "open"] });
-    }, x === undefined ? 0 : hoverDelay);
+    }, hoverDelay);
   }
 
   document.addEventListener("pointerover", (event) => {
@@ -77,17 +76,12 @@ export function installTooltips() {
     if (anchor && anchor !== tooltipTarget(event.relatedTarget)) show(anchor, event.clientX);
   }, true);
   document.addEventListener("pointerout", (event) => {
-    if (trigger && pointerX !== undefined && tooltipTarget(event.target) === trigger &&
+    if (trigger && tooltipTarget(event.target) === trigger &&
         tooltipTarget(event.relatedTarget) !== trigger) hide();
   }, true);
   document.addEventListener("focusin", (event) => {
     if (trigger && event.target instanceof Element &&
         event.target.closest("dialog") !== trigger.closest("dialog")) hide();
-    const anchor = tooltipTarget(event.target);
-    if (anchor === event.target && anchor?.matches(":focus-visible")) show(anchor);
-  });
-  document.addEventListener("focusout", (event) => {
-    if (trigger && pointerX === undefined && event.target === trigger) hide();
   });
   document.addEventListener("pointerdown", hide, true);
   document.addEventListener("scroll", hide, true);

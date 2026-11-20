@@ -73,7 +73,7 @@ export async function testSmbNavigation() {
     await pathIs("left", documents);
     await share("notes #1.txt").click();
     await page.keyboard.press("F3");
-    const documentAddress = page.locator(".text-window:not([hidden]) .text-toolbar > span");
+    const documentAddress = page.locator(".text-window:not([hidden]) .document-heading h2");
     await documentAddress.waitFor();
     assert.equal(await documentAddress.textContent(), "smb://192.0.2.10/documents/notes%20%231.txt");
     await page.keyboard.press("Escape");

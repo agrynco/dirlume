@@ -9,7 +9,7 @@ const bytesPerPage = 1024;
 const hex = (value: number, length = 2) => value.toString(16).toUpperCase().padStart(length, "0");
 const columns = Array.from({ length: bytesPerRow }, (_, index) => hex(index)).join(" ");
 
-export function HexViewer({ file }: { file: NamedFile }) {
+export function HexViewer({ file, onSize }: { file: NamedFile; onSize?: (size: number) => void }) {
   const [offset, setOffset] = useState(0);
   const [address, setAddress] = useState("");
   const [page, setPage] = useState<BytePage | null>(null);
@@ -22,11 +22,11 @@ export function HexViewer({ file }: { file: NamedFile }) {
     setPage(null);
     setError("");
     void readPlaceBytes(file, offset).then(
-      (result) => { if (!canceled) setPage(result); },
+      (result) => { if (!canceled) { setPage(result); onSize?.(result.length); } },
       (failure: unknown) => { if (!canceled) setError(describeError(failure)); },
     );
     return () => { canceled = true; };
-  }, [file, offset]);
+  }, [file, offset, onSize]);
 
   useLayoutEffect(() => {
     if (document.activeElement === document.body && !controls.current?.closest("[hidden]")) {

@@ -817,7 +817,18 @@ try {
     assert.notEqual(optionsPage, page);
   }
   await showOptions(() => page.locator("#left-files").press("Alt+Control+S"));
+  await searchSettings.fill("menu");
+  await optionsDialog.getByRole("button", { name: "Window", exact: true }).click();
+  const alignment = optionsContent.locator("label.setting").filter({ hasText: "Main menu alignment" });
+  assert.equal(await alignment.locator("mark").innerText(), "menu");
+  await searchSettings.fill("right");
+  await alignment.locator(".setting-search-alias").waitFor();
+  assert.equal(await alignment.locator("mark").count(), 0);
+  await searchSettings.fill("menu");
   await optionsDialog.getByRole("button", { name: "General", exact: true }).click();
+  assert.equal(await optionsContent.locator("mark").innerText(), "menu");
+  await searchSettings.fill("");
+  assert.equal(await optionsContent.locator("mark, .setting-search-alias").count(), 0);
   const provider = optionsDialog.getByLabel("Remote connection");
   await provider.selectOption("kswitcher");
   const bridgePath = optionsDialog.getByRole("combobox", { name: "KSwitcher installation folder", exact: true });
@@ -1079,7 +1090,7 @@ try {
   await page.getByRole("textbox", { name: "Edit draft.md" }).fill("# Draft");
   await page.keyboard.press("F2");
   const editor = page.getByRole("region", { name: "draft.md", exact: true });
-  await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
+  await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF-8$/ }).waitFor();
   await editor.locator(".document-heading").getByRole("combobox", { name: "Syntax" }).waitFor();
   assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
     parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
@@ -1200,6 +1211,11 @@ try {
   assert.ok(await diagram.evaluate((image) => image.complete && image.naturalWidth > 0));
   const markdownSurface = ".text-window:not([hidden]) .markdown";
   assert.equal(await fontSize(markdownSurface), linkedMarkdownFont, "Unrelated Markdown files should open with the same saved preview size.");
+  await showOptions(() => page.getByRole("button", { name: "Viewer options", exact: true }).click());
+  await optionsDialog.getByRole("heading", { name: "Viewer", exact: true }).waitFor();
+  await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("open_tool_window", { title: "Options", initialPage: "editor" }));
+  await optionsDialog.getByRole("heading", { name: "Editor", exact: true }).waitFor();
+  await closeToolWindow(optionsPage);
   await showOptions(() => page.keyboard.press("Control+Alt+S"));
   await optionsDialog.getByRole("button", { name: "Fonts", exact: true }).click();
   const textFontFamily = optionsDialog.getByLabel("Editor, viewer, and terminal font family");
@@ -1255,7 +1271,7 @@ try {
   await page.keyboard.press("Control+Tab");
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("F2");
-  await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .document-encoding")?.textContent?.trim() === "UTF8");
+  await page.locator(".text-window:not([hidden]) .document-modified").waitFor({ state: "hidden" });
   await page.keyboard.press("Escape");
   await diagram.waitFor();
   await page.keyboard.press("Escape");
@@ -1478,7 +1494,7 @@ try {
     await remote.getByRole("option", { name: /^remote.md/ }).click();
     await page.keyboard.press("F3");
     await page.getByRole("heading", { name: "Remote Markdown" }).waitFor();
-    assert.equal(await page.locator(".text-window:not([hidden]) .text-toolbar > span").textContent(),
+    assert.equal(await page.locator(".text-window:not([hidden]) .document-heading h2").textContent(),
       new URL(config.address).origin + "/folder/remote.md");
     await page.keyboard.press("F4");
     await raw.waitFor();

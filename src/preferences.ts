@@ -6,6 +6,8 @@ import { folderGroups, type FolderGroup } from "./folderShortcuts";
 import { windowsClient } from "./api";
 
 type FolderGroupCommand = `addFolderGroup${FolderGroup}` | `openFolderGroup${FolderGroup}`;
+const macDocumentKeys = typeof navigator !== "undefined" && /Macintosh/.test(navigator.userAgent);
+const documentModifier = macDocumentKeys ? "Meta" : "Ctrl";
 const folderGroupCommands = Object.fromEntries(folderGroups.flatMap((group) => [
   [`addFolderGroup${group}`, { label: "Add folder shortcut to group {0}", key: `Ctrl+Shift+${group}` }],
   [`openFolderGroup${group}`, { label: "Open folder shortcut group {0}", key: `Ctrl+${group}` }],
@@ -76,6 +78,15 @@ export const commands = {
   saveText: { label: "Save text", key: "Ctrl+S" },
   closeText: { label: "Close the viewer or editor", key: "F10" },
   cancelText: { label: "Exit the viewer or editor", key: "Escape" },
+  documentBack: { label: "Markdown back", key: "Alt+ArrowLeft" },
+  documentForward: { label: "Markdown forward", key: "Alt+ArrowRight" },
+  documentSearch: { label: "Search rendered Markdown", key: `${documentModifier}+F` },
+  documentCopy: { label: "Copy document selection", key: `${documentModifier}+C` },
+  documentSelectAll: { label: "Select all document text", key: `${documentModifier}+A` },
+  documentUndo: { label: "Undo text edit", key: `${documentModifier}+Z` },
+  documentRedo: { label: "Redo text edit", key: macDocumentKeys ? "Meta+Shift+Z" : "Ctrl+Y" },
+  documentStart: { label: "Go to start of document", key: macDocumentKeys ? "Meta+ArrowUp" : "Ctrl+Home" },
+  documentEnd: { label: "Go to end of document", key: macDocumentKeys ? "Meta+ArrowDown" : "Ctrl+End" },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
   folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
@@ -108,6 +119,7 @@ const alternateDefaults: Partial<Record<Command, { oldCommand: string; key: stri
   lastRow: { oldCommand: "lastRowAlternate", key: "End" },
   refresh: { oldCommand: "refreshAlternate", key: "" },
   saveText: { oldCommand: "saveTextAlternate", key: "F2" },
+  documentRedo: { oldCommand: "documentRedoAlternate", key: macDocumentKeys ? "" : "Ctrl+Shift+Z" },
 };
 
 export function folderGroupCommand(command: Command) {
@@ -127,7 +139,7 @@ export function commandScope(command: Command) {
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
   if (command === "viewAsHex") return "viewer";
-  if (command === "saveText" || command === "closeText" || command === "cancelText") return "text";
+  if (command === "saveText" || command === "closeText" || command === "cancelText" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
@@ -142,7 +154,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if (leftScope === "global" || rightScope === "global") return true;
   const commands = [left, right];
   if (commands.includes("open") && (leftScope === "ftp" || rightScope === "ftp")) return true;
-  if (commands.includes("viewAsHex") && (commands.includes("closeText") || commands.includes("cancelText"))) return true;
+  if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
   return (leftScope === "text" || rightScope === "text" || leftScope === "viewer" || rightScope === "viewer") &&
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));
 }

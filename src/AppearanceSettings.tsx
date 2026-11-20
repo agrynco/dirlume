@@ -15,6 +15,8 @@ import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
 import { SchemeOptions } from "./SchemeOptions";
 import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFont } from "./viewFonts";
 import { featureOptions } from "./featureOptions";
+import { MenuAlignmentSetting } from "./MenuAlignmentSetting";
+import { SettingSearchLabel } from "./SettingSearchLabel";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const sharedFonts = ["ui", "panel", "dialog", "mono"] as const;
@@ -30,7 +32,7 @@ export function ViewFontSettings({ preferences, onChange, views }: {
       const { label, group } = viewFonts[view];
       const fallback = scheme?.fonts[group]?.size ?? inheritedFont(scheme, group).size;
       return <label className="view-font-setting" key={view}>
-        <span>{t(label)}</span>
+        <SettingSearchLabel label={label} aliases={["zoom", "wheel", "font size"]} />
         <FontSizeInput label={label} size={preferences.viewFontSizes[view]} fallback={fallback}
           min={minViewFontSize} max={maxViewFontSize}
           onChange={(size) => onChange({ ...preferences, viewFontSizes: { ...preferences.viewFontSizes, [view]: size } })} />
@@ -151,25 +153,27 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     <div className="dialog-body appearance-settings">
       {section === "window" && <>
         <div className="appearance-header">
-          <label className="field">{t("Color scheme")}
+          <label className="field"><SettingSearchLabel label="Color scheme" aliases={Object.values(builtInThemes)} />
             <select aria-label={t("Color scheme")} value={active ? `custom:${active.id}` : preferences.theme} onChange={(event) => select(event.target.value)}>
               <SchemeOptions schemes={preferences.schemes} />
             </select>
           </label>
-          <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> {t("New scheme")}</Button>
+          <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> <SettingSearchLabel label="New scheme" /></Button>
         </div>
+        <MenuAlignmentSetting label="Main menu alignment" value={preferences.mainMenuAlignment}
+          onChange={(mainMenuAlignment) => onChange({ ...preferences, mainMenuAlignment })} />
         <label className="field-checkbox">
-          <span>{t("Show color scheme switcher in the title bar")}</span>
+          <SettingSearchLabel label="Show color scheme switcher in the title bar" />
           <input type="checkbox" checked={preferences.showTitlebarScheme}
             onChange={(event) => onChange({ ...preferences, showTitlebarScheme: event.target.checked })} />
         </label>
         <div className="favorite-schemes">
-          <label className="field">{t("Favorite light scheme")}
+          <label className="field"><SettingSearchLabel label="Favorite light scheme" />
             <select value={preferences.systemLightScheme} onChange={(event) => onChange({ ...preferences, systemLightScheme: event.target.value })}>
               <SchemeOptions schemes={preferences.schemes} mode="light" />
             </select>
           </label>
-          <label className="field">{t("Favorite dark scheme")}
+          <label className="field"><SettingSearchLabel label="Favorite dark scheme" />
             <select value={preferences.systemDarkScheme} onChange={(event) => onChange({ ...preferences, systemDarkScheme: event.target.value })}>
               <SchemeOptions schemes={preferences.schemes} mode="dark" />
             </select>
@@ -177,11 +181,11 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
         </div>
         {active && (
           <div className="appearance-header scheme-identity">
-            <label className="field">{t("Scheme name")}
+            <label className="field"><SettingSearchLabel label="Scheme name" />
               <HistoryField historyKey="appearance-scheme-name" aria-label={t("Scheme name")} type="text" value={active.name}
                 maxLength={maxSchemeNameLength} onValueChange={(name) => update({ ...active, name })} />
             </label>
-            <label className="field">{t("Base theme")}
+            <label className="field"><SettingSearchLabel label="Base theme" aliases={baseThemes.map((theme) => builtInThemes[theme])} />
               <select aria-label={t("Base theme")} value={active.base} onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
                 {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
               </select>
@@ -215,8 +219,8 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
       ))}
       {fontGroup === "viewer" && <>
         <fieldset className="view-font-group reading-area-settings">
-          <legend>{t("Reading area")}</legend>
-          <label className="setting unit-setting"><span>{t("Max width (px)")}</span>
+          <legend><SettingSearchLabel label="Reading area" /></legend>
+          <label className="setting unit-setting"><SettingSearchLabel label="Max width (px)" aliases={["Maximum content width (px)", "Full width"]} />
             <OptionalNumberInput label={t("Max width (px)")} size={preferences.viewerContentWidth} fallback={t("Full width")}
               min={minViewerContentWidth} max={maxViewerContentWidth}
               onChange={(viewerContentWidth) => onChange({ ...preferences, viewerContentWidth })} />
@@ -224,7 +228,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           {colorFields(viewerColors)}
         </fieldset>
         <fieldset className="view-font-group">
-          <legend>{t("Mermaid diagrams")}</legend>
+          <legend><SettingSearchLabel label="Mermaid diagrams" /></legend>
           {colorFields(mermaidColors)}
         </fieldset>
       </>}
@@ -246,7 +250,7 @@ function ColorField({ label, value, custom, onChange, onOpen }: {
 
   return (
     <div className="color-setting">
-      <span>{t(label)}</span>
+      <SettingSearchLabel label={label} />
       <Button type="button" className="color-swatch" aria-label={t("{0} color", t(label))} aria-haspopup="dialog"
         style={{ "--swatch": value } as CSSProperties} onClick={onOpen} />
       <HistoryField historyKey="appearance-hex" type="text" aria-label={t("{0} hex", t(label))} value={hex} maxLength={7} spellCheck={false}
@@ -273,11 +277,11 @@ function FontFields({ group, font, inherited, installed, disabled, onChange, chi
 
   return (
     <fieldset className="font-setting">
-      <legend>{t(label)}</legend>
+      <legend><SettingSearchLabel label={label} /></legend>
       <FontFamilyField label={label} value={font?.family ?? ""} fallback={inherited.family} installed={installed} builtIn={disabled}
         onChange={(family) => onChange({ ...font, family: family || undefined })} />
       <div className="font-size-controls">
-        <label className="field font-size-field">{t("Size (px)")}
+        <label className="field font-size-field"><SettingSearchLabel label="Size (px)" aliases={["Font size"]} />
           <FontSizeInput label={label} size={font?.size} fallback={inherited.size} min={minFontSize} max={maxFontSize}
             onChange={(size) => onChange({ ...font, size })} />
         </label>

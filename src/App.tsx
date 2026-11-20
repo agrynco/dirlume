@@ -41,7 +41,7 @@ import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { applyAppearance, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
-import type { MarkdownAnchor } from "./MarkdownPreview";
+import type { MarkdownLocation, MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
   applyListing, childPlace, closeSearchResults, extendKeyboardRange, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
@@ -70,6 +70,11 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
 type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
 type RowRename = { side: Side; place: RenameLocation; name: string };
+type DocumentTab = DocumentWindow & {
+  position?: MarkdownPosition;
+  back?: MarkdownLocation[];
+  forward?: MarkdownLocation[];
+};
 
 function sameRenameLocation(current: Place | null, place: RenameLocation) {
   return current !== null && current.kind === place.kind && placePath(current) === placePath(place) &&
@@ -154,9 +159,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const checkingUpdates = useRef(false);
   const manualUpdateCheck = useRef(false);
   const installingUpdate = useRef(false);
-  const [documents, setDocuments] = useState<DocumentWindow[]>(startup?.documents ?? []);
+  const [documents, setDocuments] = useState<DocumentTab[]>(startup?.documents ?? []);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
-  const [linkedAnchor, setLinkedAnchor] = useState<{ id: number; anchor: MarkdownAnchor } | null>(null);
+  const documentMenu = useRef<MainMenuHandle>(null);
   const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
   const dirtyDocuments = useRef(new Set<number>());
   const exitConfirmed = useRef(false);
@@ -282,7 +287,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       if (event.key !== "Alt" || !singleAlt) return;
       singleAlt = false;
       event.preventDefault();
-      mainMenu.current?.open();
+      (documentMenu.current ?? mainMenu.current)?.open();
     }
     const reset = () => { singleAlt = false; };
     window.addEventListener("keydown", down, true);
@@ -702,19 +707,39 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  function openDocument(file: NamedFile, editing: boolean, anchor?: MarkdownAnchor, replaceId?: number) {
-    const existing = documents.find((item) => (replaceId === undefined || item.id === replaceId) &&
+  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition) {
+    const existing = documents.find((item) =>
       item.editing === editing && item.file.name === file.name &&
       item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
       (file.place.kind === "local" || sameConnection(item.file.place, file.place)));
-    const id = existing?.id ?? replaceId ?? ++nextDocument.current;
+    const id = existing?.id ?? ++nextDocument.current;
     if (!existing) {
-      const opened = { id, file, editing };
-      setDocuments((current) => replaceId === undefined ? [...current, opened] :
-        current.map((item) => item.id === replaceId ? opened : item));
+      setDocuments((current) => [...current, { id, file, editing, position }]);
+    } else if (position) {
+      setDocuments((current) => current.map((tab) => tab.id === id ? { ...tab, position } : tab));
     }
-    setLinkedAnchor(anchor ? { id, anchor } : null);
     selectDocument(id);
+  }
+
+  function followMarkdownLink(id: number, from: NamedFile, file: NamedFile, position: MarkdownPosition, scrollTop: number) {
+    setDocuments((current) => current.map((tab) => tab.id !== id || tab.file !== from ? tab : {
+      ...tab, file, position, forward: [],
+      back: [...(tab.back ?? []), { file: from, position: { scrollTop } }],
+    }));
+  }
+
+  function navigateMarkdown(id: number, direction: "back" | "forward", scrollTop: number) {
+    const opposite = direction === "back" ? "forward" : "back";
+    setDocuments((current) => current.map((tab) => {
+      const history = tab[direction];
+      const target = history?.at(-1);
+      if (tab.id !== id || !history || !target) return tab;
+      return {
+        ...tab, ...target,
+        [direction]: history.slice(0, -1),
+        [opposite]: [...(tab[opposite] ?? []), { file: tab.file, position: { scrollTop } }],
+      };
+    }));
   }
 
   function closeDocument(id: number) {
@@ -1488,7 +1513,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "settings": openSettings(); break;
       case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
       case "menu":
-      case "menuAlternate": mainMenu.current?.open(); break;
+      case "menuAlternate": (documentMenu.current ?? mainMenu.current)?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
@@ -1611,11 +1636,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   const openingOptions = useRef(false);
-  function openSettings() {
-    if (!isTauri()) { setModal({ kind: "settings" }); return; }
+  function openSettings(page?: FeaturePage) {
+    if (!isTauri()) { setModal({ kind: "settings", page }); return; }
     if (openingOptions.current) return;
     openingOptions.current = true;
-    void api.openToolWindow(t("Options"), readDialogSize("options")).then(() => {
+    void api.openToolWindow(t("Options"), readDialogSize("options"), undefined, page).then(() => {
       setModal((current) => current?.kind === "connect" ? null : current);
     }).catch((error: unknown) => setStatus({ text: describeError(error), error: true })).finally(() => {
       openingOptions.current = false;
@@ -1869,17 +1894,20 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
-        {documents.map(({ id, file, editing }) => (
+        {documents.map(({ id, file, editing, position, back, forward }) => (
           <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             viewerContentWidth={preferences.viewerContentWidth} colors={scheme?.colors}
-            saveShortcut={shortcuts.saveText}
-            closeShortcut={shortcuts.closeText} cancelShortcut={shortcuts.cancelText}
-            hexShortcut={shortcuts.viewAsHex} zoomShortcut={shortcuts.zoomFont}
+            shortcuts={shortcuts} menuRef={activeDocument === id ? documentMenu : undefined}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
-            onOptions={() => setModal({ kind: "settings", page: editing ? "editor" : "viewer" })}
-            anchor={linkedAnchor?.id === id ? linkedAnchor.anchor : null}
-            onOpenDocument={(target, newTab, anchor) => openDocument(target, false, anchor, newTab || editing ? undefined : id)}
+            onOptions={() => openSettings(editing ? "editor" : "viewer")}
+            position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
+            onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}
+            onOpenDocument={(target, newTab, next, scrollTop) => {
+              if (newTab || (editing && target !== file)) openDocument(target, false, next);
+              else if (editing) setDocuments((current) => current.map((tab) => tab.id === id ? { ...tab, position: next } : tab));
+              else followMarkdownLink(id, file, target, next ?? { scrollTop: 0 }, scrollTop);
+            }}
             onDirtyChange={(dirty) => {
               if (dirty) dirtyDocuments.current.add(id);
               else dirtyDocuments.current.delete(id);
@@ -2073,7 +2101,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         </FileContextMenu>;
       })()}
       {modal?.kind === "connect" && (
-        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={openSettings}
+        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => openSettings()}
           onConnect={(place, listing) => { routeLocation(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}

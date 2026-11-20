@@ -56,7 +56,7 @@ export function resolveBuild(manifest, latest, { runNumber, runAttempt, refType,
   }
   const number = String(BigInt(runNumber) * 1000n + BigInt(runAttempt));
   if (publishRequested && (refType !== "branch" || refName !== "main")) {
-    throw new Error("Manual releases must be built from main.");
+    throw new Error("Automatic and manual releases must be built from main.");
   }
   if (refType === "tag") {
     if (refName !== `v${manifest}`) throw new Error(`The release tag must match v${manifest}.`);

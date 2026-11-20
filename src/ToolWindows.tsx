@@ -8,12 +8,14 @@ import { HelpDialog } from "./HelpDialog";
 import { setLanguage, t } from "./i18n";
 import { eventShortcut, persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
 import { Settings } from "./Settings";
+import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
 import type { NamedFile } from "./api";
 
-export function ToolWindow({ initialPreferences, comparison }: {
+export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   initialPreferences: Preferences;
   comparison?: { left: NamedFile; right: NamedFile };
+  optionsPage?: FeaturePage;
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
   const [help, setHelp] = useState(false);
@@ -79,7 +81,7 @@ export function ToolWindow({ initialPreferences, comparison }: {
     event.preventDefault();
     setHelp(true);
   }}>
-    <Settings standalone preferences={preferences} onClose={close} onChange={(draft) => {
+    <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onChange={(draft) => {
       const next = readPreferences();
       for (const key of Object.keys(draft) as (keyof Preferences)[]) {
         if (JSON.stringify(draft[key]) !== JSON.stringify(preferences[key])) Object.assign(next, { [key]: draft[key] });

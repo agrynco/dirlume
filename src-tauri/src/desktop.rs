@@ -14,7 +14,9 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use reqwest::{redirect::Policy, Certificate, Client, Response};
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    ipc::Channel, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -36,6 +38,7 @@ async fn open_tool_window(
     width: Option<f64>,
     height: Option<f64>,
     comparison: Option<serde_json::Value>,
+    initial_page: Option<String>,
 ) -> Result<()> {
     if main.label() != "main" {
         return Err("Open this window from the main Dirlume window.".into());
@@ -50,6 +53,10 @@ async fn open_tool_window(
         None => "options".to_owned(),
     };
     if let Some(window) = app.get_webview_window(&label) {
+        if let Some(page) = initial_page {
+            app.emit_to(label.as_str(), "dirlume:options-page", page)
+                .map_err(message)?;
+        }
         window.unminimize().map_err(message)?;
         window.show().map_err(message)?;
         return window.set_focus().map_err(message);
@@ -95,13 +102,15 @@ async fn open_tool_window(
     config.maximizable = true;
     config.minimizable = true;
     config.closable = true;
-    let mut builder = WebviewWindowBuilder::from_config(app, &config)
-        .map_err(message)?
-        .parent(&main)
-        .map_err(message)?;
+    let mut builder = WebviewWindowBuilder::from_config(app, &config).map_err(message)?;
     if let Some(comparison) = comparison {
-        builder =
-            builder.initialization_script(format!("window.__dirlumeComparison = {comparison};"));
+        builder = builder
+            .parent(&main)
+            .map_err(message)?
+            .initialization_script(format!("window.__dirlumeComparison = {comparison};"));
+    } else if let Some(page) = initial_page {
+        let page = serde_json::to_string(&page).map_err(message)?;
+        builder = builder.initialization_script(format!("window.__dirlumeOptionsPage = {page};"));
     }
     builder.build().map_err(message)?;
     Ok(())
@@ -1699,6 +1708,8 @@ pub fn run() {
         crate::updates::install_update,
         #[cfg(feature = "ui-automation")]
         crate::updates::fixture::updater_fixture_result,
+        #[cfg(feature = "ui-automation")]
+        crate::updates::fixture::updater_fixture_options_window,
         locations,
         requested_location,
         crate::processes::list_processes,

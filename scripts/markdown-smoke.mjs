@@ -15,13 +15,16 @@ export async function testMarkdown(page, source, wheelFont) {
   await writeFile(join(docs, "child.md"), [
     "# Linked notes", "", ...Array.from({ length: 50 }, (_, i) => "Paragraph " + i + ".\n"),
     "## Target section", "", "[Return to catalogue](../catalogue.md#catalogue-)", "",
-    "[Same document](#linked-notes)", "",
+    "[Same document](#linked-notes)", "", "[Next document](last.md)", "",
   ].join("\n"));
+  await writeFile(join(docs, "last.md"), "# Last document\n");
 
   const row = page.getByRole("listbox", { name: "left files", exact: true })
     .getByRole("option", { name: /^catalogue\.md/ });
   const catalogueViewer = page.getByRole("region", { name: "catalogue.md", exact: true });
   const childViewer = page.getByRole("region", { name: "child.md", exact: true });
+  const lastViewer = page.getByRole("region", { name: "last.md", exact: true });
+  const toolbarButton = (viewer, name) => viewer.locator(".text-toolbar").getByRole("button", { name, exact: true });
   const task = (name, checked) => catalogueViewer.getByRole("checkbox", { name, exact: true, checked });
 
   async function openCatalogue() {
@@ -31,6 +34,9 @@ export async function testMarkdown(page, source, wheelFont) {
   }
 
   await openCatalogue();
+  assert.equal(await catalogueViewer.locator(".document-heading h2").innerText(), catalogue);
+  assert.ok(await toolbarButton(catalogueViewer, "Back").isDisabled());
+  assert.ok(await toolbarButton(catalogueViewer, "Forward").isDisabled());
   const diagram = catalogueViewer.getByRole("img", { name: "Mermaid diagram" });
   await diagram.waitFor();
   assert.ok(await diagram.evaluate((image) =>
@@ -69,8 +75,28 @@ export async function testMarkdown(page, source, wheelFont) {
   assert.equal(await fontSize(), enlargedSize);
   assert.equal(await tabs.getByRole("button", { name: "View catalogue.md", exact: true }).count(), 0);
   await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .markdown")?.scrollTop > 100);
+  const childOffset = await page.locator(surface).evaluate((element) => element.scrollTop);
+  await childViewer.getByRole("link", { name: "Next document", exact: true }).evaluate((link) => link.click());
+  await lastViewer.getByRole("heading", { name: "Last document", exact: true }).waitFor();
+  await toolbarButton(lastViewer, "Back").click();
+  await childViewer.getByRole("heading", { name: "Target section", exact: true }).waitFor();
+  assert.equal(await page.locator(surface).evaluate((element) => element.scrollTop), childOffset);
+  await toolbarButton(childViewer, "Back").click();
+  await toolbarButton(catalogueViewer, "Forward").click();
+  await toolbarButton(childViewer, "Forward").click();
+  await toolbarButton(lastViewer, "Back").click();
+  await toolbarButton(childViewer, "Search").click();
+  const search = childViewer.getByRole("searchbox", { name: "Search rendered Markdown" });
+  await search.fill("paragraph");
+  await childViewer.getByText("1 of 50", { exact: true }).waitFor();
+  await search.press("Enter");
+  await childViewer.getByText("2 of 50", { exact: true }).waitFor();
+  await search.press("Shift+Enter");
+  await childViewer.getByText("1 of 50", { exact: true }).waitFor();
+  await search.press("Escape");
   await childViewer.getByRole("link", { name: "Same document", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .markdown")?.scrollTop < 100);
+  assert.ok(await toolbarButton(childViewer, "Forward").isDisabled());
   await childViewer.getByRole("link", { name: "Return to catalogue", exact: true }).click();
   await catalogueViewer.waitFor();
   assert.equal(await page.getByRole("button", { name: "View catalogue.md", exact: true }).count(), 1);
@@ -116,7 +142,7 @@ async function testTaskSource(page, source) {
     await editor.press("Control+End");
     await page.keyboard.insertText("After preview.");
     await editor.press("F2");
-    await window.locator(".document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
+    await window.locator(".document-modified").waitFor({ state: "hidden" });
     assert.equal(await readFile(path, "utf8"), (dirty ? "Before preview.\r\n\r\n" : "") + toggled + "After preview.");
     await window.getByRole("button", { name: "Close document", exact: true }).click();
   }
