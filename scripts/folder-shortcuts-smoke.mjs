@@ -27,11 +27,18 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
       .getByRole("menuitem", { name: "Folder shortcuts", exact: true }).click();
   }
 
+  async function openGroup(side, digit) {
+    await list(side).focus();
+    await page.keyboard.down("ControlRight");
+    await page.keyboard.press(`Digit${digit}`);
+    await page.keyboard.up("ControlRight");
+  }
+
   const edited = join(dst, "bookmark-edited");
   await mkdir(edited);
   await navigate("left", src);
   await navigate("right", dst);
-  await list("left").press("Control+0");
+  await openGroup("left", 0);
   await page.getByText("No folder shortcuts in group 0.", { exact: true }).waitFor();
   await openGroups();
   await dialog().getByText("No folder shortcuts saved.", { exact: true }).waitFor();
@@ -44,7 +51,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await confirm();
   await dialog().getByText("Enter an absolute folder path on the original computer.", { exact: true }).waitFor();
   await dialog().getByRole("button", { name: "Cancel", exact: true }).click();
-  await list("left").press("Control+8");
+  await openGroup("left", 8);
   await page.getByText("No folder shortcuts in group 8.", { exact: true }).waitFor();
 
   await list("left").press("Control+Shift+F8");
@@ -54,7 +61,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
 
   await list("right").focus();
   await page.locator("#right-pane.active").waitFor();
-  await list("right").press("Control+8");
+  await openGroup("right", 8);
   await opened("right", src);
   await list("right").locator('[data-current="true"][data-tooltip=".."]').waitFor();
   assert.equal(await dialog().count(), 0);
@@ -106,7 +113,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
 
   await exitDesktop(page);
   page = await startDesktop();
-  await list("right").press("Control+8");
+  await openGroup("right", 8);
   assert.match(await picker(8).getByRole("option").first().innerText(), /^Edited folder/);
   assert.match(await picker(8).getByRole("option").last().innerText(), /^Source folder/);
   if (process.env.DIRLUME_BOOKMARKS_SCREENSHOT) {
@@ -130,13 +137,13 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await picker(8).press("Enter");
   await opened("right", edited);
   assert.equal(await page.locator("#left-path").getAttribute("data-path"), src);
-  await list("right").press("Control+8");
+  await openGroup("right", 8);
   await picker(8).press("Delete");
   assert.equal(await picker(8).getByRole("option").count(), 1);
   assert.equal((await stat(edited)).isDirectory(), true);
   await picker(8).press("Delete");
   await dialog().waitFor({ state: "hidden" });
-  await list("right").press("Control+8");
+  await openGroup("right", 8);
   await page.getByText("No folder shortcuts in group 8.", { exact: true }).waitFor();
   assert.equal((await stat(src)).isDirectory(), true);
   console.log("Verified numbered folder shortcuts, both panes, duplicate checks, picker actions, and restart persistence.");

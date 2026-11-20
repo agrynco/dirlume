@@ -14,7 +14,7 @@ import type { TaskMarker } from "./MarkdownPreview";
 import { useMarkdownSearch } from "./MarkdownSearch";
 import { MainMenu, type MainMenuHandle, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
-import { eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
+import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import type { BaseTheme, Palette } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
@@ -339,12 +339,12 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       if (!shortcut) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest("[role=menubar], dialog[open]")) return;
-      const cancel = shortcuts.cancelText.includes(shortcut);
+      const cancel = bindingMatches(shortcuts.cancelText, shortcut);
       if (cancel && target?.hasAttribute("data-history-open")) return;
       const action = [
         ...fileActions, ...navigationActions, ...(!editing ? [hexAction] : []),
         ...(!target?.closest("input, select, textarea") ? selectionActions : []),
-      ].find(({ command }) => command && shortcuts[command].includes(shortcut));
+      ].find(({ command }) => command && bindingMatches(shortcuts[command], shortcut));
       if (!cancel && !action) return;
       event.preventDefault();
       event.stopPropagation();
@@ -715,8 +715,8 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   return <>
     <Dialog title={t("Compare files")} wide standalone={standalone} onClose={requestClose} onKeyDown={(event) => {
       const shortcut = eventShortcut(event);
-      const previous = previousShortcut.includes(shortcut);
-      if (previous || nextShortcut.includes(shortcut)) {
+      const previous = bindingMatches(previousShortcut, shortcut);
+      if (previous || bindingMatches(nextShortcut, shortcut)) {
         event.preventDefault();
         jump(previous ? -1 : 1);
       }

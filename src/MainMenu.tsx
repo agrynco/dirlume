@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
-import { BookOpen, Bug, ChevronRight, CodeXml, Coffee, Package, X } from "lucide-react";
+import { BookOpen, Bug, Check, ChevronRight, CodeXml, Coffee, Package, X } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { api, describeError } from "./api";
@@ -20,6 +20,9 @@ export interface MenuAction {
   shortcut?: string;
   disabled?: boolean;
   separatorBefore?: boolean;
+  id?: string;
+  checked?: boolean;
+  translated?: boolean;
   run: () => void;
 }
 
@@ -174,11 +177,12 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
             onClick={() => { if (shown) close(true); else open(index); }}>{t(label)}</Button>
           {shown && <div className="main-menu-dropdown" role="menu" aria-label={t(label)} data-tauri-drag-region="false">
             {items.map((action, item) => {
-              const { label, shortcut, disabled, separatorBefore } = action;
+              const { label, shortcut, disabled, separatorBefore, checked, id, translated } = action;
               const nested = "items" in action;
-              return <Fragment key={label}>
+              return <Fragment key={id ?? label}>
                   {separatorBefore && <div className="main-menu-separator" role="separator" />}
-                  <Button type="button" role="menuitem" tabIndex={-1} data-menu-item={item}
+                                    <Button type="button" role={checked === undefined ? "menuitem" : "menuitemradio"}
+                    aria-checked={checked} tabIndex={-1} data-menu-item={item}
                     aria-disabled={disabled || undefined} shortcut={shortcut} aria-haspopup={nested ? "menu" : undefined}
                     aria-expanded={nested ? submenu?.item === item : undefined}
                     onFocus={() => { setCursor(item); if (submenu && submenu.item !== item) setSubmenu(null); }}
@@ -191,7 +195,10 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
                         action.run();
                       }
                     }}>
-                    <span>{t(label)}</span>{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
+                    <span className={checked === undefined ? undefined : "main-menu-choice"}>
+                      {checked !== undefined && <span aria-hidden="true">{checked && <Check />}</span>}
+                      {translated ? label : t(label)}
+                    </span>{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
                     {nested && <ChevronRight aria-hidden="true" />}
                   </Button>
                 </Fragment>;

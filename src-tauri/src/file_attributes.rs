@@ -63,6 +63,27 @@ pub fn read(path: &Path) -> io::Result<Attributes> {
     })
 }
 
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelMetadata {
+    owner: Option<String>,
+    hard_links: Option<u64>,
+}
+
+impl PanelMetadata {
+    pub fn read(path: &Path, owner: bool, links: bool) -> Self {
+        let Ok(metadata) = fs::symlink_metadata(path) else {
+            return Self::default();
+        };
+        Self {
+            owner: owner.then(|| platform::owner(path, &metadata)).flatten(),
+            hard_links: (links && metadata.is_file() && !crate::local::is_link(&metadata))
+                .then(|| platform::hard_links(path, &metadata))
+                .flatten(),
+        }
+    }
+}
+
 pub fn update(path: &Path, changes: &[Change]) -> io::Result<Attributes> {
     if !changes.is_empty() {
         platform::update(path, changes)?;
@@ -133,7 +154,30 @@ mod platform {
             .collect()
     }
 
-    fn owner(path: &Path) -> Option<String> {
+    pub(super) fn hard_links(path: &Path, _: &fs::Metadata) -> Option<u64> {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+
+        let file = fs::OpenOptions::new()
+            .access_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .ok()?;
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        let result = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+        (result != 0
+            && info.nNumberOfLinks > 0
+            && info.dwFileAttributes
+                & (FILE_ATTRIBUTE_REPARSE_POINT
+                    | windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY)
+                == 0)
+            .then_some(u64::from(info.nNumberOfLinks))
+    }
+
+    pub(super) fn owner(path: &Path, _: &fs::Metadata) -> Option<String> {
         let mut sid = ptr::null_mut();
         let mut descriptor = ptr::null_mut();
         let path = wide_path(path);
@@ -209,7 +253,7 @@ mod platform {
                 writable: editable && writable(metadata, flag),
             })
             .collect();
-        (flags, owner(path), None)
+        (flags, owner(path, metadata), None)
     }
 
     pub(super) fn update(path: &Path, changes: &[Change]) -> io::Result<()> {
@@ -251,6 +295,47 @@ mod platform {
     use super::*;
 
     const OWNER_WRITE: u32 = 0o200;
+
+    pub(super) fn hard_links(_: &Path, metadata: &fs::Metadata) -> Option<u64> {
+        Some(metadata.nlink())
+    }
+
+    pub(super) fn owner(_: &Path, metadata: &fs::Metadata) -> Option<String> {
+        use std::{ffi::CStr, ptr};
+
+        let uid = metadata.uid();
+        let mut size = 1024;
+        while size <= 64 * 1024 {
+            let mut buffer = vec![0; size];
+            let mut user = std::mem::MaybeUninit::<libc::passwd>::uninit();
+            let mut result = ptr::null_mut();
+            let status = unsafe {
+                libc::getpwuid_r(
+                    uid,
+                    user.as_mut_ptr(),
+                    buffer.as_mut_ptr(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+            if status == libc::ERANGE {
+                size *= 2;
+                continue;
+            }
+            if status == 0 && !result.is_null() {
+                let user = unsafe { user.assume_init() };
+                if !user.pw_name.is_null() {
+                    return Some(
+                        unsafe { CStr::from_ptr(user.pw_name) }
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                }
+            }
+            break;
+        }
+        Some(uid.to_string())
+    }
 
     pub(super) fn read(
         path: &Path,

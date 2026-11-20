@@ -39,6 +39,7 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
+import { panelModeIds, panelModeName, type PanelModeId } from "./panelModes";
 import { AppearancePicker } from "./AppearancePicker";
 import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
@@ -51,7 +52,7 @@ import {
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
+import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
@@ -165,6 +166,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
+  const rowsPerGroup = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
@@ -284,7 +286,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   useLayoutEffect(() => {
     if (!helpShortcut.length) return;
     function openHelp(event: WindowEventMap["keydown"]) {
-      if (event.defaultPrevented || event.isComposing || !helpShortcut.includes(eventShortcut(event))) return;
+      if (event.defaultPrevented || event.isComposing || !bindingMatches(helpShortcut, eventShortcut(event))) return;
       const target = event.target instanceof Element ? event.target : null;
       if (isTerminalInput(target) || target?.closest("[data-shortcut-capture]")) return;
       event.preventDefault();
@@ -317,11 +319,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     window.addEventListener("keyup", up, true);
     window.addEventListener("blur", reset);
     window.addEventListener("pointerdown", reset, true);
+    window.addEventListener("wheel", reset, true);
     return () => {
       window.removeEventListener("keydown", down, true);
       window.removeEventListener("keyup", up, true);
       window.removeEventListener("blur", reset);
       window.removeEventListener("pointerdown", reset, true);
+      window.removeEventListener("wheel", reset, true);
     };
   }, [shortcuts.menuAlternate, modal, helpTopic]);
 
@@ -685,7 +689,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (modal || helpTopic || event.defaultPrevented || event.isComposing || isTerminalInput(event.target)) return;
     if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
-    const settingsMatch = shortcuts.settings.includes(shortcut) ||
+    if (event.getModifierState("AltGraph") && /^Digit[0-9]$/.test(event.code)) return;
+    const settingsMatch = bindingMatches(shortcuts.settings, shortcut) ||
       (shortcuts.settings.includes(commands.settings.key) && event.code === "KeyS" &&
         !event.getModifierState("AltGraph") && eventShortcut(event, "S") === commands.settings.key);
     if (settingsMatch) {
@@ -695,13 +700,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return;
     }
     if (event.target instanceof Element && event.target.closest("[role=menu]")) return;
-    if (shortcuts.cancelMeasure.includes(shortcut) && activeDocument === null &&
+    if (bindingMatches(shortcuts.cancelMeasure, shortcut) && activeDocument === null &&
         !panelsHidden && cancelFolderOperation(active)) {
       event.preventDefault();
       event.stopPropagation();
       return;
     }
-    const direction = shortcuts.nextDocument.includes(shortcut) ? 1 : shortcuts.previousDocument.includes(shortcut) ? -1 : 0;
+    const direction = bindingMatches(shortcuts.nextDocument, shortcut) ? 1 : bindingMatches(shortcuts.previousDocument, shortcut) ? -1 : 0;
     if (shortcut && direction && documents.length) {
       event.preventDefault();
       event.stopPropagation();
@@ -712,11 +717,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const element = event.target instanceof Element ? event.target : null;
     const noControl = !element?.closest(".app");
-    if (noControl && shortcuts.attributes.includes(shortcut)) return;
+    if (noControl && bindingMatches(shortcuts.attributes, shortcut)) return;
     const inTitlebar = element?.closest(".topbar") && !element.closest("select, input");
     const hasModifier = event.ctrlKey || event.altKey || event.metaKey || /^F\d+$/.test(event.key);
     if ((!noControl && (!inTitlebar || !hasModifier)) ||
-        !shortcut || !commandNames.some((command) => shortcuts[command].includes(shortcut))) return;
+        !shortcut || !commandNames.some((command) => bindingMatches(shortcuts[command], shortcut))) return;
     const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".terminal-card:not([hidden])" : `#${active}-files`;
     const target = document.querySelector(selector);
     if (target && !target.dispatchEvent(new globalThis.KeyboardEvent("keydown", {
@@ -799,7 +804,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((event.target as HTMLElement).closest("dialog[open]")) return;
     const shortcut = eventShortcut(event);
     if (!shortcut) return;
-    const resize = shortcuts.expandTerminal.includes(shortcut) ? 1 : shortcuts.collapseTerminal.includes(shortcut) ? -1 : 0;
+    const resize = bindingMatches(shortcuts.expandTerminal, shortcut) ? 1 : bindingMatches(shortcuts.collapseTerminal, shortcut) ? -1 : 0;
     if (resize && activeDocument === null) {
       event.preventDefault();
       event.stopPropagation();
@@ -808,8 +813,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     if (isTerminalInput(event.target)) {
       // Only terminal layout shortcuts need to intercept keys before xterm processes them.
-      const toggle = shortcuts.toggleTerminal.includes(shortcut);
-      if (toggle || shortcuts.terminal.includes(shortcut)) {
+      const toggle = bindingMatches(shortcuts.toggleTerminal, shortcut);
+      if (toggle || bindingMatches(shortcuts.terminal, shortcut)) {
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) {
@@ -819,7 +824,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }
       return;
     }
-    if (shortcuts.menu.includes(shortcut)) {
+    if (bindingMatches(shortcuts.menu, shortcut)) {
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) perform("menu");
@@ -1597,7 +1602,25 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     });
   }
 
-  function perform(command: Command) {
+  function canSelectPanelMode(side: Side) {
+    const place = panes[side].place;
+    return !panelsHidden && activeDocument === null && !processPanels[side] &&
+      !!place && place.kind !== "connections";
+  }
+
+  function setPanelMode(side: Side, id: PanelModeId) {
+    if (!canSelectPanelMode(side)) return;
+    setPreferences((before) => before.selectedPanelModes[side] === id ? before : ({
+      ...before, selectedPanelModes: { ...before.selectedPanelModes, [side]: id },
+    }));
+  }
+
+  function perform(command: Command, groupStep = 0) {
+    const mode = commandPanelMode(command);
+    if (mode) {
+      setPanelMode(active, mode);
+      return;
+    }
     if (command === "recycleAlternate") command = "recycle";
     if (command === "toggleTerminal") {
       toggleTerminal();
@@ -1652,7 +1675,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       const offset = rowCommands[command as keyof typeof rowCommands];
       updatePane(active, (pane) => {
         const index = paneCursorIndex(pane, items);
-        const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
+        if (groupStep && (index + groupStep < 0 || index + groupStep >= items.length)) return pane;
+        const next = Math.max(0, Math.min(items.length - 1, groupStep ? index + groupStep : offset === 0 ? 0 : index + offset));
         return isRangeCommand(command) ? toggleMarkAndMoveCursor(pane, items, index, next) : { ...pane, selected: items[next].name };
       });
       return;
@@ -1832,7 +1856,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   function keyDown(event: KeyboardEvent) {
     const native = event.nativeEvent;
     if ((event.target as HTMLElement).closest(".inline-rename")) return;
-    if (modal || helpTopic || event.defaultPrevented || native.isComposing) return;
+    if (modal || helpTopic || event.defaultPrevented || native.isComposing || native.getModifierState("AltGraph")) return;
     const target = event.target as HTMLElement;
     if (target.closest("dialog[open]") || isTerminalInput(target)) return;
     if (target === commandInput.current && event.ctrlKey && !event.altKey && !event.metaKey &&
@@ -1844,14 +1868,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? eventShortcut(event, event.code.slice(3)) : "";
     const onFiles = target.closest(".file-list");
     const profileCommand = catalog && !processPanels[active] && onFiles
-      ? connectionCommands[catalog.source].find((command) => shortcuts[command].includes(shortcut)) : undefined;
+      ? connectionCommands[catalog.source].find((command) => bindingMatches(shortcuts[command], shortcut)) : undefined;
     const command = profileCommand ?? commandNames.find((command) => shortcut && command !== "settings" && commandScope(command) === "main" &&
-      shortcuts[command].includes(shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
-      commands[command].key === physical && shortcuts[command].includes(physical)) ??
-      physicalFolderBinding(native, shortcuts);
+      bindingMatches(shortcuts[command], shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
+      commands[command].key === physical && shortcuts[command].includes(physical));
     if (activeDocument !== null) return;
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command && (commandPanelMode(command) || (folderGroupCommand(command)?.add === false)) &&
+        (inField || target.closest("[role=menu]") || (commandPanelMode(command) && !canSelectPanelMode(active)))) return;
     if (!command || command === "quickSearch") {
       const unavailable = processPanels[active] ? target !== onFiles || !onFiles?.classList.contains("process-table") : !pane.place;
       if (panelsHidden || unavailable || (inField && !inCommandLine)) return;
@@ -1873,8 +1898,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
     if (!event.repeat || (!["hidden", "attributes", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
-        !folderGroupCommand(command))) {
-      perform(command);
+        !folderGroupCommand(command) && !commandPanelMode(command))) {
+      const groupStep = onFiles && shortcut === "ArrowLeft" && command === "firstRow" ? -rowsPerGroup.current[active] :
+        onFiles && shortcut === "ArrowRight" && command === "lastRow" ? rowsPerGroup.current[active] : 0;
+      perform(command, groupStep);
     }
   }
 
@@ -1926,7 +1953,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return {
       label: side === "left" ? "Left" : "Right",
       items: [
-        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
+        ...panelModeIds.map((id) => ({
+          id,
+          label: panelModeName(id, preferences.panelModes),
+          translated: true,
+          checked: preferences.selectedPanelModes[side] === id,
+          shortcut: keyLabel(panelModeCommand(id)),
+          disabled: !canSelectPanelMode(side),
+          run: () => setPanelMode(side, id),
+        })),
+        { ...menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"), separatorBefore: true },
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
@@ -2018,6 +2054,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {(["left", "right"] as const).map((side) => (
           <Pane key={side} side={side} active={active === side} layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
+            modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
+            onGroupRows={(rows) => { rowsPerGroup.current[side] = rows; }}
             rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
               ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}

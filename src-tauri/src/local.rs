@@ -28,6 +28,10 @@ pub struct Entry {
     system: bool,
     size: Option<u64>,
     modified: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) hard_links: Option<u64>,
 }
 
 #[derive(Default)]
@@ -70,6 +74,8 @@ impl Entry {
             directory,
             link,
             size,
+            owner: None,
+            hard_links: None,
             modified: modified.and_then(|value| {
                 value
                     .duration_since(UNIX_EPOCH)

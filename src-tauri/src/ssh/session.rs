@@ -122,14 +122,16 @@ impl Session {
             .map(|entry| {
                 let directory = entry.is_directory();
                 let link = entry.kind.is_some_and(|kind| kind.is_symlink());
-                local::Entry::new(
+                let mut result = local::Entry::new(
                     entry.name,
                     directory,
                     link,
                     local::EntryAttributes::default(),
                     entry.size,
                     entry.modified,
-                )
+                );
+                result.owner = entry.uid.map(|uid| uid.to_string());
+                result
             })
             .collect();
         Ok(RemoteListing { entries, omitted })
