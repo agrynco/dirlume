@@ -44,8 +44,8 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownAnchor } from "./MarkdownPreview";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, extendKeyboardRange, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
-  readPlace, selectableRange, showSearchResults, visibleEntries,
+  applyListing, childPlace, closeSearchResults, extendKeyboardRange, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
@@ -83,7 +83,8 @@ type ActionModal = (
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
-  | { kind: "connect" | "ftp" | "smb" | "ssh"; side: Side }
+  | { kind: "connect" | "ftp" | "ssh"; side: Side }
+  | { kind: "smb"; side: Side; navigation?: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
   | { kind: "search"; side: Side; place: Place }
@@ -188,13 +189,15 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const watchId = useRef(0);
   const measureId = useRef(0);
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
-  const drag = useRef<{ side: Side; source: Place; items: Transfer["items"]; pointer: number; x: number; y: number; moving: boolean } | null>(null);
+  const drag = useRef<{ side: Side; source: Transfer["source"]; items: Transfer["items"]; pointer: number; x: number; y: number; moving: boolean } | null>(null);
   const [dropTarget, setDropTarget] = useState<Side | null>(null);
   const latest = useRef(panes);
   const mainMenu = useRef<MainMenuHandle>(null);
   latest.current = panes;
   const connected = useRef<Record<Side, NetworkPlace | null>>({ left: null, right: null });
   const failedFtp = useRef<Partial<Record<Side, SavedFtpLocation>>>({});
+  const activeModal = useRef(modal);
+  activeModal.current = modal;
   const pane = panes[active];
   const other = panes[opposite(active)];
   const canSwapPanes = !panes.left.loading && !panes.right.loading && !busy;
@@ -214,7 +217,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
   const permanentDelete = Boolean(fileServer || smbHost(local));
   const otherFileServer = !other.search && isFileServer(other.place);
-  const canTransfer = Boolean(current && pane.place);
+  const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
   const helpShortcut = shortcuts.help;
   const modalKind = modal?.kind;
@@ -337,29 +340,41 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const load = useCallback(async (side: Side, place: Place, action: ListingAction | "background" = "push", reveal?: string, sudoPassword?: string) => {
     const background = action === "background";
     const elevated = sudoPassword !== undefined;
-    if (background && (pendingListings.current[side] || latest.current[side].sudoListing)) return false;
+    const dialog = activeModal.current;
+    if (background && (pendingListings.current[side] || latest.current[side].sudoListing ||
+        (dialog?.kind === "smb" && dialog.side === side && dialog.navigation))) return false;
     if (action !== "refresh" && !background) cancelScan(side);
     const { ticket, signal } = beginListing(side);
     if (!background) updatePane(side, (pane) => ({
       ...pane, loading: true, loadingPath: placePath(place), error: "", elevationPath: undefined,
       deniedSshListing: elevated ? pane.deniedSshListing : undefined,
     }));
-    try {
-      const result = await waitForListing(readPlace(place, sudoPassword, !background), signal);
-      if (!result || ticket !== request.current[side]) return false;
+    const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean) => {
+      if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
-      const found = reveal === ".." ? hasParentRow(result.place) :
-        reveal !== undefined && result.listing.entries.some((entry) => entry.name === reveal);
+      const found = reveal === ".." ? hasParentRow(openedPlace) :
+        reveal !== undefined && openedListing.entries.some((entry) => entry.name === reveal);
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
-        const listing = { ...applyListing(pane, result.place, result.listing, action), sudoListing: result.elevated };
+        const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
       });
       return true;
+    };
+    try {
+      const result = await waitForListing(readPlace(place, sudoPassword, !background), signal);
+      return result ? complete(result.place, result.listing, result.elevated) : false;
     } catch (error) {
       if (ticket === request.current[side]) {
-        const text = describeError(error);
+        const credentialsRequired = error instanceof SmbCredentialsRequired;
+        const prompt = credentialsRequired && !background && !activeModal.current && (action !== "refresh" || place.kind === "smbRoot");
+        if (prompt) {
+          const credentialsDialog = { kind: "smb", side, navigation: { path: placePath(place), complete } } as const;
+          activeModal.current = credentialsDialog;
+          setModal(credentialsDialog);
+        }
+        const text = credentialsRequired ? (prompt ? "" : error.message) : describeError(error);
         updatePane(side, (pane) => background && pane.error ? pane : {
           ...pane, loading: false, loadingPath: undefined, error: text,
           elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined,
@@ -388,7 +403,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       if (home && alternate) {
         await Promise.all(([["left", home.path], ["right", alternate.path]] as const).map(async ([side, fallback]) => {
           if (request.current[side] !== 0) return;
-          const requestedFolder = side === "left" && requested ? localPath(requested) : null;
+          const requestedFolder = side === "left" && requested ? filesystemPlace(requested) : null;
           const saved = startup?.panels[side];
           const savedFtp = !requestedFolder ? saved?.ftp : undefined;
           let failure: string | undefined;
@@ -775,6 +790,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     connected.current[side] = place.kind === "server" || isFileServer(place) ? place : null;
     setActive(side);
     updatePane(side, (pane) => {
+      if (place.kind === "smbRoot" && pane.place?.kind === "smbRoot" && pane.place.path === place.path) {
+        return applyListing(pane, place, listing, "refresh");
+      }
       const history = pane.history.slice(0, pane.position + 1).filter((location) => location.kind === "local");
       return applyListing({ ...pane, history, position: history.length - 1 }, place, listing, "push");
     });
@@ -782,8 +800,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   function open(side: Side, entry: Entry) {
     if (entry.name === "..") { parent(side); return; }
-    const item = paneItem(panes[side], entry);
-    if (!item || panes[side].loading) return;
+    const pane = panes[side];
+    if (pane.loading) return;
+    if (pane.place?.kind === "smbRoot" && entry.directory) {
+      void load(side, childPlace(pane.place, entry.name));
+      return;
+    }
+    const item = paneItem(pane, entry);
+    if (!item) return;
     const { place, entry: file } = item;
     if (file.directory) {
       void load(side, childPlace(place, file.name));
@@ -837,7 +861,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     const place = panes[side].place;
     const target = place && parentPlace(place);
-    if (target) void load(side, target, "push", place?.kind === "archive" && !place.segments.length ? folderLabel(place) : undefined);
+    if (place && target) {
+      const reveal = target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
+      void load(side, target, "push", reveal);
+    }
   }
 
   function currentFolderShortcut(side: Side) {
@@ -918,7 +945,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       } else if (remote.kind === "ssh") {
         const result = await api.connectSsh(remote.id, undefined, segments);
         if (result.kind === "verifyHost") throw new Error(t("Verify the host key in SSH connections before opening this shortcut."));
-        place = { kind: "ssh", id: result.id, profileId: remote.id, address: result.address, segments: result.segments };
+        place = { kind: "ssh", id: result.id, profileId: remote.id, address: result.address, origin: result.origin, segments: result.segments };
         listing = result.listing;
       } else {
         const shared = connected.current[opposite(side)];
@@ -1017,7 +1044,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     });
   }
 
-  function openTransfer(kind: Transfer["kind"], source: Place, items: Transfer["items"], target: Place | null, chooseOperation = false) {
+  function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null, chooseOperation = false) {
     if (!items.length) return;
     const remoteDestination = isFileServer(target) ? target : undefined;
     if (remoteDestination && source.kind !== "local") {
@@ -1038,7 +1065,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   function transfer(kind: "copy" | "move") {
     const source = pane.place;
-    if (!source || !current || pane.loading) {
+    if (!source || source.kind === "smbRoot" || !current || pane.loading) {
       setStatus({ text: "Select a file or folder in the active pane." });
       return;
     }
@@ -1053,7 +1080,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
     if (!event.isPrimary || event.button !== 0 || event.pointerType === "touch") return;
     const state = panes[side];
-    if (!state.place || state.loading || modal) return;
+    if (!state.place || state.place.kind === "smbRoot" || state.loading || modal) return;
     const items = transferItems(side, entry, state.marked.includes(entry.name));
     if (!items.length) return;
     drag.current = { side, source: state.place, items, pointer: event.pointerId,
@@ -1519,7 +1546,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "lockingProcesses": if (current) showLockingProcesses(active, currentItem); break;
       case "pasteClipboard": void pasteClipboard(active); break;
       case "search":
-        if (pane.place && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
+        if (pane.place && pane.place.kind !== "smbRoot" && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
         break;
       case "mkdir":
         if (local && !pane.search && !busy && !pane.loading) setModal({ kind: "mkdir", side: active, place: local });
@@ -1705,7 +1732,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
     ] },
     { label: "Commands", items: [
-      menuCommand("search", !filesAvailable || !pane.place),
+      menuCommand("search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       menuCommand("compare", !filesAvailable || comparison === null),
       menuCommand("copyFullPath", currentFullPath === null),
       menuCommand("connect", activeDocument !== null, "Connect"),
@@ -1737,7 +1764,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           <Button className="toolbar-button topbar-connect" aria-label={t("Connect")} shortcut={keyLabel("connect")} onClick={() => perform("connect")}>
             <Server /> <span>{t("Connect")}</span>
           </Button>
-          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")} disabled={activeDocument !== null || !!processPanels[active] || !pane.place || pane.loading}
+          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")}
+            disabled={activeDocument !== null || !!processPanels[active] || !pane.place || pane.place.kind === "smbRoot" || pane.loading}
             onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
           <Button className="icon-button" aria-label={t("Swap panes")} shortcut={keyLabel("swap")}
@@ -1783,7 +1811,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
                   return;
                 }
                 void load(side, { ...place, segments: path.split("/").filter(Boolean) });
-              } else void load(side, localPath(path));
+              } else void load(side, filesystemPlace(path));
             }}
             onPathAncestor={(place) => { showProcesses(side, false); void load(side, place); }}
             onCopyPath={copyPath}
@@ -1916,7 +1944,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           {errorText(status.text)}
         </span>
         <span>{pane.place?.kind === "archive" ? t(pane.place.address) :
-          pane.place && pane.place.kind !== "local" ? pane.place.address : smbHost(pane.place) ?? t("Local file system")}</span>
+          pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
+            smbHost(pane.place) ?? t("Local file system")}</span>
         <WindowResizeGrip title="Dirlume" />
       </footer>
       {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences} onChange={(next) => {
@@ -2013,6 +2042,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         const item = entry ? paneItem(state, entry) : null;
         const target = panes[opposite(side)];
         return <FileContextMenu x={x} y={y} onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
+          {state.place?.kind === "smbRoot" && entry && <Button role="menuitem" onClick={() => {
+            setFileMenu(null);
+            open(side, entry);
+          }}>{t("Open")}</Button>}
           {item && <>
             <Button role="menuitem" onClick={() => {
               setFileMenu(null);
@@ -2045,9 +2078,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           onClose={() => setModal(null)} />
       )}
       {modal?.kind === "smb" && (
-        <SmbDialog onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
-          onConnect={(listing, warning) => {
-            routeLocation(modal.side, { kind: "local", path: listing.path, parent: listing.parent }, listing);
+        <SmbDialog initialPath={modal.navigation?.path} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
+          onConnect={(place, listing, warning) => {
+            if (modal.navigation) modal.navigation.complete(place, listing);
+            else routeLocation(modal.side, place, listing);
             setModal(null);
             if (warning) setStatus({ text: t("Could not save SMB credentials. {0}", warning), error: true });
             requestAnimationFrame(() => focus(modal.side));
@@ -2305,8 +2339,8 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
           onClose();
         }
       } else {
-        const { id, address, share, listing } = await api.connect(value);
-        onConnect({ kind: "server", id, address, share, segments: [] }, listing);
+        const { listing, ...connection } = await api.connect(value);
+        onConnect({ kind: "server", ...connection, segments: [] }, listing);
       }
     } catch (error) {
       setError(describeError(error));

@@ -6,6 +6,7 @@ import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
+import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
 import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
@@ -31,6 +32,7 @@ import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
+if (process.env.CI) await testSmbNavigation();
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
 const dst = join(temp, "to");
@@ -1451,7 +1453,7 @@ try {
   if (process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT, scale: "css" });
   await page.getByRole("button", { name: "Close terminal" }).click();
 
-  await withServer(async ({ invitation, bytes }) => {
+  await withServer(async ({ invitation, config, bytes }) => {
     await page.getByRole("button", { name: "Connect", exact: true }).click();
     await page.getByLabel("Server invitation").fill(invitation);
     await page.getByRole("dialog").getByRole("button", { name: "Connect", exact: true }).click();
@@ -1476,6 +1478,8 @@ try {
     await remote.getByRole("option", { name: /^remote.md/ }).click();
     await page.keyboard.press("F3");
     await page.getByRole("heading", { name: "Remote Markdown" }).waitFor();
+    assert.equal(await page.locator(".text-window:not([hidden]) .text-toolbar > span").textContent(),
+      new URL(config.address).origin + "/folder/remote.md");
     await page.keyboard.press("F4");
     await raw.waitFor();
     assert.match(await raw.innerText(), /23 20 52 65 6D 6F 74 65/);

@@ -47,7 +47,8 @@ export function SshDialog({ shortcuts, onConnect, onClose }: {
       if (result.kind === "verifyHost") {
         setVerification(result.verification);
       } else {
-        onConnect({ kind: "ssh", id: result.id, profileId: profile.id, address: result.address, segments: result.segments }, result.listing);
+        onConnect({ kind: "ssh", id: result.id, profileId: profile.id, address: result.address,
+          origin: result.origin, segments: result.segments }, result.listing);
       }
     } catch (failure) {
       setError(describeError(failure));

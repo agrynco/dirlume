@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, type LocalListing } from "./api";
+import { api, describeError, placePath, smbLocation, type Listing, type SmbPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { HistoryField } from "./HistoryField";
@@ -14,18 +14,18 @@ function readSaved() {
   } catch { return []; }
 }
 
-export function SmbDialog({ onClose, onConnect }: {
+export function SmbDialog({ initialPath, onClose, onConnect }: {
+  initialPath?: string;
   onClose: () => void;
-  onConnect: (listing: LocalListing, warning: string | null) => void;
+  onConnect: (place: SmbPlace, listing: Listing, warning: string | null) => void;
 }) {
-  const [path, setPath] = useState("");
-  const [needsCredentials, setNeedsCredentials] = useState(false);
+  const [path, setPath] = useState(initialPath ?? "");
+  const [needsCredentials, setNeedsCredentials] = useState(!!initialPath);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const [saveLocation, setSaveLocation] = useState(false);
   const [saved, setSaved] = useState(readSaved);
-  const [shares, setShares] = useState<{ server: string; names: string[] }>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const request = useRef<AbortController | null>(null);
@@ -51,7 +51,6 @@ export function SmbDialog({ onClose, onConnect }: {
     setUsername("");
     setPassword("");
     setRemember(false);
-    setShares(undefined);
     setError("");
   }
 
@@ -70,15 +69,10 @@ export function SmbDialog({ onClose, onConnect }: {
         setError(result.error ?? "");
         return;
       }
-      const location = result.kind === "opened" ? result.listing.path : result.server;
+      const { place, listing } = smbLocation(result);
+      const location = placePath(place);
       if (saveLocation && !saved.some((entry) => entry.toLowerCase() === location.toLowerCase())) updateSaved([...saved, location]);
-      if (result.kind === "opened") onConnect(result.listing, result.warning);
-      else {
-        setShares(result);
-        setNeedsCredentials(false);
-        setPassword("");
-        if (result.warning) setError(t("Could not save SMB credentials. {0}", result.warning));
-      }
+      onConnect(place, listing, result.warning);
     } catch (failure) {
       if (!attempt.signal.aborted) setError(describeError(failure));
     } finally {
@@ -89,10 +83,10 @@ export function SmbDialog({ onClose, onConnect }: {
     }
   }
 
-  return <Dialog title={t("Connect to SMB share")} onClose={onClose}>
+  return <Dialog title={t("Connect to SMB")} onClose={onClose}>
     <form className="dialog-form" onSubmit={(event: FormEvent) => { event.preventDefault(); void connect(path, needsCredentials); }}>
       <div className="dialog-body transfer-body">
-        {saved.length > 0 && <div className="field">
+        {!initialPath && saved.length > 0 && <div className="field">
           <span>{t("Saved SMB locations")}</span>
           <div className="smb-locations">
             {saved.map((location) => <div key={location} className="smb-location">
@@ -107,7 +101,7 @@ export function SmbDialog({ onClose, onConnect }: {
           </div>
         </div>}
         <label className="field">{t("SMB server or share")}
-          <HistoryField historyKey="smb-share" data-initial-focus required disabled={busy}
+          <HistoryField historyKey="smb-share" data-initial-focus={!initialPath || undefined} required disabled={busy || !!initialPath}
             aria-describedby="smb-path-hint" placeholder="192.168.1.10" value={path} onValueChange={changePath} />
         </label>
         <p id="smb-path-hint" className="appearance-hint">
@@ -119,7 +113,7 @@ export function SmbDialog({ onClose, onConnect }: {
         </label>
         {needsCredentials && <>
           <label className="field">{t("Username")}
-            <input ref={usernameField} value={username} disabled={busy} required autoComplete="username"
+            <input ref={usernameField} data-initial-focus={!!initialPath || undefined} value={username} disabled={busy} required autoComplete="username"
               onChange={(event) => setUsername(event.target.value)} />
           </label>
           <label className="field">{t("Password")}
@@ -131,16 +125,6 @@ export function SmbDialog({ onClose, onConnect }: {
             <input type="checkbox" checked={remember} disabled={busy} onChange={(event) => setRemember(event.target.checked)} />
           </label>
         </>}
-        {shares && <div className="field">
-          <span>{t("Shares on {0}", shares.server.slice(2))}</span>
-          {shares.names.length > 0 ? <div className="smb-locations">
-            {shares.names.map((name) => <Button type="button" key={name} disabled={busy} onClick={() => {
-              const location = shares.server + "\\" + name;
-              changePath(location);
-              void connect(location, false);
-            }}>{name}</Button>)}
-          </div> : <p>{t("The server returned no shared folders.")}</p>}
-        </div>}
         {busy && <div role="status">{t("Connecting…")}</div>}
         {error && <div role="alert">{error}</div>}
       </div>

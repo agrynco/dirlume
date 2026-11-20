@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::{
     desktop::{blocking, message, Result},
     local,
-    protocol::RemoteListing,
+    protocol::{file_server_origin, RemoteListing},
 };
 
 const TIMEOUT: Duration = Duration::from_secs(12);
@@ -315,6 +315,7 @@ impl Connection {
 pub struct Connected {
     id: u32,
     address: String,
+    origin: String,
     segments: Vec<String>,
     listing: RemoteListing,
 }
@@ -347,6 +348,7 @@ pub async fn connect_ftp(
         Ok((connection, segments, listing))
     }).await?;
     let address = connection.profile.label.clone();
+    let origin = file_server_origin("ftp", &connection.profile.host, connection.profile.port, 21);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
         .connections
@@ -356,6 +358,7 @@ pub async fn connect_ftp(
     Ok(Connected {
         id,
         address,
+        origin,
         segments,
         listing,
     })

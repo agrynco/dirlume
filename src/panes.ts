@@ -1,5 +1,5 @@
-import { api, isFileServer, placePath, windowsClient, type Entry, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
-import { locale } from "./i18n";
+import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { locale, t } from "./i18n";
 
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified" | "time";
@@ -130,11 +130,11 @@ export function closeSearchResults(pane: PaneState): PaneState {
   return pane.search ? { ...pane, ...pane.search.previous, keyboardRange: undefined, search: null } : pane;
 }
 
-export function paneItem(pane: PaneState, entry?: Entry): { place: Place; entry: Entry } | null {
-  if (!entry || entry.name === ".." || !pane.place) return null;
+export function paneItem(pane: PaneState, entry?: Entry): { place: FilePlace; entry: Entry } | null {
+  if (!entry || entry.name === ".." || !pane.place || pane.place.kind === "smbRoot") return null;
   if (pane.search) {
     const match = pane.search.matches.get(entry.name);
-    return match ? { place: match.directory, entry: match.entry } : null;
+    return match && match.directory.kind !== "smbRoot" ? { place: match.directory, entry: match.entry } : null;
   }
   return { place: pane.place, entry };
 }
@@ -143,6 +143,11 @@ export const opposite = (side: Side): Side => side === "left" ? "right" : "left"
 
 export function localPath(path: string): Extract<Place, { kind: "local" }> {
   return { kind: "local", path, parent: null };
+}
+
+export function filesystemPlace(path: string): Place {
+  const [host, share] = uncParts(path);
+  return host && !share ? { kind: "smbRoot", path: "\\\\" + host } : localPath(path);
 }
 
 export function childPlace(place: Place, name: string): Place {
@@ -162,7 +167,14 @@ export function parentPlace(place: Place): Place | null {
     return place.segments.length ? { ...place, segments: place.segments.slice(0, -1) } : null;
   }
   if (place.kind === "kswitcher") return place.parent === null ? null : { ...place, path: place.parent, parent: null };
-  return place.parent ? localPath(place.parent) : null;
+  if (place.kind === "smbRoot") return null;
+  const [host, share, folder] = uncParts(place.path);
+  if (host && share && !folder) return { kind: "smbRoot", path: "\\\\" + host };
+  return place.parent ? filesystemPlace(place.parent) : null;
+}
+
+export class SmbCredentialsRequired extends Error {
+  constructor() { super(t("Enter your SMB credentials.")); }
 }
 
 function folderInAncestor(from: Place | null, to: Place) {
@@ -190,6 +202,12 @@ export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?:
   if (place.kind === "kswitcher") {
     const listing = await api.listKSwitcher(place.directory, place.peer, place.path);
     return { place: { ...place, parent: listing.parent }, listing };
+  }
+  const unc = uncParts(place.path);
+  if (place.kind === "smbRoot" || unc.length === 2) {
+    const result = await api.connectSmb("\\\\" + unc.join("\\"), null, false);
+    if (result.kind === "credentials_required") throw new SmbCredentialsRequired();
+    return smbLocation(result);
   }
   const listing = await api.listLocal(place.path);
   return { place: { kind: "local", path: listing.path, parent: listing.parent }, listing };

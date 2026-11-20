@@ -2,7 +2,7 @@ import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FileServer, type Place, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { childPlace, formatSize, localPath } from "./panes";
 import { useTimestamps } from "./useTimestamps";
@@ -12,8 +12,8 @@ import { ElevationButton, LockDialog } from "./ProcessTools";
 
 export interface Transfer {
   kind: "copy" | "move";
-  source: Place;
-  items: { place: Place; entry: Entry }[];
+  source: FilePlace;
+  items: { place: FilePlace; entry: Entry }[];
   target: string;
   remoteDestination?: FileServer;
   chooseOperation?: boolean;
@@ -24,7 +24,7 @@ let nextSession = 0;
 
 export const nextTransferId = () => ++nextSession;
 
-export function itemSource(place: Place, item: Entry): TransferSource {
+export function itemSource(place: FilePlace, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (isFileServer(place)) return { kind: place.kind, connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };

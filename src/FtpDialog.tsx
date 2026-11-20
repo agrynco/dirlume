@@ -71,7 +71,8 @@ export function FtpDialog({ shortcuts, onConnect, onClose }: {
       if (profile.kind === "ssh") {
         const result = await api.connectSsh(profile.id, approval);
         if (result.kind === "verifyHost") setVerification(result.verification);
-        else onConnect({ kind: "ssh", id: result.id, profileId: profile.id, address: result.address, segments: result.segments }, result.listing);
+        else onConnect({ kind: "ssh", id: result.id, profileId: profile.id, address: result.address,
+          origin: result.origin, segments: result.segments }, result.listing);
       } else {
         const { place, listing } = await connectFtpLocation(profile.id);
         onConnect(place, listing);

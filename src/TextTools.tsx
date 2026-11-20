@@ -4,7 +4,7 @@ import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, isPermissionError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
@@ -61,7 +61,7 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
   const markdownSource = document && !dirty ? document.text : text;
   const isMarkdown = isMarkdownFile(file.name);
   const writable = writableTextPlace(file.place);
-  const path = placePath(file.place);
+  const path = documentPath(file);
   const section = useRef<HTMLElement>(null);
   const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];

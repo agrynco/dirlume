@@ -26,7 +26,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     desktop::{blocking, message, Result},
-    protocol::RemoteListing,
+    protocol::{file_server_origin, RemoteListing},
 };
 use profiles::{Authentication, Config, ConnectionSettings, Endpoint, ProfileInput, SavedProfile};
 pub(crate) use session::{Entry, Session};
@@ -373,6 +373,7 @@ pub enum ConnectOutcome {
     Connected {
         id: u32,
         address: String,
+        origin: String,
         segments: Vec<String>,
         listing: RemoteListing,
     },
@@ -448,6 +449,8 @@ pub async fn connect_ssh(
         Err(verification) => return Ok(ConnectOutcome::VerifyHost { verification }),
     };
     let address = connection.profile.profile.label.clone();
+    let endpoint = &connection.profile.profile.settings.endpoint;
+    let origin = file_server_origin("sftp", &endpoint.host, endpoint.port, 22);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
         .connections
@@ -457,6 +460,7 @@ pub async fn connect_ssh(
     Ok(ConnectOutcome::Connected {
         id,
         address,
+        origin,
         segments,
         listing,
     })

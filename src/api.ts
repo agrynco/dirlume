@@ -66,13 +66,16 @@ export interface QuickLocation {
 
 export type Place =
   | { kind: "local"; path: string; parent: string | null }
-  | { kind: "server"; id: number; share: string; address: string; segments: string[] }
-  | { kind: "ftp"; id: number; profileId: string; address: string; segments: string[] }
+  | { kind: "smbRoot"; path: string }
+  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[] }
+  | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; address: string }
-  | { kind: "ssh"; id: number; profileId: string; address: string; segments: string[] }
+  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
-export type RemotePlace = Exclude<Place, { kind: "local" | "archive" }>;
+export type RemotePlace = Exclude<Place, { kind: "local" | "smbRoot" | "archive" }>;
+export type SmbPlace = Extract<Place, { kind: "local" | "smbRoot" }>;
+export type FilePlace = Exclude<Place, { kind: "smbRoot" }>;
 export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
 type FileServerPlace = FtpPlace | SshPlace;
@@ -183,6 +186,7 @@ export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: 
 interface Connection {
   id: number;
   address: string;
+  origin: string;
   listing: Listing;
 }
 
@@ -363,6 +367,26 @@ export function placePath(place: Place) {
   return place.path;
 }
 
+export function documentPath({ place, name }: NamedFile) {
+  if (place.kind === "server" || isFileServer(place)) {
+    return place.origin + "/" + [...place.segments, name].map(encodeURIComponent).join("/");
+  }
+  if (place.kind === "local") {
+    const [host, ...segments] = uncParts(place.path);
+    if (host && segments.length) return "smb://" + host + "/" + [...segments, name].map(encodeURIComponent).join("/");
+  }
+  return placePath(place);
+}
+
+export function smbLocation(result: Exclude<SmbConnection, { kind: "credentials_required" }>): { place: SmbPlace; listing: Listing } {
+  if (result.kind === "opened") {
+    const { path, parent } = result.listing;
+    return { place: { kind: "local", path, parent }, listing: result.listing };
+  }
+  const entries = result.names.map((name) => ({ name, directory: true, link: false, hidden: false, size: null, modified: null }));
+  return { place: { kind: "smbRoot", path: result.server }, listing: { entries, omitted: 0 } };
+}
+
 export async function connectFtpLocation(profileId: string, segments?: string[]) {
   const { listing, ...location } = await api.connectFtp(profileId, segments);
   const place: FtpPlace = { kind: "ftp", profileId, ...location };
@@ -425,8 +449,17 @@ export function folderLabel(place: Place) {
 
 export const windowsClient = /Windows/i.test(navigator.userAgent);
 
+export function uncParts(path: string) {
+  if (!windowsClient) return [];
+  const normalized = path.replaceAll("/", "\\").replace(/^\\\\\?\\UNC\\/i, "\\\\");
+  if (!normalized.startsWith("\\\\")) return [];
+  const parts = normalized.slice(2).split("\\");
+  if (!parts[0] || /^[.?]$|[@:\s]/.test(parts[0])) return [];
+  return parts.filter(Boolean);
+}
+
 export function smbHost(place: Place | null) {
-  return windowsClient && place?.kind === "local" ? /^\\\\([^\\]+)\\/.exec(place.path)?.[1] : undefined;
+  return place?.kind === "local" || place?.kind === "smbRoot" ? uncParts(place.path)[0] : undefined;
 }
 
 export function describeError(error: unknown) {
