@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { api, windowsClient, type CommandCompletion } from "./api";
 import { t } from "./i18n";
-import { HistoryButton } from "./HistoryField";
+import { EditableDropdown } from "./EditableDropdown";
 
 type Option = { label: string; text: string; index: number; length: number; history?: boolean };
 
@@ -78,6 +78,12 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     setSelected(-1);
   }
 
+  function toggleHistory() {
+    input.current?.focus({ preventScroll: true });
+    setShowHistory(!showHistory);
+    setSelected(-1);
+  }
+
   function choose(option: Option) {
     setShowHistory(false);
     const value = draft.slice(0, option.index) + option.text + draft.slice(option.index + option.length);
@@ -127,27 +133,24 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   }
 
   return <div className="command-entry">
-    <textarea ref={input} aria-label={t("Command line")} role="combobox" aria-autocomplete="list" aria-expanded={open}
-      aria-controls={open ? id : undefined} aria-activedescendant={activeOption ? `${id}-${selected}` : undefined}
-      rows={Math.min(4, draft.split("\n").length)} wrap="off" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
-      onFocus={(event) => { setFocused(true); setDismissed(""); selectCaret(event.currentTarget); }}
-      onBlur={() => { setFocused(false); setShowHistory(false); setSelected(-1); setNative(null); }}
-      onSelect={(event) => selectCaret(event.currentTarget)}
-      onKeyUp={(event) => selectCaret(event.currentTarget)}
-      onChange={(event) => {
-        setFocused(document.activeElement === event.currentTarget);
-        setPosition(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
-        setShowHistory(false);
-        setDismissed("");
-        setSelected(-1);
-        onChange(event.currentTarget.value);
-      }}
-      onKeyDown={keyDown} />
-    <HistoryButton id={id} expanded={open} onClick={() => {
-      input.current?.focus({ preventScroll: true });
-      setShowHistory(!showHistory);
-      setSelected(-1);
-    }} />
+    <EditableDropdown trigger={{ popupId: id, expanded: open, onClick: toggleHistory }}>
+      <textarea ref={input} aria-label={t("Command line")} role="combobox" aria-autocomplete="list" aria-expanded={open}
+        aria-controls={open ? id : undefined} aria-activedescendant={activeOption ? `${id}-${selected}` : undefined}
+        rows={Math.min(4, draft.split("\n").length)} wrap="off" autoFocus autoComplete="off" spellCheck={false} value={draft} placeholder={t("Enter a command")}
+        onFocus={(event) => { setFocused(true); setDismissed(""); selectCaret(event.currentTarget); }}
+        onBlur={() => { setFocused(false); setShowHistory(false); setSelected(-1); setNative(null); }}
+        onSelect={(event) => selectCaret(event.currentTarget)}
+        onKeyUp={(event) => selectCaret(event.currentTarget)}
+        onChange={(event) => {
+          setFocused(document.activeElement === event.currentTarget);
+          setPosition(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
+          setShowHistory(false);
+          setDismissed("");
+          setSelected(-1);
+          onChange(event.currentTarget.value);
+        }}
+        onKeyDown={keyDown} />
+    </EditableDropdown>
     {open && <div className="command-suggestions" role="listbox" id={id} aria-label={t("Command suggestions")}>
       {options.map((option, index) => <div key={`${option.index}:${option.text}`} id={`${id}-${index}`}
         role="option" aria-selected={index === selected} data-tooltip={option.label}

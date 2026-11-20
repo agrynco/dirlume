@@ -6,8 +6,9 @@ import { File, Folder, FolderOpen } from "lucide-react";
 import { api, windowsClient, type Entry, type FileServer } from "./api";
 import { Button } from "./Button";
 import { reportFrontendError } from "./diagnostics";
+import { EditableDropdown } from "./EditableDropdown";
 import { t } from "./i18n";
-import { HistoryButton, matchingFieldHistory, readFieldHistory, rememberFieldValue, useSuggestionPosition } from "./HistoryField";
+import { matchingFieldHistory, readFieldHistory, rememberFieldValue, useSuggestionPosition } from "./HistoryField";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -52,6 +53,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   baseDirectory?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLSpanElement>(null);
   const edited = useRef(false);
   const [editing, setEditing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -103,7 +105,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
     .map((path) => ({ path, label: path, directory: undefined }));
   const choices = [...paths, ...recent];
   const current = choices[selection];
-  const position = useSuggestionPosition(input, !readOnly && (showHistory || choices.length > 0));
+  const position = useSuggestionPosition(field, !readOnly && (showHistory || choices.length > 0));
   const expanded = position !== undefined;
 
   useLayoutEffect(() => {
@@ -114,6 +116,12 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
     setEditing(false);
     setShowHistory(false);
     setSelection(-1);
+  }
+
+  function toggleHistory() {
+    input.current?.focus({ preventScroll: true });
+    if (showHistory) closeSuggestions();
+    else { setShowHistory(true); setSelection(-1); }
   }
 
   function choose(path: string) {
@@ -194,33 +202,31 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
     </div>
   );
   const dialog = list ? input.current?.closest("dialog") : null;
+  const trigger = readOnly ? undefined : { popupId: popup, expanded, onClick: toggleHistory };
   return <div className="path-field">
     <div className="path-input-row">
-      <input ref={input} id={id} aria-label={label} value={value} readOnly={readOnly} type="text" required={required}
-        role={readOnly ? undefined : "combobox"} aria-autocomplete={readOnly ? undefined : "list"}
-        aria-expanded={readOnly ? undefined : expanded} aria-controls={expanded ? popup : undefined}
-        aria-activedescendant={expanded && current ? popup + "-" + selection : undefined}
-        spellCheck={false} autoComplete="off" data-initial-focus={initialFocus || undefined}
-        onFocus={(event) => {
-          if (selectOnFocus) event.currentTarget.select();
-          if (suggestOnFocus) setEditing(true);
-        }} onBlur={(event) => {
-          if (edited.current && !onCommit) rememberFieldValue(historyScope, event.currentTarget.value);
-          edited.current = false;
-          closeSuggestions();
-        }}
-        onChange={(event) => {
-          edited.current = true;
-          onChange(event.target.value);
-          setEditing(true);
-          setShowHistory(false);
-          setSelection(-1);
-        }} onKeyDown={handleKeys} />
-      {!readOnly && <HistoryButton id={popup} expanded={expanded} onClick={() => {
-        input.current?.focus({ preventScroll: true });
-        if (showHistory) closeSuggestions();
-        else { setShowHistory(true); setSelection(-1); }
-      }} />}
+      <EditableDropdown ref={field} trigger={trigger}>
+        <input ref={input} id={id} aria-label={label} value={value} readOnly={readOnly} type="text" required={required}
+          role={readOnly ? undefined : "combobox"} aria-autocomplete={readOnly ? undefined : "list"}
+          aria-expanded={readOnly ? undefined : expanded} aria-controls={expanded ? popup : undefined}
+          aria-activedescendant={expanded && current ? popup + "-" + selection : undefined}
+          spellCheck={false} autoComplete="off" data-initial-focus={initialFocus || undefined}
+          onFocus={(event) => {
+            if (selectOnFocus) event.currentTarget.select();
+            if (suggestOnFocus) setEditing(true);
+          }} onBlur={(event) => {
+            if (edited.current && !onCommit) rememberFieldValue(historyScope, event.currentTarget.value);
+            edited.current = false;
+            closeSuggestions();
+          }}
+          onChange={(event) => {
+            edited.current = true;
+            onChange(event.target.value);
+            setEditing(true);
+            setShowHistory(false);
+            setSelection(-1);
+          }} onKeyDown={handleKeys} />
+      </EditableDropdown>
       {browse && !readOnly && !server && isTauri() &&
         <Button type="button" className="icon-button path-browse" aria-label={browseLabel} disabled={browsing} onClick={() => void pickPath()}>
           <FolderOpen aria-hidden="true" />

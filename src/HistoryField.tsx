@@ -1,7 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState, type ComponentPropsWithRef, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown } from "lucide-react";
-import { Button } from "./Button";
+import { EditableDropdown } from "./EditableDropdown";
 import { t } from "./i18n";
 
 const prefix = "dirlume.field-history.";
@@ -67,12 +66,6 @@ export function useSuggestionPosition(anchor: RefObject<HTMLElement | null>, ope
   return open ? position : undefined;
 }
 
-export function HistoryButton({ id, expanded, onClick }: { id: string; expanded: boolean; onClick: () => void }) {
-  return <Button type="button" className="icon-button history-button" aria-label={t("Show entry history")}
-    aria-haspopup="listbox" aria-expanded={expanded} aria-controls={expanded ? id : undefined}
-    tabIndex={-1} onMouseDown={(event) => event.preventDefault()} onClick={onClick}><ChevronDown aria-hidden="true" /></Button>;
-}
-
 type HistoryFieldProps = Omit<ComponentPropsWithRef<"input">, "value" | "onChange"> & {
   historyKey: string;
   value: string;
@@ -113,7 +106,14 @@ export function HistoryField({ historyKey, value, ref, onValueChange, onKeyDown,
     close();
   }
 
-  return <span className="history-field" ref={field}>
+  function toggleHistory() {
+    input.current?.focus({ preventScroll: true });
+    if (mode === "history") close();
+    else { setMode("history"); setSelection(-1); }
+  }
+
+  const trigger = props.disabled || props.readOnly ? undefined : { popupId: id, expanded, onClick: toggleHistory };
+  return <EditableDropdown className="history-field" ref={field} trigger={trigger}>
     <input {...props} ref={(element) => {
       input.current = element;
       if (typeof ref === "function") return ref(element);
@@ -154,11 +154,6 @@ export function HistoryField({ historyKey, value, ref, onValueChange, onKeyDown,
           event.stopPropagation();
         } else onKeyDown?.(event);
       }} />
-    {!props.disabled && !props.readOnly && <HistoryButton id={id} expanded={expanded} onClick={() => {
-      input.current?.focus({ preventScroll: true });
-      if (mode === "history") close();
-      else { setMode("history"); setSelection(-1); }
-    }} />}
     {expanded && createPortal(
       <div id={id} role="listbox" className="path-suggestions"
         style={position} aria-label={t("Entry history")}>
@@ -168,5 +163,5 @@ export function HistoryField({ historyKey, value, ref, onValueChange, onKeyDown,
         </div>)}
         {!matches.length && <div className="history-empty" role="status">{t("No previous entries.")}</div>}
       </div>, field.current?.closest("dialog") ?? document.body)}
-  </span>;
+  </EditableDropdown>;
 }
