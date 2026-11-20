@@ -8,6 +8,7 @@ import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
+import { testSystemTheme } from "./system-theme-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
 import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
@@ -2057,6 +2058,7 @@ try {
   await testProcessExecutablePath(page, child.pid);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
+  await testSystemTheme(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
