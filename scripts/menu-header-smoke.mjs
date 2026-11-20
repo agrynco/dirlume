@@ -32,8 +32,8 @@ export async function testHeaderMenus(page, windows = false) {
     const restore = page.getByRole("button", { name: "Restore window", exact: true });
     const initiallyMaximized = await restore.isVisible();
     for (const next of initiallyMaximized ? [maximize, restore] : [restore, maximize]) {
-      const { x, y } = await blankMenuHeaderPoint(bar);
-      await page.mouse.dblclick(x, y);
+      // Exercise Tauri's native double-click handler without starting a Windows move loop on the first down event.
+      await bar.dispatchEvent("mousedown", { button: 0, detail: 2, bubbles: true, cancelable: true });
       await next.waitFor();
     }
   }
