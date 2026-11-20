@@ -16,6 +16,7 @@ export async function testPermanentDelete(page, root) {
 
   async function open(name, title, cancelLabel) {
     await row(name).click();
+    await page.mouse.move(0, 0);
     await page.keyboard.press("Shift+Delete");
     const dialog = page.getByRole("dialog", { name: title, exact: true });
     const cancel = dialog.getByRole("button", { name: cancelLabel, exact: true });
@@ -43,6 +44,14 @@ export async function testPermanentDelete(page, root) {
     await trash.waitFor({ state: "hidden" });
   }
   const standard = await open("projects", "Delete permanently", "Cancel");
+  const cancel = standard.getByRole("button", { name: "Cancel", exact: true });
+  const tooltip = page.getByRole("tooltip");
+  await cancel.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+  assert.equal(await tooltip.isVisible(), false, "Initial keyboard focus must not trigger a tooltip.");
+  await cancel.hover();
+  await tooltip.filter({ hasText: /^Cancel$/ }).waitFor();
+  await page.mouse.move(0, 0);
+  await tooltip.waitFor({ state: "hidden" });
   assert.equal(await standard.evaluate((dialog) => getComputedStyle(dialog).backgroundColor), "rgb(128, 0, 0)");
   await standard.getByText("Permanently delete projects?", { exact: true }).waitFor();
   await standard.getByText("This action cannot be undone.", { exact: true }).waitFor();
