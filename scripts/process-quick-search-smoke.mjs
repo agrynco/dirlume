@@ -43,13 +43,14 @@ export async function testProcessQuickSearch(page, root) {
     await address.fill(folder);
     await address.press("Enter");
     const files = pane("left").getByRole("listbox", { name: "left files", exact: true });
-    await files.getByRole("option").filter({ hasText: "sample-name.txt" }).waitFor();
+    const sample = files.locator('[role="option"][data-tooltip="sample-name.txt"]');
+    await sample.waitFor();
     await files.focus();
     await page.keyboard.press("Alt+s");
     const query = pane("left").getByRole("textbox", { name: "Quick search", exact: true });
     assert.equal((await query.inputValue()).toLowerCase(), "s");
     await query.fill("sample-");
-    await files.locator("[data-current='true']").getByText("sample-name.txt", { exact: true }).waitFor();
+    await sample.and(files.locator('[data-current="true"]')).waitFor();
     await query.press("Escape");
     assert.equal(await files.evaluate((element) => element === document.activeElement), true);
   } finally {

@@ -338,7 +338,7 @@ export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPe
     const dot = (entry.directory ? definition.alignFolders : definition.alignFiles) ? text.lastIndexOf(".") : -1;
     const aligned = dot > text.lastIndexOf("/") + 1 && dot < text.length - 1;
     return <span className={`file-name-text${field === "rightName" ? " file-name-end" : ""}${aligned && field !== "rightName" ? " file-name-aligned" : ""}`}>
-      {aligned && field !== "rightName" ? <><span>{text.slice(0, dot)}</span><span>{text.slice(dot)}</span></> :
+      {aligned && field !== "rightName" ? <><span>{text.slice(0, dot)}</span><span>{text.slice(entry.directory ? dot : dot + 1)}</span></> :
         field === "rightName" ? <span>{text}</span> : text}
     </span>;
   }

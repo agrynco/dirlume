@@ -16,10 +16,13 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   await mkdir(folder);
   await mkdir(join(folder, "SAMPLE.FOLDER"));
   await writeFile(join(folder, "UPPERCASE.TXT"), "x".repeat(12345));
+  await Promise.all(["report.txt", "archive.tar.gz", "LICENSE", ".gitignore"].map((name) => writeFile(join(folder, name), "")));
   await Promise.all(Array.from({ length: 80 }, (_, index) =>
     writeFile(join(folder, `item-${String(index).padStart(3, "0")}.txt`), "")));
   const list = (side) => page.locator(`#${side}-files`);
   const row = (name) => list("left").locator(`[data-tooltip="${name}"]`);
+  const visibleName = (name) => row(name).locator(".file-name-text");
+  const nameParts = (name) => visibleName(name).locator(":scope > span").allTextContents();
   async function waitMode(side, mode) {
     await page.locator(`#${side}-pane[data-panel-mode="${mode}"]`).waitFor();
   }
@@ -28,6 +31,27 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   await address.fill(folder);
   await address.press("Enter");
   await row("UPPERCASE.TXT").waitFor();
+  assert.deepEqual(await nameParts("report.txt"), ["report", "txt"]);
+  assert.deepEqual(await nameParts("archive.tar.gz"), ["archive.tar", "gz"]);
+  for (const name of ["LICENSE", "SAMPLE.FOLDER"]) {
+    assert.equal(await visibleName(name).textContent(), name);
+    assert.deepEqual(await nameParts(name), []);
+  }
+  const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
+  const hiddenWasOff = await showHidden.getAttribute("aria-pressed") === "false";
+  if (hiddenWasOff) await showHidden.click();
+  assert.equal(await visibleName(".gitignore").textContent(), ".gitignore");
+  assert.deepEqual(await nameParts(".gitignore"), []);
+  if (hiddenWasOff) await showHidden.click();
+  await row("report.txt").click();
+  await list("left").press("Control+Shift+c");
+  await page.waitForFunction(async (expected) =>
+    await window.__TAURI_INTERNALS__.invoke("clipboard_text") === expected, join(folder, "report.txt"));
+  await list("left").press("F2");
+  const rename = row("report.txt").getByRole("textbox", { name: "New name for report.txt", exact: true });
+  assert.equal(await rename.inputValue(), "report.txt");
+  await rename.press("Escape");
+  await rename.waitFor({ state: "hidden" });
   // Select an item in the first column before exercising horizontal navigation.
   await row("item-000.txt").click();
   await list("right").focus();
@@ -118,8 +142,13 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   await width.fill("35%");
   await fields.getByRole("checkbox", { name: "Show uppercase file names in lowercase" }).check();
   await fields.getByRole("checkbox", { name: "Show folders in uppercase" }).uncheck();
+  await fields.getByRole("checkbox", { name: "Align file extensions" }).uncheck();
+  await fields.getByRole("checkbox", { name: "Align folder extensions" }).check();
   await options.getByRole("button", { name: "Apply", exact: true }).click();
   await row("UPPERCASE.TXT").getByText("uppercase.txt", { exact: true }).waitFor();
+  assert.equal(await visibleName("report.txt").textContent(), "report.txt");
+  assert.deepEqual(await nameParts("report.txt"), []);
+  assert.deepEqual(await nameParts("SAMPLE.FOLDER"), ["SAMPLE", ".FOLDER"]);
   await fields.getByRole("button", { name: "Move field 2 down", exact: true }).first().click();
   await options.getByRole("button", { name: "Reset", exact: true }).click();
   assert.equal(await name.inputValue(), "");
