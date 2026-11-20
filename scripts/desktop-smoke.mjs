@@ -12,6 +12,7 @@ import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
 import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
@@ -32,7 +33,10 @@ import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-wi
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
-if (process.env.CI) await testSmbNavigation();
+if (process.env.CI) {
+  await testSmbNavigation();
+  await testFolderMeasurement();
+}
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
 const dst = join(temp, "to");

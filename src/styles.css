@@ -660,6 +660,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   background: var(--raised);
 }
 .pane-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pane-measurement { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.pane-measurement .pane-progress-status span { flex-shrink: 1; }
+.pane-measurement > button { flex: none; width: 20px; height: 20px; min-height: 20px; }
 .pane-counts { flex: none; }
 .pane .pane-footer .pane-marked { color: var(--panel-marked); font-weight: 600; }
 .pane-free { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-inline-start: auto; }
