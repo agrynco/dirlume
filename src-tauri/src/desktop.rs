@@ -116,6 +116,35 @@ async fn open_tool_window(
     Ok(())
 }
 
+#[tauri::command]
+pub(crate) async fn set_appearance_picker(window: WebviewWindow, picking: bool) -> Result<()> {
+    let app = window.app_handle();
+    if picking && window.label() != "options"
+        || !picking && window.label() != "main" && !window.label().starts_with("compare-")
+    {
+        return Err("The appearance picker cannot switch from this window.".into());
+    }
+    let options = app
+        .get_webview_window("options")
+        .ok_or("Options is no longer open.")?;
+    if !picking {
+        options.show().map_err(message)?;
+        return options.set_focus().map_err(message);
+    }
+    let main = app
+        .get_webview_window("main")
+        .ok_or("The main window is no longer open.")?;
+    main.unminimize().map_err(message)?;
+    main.show().map_err(message)?;
+    options.hide().map_err(message)?;
+    if let Err(error) = main.set_focus() {
+        let _ = options.show();
+        let _ = options.set_focus();
+        return Err(message(error));
+    }
+    Ok(())
+}
+
 pub(crate) async fn blocking<T: Send + 'static>(
     task: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
@@ -1758,6 +1787,7 @@ pub fn run() {
         diagnostics::error_log,
         build_version,
         open_tool_window,
+        set_appearance_picker,
         crate::updates::check_for_update,
         crate::updates::read_portable_state,
         crate::updates::save_portable_preferences,

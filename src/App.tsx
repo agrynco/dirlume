@@ -39,6 +39,8 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { Settings } from "./Settings";
+import { AppearancePicker } from "./AppearancePicker";
+import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
 import { applyAppearance, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
@@ -160,6 +162,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
+  const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
   const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
@@ -2176,11 +2179,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             smbHost(pane.place) ?? t("Local file system")}</span>
         <WindowResizeMarker />
       </footer>
-      {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences} onChange={(next) => {
+      {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences}
+        onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={(next) => {
         setLanguage(next.language);
         setPreferences(next);
         return next;
       }} onClose={() => setModal(null)} />}
+      {localAppearancePick && <AppearancePicker onFinish={(pick) => {
+        setLocalAppearancePick(null);
+        localAppearancePick(pick);
+      }} />}
       {modal?.kind === "exit" && (
         <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setModal(modal.update ? { kind: "update", update: modal.update } : null)}>
           <div className="dialog-body"><p>{t(modal.update ? "Some editors have unsaved changes. Discard them and install the update?" :
