@@ -103,13 +103,12 @@ export async function testMarkdown(page, source, wheelFont) {
 
   const external = updated + "\r\nExternal changes.\r\n";
   await writeFile(catalogue, external);
-  await task("Main task", true).click();
-  await catalogueViewer.getByRole("alert").filter({ hasText: "The file changed on disk." }).waitFor();
+  await catalogueViewer.getByText("External changes.", { exact: true }).waitFor();
   await task("Main task", true).waitFor();
   assert.equal(await readFile(catalogue, "utf8"), external);
   await catalogueViewer.getByRole("button", { name: "Close document", exact: true }).click();
   await testTaskSource(page, source);
-  console.log("Verified Markdown link navigation and Ctrl-click tabs, shared preview zoom, heading anchors, task persistence, and external edit protection.");
+  console.log("Verified Markdown link navigation and Ctrl-click tabs, shared preview zoom, heading anchors, task persistence, and external reloads.");
   return enlargedSize;
 }
 

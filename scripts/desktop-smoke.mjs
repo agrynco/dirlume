@@ -29,6 +29,7 @@ import { testInlineRename } from "./inline-rename-smoke.mjs";
 import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-smoke.mjs";
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
+import { testDocumentWatch } from "./document-watch-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -1193,6 +1194,7 @@ try {
   await navigate("left", encodedFiles);
   await testNewFileEncoding(page, encodedFiles);
   await testDocumentMode(page, temp);
+  await testDocumentWatch(page, temp);
   await navigate("left", src);
   await left.focus();
   await page.keyboard.press("Shift+F4");

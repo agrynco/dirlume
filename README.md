@@ -106,6 +106,8 @@ The Viewer and Editor have document-specific menus and a shortcut strip. The hea
 
 Use **F6** or the document's **File** menu to switch modes for the current file. The Viewer shows the saved file, and the Editor keeps its unsaved changes when you return. Change or disable the shortcut in **Options → Keyboard shortcuts**. In the file panes, **F6** still opens **Rename or move**.
 
+The Viewer refreshes an open local file when it changes on disk. The Editor offers **Reload from disk** to open the updated file or **Keep editing** to retain the current buffer. Reloading discards any unsaved edits. Saving still checks that the disk contents match the version originally opened or last saved by the Editor.
+
 Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing a scheme’s font size clears wheel adjustments for views that use that size. A custom Viewer family also applies to Markdown.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.

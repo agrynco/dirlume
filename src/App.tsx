@@ -17,7 +17,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
-import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
+import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
@@ -210,7 +210,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const request = useRef({ left: 0, right: 0 });
   const pendingListings = useRef<Partial<Record<Side, AbortController>>>({});
   const nextSession = useRef(0);
-  const watchId = useRef(0);
   const measureId = useRef(0);
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
   const drag = useRef<{ side: Side; source: Transfer["source"]; items: Transfer["items"]; pointer: number; x: number; y: number; moving: boolean } | null>(null);
@@ -499,27 +498,23 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const locations = [["left", leftPath], ["right", rightPath]] as const;
     const stopWatching = locations.map(([side, path]) => {
       if (!path) return () => {};
-      const id = ++watchId.current;
       let stopped = false;
       let timer: number | undefined;
-      const changes = new Channel<null>();
       const refreshWatchedFolder = () => {
         const current = latest.current[side];
         if (stopped || current.place?.kind !== "local" || current.place.path !== path) return;
         if (pendingListings.current[side]) timer = window.setTimeout(refreshWatchedFolder, 150);
         else void load(side, current.place, "background");
       };
-      changes.onmessage = () => {
+      const watch = watchDirectory(path, () => {
         window.clearTimeout(timer);
         timer = window.setTimeout(refreshWatchedFolder, 150);
-      };
-      const started = api.watchDirectory(id, path, changes);
-      void started.catch(() => {});
+      });
+      void watch.ready.catch(() => {});
       return () => {
         stopped = true;
-        changes.onmessage = () => {};
         window.clearTimeout(timer);
-        void started.then(() => api.unwatchDirectory(id)).catch(() => {});
+        watch.stop();
       };
     });
     return () => stopWatching.forEach((stop) => stop());
@@ -2122,8 +2117,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
-              if (editing) {
-                // Keep the Viewer's navigation and refresh its copy after an explicit save.
+              if (editing && file.place.kind !== "local") {
+                // A remote Viewer reloads after a save because it has no local directory watch.
                 setDocuments((current) => current.map((tab) => !tab.editing && sameDocumentFile(tab.file, file)
                   ? { ...tab, file: { ...tab.file } } : tab));
               }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
@@ -40,7 +40,7 @@ const scratch = await realpath(tmpdir());
 const work = await mkdtemp(join(scratch, "dirlume-updater-"));
 const install = join(work, "installed");
 await mkdir(install);
-await writeFile(join(work, "document-mode-fixture.txt"), "Document mode fixture");
+const documentFile = join(work, "document-mode-fixture.txt");
 const webview = join(work, "webview");
 const keyFile = join(work, "signing.key");
 const configFile = join(work, "bundle.json");
@@ -116,11 +116,21 @@ async function reportedVersion() {
     } catch (error) {
       if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     }
+    const phase = await readFile(phaseFile, "utf8").catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+      return "";
+    });
+    for (const action of ["an in-place document update", "a replaced document"]) {
+      if (!phase.endsWith(action) || inputs.has(action)) continue;
+      inputs.add(action);
+      if (action === "an in-place document update") await writeFile(documentFile, "Edited in place");
+      else {
+        const replacement = join(work, "document-replacement.tmp");
+        await writeFile(replacement, "Replaced file");
+        await rename(replacement, documentFile);
+      }
+    }
     if (macInput) {
-      const phase = await readFile(phaseFile, "utf8").catch((error) => {
-        if (error.code !== "ENOENT") throw error;
-        return "";
-      });
       const input = phase.endsWith("the native screen color cancellation") ? "escape" :
         phase.endsWith("the external screen color") ? "click" : undefined;
       if (input && !inputs.has(input)) {
@@ -198,6 +208,7 @@ try {
     const metadata = { version: nextVersion, platforms: { [target]: { url, signature } } };
     const previousDownloads = downloads;
     await rm(phaseFile, { force: true });
+    await writeFile(documentFile, "Document mode fixture");
     await writeFile(fixtureFile, JSON.stringify({
       result: resultFile, phase: phaseFile, expected: nextVersion, reject, metadata,
       replacement_failure: replacementFailure,

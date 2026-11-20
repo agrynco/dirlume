@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    ffi::OsStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -121,13 +122,29 @@ pub fn cancel_measurement(id: u32, state: State<'_, Measurements>) -> Result<()>
 pub async fn watch_directory(
     id: u32,
     path: String,
+    name: Option<String>,
     changes: Channel<()>,
     state: State<'_, Watches>,
 ) -> Result<()> {
     let watcher = blocking(move || {
+        let directory = local::absolute(&path).map_err(message)?;
+        if let Some(name) = &name {
+            local::name_component(name).map_err(message)?;
+        }
+        let watched = directory.to_owned();
         let mut watcher =
             notify::recommended_watcher(move |event: notify::Result<Event>| match event {
-                Ok(event) if !matches!(event.kind, EventKind::Access(_)) => {
+                Ok(event)
+                    if !matches!(event.kind, EventKind::Access(_))
+                        && name.as_deref().is_none_or(|name| {
+                            // The parent stays watched when a save replaces the file at this name.
+                            event.need_rescan()
+                                || event.paths.is_empty()
+                                || event.paths.iter().any(|path| {
+                                    path == &watched || path.file_name() == Some(OsStr::new(name))
+                                })
+                        }) =>
+                {
                     let _ = changes.send(());
                 }
                 Err(_) => failure("watch_events", FailureCode::Io, None),
@@ -135,10 +152,7 @@ pub async fn watch_directory(
             })
             .map_err(message)?;
         watcher
-            .watch(
-                local::absolute(&path).map_err(message)?,
-                RecursiveMode::NonRecursive,
-            )
+            .watch(directory, RecursiveMode::NonRecursive)
             .map_err(message)?;
         Ok(watcher)
     })

@@ -364,9 +364,6 @@ export const api = {
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),
-  watchDirectory: (id: number, path: string, changes: Channel<null>) =>
-    invoke<void>("watch_directory", { id, path, changes }),
-  unwatchDirectory: (id: number) => invoke<void>("unwatch_directory", { id }),
   measureFolders: (id: number, source: { kind: "local"; directory: string } |
     { kind: "ftp"; connection: number; segments: string[] }, names: string[], output: Channel<SizeResult>) =>
     invoke<void>("measure_folders", { id, source, names, output }),
@@ -453,6 +450,22 @@ export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
 
 export function writableTextPlace(place: TextPlace) {
   return place.kind !== "server" && (place.kind !== "archive" || place.writable);
+}
+
+let nextDirectoryWatch = 0;
+
+export function watchDirectory(path: string, onChange: () => void, name?: string) {
+  const id = ++nextDirectoryWatch;
+  const changes = new Channel<null>();
+  changes.onmessage = onChange;
+  const ready = invoke<void>("watch_directory", { id, path, name: name ?? null, changes });
+  return {
+    ready,
+    stop: () => {
+      changes.onmessage = () => {};
+      void ready.then(() => invoke<void>("unwatch_directory", { id })).catch(() => {});
+    },
+  };
 }
 
 export function isPermissionError(error: string) {
