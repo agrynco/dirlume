@@ -26,6 +26,13 @@ async (upgraded, reject) => {
       await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
       await waitFor(() => document.querySelector('.topbar[data-menu-position="right"]') &&
         JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").mainMenuAlignment === "right");
+      const resize = await waitFor(() => document.querySelector(".statusbar > .window-resize-marker"));
+      const marker = resize.getBoundingClientRect();
+      const status = resize.parentElement.getBoundingClientRect();
+      if (resize.tabIndex >= 0 || resize.getAttribute("aria-hidden") !== "true" ||
+        Math.abs(status.right - marker.right) > 2 || Math.abs(status.bottom - marker.bottom) > 2) {
+        throw new Error("The main window resize marker was not decorative and flush with the status bar.");
+      }
       const refresh = await waitFor(() => document.querySelector('#left-pane button[aria-label="Refresh folder"]:enabled'));
       await checkTooltip(refresh, "Refresh folder");
       const locations = document.querySelector("#left-pane .location-trigger");

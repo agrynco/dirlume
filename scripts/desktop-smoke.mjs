@@ -28,7 +28,7 @@ import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
-import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -149,20 +149,17 @@ try {
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
   assert.equal(await page.locator(".topbar-scheme").count(), 0, "The scheme picker is hidden by default.");
   await page.waitForFunction(() => window.__TAURI_INTERNALS__.invoke("plugin:window|is_visible", { label: "main" }));
+  const resizeMain = page.locator(".statusbar > .window-resize-marker");
+  await checkResizeMarker(resizeMain);
+  assert.equal(await resizeMain.evaluate((marker) => {
+    const status = marker.parentElement.querySelector("span:last-of-type")?.getBoundingClientRect();
+    return !!status && status.right < marker.getBoundingClientRect().left;
+  }), true);
   await page.getByRole("button", { name: "Maximize window" }).click();
+  await resizeMain.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Restore window" }).click();
   await page.getByRole("button", { name: "Maximize window" }).waitFor();
-  const resizeMain = page.getByRole("button", { name: "Resize Dirlume", exact: true });
-  await resizeMain.waitFor();
-  assert.equal(await resizeMain.evaluate((grip) => {
-    const corner = grip.getBoundingClientRect();
-    return innerWidth - corner.right <= 2 && innerHeight - corner.bottom <= 2;
-  }), true);
-  const initialWidth = await page.evaluate(() => innerWidth);
-  await resizeMain.press("ArrowRight");
-  await page.waitForFunction((width) => innerWidth > width, initialWidth);
-  await resizeMain.press("ArrowLeft");
-  await page.waitForFunction((width) => innerWidth === width, initialWidth);
+  await checkResizeMarker(resizeMain);
   assert.equal(await page.locator(".window-titlebar").getAttribute("data-tauri-drag-region"), "deep");
   assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });

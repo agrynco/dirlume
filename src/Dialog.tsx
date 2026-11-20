@@ -2,7 +2,7 @@ import { t } from "./i18n";
 import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
-import { ResizeGrip, WindowResizeGrip } from "./ResizeGrip";
+import { ResizeMarker, WindowResizeMarker } from "./ResizeGrip";
 
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
@@ -81,7 +81,6 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
         const handle = event.target.closest<HTMLElement>("[data-resize-edge]");
         if (handle?.closest("dialog") !== event.currentTarget) return;
         event.preventDefault();
-        if (handle instanceof HTMLButtonElement) handle.focus({ preventScroll: true });
         const edge = handle.dataset.resizeEdge ?? "";
         const { width, height } = event.currentTarget.getBoundingClientRect();
         drag.current = {
@@ -106,11 +105,8 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
       </header>
       {children}
       {footer && <footer className="dialog-footer">{footer}</footer>}
-      {resizeKey && <ResizeGrip title={title} edge="se" onResize={(width, height) => {
-        const bounds = ref.current?.getBoundingClientRect();
-        if (bounds) resize(bounds.width + width, bounds.height + height, true);
-      }} />}
-      {standalone && <WindowResizeGrip title={title} />}
+      {resizeKey && <ResizeMarker edge="se" />}
+      {standalone && <WindowResizeMarker />}
       {resizeKey && resizeEdges.map((edge) =>
         <div key={edge} className="dialog-resize-edge" data-resize-edge={edge} aria-hidden="true" />)}
     </dialog>
