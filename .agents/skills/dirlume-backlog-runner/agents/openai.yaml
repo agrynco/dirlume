@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dirlume Backlog Runner"
+  short_description: "Work through Dirlume issues and publish a batch"
+  default_prompt: "Use $dirlume-backlog-runner to implement the Dirlume backlog in order, merge each task into prerelease, and release the completed batch."

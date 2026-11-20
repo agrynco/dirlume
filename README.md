@@ -206,7 +206,9 @@ The installer and server filenames include both numbers, for example `Dirlume-0.
 
 Start work branches from `prerelease`. For implementation tasks, Codex runs the relevant local checks, opens a pull request into `prerelease`, and squash-merges it when ready. Pull requests and pushes to that branch do not start CI.
 
-When the batch is ready, the maintainer opens one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open.
+When the batch is ready, open one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open.
+
+Invoke [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md) in Codex to process the GitHub issue backlog in the current checkout. It works through the issues in order, merges each completed task into `prerelease`, then opens and merges the promotion pull request after its required checks pass.
 
 After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
 
