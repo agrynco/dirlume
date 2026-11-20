@@ -226,7 +226,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
-  const operationLabel = t(pane.loading ? "Opening folder…" : "Calculating folder sizes…");
+  const loadingLabel = t("Opening folder…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
   const sources = [
@@ -367,13 +367,13 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         </div>
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
-      {(pane.loading || pane.measuring.length > 0) && <div className="pane-progress">
-        <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? operationLabel}>
+      {pane.loading && <div className="pane-progress">
+        <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
           <LoaderCircle className="spin" aria-hidden="true" />
-          <span>{operationLabel}</span>
+          <span>{loadingLabel}</span>
           {pane.loadingPath && <span className="pane-progress-path">{pane.loadingPath}</span>}
         </div>
-        <Button type="button" aria-label={t(pane.loading ? "Cancel folder navigation" : "Cancel folder size calculation")}
+        <Button type="button" aria-label={t("Cancel folder navigation")}
           shortcut={cancelKey} onClick={onCancelFolderOperation}>
           {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
         </Button>
@@ -472,8 +472,14 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       <footer className="pane-footer">
         <span className="pane-counts">{search ? countText(entries.length, "match") :
           <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
-        <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
-          search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>
+        {!pane.loading && pane.measuring.length > 0 ? <div className="pane-measurement">
+          <div className="pane-progress-status" role="status">
+            <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
+          </div>
+          <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
+            shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
+        </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
+          search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
         {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
           <span className="pane-free-full">{freeLabel}</span>
           <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
