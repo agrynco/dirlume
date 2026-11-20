@@ -12,6 +12,8 @@ export const builtInThemes = {
   emerald: "Emerald",
   aurora: "Aurora",
   midnight: "Midnight blue",
+  sunrise: "Sunrise",
+  graphite: "Graphite",
 } as const;
 
 export type Theme = keyof typeof builtInThemes;
@@ -27,9 +29,9 @@ function isBaseTheme(value: unknown): value is BaseTheme {
 
 export const baseThemes = Object.keys(builtInThemes).filter(isBaseTheme);
 
-const lightThemes = new Set<BaseTheme>(["light", "lavender"]);
+const lightThemes = new Set<BaseTheme>(["light", "lavender", "sunrise"]);
 // These themes share rounded cards, glowing backgrounds and chip-style key buttons.
-const modernThemes = new Set<BaseTheme>(["lavender", "emerald", "aurora", "midnight"]);
+const modernThemes = new Set<BaseTheme>(["lavender", "emerald", "aurora", "midnight", "sunrise", "graphite"]);
 
 export const isLightTheme = (theme: BaseTheme) => lightThemes.has(theme);
 export const readTheme = (value: unknown): Theme => isTheme(value) ? value : "system";

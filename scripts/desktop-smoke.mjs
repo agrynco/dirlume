@@ -2066,7 +2066,8 @@ try {
     return (light + 0.05) / (dark + 0.05);
   };
   const modernAppearance = await openAppearance();
-  for (const [modernTheme, colorScheme] of [["lavender", "light"], ["emerald", "dark"], ["aurora", "dark"], ["midnight", "dark"]]) {
+  for (const [modernTheme, colorScheme] of [["lavender", "light"], ["emerald", "dark"], ["aurora", "dark"], ["midnight", "dark"],
+    ["sunrise", "light"], ["graphite", "dark"]]) {
     await modernAppearance.getByLabel("Color scheme", { exact: true }).selectOption(modernTheme);
     await modernAppearance.locator(`.preview-frame[data-theme=${modernTheme}]`).waitFor();
     await modernAppearance.getByRole("button", { name: "Apply", exact: true }).click();
@@ -2095,7 +2096,7 @@ try {
     }
   }
   await closeToolWindow(optionsPage, () => modernAppearance.getByRole("button", { name: "Done", exact: true }).click());
-  console.log("Verified the Lavender, Emerald, Aurora, and Midnight blue themes.");
+  console.log("Verified the Lavender, Emerald, Aurora, Midnight blue, Sunrise, and Graphite themes.");
   const themeRoot = () => page.locator("html[data-theme=classic-blue]");
   const appearance = await openAppearance();
   await appearance.getByLabel("Color scheme", { exact: true }).selectOption("classic-blue");

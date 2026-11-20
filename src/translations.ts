@@ -577,6 +577,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Emerald": ["Смарагдова", "Изумрудная"],
   "Aurora": ["Полярне сяйво", "Северное сияние"],
   "Midnight blue": ["Опівнічна синя", "Полуночная синяя"],
+  "Sunrise": ["Світанок", "Рассвет"],
+  "Graphite": ["Графіт", "Графит"],
   "Window": ["Вікно", "Окно"],
   "Window background": ["Тло вікна", "Фон окна"],
   "Toolbar and status bar": ["Панель інструментів і рядок стану", "Панель инструментов и строка состояния"],
