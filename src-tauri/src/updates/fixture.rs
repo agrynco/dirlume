@@ -71,8 +71,10 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
     #[cfg(not(windows))]
     let portable = false;
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
+    let directory =
+        serde_json::to_string(&fixture.result.parent()).unwrap_or_else(|_| "null".into());
     let _ = webview.eval(format!(
-        "({script})({upgraded}, {}, {portable}, {}, {}, {});",
+        "({script})({upgraded}, {}, {portable}, {}, {}, {}, {directory});",
         fixture.reject,
         fixture.replacement_failure,
         fixture.check_clipboard,

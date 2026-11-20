@@ -27,7 +27,7 @@ const CodeSurface = lazy(() => import("./CodeSurface"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
 
 export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, fontSizes, viewerContentWidth, colors,
-  onZoom, onOptions, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+  onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -39,6 +39,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   colors?: Palette;
   onZoom: ZoomViewFont;
   onOptions: () => void;
+  onSwitchMode: () => void;
   position?: MarkdownPosition;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -119,6 +120,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       if (!cancelled) {
         setDocument(value);
         setText(normalized(value.text));
+        setReadError("");
       }
     }, (error: unknown) => {
       if (cancelled) return;
@@ -212,7 +214,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const forward = action("Forward", "documentForward", () => navigate("forward"), !canGoForward);
   const searchAction = action("Search", "documentSearch", find);
   const hexAction = action("Hex", "viewAsHex", () => setHex(!hex));
-  const fileActions = [...(editing ? [saveAction] : []), closeAction];
+  const switchMode = action(editing ? "Open in Viewer" : "Open in Editor", "switchDocumentMode", onSwitchMode,
+    saving || sudoAction !== null || (!editing && (!writable || !document)));
+  const fileActions = [...(editing ? [saveAction] : []), switchMode, closeAction];
   const selectionActions = [
     ...(editing && sourceVisible ? [
       action("Undo", "documentUndo", () => sourceActions.current?.undo(), saving || !sourceStatus.canUndo),
@@ -238,7 +242,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
         items: syntaxOptions.map((name) => ({ label: name, run: () => setSyntax(name) })) },
     ] }] : []),
   ];
-  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), closeAction];
+  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), switchMode, closeAction];
 
   return (
     <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
@@ -259,7 +263,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       event.preventDefault();
       event.stopPropagation();
       if (cancel) (searchOpen && markdownViewer ? closeSearch : close)();
-      else if (action && !action.disabled) action.run();
+      else if (action && !action.disabled && !(action === switchMode && event.repeat)) action.run();
     }}>
       <header className="document-heading">
         <div className="document-menu">

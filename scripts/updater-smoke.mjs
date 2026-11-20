@@ -40,6 +40,7 @@ const scratch = await realpath(tmpdir());
 const work = await mkdtemp(join(scratch, "dirlume-updater-"));
 const install = join(work, "installed");
 await mkdir(install);
+await writeFile(join(work, "document-mode-fixture.txt"), "Document mode fixture");
 const webview = join(work, "webview");
 const keyFile = join(work, "signing.key");
 const configFile = join(work, "bundle.json");

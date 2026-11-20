@@ -89,6 +89,7 @@ export const commands = {
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
+  switchDocumentMode: { label: "Switch between Viewer and Editor", key: "F6" },
   saveText: { label: "Save text", key: "Ctrl+S" },
   closeText: { label: "Close the viewer or editor", key: "F10" },
   cancelText: { label: "Exit the viewer or editor", key: "Escape" },
@@ -163,7 +164,8 @@ export function commandScope(command: Command) {
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
-  if (command === "saveText" || command === "closeText" || command === "cancelText" || command.startsWith("document")) return "text";
+  if (command === "switchDocumentMode" || command === "saveText" || command === "closeText" ||
+      command === "cancelText" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
