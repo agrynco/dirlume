@@ -49,6 +49,7 @@ export const commands = {
   search: { label: "Find files", key: "Alt+F7" },
   copyClipboard: { label: "Copy files to clipboard", key: "Ctrl+C" },
   copyFullPath: { label: "Copy full path", key: "Ctrl+Shift+C" },
+  copyItemNames: { label: "Copy item names", key: "Ctrl+Insert" },
   pasteClipboard: { label: "Paste files from clipboard", key: "Ctrl+V" },
   recycle: { label: "Move to Trash", key: "F8" },
   recycleAlternate: { label: "Move to Trash (alternate)", key: "Delete" },
@@ -224,7 +225,8 @@ export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wh
 export const defaultBindings = Object.fromEntries<readonly string[]>(commandNames.map((command) => {
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
-    command !== "addFolderShortcut" && command !== "pasteTerminalText" && !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
+    command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" &&
+    !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
   return [command, [key, alternateDefaults[command]?.key].filter((value): value is string => Boolean(value))];
 })) as Bindings;
