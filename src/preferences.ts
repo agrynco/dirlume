@@ -64,6 +64,7 @@ export const commands = {
   compare: { label: "Compare files", key: "Shift+F11" },
   terminal: { label: "Show or hide file panels", key: "Ctrl+O" },
   toggleTerminal: { label: "Toggle terminal", key: "F12" },
+  pasteTerminalText: { label: "Paste text into terminal", key: "Ctrl+V" },
   expandTerminal: { label: "Make the terminal taller", key: "Ctrl+ArrowUp" },
   collapseTerminal: { label: "Make the terminal shorter", key: "Ctrl+ArrowDown" },
   commandPath: { label: "Insert selected path in command line", key: "Ctrl+F" },
@@ -140,6 +141,7 @@ export function commandLabel(command: Command) {
 export function commandScope(command: Command) {
   if (command === "help" || command === "menu") return "global";
   if (command === "zoomFont") return "wheel";
+  if (command === "pasteTerminalText") return "terminal";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
@@ -200,6 +202,7 @@ export interface Preferences {
   schemes: Scheme[];
   hidden: boolean;
   refreshEnvironment: boolean;
+  terminalPasteOnRightClick: boolean;
   provider: Provider;
   kswitcher: string;
   activeShortcutScheme: string | null;
@@ -221,7 +224,7 @@ export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wh
 export const defaultBindings = Object.fromEntries<readonly string[]>(commandNames.map((command) => {
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
-    command !== "addFolderShortcut" && !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
+    command !== "addFolderShortcut" && command !== "pasteTerminalText" && !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
   return [command, [key, alternateDefaults[command]?.key].filter((value): value is string => Boolean(value))];
 })) as Bindings;
@@ -290,7 +293,7 @@ export function readPreferences(): Preferences {
     theme: "system", layout: "standard", actionButtonWidth: "compact", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
     mainMenuAlignment: "center", activeShortcutScheme: null, shortcutSchemes: [],
     viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
-    terminalResizeRows: 1,
+    terminalResizeRows: 1, terminalPasteOnRightClick: true,
   };
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as
@@ -328,6 +331,7 @@ export function readPreferences(): Preferences {
       provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
       hidden: saved.hidden === true,
       refreshEnvironment: saved.refreshEnvironment !== false,
+      terminalPasteOnRightClick: saved.terminalPasteOnRightClick !== false,
       kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
       activeShortcutScheme,
       shortcutSchemes,

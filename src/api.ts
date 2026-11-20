@@ -259,6 +259,7 @@ export const api = {
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   copyPath: (path: string) => invoke<void>("copy_path", { path }),
+  clipboardText: () => invoke<string>("clipboard_text"),
   droppedFiles: (paths: string[]) => invoke<{ directory: string; entry: Entry }[]>("dropped_files", { paths }),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
   formatTimestamps: (timestamps: number[], style: "date" | "time" | "date_time") =>

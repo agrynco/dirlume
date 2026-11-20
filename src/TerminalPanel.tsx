@@ -9,6 +9,7 @@ import { X } from "lucide-react";
 import { api, describeError, windowsClient, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
+import { eventShortcut } from "./preferences";
 import "@xterm/xterm/css/xterm.css";
 
 // Focus and device reports are forwarded to the PTY without changing input state.
@@ -51,7 +52,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  onCommandsQueued, rowHeight, onCommandSubmitted, focusRequested, onClose }: {
+  pasteShortcut, pasteOnRightClick, onPasteError, onCommandsQueued, rowHeight, onCommandSubmitted, focusRequested, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -59,6 +60,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   scheme: Scheme | null;
   pendingCommands: TerminalCommand[];
   watchEnvironment: boolean;
+  pasteShortcut: readonly string[];
+  pasteOnRightClick: boolean;
+  onPasteError: (error: unknown) => void;
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
   rowHeight: { current: number };
@@ -76,6 +80,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   acknowledge.current = onCommandsQueued;
   const record = useRef(onCommandSubmitted);
   record.current = onCommandSubmitted;
+  const pasteSettings = useRef({ pasteShortcut, pasteOnRightClick, onPasteError, visible });
+  pasteSettings.current = { pasteShortcut, pasteOnRightClick, onPasteError, visible };
 
   useEffect(() => {
     if (!windowsClient || !watchEnvironment) return;
@@ -247,6 +253,33 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       runQueuedCommand();
     };
     const data = term.onData(send);
+    let pasting = Promise.resolve();
+    function paste() {
+      pasting = pasting.then(async () => {
+        if (stopped || closed || !pasteSettings.current.visible) return;
+        const text = await api.clipboardText();
+        if (!stopped && !closed && pasteSettings.current.visible && text) term.paste(text);
+      }).catch((error: unknown) => { if (!stopped) pasteSettings.current.onPasteError(error); });
+    }
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown" || event.isComposing) return true;
+      const command = eventShortcut(event);
+      if (!pasteSettings.current.pasteShortcut.includes(command)) {
+        if (command === "Ctrl+V") event.preventDefault();
+        return true;
+      }
+      event.preventDefault();
+      if (!event.repeat) paste();
+      return false;
+    });
+    function pasteOnContextMenu(event: MouseEvent) {
+      if (event.button !== 2 || !pasteSettings.current.pasteOnRightClick) return;
+      event.preventDefault();
+      event.stopPropagation();
+      term.focus();
+      paste();
+    }
+    surface.addEventListener("contextmenu", pasteOnContextMenu, true);
     const keys = term.onKey(({ domEvent }) => {
       // xterm can leave a WebView function-key default enabled in screen reader mode.
       if (/^F\d+$/.test(domEvent.key)) domEvent.preventDefault();
@@ -267,6 +300,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       data.dispose();
       keys.dispose();
       resized.dispose();
+      surface.removeEventListener("contextmenu", pasteOnContextMenu, true);
       titles.forEach((title) => title.dispose());
       resize.disconnect();
       output.onmessage = () => {};

@@ -20,6 +20,7 @@ import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
+import { testTerminalPaste } from "./terminal-paste-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
@@ -38,6 +39,7 @@ if (process.env.CI) {
   await testSmbNavigation();
   await testFolderMeasurement();
   await testSyntaxMenu();
+  await testTerminalPaste();
 }
 const temp = await fixture("desktop-");
 const src = join(temp, "from");

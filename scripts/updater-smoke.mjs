@@ -159,6 +159,7 @@ try {
     const previousDownloads = downloads;
     await writeFile(fixtureFile, JSON.stringify({
       result: resultFile, expected: nextVersion, reject, metadata, replacement_failure: replacementFailure,
+      terminal_paste: process.env.CI === "true" && target.endsWith("-portable") === false,
     }));
     child = startApp(executable);
     const version = await Promise.race([

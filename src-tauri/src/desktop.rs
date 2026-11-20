@@ -1780,6 +1780,7 @@ pub fn run() {
         crate::file_clipboard::copy_file_references,
         crate::file_clipboard::clipboard_files,
         crate::file_clipboard::copy_path,
+        crate::file_clipboard::clipboard_text,
         crate::file_clipboard::dropped_files,
         #[cfg(windows)]
         crate::windows_shell::windows_item_menu,
