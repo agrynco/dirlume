@@ -858,9 +858,11 @@ try {
   await refreshSizeFixture.click();
   await measuredItem.getByText("1 B", { exact: true }).waitFor();
   const sizeSort = leftPane.getByRole("button", { name: /^Size\b/ });
+  const sizeOrder = () => left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   await sizeSort.click();
-  assert.deepEqual(await left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)),
-    ["..", "measured-item", "other.txt"]);
+  assert.deepEqual(await sizeOrder(), ["..", "other.txt", "measured-item"]);
+  await sizeSort.click();
+  assert.deepEqual(await sizeOrder(), ["..", "measured-item", "other.txt"]);
   await leftPane.getByRole("button", { name: /^Name\b/ }).click();
   await navigate("left", src);
   await page.getByRole("option", { name: /^notes.txt/ }).click();
