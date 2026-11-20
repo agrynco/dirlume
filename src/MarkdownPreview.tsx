@@ -19,8 +19,8 @@ const PreviewContext = createContext<{
   saving: boolean;
   light: boolean;
   colors?: Palette;
-  onToggleTask: (marker: TaskMarker, checked: boolean) => void;
-  followLink: (href: string, newTab: boolean) => void;
+  onToggleTask?: (marker: TaskMarker, checked: boolean) => void;
+  followLink?: (href: string, newTab: boolean) => void;
 } | null>(null);
 const documentOrigin = "https://markdown.dirlume.invalid";
 const scheme = /^[a-z][a-z\d+.-]*:/i;
@@ -114,7 +114,7 @@ function TaskCheckbox({ type, checked }: ComponentProps<"input">) {
   return <input type="checkbox" checked={Boolean(checked)} disabled={!task || !preview?.writable}
     aria-disabled={preview?.saving || undefined} onClick={(event) => { if (preview?.saving) event.preventDefault(); }}
     aria-label={task?.label || t("Markdown task")} onChange={(event) => {
-      if (task && !preview?.saving) preview?.onToggleTask(task, event.target.checked);
+      if (task && !preview?.saving) preview?.onToggleTask?.(task, event.target.checked);
     }} />;
 }
 
@@ -124,11 +124,12 @@ function isWebLink(href: string) {
 
 function PreviewLink({ href, children, ...props }: ComponentProps<"a">) {
   const preview = useContext(PreviewContext);
-  if (!href || (scheme.test(href) && !isWebLink(href))) return <span>{children}</span>;
+  const followLink = preview?.followLink;
+  if (!followLink || !href || (scheme.test(href) && !isWebLink(href))) return <span>{children}</span>;
   return <a {...props} className="markdown-link" href={href} onAuxClick={(event) => event.preventDefault()}
     onClick={(event) => {
       event.preventDefault();
-      preview?.followLink(href, event.ctrlKey || event.metaKey);
+      followLink(href, event.ctrlKey || event.metaKey);
     }}>{children}</a>;
 }
 
@@ -150,6 +151,25 @@ const components: Components = {
   input: TaskCheckbox,
   pre: PreviewCode,
 };
+
+function MarkdownContent({ source, prefix, htmlFormatting = false }: {
+  source: string;
+  prefix: string;
+  htmlFormatting?: boolean;
+}) {
+  return <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]}
+    rehypePlugins={[[rehypeSlug, { prefix }]]} skipHtml components={components}>{source}</Markdown>;
+}
+
+export function ReadOnlyMarkdown({ source, light }: { source: string; light: boolean }) {
+  return <div className="markdown" tabIndex={0}>
+    <div className="markdown-content">
+      <PreviewContext.Provider value={{ writable: false, saving: false, light }}>
+        <MarkdownContent source={source} prefix="dirlume-quick-view-" />
+      </PreviewContext.Provider>
+    </div>
+  </div>;
+}
 
 async function resolveFileLink({ place }: NamedFile, destination: string): Promise<NamedFile> {
   if (place.kind === "local") {
@@ -235,8 +255,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
     <div ref={scroll} className="markdown" tabIndex={0}>
       <div className="markdown-content" ref={onContent}>
         <PreviewContext.Provider value={{ writable, saving, light, colors, onToggleTask, followLink }}>
-          <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]} rehypePlugins={[[rehypeSlug, { prefix }]]}
-            skipHtml components={components}>{source}</Markdown>
+          <MarkdownContent source={source} prefix={prefix} htmlFormatting={htmlFormatting} />
         </PreviewContext.Provider>
       </div>
     </div>

@@ -12,10 +12,6 @@ const overlay = (page) => page.locator(".appearance-picker");
 
 export async function testNativeAppearancePicker(main) {
   const tool = await openOptionsWindow(main);
-  const windowState = (page, command) => page.evaluate((command) => {
-    const tauri = window.__TAURI_INTERNALS__;
-    return tauri.invoke("plugin:window|" + command, { label: tauri.metadata.currentWindow.label });
-  }, command);
   const returned = () => tool.waitForFunction(() => {
     const tauri = window.__TAURI_INTERNALS__;
     return tauri.invoke("plugin:window|is_focused", { label: tauri.metadata.currentWindow.label });
@@ -23,8 +19,11 @@ export async function testNativeAppearancePicker(main) {
   await pickerButton(tool).click();
   await overlay(main).waitFor();
   assert.equal(await pickerButton(tool).isDisabled(), true);
-  assert.equal(await windowState(tool, "is_visible"), false);
-  assert.equal(await windowState(main, "is_focused"), true);
+  await main.waitForFunction(async () => {
+    const tauri = window.__TAURI_INTERNALS__;
+    return !await tauri.invoke("plugin:window|is_visible", { label: "options" }) &&
+      await tauri.invoke("plugin:window|is_focused", { label: "main" });
+  });
   await main.keyboard.press("Escape");
   await overlay(main).waitFor({ state: "hidden" });
   await returned();

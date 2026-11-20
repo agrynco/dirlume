@@ -82,6 +82,7 @@ export const commands = {
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
+  quickView: { label: "Quick View", key: "Ctrl+Q" },
   cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },

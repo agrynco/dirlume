@@ -10,7 +10,7 @@ import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHist
 import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
-  Calculator, CircleHelp, Moon, Pencil, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2,
+  Calculator, CircleHelp, Moon, Pencil, ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -48,7 +48,7 @@ import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
 import { applyAppearance, isLightTheme, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
-import type { MarkdownLocation, MarkdownPosition } from "./markdown";
+import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
   applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
@@ -64,6 +64,7 @@ import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts
 import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
+const QuickView = lazy(() => import("./QuickView"));
 const previousTerminalHeights = [28, 28, 38, 48, 58];
 const noCommands: TerminalCommand[] = [];
 
@@ -168,7 +169,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   visiblePanes.current = panes;
   const [rowRename, setRowRename] = useState<RowRename | null>(null);
   const [locations, setLocations] = useState<QuickLocation[]>([]);
-  const [active, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
+  const [focusedSide, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
+  const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
+  const [quickViewSourceText, setQuickViewSourceText] = useState(false);
+  const active = quickViewSource ?? focusedSide;
+  const previewSide = quickViewSource === null ? null : opposite(quickViewSource);
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
   const rowsPerGroup = useRef<Record<Side, number>>({ left: 0, right: 0 });
@@ -231,7 +236,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const pane = panes[active];
   const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
-  const canSwapPanes = !panes.left.loading && !panes.right.loading && !busy;
+  const canSwapPanes = !previewSide && !panes.left.loading && !panes.right.loading && !busy;
   const showingSortMenu = modal?.kind === "sortMenu" ? modal.side : undefined;
   const leftSort = useFileSortMetadata(panes.left, preferences.sortSettings, showingSortMenu === "left");
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
@@ -691,6 +696,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function focus(side: Side) {
+    side = quickViewSource ?? side;
     setActive(side);
     document.getElementById(`${side}-files`)?.focus();
   }
@@ -1182,7 +1188,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
-    if (!windowsClient || item?.place.kind !== "local") return;
+    if (previewSide || !windowsClient || item?.place.kind !== "local") return;
     const { place, entry } = item;
     showProcesses(opposite(side), true, placePath(childPlace(place, entry.name)));
   }
@@ -1640,7 +1646,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function canSelectPanelMode(side: Side) {
     const place = panes[side].place;
-    return !panelsHidden && activeDocument === null && !processPanels[side] &&
+    return side !== previewSide && !panelsHidden && activeDocument === null && !processPanels[side] &&
       !!place && place.kind !== "connections";
   }
 
@@ -1652,6 +1658,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function perform(command: Command, groupStep = 0) {
+    if (command === "quickView") {
+      if (!canToggleQuickView) return;
+      setQuickViewSource(quickViewSource === null ? active : null);
+      setQuickViewSourceText(false);
+      focus(active);
+      return;
+    }
     if (command === "sortMenu") {
       showSortMenu(active);
       return;
@@ -1732,7 +1745,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     switch (command) {
       case "switchPane":
-        if (panelsHidden) break;
+        if (panelsHidden || previewSide) break;
         if (document.activeElement === commandInput.current) setActive(opposite(active));
         else focus(opposite(active));
         break;
@@ -1769,8 +1782,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
-        if (panelsHidden) setPanelsHidden(false);
         const side = command === "leftLocations" ? "left" : "right";
+        if (side === previewSide) break;
+        if (panelsHidden) setPanelsHidden(false);
         setActive(side);
         requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
         break;
@@ -1947,7 +1961,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
-    if (!event.repeat || (!["hidden", "attributes", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
+    if (!event.repeat || (!["hidden", "attributes", "quickView", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
       const groupStep = onFiles && shortcut === "ArrowLeft" && command === "firstRow" ? -rowsPerGroup.current[active] :
         onFiles && shortcut === "ArrowRight" && command === "lastRow" ? rowsPerGroup.current[active] : 0;
@@ -1979,6 +1993,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const panesAvailable = !panelsHidden && activeDocument === null;
   const filesAvailable = panesAvailable && !processPanels[active] && !pane.loading;
+  const canToggleQuickView = panesAvailable && (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
+  const previewFile = previewSide && filesAvailable ? currentFile : null;
+  const previewName = currentItem?.entry.name ?? current?.name;
+  const previewKey = previewFile ? JSON.stringify([
+    previewFile.place.kind, "id" in previewFile.place ? previewFile.place.id : null, placePath(previewFile.place),
+    previewFile.name, currentItem?.entry.size, currentItem?.entry.modified,
+  ]) : "";
+  const previewMessage = t(pane.loading ? "Loading preview…" :
+    !current || processPanels[active] ? "Select a file to preview." :
+    current.directory ? "Folders cannot be previewed." : "This file type cannot be previewed.");
+  const formattedPreview = previewFile && (isMarkdownFile(previewFile.name) || /\.html?$/i.test(previewFile.name));
   const canCopyItemNames = filesAvailable && !catalog && (pane.marked.length > 0 || !!current);
   const currentFullPath = filesAvailable && currentItem ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : null;
 
@@ -1988,7 +2013,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function paneMenu(side: Side): MenuGroup {
     const target = panes[side];
-    const available = panesAvailable && !target.loading;
+    const available = panesAvailable && side !== previewSide && !target.loading;
     function inPane(command: "back" | "forward" | "parent" | "refresh", disabled: boolean) {
       return {
         ...menuCommand(command, !available || disabled),
@@ -2013,7 +2038,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           run: () => setPanelMode(side, id),
         })),
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
-        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
+        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null || side === previewSide, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
@@ -2029,12 +2054,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ...fileActions.map(({ command, label, disabled }) => menuCommand(command, !filesAvailable || disabled, label)),
       menuCommand("createArchive", !filesAvailable || !local || !current || !!pane.search, "Create archive"),
       menuCommand("attributes", !filesAvailable || !currentItem || busy),
-      ...(windowsClient ? [menuCommand("lockingProcesses", !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
+      ...(windowsClient ? [menuCommand("lockingProcesses", !!previewSide || !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
       ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
     ] },
     { label: "Commands", items: [
+      { ...menuCommand("quickView", !canToggleQuickView), checked: quickViewSource !== null },
       menuCommand("search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       menuCommand("compare", !filesAvailable || comparison === null),
       menuCommand("copyFullPath", currentFullPath === null),
@@ -2069,6 +2095,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
         <div className="top-actions">
+          {panesAvailable && formattedPreview && <div className="quick-view-modes" role="group" aria-label={t("Quick View format")}>
+            <Button aria-pressed={!quickViewSourceText} onClick={() => { setQuickViewSourceText(false); focus(active); }}>{t("Rendered")}</Button>
+            <Button aria-pressed={quickViewSourceText} onClick={() => { setQuickViewSourceText(true); focus(active); }}>{t("Source")}</Button>
+          </div>}
+          <Button className="icon-button" aria-label={t("Quick View")} aria-pressed={quickViewSource !== null}
+            shortcut={keyLabel("quickView")} disabled={!canToggleQuickView} onClick={() => perform("quickView")}><ScanEye /></Button>
           <Button className="toolbar-button topbar-connect" aria-label={t("Connect")} shortcut={keyLabel("connect")} onClick={() => perform("connect")}>
             <Server /> <span>{t("Connect")}</span>
           </Button>
@@ -2103,7 +2135,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <main className="workspace" hidden={panelsHidden}
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
-          <Pane key={side} side={side} active={active === side} layout={preferences.layout} showHidden={preferences.hidden}
+          <Pane key={side} side={side} active={active === side} covered={side === previewSide} layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
             sortAvailable={!sorts[side].pending && sorts[side].canSort(sortMode(panes[side].sort.column))} sortPending={sorts[side].pending}
@@ -2159,6 +2191,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
+        {panesAvailable && previewSide && <Suspense fallback={<section className={`pane quick-view quick-view-${previewSide}`}>
+          <p className="pane-empty" role="status">{t("Loading preview…")}</p>
+        </section>}>
+          <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
+            message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} onFocusFiles={() => focus(active)} />
+        </Suspense>}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator"
           aria-label={t("Resize terminal")} aria-orientation="horizontal" aria-valuenow={Math.round(terminalShare)} tabIndex={0}
           onPointerDown={(event) => {
