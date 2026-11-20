@@ -6,6 +6,8 @@ Choose English, Ukrainian, or Russian in **Options → General → Language**. A
 
 Choose **Classic blue** in **Options → Appearance → Window → Color scheme** for vivid blue file panes, cyan borders, yellow column headings, and a teal selection. You can use it as the base for a custom scheme.
 
+**Lavender**, **Emerald**, **Aurora**, **Midnight blue**, **Sunrise**, and **Graphite** give the window a modern look: rounded file panes on a soft gradient or glowing background, chip-style drive and key buttons, and the main window font in the file lists. Lavender and Sunrise are light schemes, the other four are dark. Sunrise (warm ivory with a coral accent) and Graphite (neutral charcoal with an amber accent) are a matching pair with plainer backgrounds. They look closest to their design in the **Twin panels** layout and work with every layout. A font set in **Appearance → Fonts** still takes precedence.
+
 Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
 
 Use **Export settings** in **Options** to save selected settings groups and custom color schemes to a JSON file. To share only a palette, select its scheme. On another installation, use **Import settings** to choose what to apply from the file. Dirlume asks for confirmation before replacing a local color scheme. Imported schemes are available under **Options → Appearance → Window → Color scheme**.
