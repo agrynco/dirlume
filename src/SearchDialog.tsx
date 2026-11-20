@@ -3,7 +3,7 @@ import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, placePath, type FtpSearchEvent, type Place } from "./api";
+import { api, describeError, placePath, type FileLocation, type FtpSearchEvent } from "./api";
 import { Dialog } from "./Dialog";
 import { childPlace, readPlace, type SearchMatch } from "./panes";
 
@@ -11,7 +11,7 @@ const previewLimit = 1000;
 let nextFtpSearchId = 0;
 
 async function findFtp(
-  root: Extract<Place, { kind: "ftp" }>, mask: string, showHidden: boolean, signal: AbortSignal,
+  root: Extract<FileLocation, { kind: "ftp" }>, mask: string, showHidden: boolean, signal: AbortSignal,
   append: (matches: SearchMatch[]) => void,
 ) {
   const id = ++nextFtpSearchId;
@@ -68,10 +68,10 @@ function fileMask(mask: string) {
   };
 }
 
-export async function findFiles(root: Place, mask: string, showHidden: boolean, signal: AbortSignal, append: (matches: SearchMatch[]) => void) {
+export async function findFiles(root: FileLocation, mask: string, showHidden: boolean, signal: AbortSignal, append: (matches: SearchMatch[]) => void) {
   if (root.kind === "ftp") return findFtp(root, mask, showHidden, signal, append);
   const includes = fileMask(mask);
-  const pending: { place: Place; prefix: string }[] = [{ place: root, prefix: "" }];
+  const pending: { place: FileLocation; prefix: string }[] = [{ place: root, prefix: "" }];
   let skipped = 0;
   while (pending.length && !signal.aborted) {
     const folder = pending.pop()!;
@@ -96,10 +96,10 @@ export async function findFiles(root: Place, mask: string, showHidden: boolean, 
 }
 
 export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResults }: {
-  root: Place;
+  root: FileLocation;
   showHidden: boolean;
   onClose: () => void;
-  onReveal: (directory: Place, name: string) => void;
+  onReveal: (directory: FileLocation, name: string) => void;
   onShowResults: (mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) => void;
 }) {
   const [mask, setMask] = useState("*");

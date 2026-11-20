@@ -20,6 +20,9 @@ export async function testSmbNavigation() {
       const home = "C:\\test";
       const file = { name: "notes #1.txt", directory: false, link: false, hidden: false, size: 7, modified: null };
       let authorized = false;
+      let sshProfile;
+      const sshVerification = { host: "fixture.example", port: 22, fingerprint: "SHA256:fixture" };
+      const sshListing = { entries: [{ ...file, name: "ssh-notes.txt" }], omitted: 0 };
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args) => {
@@ -27,6 +30,19 @@ export async function testSmbNavigation() {
             case "locations": return [{ label: "Home", path: home }];
             case "list_directory": return { path: home, parent: null, entries: [], omitted: 0 };
             case "file_icons": return args.items.map(() => null);
+            case "ssh_profiles": return sshProfile ? [sshProfile] : [];
+            case "save_ssh_profile": {
+              const { secret, clearSecret: _clearSecret, ...fields } = args.input;
+              sshProfile = { ...fields, id: "ssh-fixture", hasSecret: Boolean(secret || sshProfile?.hasSecret) };
+              return sshProfile;
+            }
+            case "connect_ssh":
+              if (args.id !== sshProfile?.id) throw new Error("Unknown SSH profile");
+              if (!args.approval) return { kind: "verifyHost", verification: sshVerification };
+              if (args.approval.fingerprint !== sshVerification.fingerprint) throw new Error("Unapproved SSH host key");
+              return { kind: "connected", id: 17, address: sshVerification.host, origin: "sftp://fixture.example",
+                segments: ["home"], listing: sshListing };
+            case "list_ssh": return { ...sshListing, elevated: false };
             case "read_text":
               if (args.directory !== documents || args.name !== file.name) throw new Error("Unexpected SMB file");
               return { text: "Fixture", encoding: "utf8" };
@@ -56,9 +72,21 @@ export async function testSmbNavigation() {
     const connect = async (side, path) => {
       await pane(side).getByRole("button", { name: "Locations for " + side + " pane", exact: true }).click();
       await pane(side).getByRole("button", { name: "SMB", exact: true }).click();
-      await connection.getByLabel("SMB server or share").fill(path);
-      await connection.getByRole("button", { name: "Connect", exact: true }).click();
-      await connection.waitFor({ state: "hidden" });
+      await pathIs(side, "SMB");
+      const files = fileList(side);
+      await files.press("Shift+F4");
+      const form = page.getByRole("dialog", { name: "Add SMB connection", exact: true });
+      await form.getByLabel("Connection name").fill(side + " SMB");
+      await form.getByLabel("SMB server or share").fill(path);
+      await form.getByRole("button", { name: "Save connection", exact: true }).click();
+      await files.getByRole("option", { name: new RegExp("^" + side + " SMB") }).click();
+      await files.press("F4");
+      const edit = page.getByRole("dialog", { name: "Edit SMB connection", exact: true });
+      assert.equal(await edit.getByLabel("SMB server or share").inputValue(), path.startsWith("\\\\") ? path : "\\\\" + path);
+      await edit.getByLabel("Connection name").fill(side + " SMB edited");
+      await edit.getByRole("button", { name: "Save connection", exact: true }).click();
+      await files.getByRole("option", { name: new RegExp("^" + side + " SMB edited") }).click();
+      await files.press("Enter");
     };
 
     await pathIs("left", "C:\\test");
@@ -95,8 +123,41 @@ export async function testSmbNavigation() {
     await pathIs("right", documents);
     await pane("right").getByRole("button", { name: "Parent folder", exact: true }).click();
     await pathIs("right", root);
+
+    async function openSsh(side) {
+      await pane(side).getByRole("button", { name: "Locations for " + side + " pane", exact: true }).click();
+      await pane(side).getByRole("button", { name: "SSH", exact: true }).click();
+      await pathIs(side, "SSH");
+    }
+    const right = fileList("right");
+    await openSsh("right");
+    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), [".."]);
+    await right.getByRole("option", { name: /^\.\./ }).dblclick();
+    await pathIs("right", root);
+    await openSsh("right");
+    await right.press("Shift+F4");
+    const addSsh = page.getByRole("dialog", { name: "Add SSH connection", exact: true });
+    await addSsh.getByLabel("Connection name").fill("SSH fixture");
+    await addSsh.getByLabel("Server", { exact: true }).fill("fixture.example");
+    await addSsh.getByLabel("Username").fill("fixture");
+    await addSsh.getByLabel("Password", { exact: true }).fill("fixture-password");
+    await addSsh.getByRole("button", { name: "Save connection", exact: true }).click();
+    await right.getByRole("option", { name: /^SSH fixture/ }).click();
+    await right.press("F4");
+    const editSsh = page.getByRole("dialog", { name: "Edit SSH connection", exact: true });
+    assert.equal(await editSsh.getByLabel("Server", { exact: true }).inputValue(), "fixture.example");
+    await editSsh.getByLabel("Connection name").fill("Edited SSH");
+    await editSsh.getByRole("button", { name: "Save connection", exact: true }).click();
+    await right.getByRole("option", { name: /^Edited SSH/ }).click();
+    await right.press("Enter");
+    const verify = page.getByRole("dialog", { name: "Verify SSH server", exact: true });
+    await verify.getByText("SHA256:fixture", { exact: true }).waitFor();
+    await verify.getByRole("button", { name: "Trust and connect", exact: true }).click();
+    await pathIs("right", "/home");
+    await right.getByRole("option", { name: /^ssh-notes/ }).waitFor();
+    await pathIs("left", projects);
     assert.deepEqual(errors, []);
-    console.log("SMB navigation smoke passed.");
+    console.log("Verified saved SMB and SSH connections, edit forms, parent navigation, and authentication.");
   } finally {
     await browser.close();
   }

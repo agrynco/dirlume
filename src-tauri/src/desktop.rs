@@ -976,7 +976,57 @@ struct Connected {
 
 #[tauri::command]
 async fn connect_server(invitation: String, state: State<'_, Connections>) -> Result<Connected> {
-    let connection = Connection::connect(&invitation)?;
+    open_server(&invitation, &state).await
+}
+
+fn server_invitation_entry(credential: uuid::Uuid) -> Result<keyring::Entry> {
+    keyring::Entry::new("Dirlume Server", &credential.to_string()).map_err(message)
+}
+
+#[tauri::command]
+async fn save_server_invitation(invitation: String) -> Result<uuid::Uuid> {
+    blocking(move || {
+        let invitation = zeroize::Zeroizing::new(invitation);
+        crate::protocol::Invitation::parse(&invitation)?;
+        let credential = uuid::Uuid::new_v4();
+        server_invitation_entry(credential)?
+            .set_password(invitation.trim())
+            .map_err(|_| "Could not save the invitation in the system credential store.")?;
+        Ok(credential)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_server_invitation(credential: uuid::Uuid) -> Result<()> {
+    blocking(
+        move || match server_invitation_entry(credential)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => {
+                Err("Could not remove the invitation from the system credential store.".to_owned())
+            }
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn connect_saved_server(
+    credential: uuid::Uuid,
+    state: State<'_, Connections>,
+) -> Result<Connected> {
+    let invitation = blocking(move || {
+        server_invitation_entry(credential)?
+            .get_password()
+            .map(zeroize::Zeroizing::new)
+            .map_err(|_| "Could not read the saved invitation. Edit the connection to replace its invitation.".to_owned())
+    })
+    .await?;
+    open_server(&invitation, &state).await
+}
+
+async fn open_server(invitation: &str, state: &Connections) -> Result<Connected> {
+    let connection = Connection::connect(invitation)?;
     let listing = connection.list(Vec::new()).await?;
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     let address = connection
@@ -1753,6 +1803,9 @@ pub fn run() {
         crate::archives::delete_archive_entries,
         crate::folders::create_folders,
         connect_server,
+        connect_saved_server,
+        save_server_invitation,
+        remove_server_invitation,
         list_server,
         disconnect_server,
         ftp::ftp_profiles,

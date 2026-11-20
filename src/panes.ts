@@ -1,5 +1,6 @@
-import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
+import { connectionEntries } from "./savedConnections";
 
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified" | "time";
@@ -12,7 +13,7 @@ export interface DeniedSshListing {
 }
 
 export interface SearchMatch {
-  directory: Place;
+  directory: FileLocation;
   entry: Entry;
   relativePath: string;
 }
@@ -55,6 +56,7 @@ export const emptyPane: PaneState = {
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export function hasParentRow(place: Place | null) {
+  if (place?.kind === "connections") return true;
   // The KSwitcher drive list is a source chooser, outside the drive itself.
   return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
 }
@@ -131,7 +133,7 @@ export function closeSearchResults(pane: PaneState): PaneState {
 }
 
 export function paneItem(pane: PaneState, entry?: Entry): { place: FilePlace; entry: Entry } | null {
-  if (!entry || entry.name === ".." || !pane.place || pane.place.kind === "smbRoot") return null;
+  if (!entry || entry.name === ".." || !pane.place || pane.place.kind === "smbRoot" || pane.place.kind === "connections") return null;
   if (pane.search) {
     const match = pane.search.matches.get(entry.name);
     return match && match.directory.kind !== "smbRoot" ? { place: match.directory, entry: match.entry } : null;
@@ -145,12 +147,12 @@ export function localPath(path: string): Extract<Place, { kind: "local" }> {
   return { kind: "local", path, parent: null };
 }
 
-export function filesystemPlace(path: string): Place {
+export function filesystemPlace(path: string): FileLocation {
   const [host, share] = uncParts(path);
   return host && !share ? { kind: "smbRoot", path: "\\\\" + host } : localPath(path);
 }
 
-export function childPlace(place: Place, name: string): Place {
+export function childPlace(place: FileLocation, name: string): FileLocation {
   if (place.kind === "server" || isFileServer(place) || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
@@ -160,7 +162,8 @@ export function childPlace(place: Place, name: string): Place {
   return localPath(place.path + (place.path.endsWith(separator) ? "" : separator) + name);
 }
 
-export function parentPlace(place: Place): Place | null {
+export function parentPlace(place: Place): FileLocation | null {
+  if (place.kind === "connections") return place.from;
   if (place.kind === "archive") return place.segments.length
     ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || isFileServer(place)) {
@@ -191,7 +194,11 @@ function folderInAncestor(from: Place | null, to: Place) {
   }
 }
 
-export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<{ place: Place; listing: Listing; elevated?: boolean }> {
+type PlaceListing<Location extends Place> = { place: Location; listing: Listing; elevated?: boolean };
+export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<FileLocation>>;
+export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>>;
+export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>> {
+  if (place.kind === "connections") return { place, listing: { entries: await connectionEntries(place.source), omitted: 0 } };
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "ssh") {

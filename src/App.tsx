@@ -18,12 +18,13 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
+import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
 import { reportFrontendError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
-import { FtpDialog } from "./FtpDialog";
-import { SshDialog } from "./SshDialog";
+import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
+import { VerifyHostDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
@@ -44,7 +45,7 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownLocation, MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, extendKeyboardRange, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  applyListing, childPlace, closeSearchResults, emptyPane, extendKeyboardRange, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
@@ -88,11 +89,14 @@ type ActionModal = (
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
-  | { kind: "connect" | "ftp" | "ssh"; side: Side }
-  | { kind: "smb"; side: Side; navigation?: { path: string; complete: (place: Place, listing: Listing) => boolean } }
+  | { kind: "connect"; side: Side }
+  | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
+  | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
+  | { kind: "removeConnection"; side: Side; profile: SavedConnection }
+  | { kind: "verifyConnection"; side: Side; profile: SavedConnection; verification: SshHostVerification }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
-  | { kind: "search"; side: Side; place: Place }
+  | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
@@ -204,6 +208,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const activeModal = useRef(modal);
   activeModal.current = modal;
   const pane = panes[active];
+  const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
   const canSwapPanes = !panes.left.loading && !panes.right.loading && !busy;
   const entries = useMemo(() => ({
@@ -508,7 +513,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     const timer = window.setInterval(() => {
       for (const side of ["left", "right"] as const) {
         const { place } = latest.current[side];
-        if (place && place.kind !== "local") void load(side, place, "background");
+        if (place && place.kind !== "local" && place.kind !== "connections") void load(side, place, "background");
       }
     }, 5000);
     return () => window.clearInterval(timer);
@@ -827,6 +832,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     if (entry.name === "..") { parent(side); return; }
     const pane = panes[side];
     if (pane.loading) return;
+    if (pane.place?.kind === "connections" && entry.connection) {
+      void openSavedConnection(side, entry.connection);
+      return;
+    }
     if (pane.place?.kind === "smbRoot" && entry.directory) {
       void load(side, childPlace(pane.place, entry.name));
       return;
@@ -852,6 +861,111 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         setStatus({ text: describeError(error), error: true }));
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
+    }
+  }
+
+  function openConnections(side: Side, source: ConnectionSource) {
+    const place = panes[side].place;
+    showProcesses(side, false);
+    if (place?.kind === "connections" && place.source === source) refresh(side);
+    else void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place });
+  }
+
+  function editConnection(side: Side, source: ConnectionSource, profile?: SavedConnection) {
+    if (panes[side].loading) return;
+    setModal({ kind: "connectionEditor", side, source, profile });
+  }
+
+  function connectionDialogsClosed(side: Side) {
+    activeModal.current = null;
+    setModal(null);
+    requestAnimationFrame(() => focus(side));
+  }
+
+  function reloadConnectionLists(side: Side, selected?: { kind: SavedConnection["kind"]; id: string }) {
+    connectionDialogsClosed(side);
+    for (const shown of ["left", "right"] as const) {
+      const { place, loading } = latest.current[shown];
+      if (place?.kind !== "connections" || loading) continue;
+      void load(shown, place, "refresh").then((loaded) => {
+        if (!loaded || shown !== side || !selected) return;
+        updatePane(shown, (pane) => {
+          if (pane.place !== place) return pane;
+          const entry = pane.entries.find(({ connection }) => connection?.kind === selected.kind && connection.id === selected.id);
+          return entry ? { ...pane, selected: entry.name, filter: "" } : pane;
+        });
+      });
+    }
+  }
+
+  async function openSavedConnection(side: Side, profile: SavedConnection, approval?: SshHostVerification) {
+    const { ticket } = beginListing(side);
+    updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
+    function complete(place: Place, listing: Listing) {
+      if (request.current[side] !== ticket) {
+        if (place.kind === "server" || isFileServer(place)) disconnect(place);
+        return false;
+      }
+      routeLocation(side, place, listing);
+      requestAnimationFrame(() => focus(side));
+      return true;
+    }
+    try {
+      switch (profile.kind) {
+        case "ftp": {
+          const { place, listing } = await connectFtpLocation(profile.id);
+          complete(place, listing);
+          break;
+        }
+        case "ssh": {
+          const result = await api.connectSsh(profile.id, approval);
+          if (result.kind === "verifyHost") {
+            if (request.current[side] !== ticket) break;
+            if (activeModal.current) throw new Error(t("Open this connection again to verify its host key."));
+            const verification = { kind: "verifyConnection", side, profile, verification: result.verification } as const;
+            activeModal.current = verification;
+            setModal(verification);
+          } else {
+            const { id, address, origin, segments, listing } = result;
+            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments }, listing);
+          }
+          break;
+        }
+        case "smb": {
+          const result = await api.connectSmb(profile.path, null, false);
+          if (request.current[side] !== ticket) break;
+          if (result.kind === "credentials_required") {
+            if (activeModal.current) throw new SmbCredentialsRequired();
+            const credentials = { kind: "smb", side, navigation: { path: profile.path, complete } } as const;
+            activeModal.current = credentials;
+            setModal(credentials);
+          } else {
+            const { place, listing } = smbLocation(result);
+            if (complete(place, listing) && result.warning) {
+              setStatus({ text: t("Could not save SMB credentials. {0}", result.warning), error: true });
+            }
+          }
+          break;
+        }
+        case "server": {
+          const { listing, ...connected } = await api.connectSavedServer(profile.credential);
+          complete({ kind: "server", ...connected, segments: [] }, listing);
+          break;
+        }
+        case "kswitcher": {
+          const directory = preferences.kswitcher;
+          const listing = await api.listKSwitcher(directory, profile.peer, "");
+          complete({ kind: "kswitcher", directory, peer: profile.peer, path: "", parent: listing.parent, address: profile.label }, listing);
+          break;
+        }
+      }
+    } catch (failure) {
+      if (request.current[side] === ticket) updatePane(side, (pane) => ({ ...pane, error: describeError(failure) }));
+    } finally {
+      if (request.current[side] === ticket) {
+        delete pendingListings.current[side];
+        updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined }));
+      }
     }
   }
 
@@ -886,6 +1000,16 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     }
     const place = panes[side].place;
     const target = place && parentPlace(place);
+    if (place?.kind === "connections") {
+      if (target) {
+        const position = panes[side].history.lastIndexOf(target, panes[side].position - 1);
+        void load(side, target, position >= 0 ? position : "push");
+      } else {
+        cancelLoading(side);
+        updatePane(side, () => emptyPane);
+      }
+      return;
+    }
     if (place && target) {
       const reveal = target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
       void load(side, target, "push", reveal);
@@ -1090,7 +1214,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
 
   function transfer(kind: "copy" | "move") {
     const source = pane.place;
-    if (!source || source.kind === "smbRoot" || !current || pane.loading) {
+    if (!source || source.kind === "smbRoot" || source.kind === "connections" || !current || pane.loading) {
       setStatus({ text: "Select a file or folder in the active pane." });
       return;
     }
@@ -1105,7 +1229,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
     if (!event.isPrimary || event.button !== 0 || event.pointerType === "touch") return;
     const state = panes[side];
-    if (!state.place || state.place.kind === "smbRoot" || state.loading || modal) return;
+    if (!state.place || state.place.kind === "smbRoot" || state.place.kind === "connections" || state.loading || modal) return;
     const items = transferItems(side, entry, state.marked.includes(entry.name));
     if (!items.length) return;
     drag.current = { side, source: state.place, items, pointer: event.pointerId,
@@ -1212,6 +1336,10 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
+    if (panes[side].place?.kind === "connections") {
+      updatePane(side, (pane) => ({ ...pane, selected: entry.name }));
+      return;
+    }
     if (rowRename && (rowRename.side !== side || rowRename.name !== entry.name)) setRowRename(null);
     const items = entries[side];
     const index = items.findIndex(({ name }) => name === entry.name);
@@ -1466,6 +1594,18 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       if (!["switchPane", "swap", "back", "forward", "parent", "leftLocations", "rightLocations",
         "shrinkLeft", "growLeft", "settings", "help", "menu", "close", "terminal", "commandHistory", "connect"].includes(command)) return;
     }
+    if (catalog && !processPanels[active]) {
+      const [add, edit] = connectionCommands[catalog.source];
+      if (command === add || command === edit) {
+        if (command === add || current?.connection) editConnection(active, catalog.source, command === edit ? current?.connection : undefined);
+        return;
+      }
+      if (command === "recycle" || command === "delete") {
+        if (current?.connection && !pane.loading) setModal({ kind: "removeConnection", side: active, profile: current.connection });
+        return;
+      }
+      if (isRangeCommand(command) || command === "mark") return;
+    }
     if (command in rowCommands) {
       const items = entries[active];
       if (!items.length) return;
@@ -1571,7 +1711,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
       case "lockingProcesses": if (current) showLockingProcesses(active, currentItem); break;
       case "pasteClipboard": void pasteClipboard(active); break;
       case "search":
-        if (pane.place && pane.place.kind !== "smbRoot" && !pane.loading) setModal({ kind: "search", side: active, place: pane.place });
+        if (pane.place && pane.place.kind !== "smbRoot" && pane.place.kind !== "connections" && !pane.loading) {
+          setModal({ kind: "search", side: active, place: pane.place });
+        }
         break;
       case "mkdir":
         if (local && !pane.search && !busy && !pane.loading) setModal({ kind: "mkdir", side: active, place: local });
@@ -1660,13 +1802,15 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     // Use the physical letter for these defaults when the keyboard layout changes.
     const physical = /^Key[A-Z]$/.test(event.code) && !event.getModifierState("AltGraph")
       ? eventShortcut(event, event.code.slice(3)) : "";
-    const command = commandNames.find((command) => shortcut && command !== "settings" && commandScope(command) === "main" &&
+    const onFiles = target.closest(".file-list");
+    const profileCommand = catalog && !processPanels[active] && onFiles
+      ? connectionCommands[catalog.source].find((command) => shortcuts[command].includes(shortcut)) : undefined;
+    const command = profileCommand ?? commandNames.find((command) => shortcut && command !== "settings" && commandScope(command) === "main" &&
       shortcuts[command].includes(shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
       commands[command].key === physical && shortcuts[command].includes(physical)) ??
       physicalFolderBinding(native, shortcuts);
     if (activeDocument !== null) return;
     const inCommandLine = target === commandInput.current;
-    const onFiles = target.closest(".file-list");
     const inField = target.closest("input, select, textarea, [contenteditable]");
     if (!command || command === "quickSearch") {
       const unavailable = processPanels[active] ? target !== onFiles || !onFiles?.classList.contains("process-table") : !pane.place;
@@ -1698,7 +1842,11 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }
 
   const currentFile = fileFor(active);
-  const fileActions = ([
+  const fileActions = catalog ? ([
+    { command: connectionCommands[catalog.source][0], label: "Add connection", Icon: FilePlus, disabled: pane.loading },
+    { command: connectionCommands[catalog.source][1], label: "Edit connection", Icon: Pencil, disabled: !current?.connection || pane.loading },
+    { command: "recycle", label: "Remove connection", Icon: Trash2, disabled: !current?.connection || pane.loading },
+  ] as const) : ([
     { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
     { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !writableTextPlace(currentFile.place) },
@@ -1739,7 +1887,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
-        inPane("parent", !processPanels[side] && !target.search && (!target.place || !parentPlace(target.place))),
+        inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
+          (!target.place || !parentPlace(target.place))),
         inPane("refresh", !!processPanels[side] || !target.place),
       ],
     };
@@ -1860,9 +2009,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
               if (item) revealResult(side, item.place, item.entry.name);
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter, keyboardRange: undefined }))} onSort={(column) => sort(side, column)}
-            onRemote={() => setModal({ kind: "connect", side })} onFtp={() => setModal({ kind: "ftp", side })}
-            onSsh={() => setModal({ kind: "ssh", side })}
-            onSmb={() => setModal({ kind: "smb", side })}
+            onRemote={() => openConnections(side, "remote")} onFtp={() => openConnections(side, "ftp")}
+            onSsh={() => openConnections(side, "ssh")} onSmb={() => openConnections(side, "smb")}
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
@@ -1972,7 +2120,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <span role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
           {errorText(status.text)}
         </span>
-        <span>{pane.place?.kind === "archive" ? t(pane.place.address) :
+        <span>{pane.place?.kind === "connections" ? t("Saved connections") : pane.place?.kind === "archive" ? t(pane.place.address) :
           pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
             smbHost(pane.place) ?? t("Local file system")}</span>
         <WindowResizeMarker />
@@ -2071,6 +2219,21 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         const item = entry ? paneItem(state, entry) : null;
         const target = panes[opposite(side)];
         return <FileContextMenu x={x} y={y} onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
+          {state.place?.kind === "connections" && (() => {
+            const { source } = state.place;
+            return <>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source); }}>{t("Add connection")}</Button>
+              {entry?.connection && <>
+                <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>
+                <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source, entry.connection); }}>
+                  {t("Edit connection")}</Button>
+                <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  setModal({ kind: "removeConnection", side, profile: entry.connection! });
+                }}>{t("Remove connection")}</Button>
+              </>}
+            </>;
+          })()}
           {state.place?.kind === "smbRoot" && entry && <Button role="menuitem" onClick={() => {
             setFileMenu(null);
             open(side, entry);
@@ -2107,10 +2270,9 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           onClose={() => setModal(null)} />
       )}
       {modal?.kind === "smb" && (
-        <SmbDialog initialPath={modal.navigation?.path} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
+        <SmbDialog path={modal.navigation.path} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
           onConnect={(place, listing, warning) => {
-            if (modal.navigation) modal.navigation.complete(place, listing);
-            else routeLocation(modal.side, place, listing);
+            modal.navigation.complete(place, listing);
             setModal(null);
             if (warning) setStatus({ text: t("Could not save SMB credentials. {0}", warning), error: true });
             requestAnimationFrame(() => focus(modal.side));
@@ -2128,24 +2290,17 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           void openFolderShortcut(modal.side, entry);
         }}
         onClose={() => closeFolderShortcuts(modal.side)} />}
-      {modal?.kind === "ftp" && (
-        <FtpDialog shortcuts={shortcuts} onClose={() => setModal(null)}
-          onConnect={(place, listing) => {
-            routeLocation(modal.side, place, listing);
-            setModal(null);
-            requestAnimationFrame(() => focus(modal.side));
-          }} />
-      )}
-      {modal?.kind === "ssh" && (
-        <SshDialog shortcuts={shortcuts} onClose={() => {
-          setModal(null);
-          requestAnimationFrame(() => focus(modal.side));
-        }} onConnect={(place, listing) => {
-          routeLocation(modal.side, place, listing);
-          setModal(null);
-          requestAnimationFrame(() => focus(modal.side));
-        }} />
-      )}
+      {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
+        remoteProvider={preferences.provider} bridgeDirectory={preferences.kswitcher}
+        onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
+        onClose={() => connectionDialogsClosed(modal.side)} />}
+      {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
+        onRemoved={() => reloadConnectionLists(modal.side)} onClose={() => connectionDialogsClosed(modal.side)} />}
+      {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}
+        onCancel={() => connectionDialogsClosed(modal.side)} onApprove={() => {
+          connectionDialogsClosed(modal.side);
+          void openSavedConnection(modal.side, modal.profile, modal.verification);
+        }} />}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} onClose={() => setModal(null)} />}
       {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}

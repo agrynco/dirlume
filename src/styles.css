@@ -439,6 +439,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   font: .92em var(--mono);
 }
 .address-breadcrumbs[data-editable="true"] { cursor: text; }
+.connection-address { gap: 6px; padding-inline: 8px; }
+.connection-address svg { width: 14px; height: 14px; color: var(--panel-muted); }
 .address-current, .address-ancestor { cursor: default; }
 .address-crumb-clip { min-width: 0; overflow: hidden; direction: rtl; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
@@ -489,10 +491,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .location-menu { position: relative; }
 .location-source-group { border-block-start: 1px solid var(--line); padding-block-start: 4px; margin-block-start: 4px; }
 .location-source-group kbd { min-inline-size: 2ch; padding: 0; text-align: center; background: transparent; font-size: .85em; }
-.smb-locations { display: grid; align-content: start; gap: 3px; max-height: 200px; overflow: auto; }
-.smb-locations button { justify-content: flex-start; }
-.smb-location { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; }
-.smb-location > button:first-child { overflow: hidden; text-overflow: ellipsis; }
 .location-trigger { width: 38px; gap: 2px; border-color: var(--line); }
 .location-trigger svg:last-child { width: 11px; }
 .location-popup, .file-column-menu {
@@ -956,7 +954,6 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 }
 .quick-search input { min-width: 0; }
 .quick-search span { color: var(--muted); }
-.ftp-connections select { width: 100%; min-width: 0; }
 .ftp-fields { display: grid; gap: 10px; }
 .ftp-fields input { min-width: 0; }
 .ftp-host-row, .ftp-encoding-row { display: grid; gap: 8px; align-items: end; }

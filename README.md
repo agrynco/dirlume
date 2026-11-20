@@ -141,6 +141,8 @@ Press **Enter** on an archive to open it in a pane. Use **F5** to extract select
 
 ## Remote sources
 
+Choose **FTP**, **SSH**, **SMB** (Windows), or **Remote machine** from either pane's sources menu to open its saved connections. Use **Shift+F4** to add a connection, **F4** to edit the selected connection, and **Enter** to connect. Open **..** to return to the previous location in that pane. Configure the connection shortcuts in **Options → Keyboard shortcuts**.
+
 **SSH.** Open the left or right pane's sources with **Alt+F1** or **Alt+F2**, then choose **SSH** or press **5**. Use **Shift+F4** to add a named connection, **F4** to edit it, or select a saved connection and press **Enter**. SSH uses SFTP, with port 22 by default. Authenticate with a password or a private key file, optionally protected by a passphrase. Dirlume keeps passwords and passphrases in the system credential store and reads the private key from its existing location.
 
 Use **Test connection** in the SSH profile form to check the entered credentials and browse the server's initial directory before saving. Approval of a new host key applies only to that test.
@@ -182,7 +184,7 @@ Use the client's tool list for argument schemas. The server works with the locat
 | Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
 
 For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
-On Windows, choose **SMB** in a pane's sources menu. Enter a server name or IP address to open its shares as folders in the pane. Open a share and use **Parent folder** at its root to return to the server's share list. A UNC path such as `\\server\documents` opens the share directly. **Save SMB location** adds the server or share to the dialog for quick access. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
+On Windows, add an **SMB** connection using a server name, IP address, or UNC share path such as `\\server\documents`. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
 
 ## Desktop diagnostics
 
