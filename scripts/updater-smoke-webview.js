@@ -1,4 +1,4 @@
-async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScreenColor) => {
+async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScreenColor, fixtureDirectory) => {
   const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
   const report = (error) => invoke("updater_fixture_result", { error });
   const record = (phase) => invoke("updater_fixture_phase", { phase });
@@ -42,6 +42,43 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       if (document.getElementById("dirlume-tooltip")) throw new Error("The visible SSH label and shortcut showed a redundant tooltip.");
     }
     pointer("pointerout");
+  }
+  async function checkDocumentMode() {
+    const fileName = "document-mode-fixture.txt";
+    const key = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
+      key, bubbles: true, cancelable: true, ...modifiers,
+    }));
+    const pane = await waitFor("the left file pane", () => document.querySelector('#left-files[aria-busy="false"]'));
+    const breadcrumbs = await waitFor("the left path breadcrumbs", () => document.querySelector('#left-path .address-breadcrumbs[data-editable="true"]'));
+    breadcrumbs.click();
+    const address = await waitFor("the editable left path", () => document.querySelector("input#left-address"));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(address, fixtureDirectory);
+    address.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise(requestAnimationFrame);
+    key(address, "Enter");
+    const row = await waitFor("the document mode fixture", () => [...pane.querySelectorAll(".file-row")]
+      .find((row) => row.querySelector(".file-name-text")?.textContent === fileName));
+    row.click();
+    await waitFor("the selected document mode fixture", () => row.dataset.current === "true" && document.activeElement === pane);
+    key(pane, "F3");
+    const mode = (editing) => waitFor(editing ? "the same file in Editor" : "the same file in Viewer", () => {
+      const view = document.querySelector(`.text-window[data-editing="${editing}"][aria-label="${fileName}"]:not([hidden])`);
+      return view?.querySelector(".cm-content")?.textContent === "Document mode fixture" && view;
+    });
+    const viewer = await mode(false);
+    key(viewer, "F6");
+    const editor = await mode(true);
+    key(editor, "F6");
+    if (await mode(false) !== viewer) throw new Error("F6 duplicated the existing Viewer.");
+    key(viewer, "F6");
+    key(await mode(true), "F10");
+    key(await mode(false), "F10");
+    await waitFor("return to the file pane", () => document.activeElement === pane);
+    key(pane, "F6");
+    const rename = await waitFor("the unchanged file pane F6 shortcut", () => [...document.querySelectorAll("dialog[open]")]
+      .find((dialog) => document.getElementById(dialog.getAttribute("aria-labelledby"))?.textContent === "Rename or move"));
+    rename.querySelector('button[aria-label="Close dialog"]').click();
+    await waitFor("the rename dialog to close", () => !rename.open);
   }
   function checkAlertColors() {
     const root = document.documentElement;
@@ -94,6 +131,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
         .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
       await checkTooltip(ssh);
       locations.click();
+      if (fixtureDirectory) await checkDocumentMode();
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();
       await invoke("updater_fixture_options_window");

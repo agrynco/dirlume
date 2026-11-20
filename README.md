@@ -63,6 +63,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
 | Esc / F10 inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
+| F6 inside the viewer or editor | Switch to the other mode for the current file. Unsaved edits stay in the Editor. |
 | Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |
 | F5 / F6 | Open the Copy or Rename or move dialog. |
 | Ctrl+Alt+S | Open Options. |
@@ -102,6 +103,8 @@ In **New file** (**Shift+F4**), choose UTF-8, UTF-8 with BOM, UTF-16 LE, or UTF-
 In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Use **Back** and **Forward** to revisit documents and restore reading positions in the current tab. **Search** finds text in the rendered document. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
 
 The Viewer and Editor have document-specific menus and a shortcut strip. The header shows the active file's full path and document status. Choose **Options** beside the document menu to open the settings for that mode.
+
+Use **F6** or the document's **File** menu to switch modes for the current file. The Viewer shows the saved file, and the Editor keeps its unsaved changes when you return. Change or disable the shortcut in **Options → Keyboard shortcuts**. In the file panes, **F6** still opens **Rename or move**.
 
 Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing a scheme’s font size clears wheel adjustments for views that use that size. A custom Viewer family also applies to Markdown.
 

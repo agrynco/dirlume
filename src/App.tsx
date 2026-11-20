@@ -136,6 +136,12 @@ function sameConnection(left: Place | null, right: Place) {
   return (left?.kind === "server" || isFileServer(left) || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
 }
 
+function sameDocumentFile(left: NamedFile, right: NamedFile) {
+  return left.name === right.name && left.place.kind === right.place.kind &&
+    placePath(left.place) === placePath(right.place) &&
+    (right.place.kind === "local" || sameConnection(left.place, right.place));
+}
+
 function disconnect(place: NetworkPlace) {
   const close = place.kind === "ssh" ? api.disconnectSsh : place.kind === "ftp" ? api.disconnectFtp : api.disconnect;
   void close(place.id).catch(() => {});
@@ -734,10 +740,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, []);
 
   function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition) {
-    const existing = documents.find((item) =>
-      item.editing === editing && item.file.name === file.name &&
-      item.file.place.kind === file.place.kind && placePath(item.file.place) === placePath(file.place) &&
-      (file.place.kind === "local" || sameConnection(item.file.place, file.place)));
+    const existing = documents.find((item) => item.editing === editing && sameDocumentFile(item.file, file));
     const id = existing?.id ?? ++nextDocument.current;
     if (!existing) {
       setDocuments((current) => [...current, { id, file, editing, position }]);
@@ -2106,6 +2109,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             shortcuts={shortcuts} menuRef={activeDocument === id ? documentMenu : undefined}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
+            onSwitchMode={() => openDocument(file, !editing)}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
             onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}
             onOpenDocument={(target, newTab, next, scrollTop) => {
@@ -2118,6 +2122,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
+              if (editing) {
+                // Keep the Viewer's navigation and refresh its copy after an explicit save.
+                setDocuments((current) => current.map((tab) => !tab.editing && sameDocumentFile(tab.file, file)
+                  ? { ...tab, file: { ...tab.file } } : tab));
+              }
               for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
             }} onClose={() => closeDocument(id)} />
         ))}
