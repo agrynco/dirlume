@@ -121,7 +121,7 @@ async function testTaskSource(page, source) {
     const original = "# Tasks\r\n\r\n- [ ] Preserve this state\r\n";
     const toggled = original.replace("[ ]", "[x]");
     await writeFile(path, original);
-    await files.getByRole("option").filter({ hasText: name }).click();
+    await files.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`).click();
     await page.keyboard.press("F4");
     const window = page.getByRole("region", { name, exact: true });
     const editor = window.getByLabel(`Edit ${name}`, { exact: true });

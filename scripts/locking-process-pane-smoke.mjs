@@ -8,7 +8,7 @@ import { close } from "./server-smoke.mjs";
 export async function testLockingProcessPane(page, root) {
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const pane = (side) => page.getByRole("region", { name: side + " pane", exact: true });
-  const row = (side) => pane(side).getByRole("option").filter({ hasText: "blocking-test.txt" });
+  const row = (side) => pane(side).locator('[role="option"][data-tooltip="blocking-test.txt"]');
   for (const side of ["left", "right"]) {
     const target = join(root, `locking-${side}`);
     await mkdir(target);

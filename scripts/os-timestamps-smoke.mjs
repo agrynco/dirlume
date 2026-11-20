@@ -30,12 +30,12 @@ export async function testOsTimestamps(page, root) {
   await address.fill(directory);
   await address.press("Enter");
   const pane = page.locator("#left-pane");
-  const file = pane.getByRole("option").filter({ hasText: "newer.txt" });
+  const file = pane.locator('[role="option"][data-tooltip="newer.txt"]');
   await file.locator(".file-date").filter({ hasText: expected[0] }).waitFor();
   await file.locator(".file-time").filter({ hasText: expected[1] }).waitFor();
   const modified = pane.getByRole("button", { name: "Date", exact: true });
   await modified.click();
-  const order = () => pane.locator(".file-name").allTextContents().then((names) => names.filter((name) => name.endsWith(".txt")));
+  const order = () => pane.locator('[role="option"][data-tooltip$=".txt"]').evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   const initial = await order();
   assert.deepEqual([...initial].sort(), ["newer.txt", "older.txt"]);
   await modified.click();

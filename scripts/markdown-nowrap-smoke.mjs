@@ -22,7 +22,7 @@ export async function testMarkdownNoWrap(page, root) {
   const previous = await address.inputValue();
   await address.fill(directory);
   await address.press("Enter");
-  await page.locator("#left-files").getByRole("option").filter({ hasText: "issues.md" }).click();
+  await page.locator("#left-files").locator('[role="option"][data-tooltip="issues.md"]').click();
   await page.keyboard.press("F3");
   const viewer = page.getByRole("region", { name: "issues.md", exact: true });
   const preview = viewer.locator(".markdown");

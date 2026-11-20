@@ -19,7 +19,7 @@ export async function testDocumentWatch(page, root) {
   await address.fill(directory);
   await address.press("Enter");
   const pane = page.locator("#left-files");
-  await pane.getByRole("option").filter({ hasText: name }).click();
+  await pane.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`).click();
   await pane.press("F3");
   const viewer = page.locator(`.text-window[data-editing="false"][aria-label="${name}"]`);
   const editor = page.locator(`.text-window[data-editing="true"][aria-label="${name}"]`);
