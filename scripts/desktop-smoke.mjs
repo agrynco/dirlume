@@ -15,6 +15,7 @@ import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
@@ -256,13 +257,8 @@ try {
   await checkTooltip(sshSource);
   await locationsTrigger.click();
   await testNativeAppearancePicker(page);
-  async function editAddress(side) {
-    const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
-    if (!await input.isVisible()) {
-      await page.locator(`#${side}-files`).press("Control+l");
-      await input.waitFor();
-    }
-    return input;
+  function editAddress(side) {
+    return editPaneAddress(page, side);
   }
   const panePath = (side) => page.locator(`#${side}-path`).getAttribute("data-path");
   for (const side of ["left", "right"]) {
