@@ -270,10 +270,10 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
           <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
-          {!processView && pane.place && pane.place.kind !== "local" && <span className="remote-name"
+          {!processView && pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
-          {!processView && host && <span className="remote-name" data-tooltip={pane.place?.kind === "local" ? pane.place.path : host}>SMB · {host}</span>}
+          {!processView && host && <span className="remote-name" data-tooltip={path}>SMB · {host}</span>}
         </div>
         <div className="pane-tools">
           {processView && <Button className="icon-button" aria-label={t("Close processes")}

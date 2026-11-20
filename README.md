@@ -146,7 +146,7 @@ The pane opens at the server's initial directory. Use **F5** to copy files or fo
 
 At startup, Dirlume reconnects to the saved FTP profile and reopens the last FTP folder in the same pane. If reconnection fails, the pane shows a local folder and reports the error. Dirlume keeps the FTP location for the next startup until you navigate to another location in that pane.
 
-Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also measures folders. **F4** opens a text file for editing and **F2** saves it back to the server if the original revision still matches. **F6** renames an item and **F8** prompts before permanently deleting selected items, with an additional confirmation for nonempty folders. FTP files can be included in a text comparison.
+Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also measures folders. **F4** opens a text file for editing and **F2** saves it back to the server if the original revision still matches. **F6** renames an item and **F8** prompts before permanently deleting selected items, with an additional confirmation for nonempty folders. FTP files can be included in a text comparison. The viewer and editor show the full address of a remote file, including the protocol, host, any non-default port, and filename.
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder with read access over TLS. Browse and download files and directories, or open and compare text in Dirlume. [Server setup and autostart](docs/server.md).
 
@@ -169,7 +169,7 @@ Use the client's tool list for argument schemas. The server works with the locat
 | Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
 
 For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
-On Windows, choose **SMB** in a pane's sources menu. Enter a server name or IP address to list shares, or open a path such as `\\\\server\\documents` directly. **Save SMB location** adds the server or share to the dialog for quick access. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager. The pane heading shows the SMB server address.
+On Windows, choose **SMB** in a pane's sources menu. Enter a server name or IP address to open its shares as folders in the pane. Open a share and use **Parent folder** at its root to return to the server's share list. A UNC path such as `\\server\documents` opens the share directly. **Save SMB location** adds the server or share to the dialog for quick access. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
 
 ## Desktop diagnostics
 

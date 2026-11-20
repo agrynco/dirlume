@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Copy, Pencil } from "lucide-react";
-import { folderLabel, placePath, smbHost, windowsClient, type Place } from "./api";
+import { folderLabel, placePath, windowsClient, type Place } from "./api";
 import { Button } from "./Button";
 import { t } from "./i18n";
 import { parentPlace, type Side } from "./panes";
@@ -16,13 +16,9 @@ function parentPath(path: string, windows: boolean) {
 }
 
 function placeKey(place: Place) {
-  const source = place.kind === "local" ? [] : place.kind === "kswitcher" ? [place.directory, place.peer] : [place.id];
+  const source = place.kind === "local" || place.kind === "smbRoot" ? [] :
+    place.kind === "kswitcher" ? [place.directory, place.peer] : [place.id];
   return JSON.stringify([place.kind, ...source, placePath(place)]);
-}
-
-function breadcrumbLabel(place: Place) {
-  return place.kind === "local" && smbHost(place) && !place.parent
-    ? place.path.replace(/[\\/]+$/, "") : folderLabel(place);
 }
 
 function breadcrumbPlaces(place: Place | null, limit = 4, inSameSource = false) {
@@ -49,7 +45,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
 }) {
   const path = place ? placePath(place) : "";
   const ftp = place?.kind === "ftp" ? place.id : undefined;
-  const editable = !place || place.kind === "local" || place.kind === "ftp";
+  const editable = !place || place.kind === "local" || place.kind === "smbRoot" || place.kind === "ftp";
   const location = place ? placeKey(place) : "";
   const addressKey = JSON.stringify([side, location]);
   const root = useRef<HTMLDivElement>(null);
@@ -153,24 +149,24 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
         <div ref={clip} className="address-crumb-clip">
           <div ref={track} className="address-crumbs">
             {ancestors.map((ancestor) => <div key={placePath(ancestor)} className="address-ancestor">
-              <button type="button" onClick={() => goTo(ancestor, true)}>{breadcrumbLabel(ancestor)}</button>
+              <button type="button" onClick={() => goTo(ancestor, true)}>{folderLabel(ancestor)}</button>
               <ChevronRight aria-hidden="true" />
             </div>)}
-            <span aria-current="location" className="address-current">{place ? breadcrumbLabel(place) : t("Enter a path")}</span>
+            <span aria-current="location" className="address-current">{place ? folderLabel(place) : t("Enter a path")}</span>
           </div>
         </div>
         {forward.length > 0 && <div className="address-forward">
           {forward.map((folder) => <div key={placeKey(folder)} className="address-ancestor">
             <ChevronRight aria-hidden="true" />
             <Button type="button" tooltip={placePath(folder)} data-tooltip-placement="above"
-              onClick={() => goTo(folder)}>{breadcrumbLabel(folder)}</Button>
+              onClick={() => goTo(folder)}>{folderLabel(folder)}</Button>
           </div>)}
         </div>}
         {shortened && ancestors.length > 0 && <Button type="button" className="icon-button address-overflow"
           aria-label={t("Show parent folders")} aria-expanded={overflow} onClick={() => setOverflow(!overflow)}>…</Button>}
         {overflow && <div className="location-popup address-parents">
           {ancestors.map((ancestor) => <Button type="button" key={placePath(ancestor)}
-            tooltip={placePath(ancestor)} onClick={() => goTo(ancestor, true)}>{breadcrumbLabel(ancestor)}</Button>)}
+            tooltip={placePath(ancestor)} onClick={() => goTo(ancestor, true)}>{folderLabel(ancestor)}</Button>)}
         </div>}
         {(editable || path) && <div className="address-actions" style={hoverX === undefined ? undefined : { left: hoverX }}>
           {editable && <Button type="button" className="icon-button" data-tooltip-placement="above" aria-label={t("Edit {0}", label)} onClick={() => startEditing()}>

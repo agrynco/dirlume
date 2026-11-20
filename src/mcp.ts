@@ -5,7 +5,7 @@ import {
 } from "./api";
 import { baseThemes, builtInThemes, colorGroups, isHexColor, maxSchemeNameLength, type Palette } from "./appearance";
 import { sameFolderShortcut, shortcutFromPlace, type FolderShortcuts } from "./folderShortcuts";
-import { localPath, readPlace, type PaneState, type Side } from "./panes";
+import { filesystemPlace, readPlace, type PaneState, type Side } from "./panes";
 import type { Preferences } from "./preferences";
 import { findFiles } from "./SearchDialog";
 import { itemSource, nextTransferId } from "./TransferDialog";
@@ -35,12 +35,12 @@ function sameFile(a: NamedFile, b: NamedFile) {
 }
 
 function textFile(place: Place, entry: Entry): NamedFile {
-  if (place.kind === "kswitcher" || entry.directory || entry.link) throw new Error("Choose a regular text file.");
+  if (place.kind === "kswitcher" || place.kind === "smbRoot" || entry.directory || entry.link) throw new Error("Choose a regular text file.");
   return { place, name: entry.name };
 }
 
 async function transfer(place: Place, items: Entry[], destination: Place, moving: boolean) {
-  if (!items.length || (moving && (place.kind !== "local" || destination.kind !== "local")) ||
+  if (place.kind === "smbRoot" || !items.length || (moving && (place.kind !== "local" || destination.kind !== "local")) ||
       (destination.kind !== "local" && (destination.kind !== "ftp" || place.kind !== "local"))) {
     throw new Error("This transfer is unavailable for the selected sources.");
   }
@@ -100,7 +100,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
     case "navigate_pane": {
       const current = pane.place;
       const path = string("path");
-      const place = !current || current.kind === "local" ? localPath(path) :
+      const place = !current || current.kind === "local" || current.kind === "smbRoot" ? filesystemPlace(path) :
         current.kind === "kswitcher" ? { ...current, path } :
           path.startsWith("/") ? { ...current, segments: path.split("/").filter(Boolean) } : null;
       if (!place || !await context.load(side, place)) throw new Error("The pane could not open the path.");

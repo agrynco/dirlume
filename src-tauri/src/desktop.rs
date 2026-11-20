@@ -873,6 +873,7 @@ impl Connections {
 struct Connected {
     id: u32,
     address: String,
+    origin: String,
     listing: RemoteListing,
 }
 
@@ -887,6 +888,7 @@ async fn connect_server(invitation: String, state: State<'_, Connections>) -> Re
         .host_str()
         .unwrap_or_default()
         .to_owned();
+    let origin = connection.invitation.address.origin().ascii_serialization();
     state
         .connections
         .lock()
@@ -895,6 +897,7 @@ async fn connect_server(invitation: String, state: State<'_, Connections>) -> Re
     Ok(Connected {
         id,
         address,
+        origin,
         listing,
     })
 }

@@ -178,6 +178,9 @@ export async function testFtp(page, temp, source, destination, config, restartDe
 
     await remoteRow("guide.md").dblclick();
     await page.getByRole("heading", { name: "FTP Markdown", exact: true }).waitFor();
+    const documentAddress = page.locator(".text-window:not([hidden]) .text-toolbar > span");
+    const ftpOrigin = "ftp://127.0.0.1:" + ftpPort;
+    assert.equal(await documentAddress.textContent(), ftpOrigin + "/start/guide.md");
     await page.getByRole("checkbox", { name: "FTP task", exact: true }).click();
     await page.getByRole("checkbox", { name: "FTP task", exact: true, checked: true }).waitFor();
     assert.match(await readFile(join(remoteFolder, "guide.md"), "utf8"), /- \[x\] FTP task/);
@@ -188,6 +191,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("Escape");
     await remoteRow("bytes.bin").click();
     await page.keyboard.press("F3");
+    await documentAddress.filter({ hasText: ftpOrigin + "/start/bytes.bin" }).waitFor();
     await page.keyboard.press("F4");
     const hex = page.getByLabel("Hexadecimal contents", { exact: true });
     await hex.waitFor();
@@ -198,6 +202,8 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await remoteRow("guide.md").click();
     await page.keyboard.press("F4");
     const editor = page.getByRole("textbox", { name: "Edit guide.md", exact: true });
+    await editor.waitFor();
+    assert.equal(await documentAddress.textContent(), ftpOrigin + "/start/guide.md");
     await editor.fill("# Edited on FTP\n");
     await page.keyboard.press("F2");
     await page.waitForFunction(() => {

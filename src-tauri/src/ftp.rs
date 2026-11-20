@@ -315,6 +315,7 @@ impl Connection {
 pub struct Connected {
     id: u32,
     address: String,
+    origin: String,
     segments: Vec<String>,
     listing: RemoteListing,
 }
@@ -347,6 +348,18 @@ pub async fn connect_ftp(
         Ok((connection, segments, listing))
     }).await?;
     let address = connection.profile.label.clone();
+    let host = &connection.profile.host;
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.clone()
+    };
+    let port = connection.profile.port;
+    let origin = if port == 21 {
+        format!("ftp://{host}")
+    } else {
+        format!("ftp://{host}:{port}")
+    };
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
         .connections
@@ -356,6 +369,7 @@ pub async fn connect_ftp(
     Ok(Connected {
         id,
         address,
+        origin,
         segments,
         listing,
     })
