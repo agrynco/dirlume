@@ -49,7 +49,8 @@ export async function testPermanentDelete(page, root) {
   await cancel.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
   assert.equal(await tooltip.isVisible(), false, "Initial keyboard focus must not trigger a tooltip.");
   await cancel.hover();
-  await tooltip.filter({ hasText: /^Cancel$/ }).waitFor();
+  await cancel.evaluate(() => new Promise((resolve) => setTimeout(resolve, 525)));
+  assert.equal(await tooltip.isVisible(), false, "The visible Cancel label needs no tooltip.");
   await page.mouse.move(0, 0);
   await tooltip.waitFor({ state: "hidden" });
   assert.equal(await standard.evaluate((dialog) => getComputedStyle(dialog).backgroundColor), "rgb(128, 0, 0)");

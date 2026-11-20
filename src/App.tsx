@@ -1949,7 +1949,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
           fileActions.map(({ command, label, Icon, disabled }) => (
           <Button key={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
             aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
-            {keyLabel(command) && <kbd aria-hidden="true">{compactShortcut(shortcuts[command][0])}</kbd>}<Icon /><span>{t(label)}</span>
+            {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
+            <Icon /><span>{t(label)}</span>
           </Button>
         ))}
         <Button type="button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>

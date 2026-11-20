@@ -5,7 +5,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, 
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { api, describeError, documentPath, isPermissionError, placePath, readPlaceText, savePlaceText, textEncodingLabels, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
@@ -654,7 +654,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       {documents && <div className="comparison-editors" hidden={!editing}>
         {compareSides.map((side) => <section key={side} className="comparison-editor text-window" data-editing="true"
           aria-label={t(side === "left" ? "Left file" : "Right file")}>
-          <div className="comparison-editor-name" title={placePath(files[side].place)}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
+          <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
             <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === "left"}
               value={documents[side]} syntaxTarget={null} onChange={(text) => {
@@ -667,10 +667,10 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       {computed && !editing && (
         <div className="comparison" data-layout={layout} style={columns} ref={output} tabIndex={0} aria-label={t("File differences")}>
           <div className={`comparison-head${split ? " comparison-head-split" : ""}`}>
-            <span title={left.name}>{left.name}</span>
+            <span data-tooltip={left.name}>{left.name}</span>
             {split ? <SplitDivider label={t("Comparison divider")} className="comparison-divider" value={ratio} onResize={setRatio} />
               : <span aria-hidden="true">→</span>}
-            <span title={right.name}>{right.name}</span>
+            <span data-tooltip={right.name}>{right.name}</span>
           </div>
           {computed.blocks.map((block, index) => collapse && block.group === null && block.rows.length > 6 && !expanded.includes(index)
             ? <Button key={index} type="button" className="diff-unchanged" onClick={() => setExpanded((items) => [...items, index])}>

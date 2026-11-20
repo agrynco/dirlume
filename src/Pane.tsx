@@ -160,6 +160,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
     return () => { cancelled = true; };
   }, [localFolder, pane.loading, pane.entries]);
   const free = localFolder && space?.folder === localFolder ? space.value : null;
+  const freeLabel = free ? t("{0} free of {1}", formatSize(free.available), formatSize(free.total)) : undefined;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
   useLayoutEffect(() => {
@@ -304,10 +305,10 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           </Button>}
         </div>
       </header>
-      {twin && free && !search && !processView && <div className="pane-volume" title={t("Free space on this drive")}>
+      {twin && free && !search && !processView && <div className="pane-volume">
         <HardDrive aria-hidden="true" />
         <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span>
-        <span className="pane-volume-free">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+        <span className="pane-volume-free" data-tooltip={freeLabel}>{freeLabel}</span>
         <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
       </div>}
       <div className="navigation">
@@ -354,7 +355,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
               <div className="location-source-group" role="group" aria-label={t("Sources")}>
                 {sources.map(({ label, key, Icon, open }) => (
                   <Button key={label} shortcut={showShortcut(key[0])} onClick={() => { setLocationsOpen(false); open(); }}>
-                    <Icon /> {label}{key.length > 0 && <kbd aria-hidden="true">{showShortcut(key[0])}</kbd>}
+                    <Icon /> <span>{label}</span>{key.length > 0 && <kbd aria-hidden="true">{showShortcut(key[0])}</kbd>}
                   </Button>
                 ))}
               </div>
@@ -470,8 +471,8 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
         <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
           search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>
-        {free && !search && !twin && <span className="pane-free" title={t("Free space on this drive")}>
-          <span className="pane-free-full">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+        {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
+          <span className="pane-free-full">{freeLabel}</span>
           <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
           <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
         </span>}
