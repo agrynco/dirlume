@@ -486,7 +486,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     {schemeDialog?.kind === "delete" && activeScheme && <Dialog title={t("Delete shortcut scheme")} tone="warning"
       onClose={() => setSchemeDialog(null)} footer={<>
         <Button type="button" data-initial-focus onClick={() => setSchemeDialog(null)}>{t("Cancel")}</Button>
-        <Button type="button" className="negative" onClick={() => {
+        <Button type="button" className="alert-confirm" onClick={() => {
           onChange({ ...preferences, activeShortcutScheme: null, shortcutSchemes: shortcutSchemes.filter(({ id }) => id !== activeScheme.id) });
           setSchemeDialog(null);
           requestAnimationFrame(() => schemeSelect.current?.focus());
@@ -494,9 +494,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       </>}>
       <div className="dialog-body"><p>{t("Delete the shortcut scheme {0}?", activeScheme.name)}</p></div>
     </Dialog>}
-    {capture && conflict && <Dialog title={t("Shortcut conflict")} onClose={() => setConflict(null)} footer={<>
+    {capture && conflict && <Dialog title={t("Shortcut conflict")} tone="warning" onClose={() => setConflict(null)} footer={<>
       <Button type="button" data-initial-focus onClick={() => setConflict(null)}>{t("Choose another shortcut")}</Button>
-      <Button type="button" className="primary" onClick={() => saveShortcut(conflict.key, capture)}>{t("Reassign shortcut")}</Button>
+        <Button type="button" className="alert-confirm" onClick={() => saveShortcut(conflict.key, capture)}>{t("Reassign shortcut")}</Button>
     </>}>
       <div className="dialog-body">
         <p>{t("{0} is assigned to {1}.", showShortcut(conflict.key), new Intl.ListFormat(locale()).format(conflict.owners.map(commandLabel)))}</p>

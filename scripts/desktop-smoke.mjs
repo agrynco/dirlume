@@ -26,7 +26,7 @@ import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-p
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
-import { testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -43,6 +43,7 @@ if (process.env.CI) {
   await testSyntaxMenu();
   await testTerminalPaste();
   await testAppearancePicker();
+  await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
@@ -218,7 +219,6 @@ try {
   await page.waitForFunction(() => ["left", "right"].every((side) =>
     document.getElementById(`${side}-path`)?.dataset.path &&
     document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
-  await testNativeAppearancePicker(page);
   const tooltip = page.getByRole("tooltip");
   await page.getByRole("button", { name: "Find files" }).dispatchEvent("pointerover", { pointerType: "mouse" });
   await tooltip.filter({ hasText: /^Find files \(Alt\+F7\)$/ }).waitFor();
@@ -249,6 +249,7 @@ try {
   await checkTooltip(homeLocation, homePath);
   await checkTooltip(sshSource);
   await locationsTrigger.click();
+  await testNativeAppearancePicker(page);
   async function editAddress(side) {
     const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
     if (!await input.isVisible()) {

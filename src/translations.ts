@@ -356,6 +356,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Dialog": ["Діалогове вікно", "Диалоговое окно"],
   "Dialog header or footer": ["Заголовок або нижня частина діалогу", "Заголовок или нижняя часть диалога"],
   "Dialog field": ["Поле діалогового вікна", "Поле диалогового окна"],
+  "Alert confirmation background": ["Тло кнопки підтвердження попередження", "Фон кнопки подтверждения предупреждения"],
+  "Alert confirmation text": ["Текст кнопки підтвердження попередження", "Текст кнопки подтверждения предупреждения"],
   "Search rendered Markdown": ["Пошук у перегляді Markdown", "Поиск в предпросмотре Markdown"],
   "Close search": ["Закрити пошук", "Закрыть поиск"],
   "Previous match": ["Попередній збіг", "Предыдущее совпадение"],

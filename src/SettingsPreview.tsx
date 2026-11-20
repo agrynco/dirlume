@@ -41,10 +41,10 @@ function CodeSample() {
 }
 
 function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences: Preferences }) {
-  const background = ["accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
+  const background = ["danger-action", "accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
     "dialog-header", "dialog-bg", "mermaid-node-bg", "panel-header", "panel-bg", "raised", "surface", "canvas"]
     .find((color) => pick.colors.some((item) => item === color));
-  const foreground = ["panel-marked", "on-accent", "panel-selected-ink", ...pick.colors.filter((color) => color.startsWith("file-")),
+  const foreground = ["panel-marked", "on-danger-action", "on-accent", "panel-selected-ink", ...pick.colors.filter((color) => color.startsWith("file-")),
     "mermaid-node-ink", "dialog-ink", "text-ink", "panel-ink", "muted", "ink"]
     .find((color) => pick.colors.some((item) => item === color));
   const style: CSSProperties = {

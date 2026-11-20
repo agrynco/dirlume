@@ -122,6 +122,7 @@ export async function testTerminalPaste() {
         await paneHint.waitFor();
         await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
         await paneHint.waitFor({ state: "hidden" });
+        await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Command line");
         await list.press("Control+v");
         await page.waitForFunction(() => window.terminalPaste.filePastes === 1);
         await page.reload();

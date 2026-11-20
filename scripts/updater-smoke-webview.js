@@ -43,6 +43,35 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
     }
     pointer("pointerout");
   }
+  function checkAlertColors() {
+    const root = document.documentElement;
+    const theme = root.getAttribute("data-theme");
+    const ordinary = document.createElement("dialog");
+    ordinary.className = "dialog";
+    ordinary.setAttribute("open", "");
+    ordinary.innerHTML = '<header class="dialog-heading"></header><div class="dialog-body"></div><footer class="dialog-footer"><button>Cancel</button><button class="primary">Copy</button></footer>';
+    const alert = ordinary.cloneNode(true);
+    alert.dataset.tone = "warning";
+    alert.querySelector(".primary").className = "alert-confirm";
+    document.body.append(ordinary, alert);
+    try {
+      for (const mode of ["light", "dark", "classic-blue"]) {
+        root.dataset.theme = mode;
+        const surfaces = (dialog) => [dialog, ...dialog.querySelectorAll(".dialog-heading, .dialog-footer, button:first-child")]
+          .map((element) => getComputedStyle(element).backgroundColor);
+        const action = getComputedStyle(alert.querySelector(".alert-confirm"));
+        if (JSON.stringify(surfaces(alert)) !== JSON.stringify(surfaces(ordinary)) ||
+            action.backgroundColor !== "rgb(163, 35, 55)" || action.color !== "rgb(255, 255, 255)") {
+          throw new Error(`The ${mode} alert did not use standard surfaces and a red confirmation button.`);
+        }
+      }
+    } finally {
+      ordinary.remove();
+      alert.remove();
+      if (theme === null) root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", theme);
+    }
+  }
   try {
     if (upgraded) {
       await waitFor("the saved pane font size", () => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
@@ -75,6 +104,8 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard) => {
       });
       updates.click();
       await waitFor("the up-to-date message", () => [...document.querySelectorAll("dialog[open] p")].some((text) => text.textContent === "Dirlume is up to date."));
+      await record("the shared alert colors");
+      checkAlertColors();
       if (checkClipboard) await verifyClipboard();
       await report(null);
       return;
