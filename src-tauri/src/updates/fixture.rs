@@ -10,12 +10,13 @@ use super::{restore_update, PendingUpdate, UpdateOffer, MANIFEST_FAILED};
 #[derive(Deserialize)]
 pub struct UpdateFixture {
     result: PathBuf,
+    phase: PathBuf,
     expected: String,
     reject: bool,
     #[serde(default)]
     replacement_failure: bool,
     #[serde(default)]
-    terminal_paste: bool,
+    check_clipboard: bool,
     metadata: serde_json::Value,
 }
 
@@ -59,6 +60,10 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
         return;
     };
     let upgraded = app.package_info().version.to_string() == fixture.expected;
+    let _ = fs::write(
+        &fixture.phase,
+        format!("{}: loading the main WebView", app.package_info().version),
+    );
     #[cfg(windows)]
     let portable = crate::portable::root().is_some();
     #[cfg(not(windows))]
@@ -66,8 +71,18 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
     let _ = webview.eval(format!(
         "({script})({upgraded}, {}, {portable}, {}, {});",
-        fixture.reject, fixture.replacement_failure, fixture.terminal_paste
+        fixture.reject, fixture.replacement_failure, fixture.check_clipboard
     ));
+}
+
+#[tauri::command]
+pub fn updater_fixture_phase(app: AppHandle, phase: String) -> DesktopResult<()> {
+    let fixture = read(&app).ok_or("Missing updater fixture configuration")?;
+    fs::write(
+        fixture.phase,
+        format!("{}: {phase}", app.package_info().version),
+    )
+    .map_err(message)
 }
 
 #[tauri::command]
