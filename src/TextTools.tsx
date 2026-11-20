@@ -1,16 +1,20 @@
-import { errorText, t } from "./i18n";
+import { errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Settings2, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, describeError, documentPath, isPermissionError, placePath, readPlaceText, savePlaceText, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { isTauri } from "@tauri-apps/api/core";
+import { api, describeError, documentPath, isPermissionError, placePath, readPlaceText, savePlaceText, textEncodingLabels, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
-import { isMarkdownFile } from "./markdown";
-import type { MarkdownAnchor, OpenMarkdownLink, TaskMarker } from "./MarkdownPreview";
-import { eventShortcut, showShortcut } from "./preferences";
+import { isMarkdownFile, type MarkdownPosition } from "./markdown";
+import type { TaskMarker } from "./MarkdownPreview";
+import { useMarkdownSearch } from "./MarkdownSearch";
+import { MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import type { SourceActions, SourceStatus } from "./CodeSurface";
+import { eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import type { BaseTheme, Palette } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
@@ -22,24 +26,24 @@ import { PathField } from "./PathField";
 const CodeSurface = lazy(() => import("./CodeSurface"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
 
-export function TextWindow({ file, editing, active, theme, saveShortcut, closeShortcut, cancelShortcut,
-  hexShortcut, zoomShortcut, fontSizes, viewerContentWidth, colors, onZoom, onOptions, anchor, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, fontSizes, viewerContentWidth, colors,
+  onZoom, onOptions, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
   theme: BaseTheme;
-  saveShortcut: readonly string[];
-  closeShortcut: readonly string[];
-  cancelShortcut: readonly string[];
-  hexShortcut: readonly string[];
-  zoomShortcut: readonly string[];
+  shortcuts: Bindings;
+  menuRef?: Ref<MainMenuHandle>;
   fontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   colors?: Palette;
   onZoom: ZoomViewFont;
   onOptions: () => void;
-  anchor: MarkdownAnchor | null;
-  onOpenDocument: OpenMarkdownLink;
+  position?: MarkdownPosition;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  onNavigate: (direction: "back" | "forward", scrollTop: number) => void;
+  onOpenDocument: (file: NamedFile, newTab: boolean, position: MarkdownPosition | undefined, scrollTop: number) => void;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
   onClose: () => void;
@@ -50,6 +54,11 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
   const [syntaxTarget, setSyntaxTarget] = useState<HTMLDivElement | null>(null);
+  const [syntax, setSyntax] = useState("auto");
+  const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ line: 1, column: 1, canUndo: false, canRedo: false });
+  const [hexSize, setHexSize] = useState<number>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [readError, setReadError] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -63,9 +72,25 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
   const writable = writableTextPlace(file.place);
   const path = documentPath(file);
   const section = useRef<HTMLElement>(null);
+  const sourceActions = useRef<SourceActions>(null);
+  const markdownScroll = useRef<HTMLDivElement>(null);
+  const [markdownContent, setMarkdownContent] = useState<HTMLDivElement | null>(null);
+  const searchField = useRef<HTMLInputElement>(null);
+  const markdownVisible = Boolean(document && preview && !hex);
+  const markdownViewer = markdownVisible && !editing;
+  const sourceVisible = Boolean(document && !preview && !hex);
+  const search = useMarkdownSearch(markdownContent, markdownScroll, searchOpen ? searchQuery.trim() : "",
+    active && markdownViewer, markdownSource, htmlFormatting);
+  const byteSize = useMemo(() => {
+    if (!document) return undefined;
+    const { encoding, text } = document;
+    return encoding.startsWith("utf16") ? text.length * 2 + 2 :
+      new TextEncoder().encode(text).length + (encoding === "utf8_bom" ? 3 : 0);
+  }, [document]);
+  const fileSize = hex ? hexSize ?? byteSize : byteSize;
   const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];
-  useFontZoom(section, zoomShortcut, fontView, onZoom);
+  useFontZoom(section, shortcuts.zoomFont, fontView, onZoom);
   const light = theme === "light";
 
   useLayoutEffect(() => {
@@ -73,11 +98,15 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
   }, [active]);
 
   useEffect(() => {
-    if (anchor && isMarkdown) {
+    if (position && isMarkdown) {
       setPreview(true);
       setHex(false);
     }
-  }, [anchor, isMarkdown]);
+  }, [position, isMarkdown]);
+
+  useLayoutEffect(() => {
+    if (active && markdownViewer && searchOpen) searchField.current?.focus();
+  }, [active, markdownViewer, searchOpen]);
 
   const reportDirty = useRef(onDirtyChange);
   reportDirty.current = onDirtyChange;
@@ -139,6 +168,76 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
     else onClose();
   }
 
+  function find() {
+    setSearchOpen(true);
+    searchField.current?.focus();
+    searchField.current?.select();
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+    markdownScroll.current?.focus({ preventScroll: true });
+  }
+
+  function copySelection() {
+    const selection = window.getSelection();
+    const selectionText = sourceVisible ? sourceActions.current?.selection() : "";
+    const content = selectionText ||
+      (selection?.anchorNode && section.current?.contains(selection.anchorNode) ? selection.toString() : "");
+    if (content) {
+      const copy = isTauri() ? api.copyPath(content) : navigator.clipboard.writeText(content);
+      void copy.catch((failure: unknown) => setError(describeError(failure)));
+    }
+  }
+
+  function selectAllText() {
+    if (sourceVisible) {
+      sourceActions.current?.selectAll();
+    } else {
+      const contents = markdownContent ?? section.current?.querySelector(".hex-view");
+      if (contents) window.getSelection()?.selectAllChildren(contents);
+    }
+  }
+
+  type Action = MenuGroup["items"][number] & { command?: Command };
+  const key = (command: Command) => showShortcut(shortcuts[command][0]);
+  const action = (label: string, command: Command, run: () => void, disabled = false): Action =>
+    ({ label, command, run, disabled, shortcut: key(command) });
+  const saveAction = action("Save", "saveText", () => void save(), !dirty || !writable || saving);
+  const closeAction = action("Close", "closeText", close, saving);
+  closeAction.shortcut ||= key("cancelText");
+  const navigate = (direction: "back" | "forward") => onNavigate(direction, markdownScroll.current?.scrollTop ?? 0);
+  const back = action("Back", "documentBack", () => navigate("back"), !canGoBack);
+  const forward = action("Forward", "documentForward", () => navigate("forward"), !canGoForward);
+  const searchAction = action("Search", "documentSearch", find);
+  const hexAction = action("Hex", "viewAsHex", () => setHex(!hex));
+  const fileActions = [...(editing ? [saveAction] : []), closeAction];
+  const selectionActions = [
+    ...(editing && sourceVisible ? [
+      action("Undo", "documentUndo", () => sourceActions.current?.undo(), saving || !sourceStatus.canUndo),
+      action("Redo", "documentRedo", () => sourceActions.current?.redo(), saving || !sourceStatus.canRedo),
+    ] : []),
+    action("Copy", "documentCopy", copySelection),
+    action("Select all", "documentSelectAll", selectAllText),
+  ];
+  const navigationActions = markdownViewer ? [back, forward, searchAction] : sourceVisible ? [
+    action("Go to start", "documentStart", () => sourceActions.current?.goToStart()),
+    action("Go to end", "documentEnd", () => sourceActions.current?.goToEnd()),
+  ] : [];
+  const menuGroups = [
+    { label: "File", items: fileActions },
+    { label: editing ? "Edit" : "Selection", items: selectionActions },
+    ...(navigationActions.length || !editing ? [
+      { label: "Navigate", items: [...navigationActions, ...(!editing && !markdownViewer ? [hexAction] : [])] },
+    ] : []),
+    ...(sourceVisible ? [{ label: "Syntax", items: [
+      { label: "Automatic", run: () => setSyntax("auto") },
+      { label: "Plain text", run: () => setSyntax("plain") },
+      { label: "Choose syntax…", run: () => syntaxTarget?.querySelector("select")?.focus() },
+    ] }] : []),
+  ];
+  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), closeAction];
+
   return (
     <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
       hidden={!active} className="text-window" data-editing={editing} data-reading={!editing || preview}
@@ -146,42 +245,72 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
-      const cancel = cancelShortcut.includes(shortcut);
-      if (cancel && event.target instanceof Element && event.target.hasAttribute("data-history-open")) return;
-      if (editing && saveShortcut.includes(shortcut)) {
-        event.preventDefault();
-        event.stopPropagation();
-        void save();
-      } else if (closeShortcut.includes(shortcut) || cancel) {
-        event.preventDefault();
-        event.stopPropagation();
-        close();
-      } else if (!editing && hexShortcut.includes(shortcut)) {
-        event.preventDefault();
-        event.stopPropagation();
-        setHex((visible) => !visible);
-      }
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[role=menubar]")) return;
+      const cancel = shortcuts.cancelText.includes(shortcut);
+      if (cancel && target?.hasAttribute("data-history-open")) return;
+      const action = [
+        ...fileActions, ...navigationActions, ...(!editing ? [hexAction] : []),
+        ...(!target?.closest("input, select, textarea") ? selectionActions : []),
+      ].find(({ command }) => command && shortcuts[command].includes(shortcut));
+      if (!cancel && !action) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (cancel) (searchOpen && markdownViewer ? closeSearch : close)();
+      else if (action && !action.disabled) action.run();
     }}>
       <header className="document-heading">
-        <h2 data-tooltip={file.name}>{file.name}</h2>
-        {document && <span className="document-encoding">
-          {document.encoding.replaceAll("_", " ").toUpperCase()}{saving ? ` · ${t("Saving…")}` : dirty ? ` · ${t("Modified")}` : ""}
-        </span>}
-        <div ref={setSyntaxTarget} />
-        <Button className="icon-button" type="button" aria-label={t("Close document")} shortcut={showShortcut(closeShortcut[0] ?? cancelShortcut[0])}
+        <div className="document-menu">
+          <MainMenu key={sourceVisible ? "source" : markdownViewer ? "markdown" : "other"}
+            groups={menuGroups} shortcut={key("menu")} ref={menuRef} label="Document menu" />
+          <Button type="button" aria-label={t(editing ? "Editor options" : "Viewer options")} onClick={onOptions}>
+            <Settings2 aria-hidden="true" /> {t("Options")}
+          </Button>
+        </div>
+        <div className="document-status">
+          <span>{t(editing ? "Edit" : "View")}</span>
+          {document && <span className="document-encoding">{textEncodingLabels[document.encoding]}</span>}
+          {sourceVisible && <div ref={setSyntaxTarget} />}
+          {fileSize !== undefined && <span>{t("{0} bytes", fileSize.toLocaleString(locale()))}</span>}
+          {sourceVisible && <span>{t("Ln {0}, Col {1}", sourceStatus.line, sourceStatus.column)}</span>}
+          {(saving || dirty) && <span className="document-modified">{t(saving ? "Saving…" : "Modified")}</span>}
+        </div>
+        <Button className="icon-button" type="button" aria-label={t("Close document")} shortcut={closeAction.shortcut}
           onClick={close} disabled={saving}><X /></Button>
+        <h2 data-tooltip={path}>{path}</h2>
       </header>
       <div className="text-toolbar">
-        <span data-tooltip={path}>{path}</span>
+        {markdownViewer && <>
+          <Button type="button" shortcut={back.shortcut} disabled={back.disabled} onClick={back.run}>
+            <ArrowLeft aria-hidden="true" /> {t(back.label)}
+          </Button>
+          <Button type="button" shortcut={forward.shortcut} disabled={forward.disabled} onClick={forward.run}>
+            <ArrowRight aria-hidden="true" /> {t(forward.label)}
+          </Button>
+          <Button type="button" shortcut={searchAction.shortcut} aria-expanded={searchOpen} onClick={searchAction.run}>
+            <Search aria-hidden="true" /> {t(searchAction.label)}
+          </Button>
+        </>}
         {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? t("Source") : t("Preview")}</Button>}
         {isMarkdown && document && preview && !hex && (
           <Button type="button" aria-pressed={htmlFormatting} onClick={() => setHtmlFormatting((enabled) => !enabled)}>
             {t("HTML formatting")}
           </Button>
         )}
-        {!editing && <Button shortcut={showShortcut(hexShortcut[0])} aria-pressed={hex} onClick={() => setHex(!hex)}>{t("Hex")}</Button>}
-        <Button type="button" onClick={onOptions}><Settings2 /> {t("Settings")}</Button>
+        {!editing && <Button shortcut={hexAction.shortcut} aria-pressed={hex} onClick={hexAction.run}>{t(hexAction.label)}</Button>}
       </div>
+      {markdownViewer && searchOpen && <form className="markdown-search" onSubmit={(event) => { event.preventDefault(); search.move(1); }}>
+        <input ref={searchField} type="search" aria-label={t("Search rendered Markdown")} placeholder={t("Search rendered Markdown")}
+          value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && event.shiftKey) { event.preventDefault(); search.move(-1); }
+          }} />
+        <span role="status">{searchQuery.trim() && (search.count ? t("{0} of {1}", search.current, search.count) : t("No match"))}</span>
+        <Button type="button" className="icon-button" aria-label={t("Previous match")} disabled={!search.count}
+          onClick={() => search.move(-1)}><ArrowUp aria-hidden="true" /></Button>
+        <Button type="submit" className="icon-button" aria-label={t("Next match")} disabled={!search.count}><ArrowDown aria-hidden="true" /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Close search")} onClick={closeSearch}><X aria-hidden="true" /></Button>
+      </form>}
       {(error || (readError && !hex)) && <div className="pane-error">
         <span role="alert">{errorText(error || readError)}</span>
         {file.place.kind === "ssh" && !saving && (deniedWrite !== null && (!editing || dirty)
@@ -189,25 +318,31 @@ export function TextWindow({ file, editing, active, theme, saveShortcut, closeSh
           : !error && isPermissionError(readError) &&
             <Button type="button" onClick={() => setSudoAction("read")}>{t("Open with sudo…")}</Button>)}
       </div>}
-      {hex ? <HexViewer file={file} /> :
+      {hex ? <HexViewer file={file} onSize={setHexSize} /> :
         !document && !readError && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
         {preview && !hex && (
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
-          <MarkdownPreview file={file} source={markdownSource} active={active} anchor={anchor} light={light} colors={colors}
+          <MarkdownPreview file={file} source={markdownSource} active={active} position={position} light={light} colors={colors}
+            scroll={markdownScroll} onContent={setMarkdownContent}
             writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
-            onOpenDocument={onOpenDocument} onError={setError} />
+            onOpenDocument={(target, newTab, next) => onOpenDocument(target, newTab, next, markdownScroll.current?.scrollTop ?? 0)} onError={setError} />
           </Suspense>
         )}
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
-              fontSize={fontSize} value={text} syntaxTarget={preview || hex ? null : syntaxTarget} onChange={setText} />
+              fontSize={fontSize} value={text} syntaxTarget={sourceVisible ? syntaxTarget : null} onChange={setText}
+              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax} />
           </Suspense>
         </div>
       </>}
+      <footer className="document-shortcuts" aria-label={t("Document shortcuts")}>
+        {hints.map((hint) => hint.shortcut && <Button type="button" key={hint.label} disabled={hint.disabled}
+          shortcut={hint.shortcut} tooltip={t(hint.label)} onClick={hint.run}><kbd>{hint.shortcut}</kbd> {t(hint.label)}</Button>)}
+      </footer>
       {sudoAction && file.place.kind === "ssh" && <SudoDialog operation={sudoAction} address={file.place.address}
-        path={`${path.replace(/\/$/, "")}/${file.name}`} onClose={() => setSudoAction(null)}
+        path={path} onClose={() => setSudoAction(null)}
         onConfirm={async (password) => {
           if (sudoAction === "read") {
             const opened = await readPlaceText(file, password);

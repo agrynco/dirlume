@@ -75,7 +75,7 @@ export async function testArchives(page, root) {
   const editor = document.getByLabel("Edit note.txt");
   await editor.fill("updated in archive");
   await editor.press("F2");
-  await document.locator(".document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
+  await document.locator(".document-modified").waitFor({ state: "hidden" });
   await button(document, "Close document").click();
   await returnToFiles();
   await row("keep.txt").click();

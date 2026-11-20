@@ -77,7 +77,7 @@ export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, spli
   documents: DocumentWindow[], activeDocument: number | null, failedFtp: Partial<Record<Side, SavedFtpLocation>>) {
   const workspace: Workspace = {
     panels: { left: savePane(panes.left, failedFtp.left), right: savePane(panes.right, failedFtp.right) }, active, split, terminalHeight,
-    documents: documents.filter(({ file }) => isLocal(file.place)), activeDocument,
+    documents: documents.filter(({ file }) => isLocal(file.place)).map(({ id, file, editing }) => ({ id, file, editing })), activeDocument,
   };
   try { localStorage.setItem(storageKey, JSON.stringify(workspace)); }
   catch (error) { reportFrontendError("save_workspace", error); }

@@ -25,10 +25,11 @@ interface MenuItem {
 export type MenuGroup = { label: string; items: MenuItem[] };
 export type MainMenuHandle = { open: () => void };
 
-export function MainMenu({ groups, shortcut, ref }: {
+export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
   groups: MenuGroup[];
   shortcut: string;
-  ref: Ref<MainMenuHandle>;
+  ref?: Ref<MainMenuHandle>;
+  label?: string;
 }) {
   const bar = useRef<HTMLElement>(null);
   const priorFocus = useRef<HTMLElement | null>(null);
@@ -111,7 +112,7 @@ export function MainMenu({ groups, shortcut, ref }: {
   }
 
   return (
-    <nav ref={bar} className="main-menu" role="menubar" aria-label={t("Main menu")}
+    <nav ref={bar} className="main-menu" role="menubar" aria-label={t(label)}
       onFocusCapture={(event) => {
         const from = event.relatedTarget;
         if (from instanceof HTMLElement && !event.currentTarget.contains(from)) priorFocus.current = from;

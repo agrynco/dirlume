@@ -1090,7 +1090,7 @@ try {
   await page.getByRole("textbox", { name: "Edit draft.md" }).fill("# Draft");
   await page.keyboard.press("F2");
   const editor = page.getByRole("region", { name: "draft.md", exact: true });
-  await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF8$/ }).waitFor();
+  await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF-8$/ }).waitFor();
   await editor.locator(".document-heading").getByRole("combobox", { name: "Syntax" }).waitFor();
   assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
     parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
@@ -1266,7 +1266,7 @@ try {
   await page.keyboard.press("Control+Tab");
   assert.match(await sourceEditor.innerText(), /retained/);
   await page.keyboard.press("F2");
-  await page.waitForFunction(() => document.querySelector(".text-window:not([hidden]) .document-encoding")?.textContent?.trim() === "UTF8");
+  await page.locator(".text-window:not([hidden]) .document-modified").waitFor({ state: "hidden" });
   await page.keyboard.press("Escape");
   await diagram.waitFor();
   await page.keyboard.press("Escape");
@@ -1489,7 +1489,7 @@ try {
     await remote.getByRole("option", { name: /^remote.md/ }).click();
     await page.keyboard.press("F3");
     await page.getByRole("heading", { name: "Remote Markdown" }).waitFor();
-    assert.equal(await page.locator(".text-window:not([hidden]) .text-toolbar > span").textContent(),
+    assert.equal(await page.locator(".text-window:not([hidden]) .document-heading h2").textContent(),
       new URL(config.address).origin + "/folder/remote.md");
     await page.keyboard.press("F4");
     await raw.waitFor();
