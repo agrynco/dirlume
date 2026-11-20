@@ -293,6 +293,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
+export const preferenceBindingVersion = 7;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -369,7 +370,7 @@ function readMenuAlignment(value: unknown): MenuPosition | undefined {
   return value === "left" || value === "center" || value === "right" ? value : undefined;
 }
 
-export function readPreferences(): Preferences {
+export function normalizePreferences(value: unknown): Preferences {
   const defaults: Preferences = {
     theme: "system", layout: "standard", actionButtonWidth: "compact", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
     mainMenuAlignment: "center", activeShortcutScheme: null, shortcutSchemes: [],
@@ -378,61 +379,64 @@ export function readPreferences(): Preferences {
     viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
     terminalResizeRows: 1, terminalPasteOnRightClick: true,
   };
+  if (!value || typeof value !== "object") return defaults;
+  const saved = value as Partial<Preferences> & { menuPosition?: unknown; shortcuts?: Record<string, unknown>; bindingDefaults?: number };
+  const schemes = readSchemes(saved.schemes);
+  const bindingVersion = saved.bindingDefaults ?? 0;
+  const shortcutSchemes = readShortcutSchemes(saved.shortcutSchemes, bindingVersion);
+  let activeShortcutScheme = shortcutSchemes.find(({ id }) => id === saved.activeShortcutScheme)?.id ?? null;
+  if (!Array.isArray(saved.shortcutSchemes) && saved.shortcuts) {
+    const bindings = readBindings(saved.shortcuts, bindingVersion);
+    if (commandNames.some((command) => bindings[command].length !== defaultBindings[command].length ||
+        bindings[command].some((key, index) => key !== defaultBindings[command][index]))) {
+      activeShortcutScheme = "my-shortcuts";
+      shortcutSchemes.push({ id: activeShortcutScheme, name: "My shortcuts", bindings });
+    }
+  }
+  const viewFontSizes: ViewFontSizes = {};
+  for (const view of viewFontKeys) {
+    const size = saved.viewFontSizes?.[view];
+    if (validViewFontSize(size)) viewFontSizes[view] = size;
+  }
+  return {
+    language: readLanguage(saved.language),
+    theme: readTheme(saved.theme),
+    layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
+    sortSettings: readSortSettings(saved.sortSettings),
+    panelModes: readPanelModes(saved.panelModes),
+    selectedPanelModes: {
+      left: isPanelMode(saved.selectedPanelModes?.left) ? saved.selectedPanelModes.left : "full",
+      right: isPanelMode(saved.selectedPanelModes?.right) ? saved.selectedPanelModes.right : "full",
+    },
+    actionButtonWidth: saved.actionButtonWidth === "full" || saved.actionButtonWidth === "compact"
+      ? saved.actionButtonWidth : defaults.actionButtonWidth,
+    mainMenuAlignment: readMenuAlignment(saved.mainMenuAlignment) ?? readMenuAlignment(saved.menuPosition) ?? defaults.mainMenuAlignment,
+    systemLightScheme: readSystemScheme(saved.systemLightScheme, schemes, "light"),
+    systemDarkScheme: readSystemScheme(saved.systemDarkScheme, schemes, "dark"),
+    showTitlebarScheme: saved.showTitlebarScheme === true,
+    activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
+    schemes,
+    provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
+    hidden: saved.hidden === true,
+    refreshEnvironment: saved.refreshEnvironment !== false,
+    terminalPasteOnRightClick: saved.terminalPasteOnRightClick !== false,
+    kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
+    activeShortcutScheme,
+    shortcutSchemes,
+    viewFontSizes,
+    terminalResizeRows: typeof saved.terminalResizeRows === "number" && Number.isInteger(saved.terminalResizeRows) &&
+      saved.terminalResizeRows >= 1 && saved.terminalResizeRows <= maxTerminalResizeRows ? saved.terminalResizeRows : 1,
+    viewerContentWidth: typeof saved.viewerContentWidth === "number" && Number.isInteger(saved.viewerContentWidth) &&
+      saved.viewerContentWidth >= minViewerContentWidth && saved.viewerContentWidth <= maxViewerContentWidth ? saved.viewerContentWidth : undefined,
+  };
+}
+
+export function readPreferences(): Preferences {
   try {
-    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as
-      (Partial<Preferences> & { menuPosition?: unknown; shortcuts?: Record<string, unknown>; bindingDefaults?: number }) | null;
-    if (!saved) return defaults;
-    const schemes = readSchemes(saved.schemes);
-    const bindingVersion = saved.bindingDefaults ?? 0;
-    const shortcutSchemes = readShortcutSchemes(saved.shortcutSchemes, bindingVersion);
-    let activeShortcutScheme = shortcutSchemes.find(({ id }) => id === saved.activeShortcutScheme)?.id ?? null;
-    if (!Array.isArray(saved.shortcutSchemes) && saved.shortcuts) {
-      const bindings = readBindings(saved.shortcuts, bindingVersion);
-      if (commandNames.some((command) => bindings[command].length !== defaultBindings[command].length ||
-          bindings[command].some((key, index) => key !== defaultBindings[command][index]))) {
-        activeShortcutScheme = "my-shortcuts";
-        shortcutSchemes.push({ id: activeShortcutScheme, name: "My shortcuts", bindings });
-      }
-    }
-    const viewFontSizes: ViewFontSizes = {};
-    for (const view of viewFontKeys) {
-      const size = saved.viewFontSizes?.[view];
-      if (validViewFontSize(size)) viewFontSizes[view] = size;
-    }
-    return {
-      language: readLanguage(saved.language),
-      theme: readTheme(saved.theme),
-      layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
-      sortSettings: readSortSettings(saved.sortSettings),
-      panelModes: readPanelModes(saved.panelModes),
-      selectedPanelModes: {
-        left: isPanelMode(saved.selectedPanelModes?.left) ? saved.selectedPanelModes.left : "full",
-        right: isPanelMode(saved.selectedPanelModes?.right) ? saved.selectedPanelModes.right : "full",
-      },
-      actionButtonWidth: saved.actionButtonWidth === "full" || saved.actionButtonWidth === "compact"
-        ? saved.actionButtonWidth : defaults.actionButtonWidth,
-      mainMenuAlignment: readMenuAlignment(saved.mainMenuAlignment) ?? readMenuAlignment(saved.menuPosition) ?? defaults.mainMenuAlignment,
-      systemLightScheme: readSystemScheme(saved.systemLightScheme, schemes, "light"),
-      systemDarkScheme: readSystemScheme(saved.systemDarkScheme, schemes, "dark"),
-      showTitlebarScheme: saved.showTitlebarScheme === true,
-      activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
-      schemes,
-      provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
-      hidden: saved.hidden === true,
-      refreshEnvironment: saved.refreshEnvironment !== false,
-      terminalPasteOnRightClick: saved.terminalPasteOnRightClick !== false,
-      kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
-      activeShortcutScheme,
-      shortcutSchemes,
-      viewFontSizes,
-      terminalResizeRows: typeof saved.terminalResizeRows === "number" && Number.isInteger(saved.terminalResizeRows) &&
-        saved.terminalResizeRows >= 1 && saved.terminalResizeRows <= maxTerminalResizeRows ? saved.terminalResizeRows : 1,
-      viewerContentWidth: typeof saved.viewerContentWidth === "number" && Number.isInteger(saved.viewerContentWidth) &&
-        saved.viewerContentWidth >= minViewerContentWidth && saved.viewerContentWidth <= maxViewerContentWidth ? saved.viewerContentWidth : undefined,
-    };
+    return normalizePreferences(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
   } catch (error) {
     reportFrontendError("load_preferences", error);
-    return defaults;
+    return normalizePreferences(null);
   }
 }
 
@@ -462,7 +466,7 @@ export function flushPortablePreferences() {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  const settings = { ...preferences, bindingDefaults: 7 };
+  const settings = { ...preferences, bindingDefaults: preferenceBindingVersion };
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;
