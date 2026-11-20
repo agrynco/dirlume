@@ -22,6 +22,7 @@ import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testTerminalPaste } from "./terminal-paste-smoke.mjs";
+import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-picker-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
@@ -41,6 +42,7 @@ if (process.env.CI) {
   await testFolderMeasurement();
   await testSyntaxMenu();
   await testTerminalPaste();
+  await testAppearancePicker();
 }
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
@@ -216,6 +218,7 @@ try {
   await page.waitForFunction(() => ["left", "right"].every((side) =>
     document.getElementById(`${side}-path`)?.dataset.path &&
     document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"));
+  await testNativeAppearancePicker(page);
   const tooltip = page.getByRole("tooltip");
   await page.getByRole("button", { name: "Find files" }).dispatchEvent("pointerover", { pointerType: "mouse" });
   await tooltip.filter({ hasText: /^Find files \(Alt\+F7\)$/ }).waitFor();

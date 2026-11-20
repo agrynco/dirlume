@@ -245,6 +245,7 @@ export const api = {
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },
     initialPage?: import("./featureOptions").FeaturePage) =>
     invoke<void>("open_tool_window", { title, ...size, comparison, initialPage }),
+  setAppearancePicker: (picking: boolean) => invoke<void>("set_appearance_picker", { picking }),
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),

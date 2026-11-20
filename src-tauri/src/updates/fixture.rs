@@ -198,6 +198,16 @@ pub async fn updater_fixture_options_window(app: AppHandle) -> DesktopResult<()>
     {
         return Err("Options did not stay visible in its independent position.".to_owned());
     }
+    crate::desktop::set_appearance_picker(options.clone(), true).await?;
+    wait_for_window("the appearance picker to focus the main window", || {
+        Ok(!options.is_visible().map_err(message)? && main.is_focused().map_err(message)?)
+    })
+    .await?;
+    crate::desktop::set_appearance_picker(main.clone(), false).await?;
+    wait_for_window("the appearance picker to return focus to Options", || {
+        Ok(options.is_visible().map_err(message)? && options.is_focused().map_err(message)?)
+    })
+    .await?;
     options.close().map_err(message)?;
     main.set_size(original_size).map_err(message)?;
     main.set_position(original).map_err(message)

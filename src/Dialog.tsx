@@ -20,7 +20,7 @@ export function saveDialogSize(key: string, size: Dimensions) {
   try { localStorage.setItem(sizePrefix + key, JSON.stringify(size)); } catch { /* The current size still applies. */ }
 }
 
-export function Dialog({ title, children, footer, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false, standalone = false, tone }: {
+export function Dialog({ title, children, footer, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -29,6 +29,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
   wide?: boolean;
   resizeKey?: string;
   standalone?: boolean;
+  suspended?: boolean;
   dismissOnOutside?: boolean;
   tone?: "warning" | "destructive";
 }) {
@@ -39,13 +40,20 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
   useLayoutEffect(() => {
     const dialog = ref.current;
     const focused = document.activeElement;
-    dialog?.showModal();
-    dialog?.querySelector<HTMLElement>("[data-initial-focus]")?.focus();
     return () => {
       dialog?.close();
       if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
     };
   }, []);
+  useLayoutEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (suspended) dialog.close();
+    else if (!dialog.open) {
+      dialog.showModal();
+      dialog.querySelector<HTMLElement>("[data-initial-focus]")?.focus();
+    }
+  }, [suspended]);
 
   function resize(width: number, height: number, persist = false) {
     const next = {

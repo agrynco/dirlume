@@ -1,11 +1,12 @@
 import { t } from "./i18n";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { File, Folder, FolderTree } from "lucide-react";
 import { applyAppearance, fileColor, resolveAppearance, useSystemTheme } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { shortcutBindings, showShortcut, type Preferences } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
 import { featureOptions, type FeaturePage } from "./featureOptions";
+import { pickLabel, type AppearancePick } from "./appearancePick";
 
 type PreviewPage = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 
@@ -39,7 +40,25 @@ function CodeSample() {
     <span className="syntax-property">zoom</span>: <span className="syntax-number">100</span>{"\n}"};</pre>;
 }
 
-export function SettingsPreview({ page, preferences }: { page: PreviewPage; preferences: Preferences }) {
+function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences: Preferences }) {
+  const background = ["accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
+    "dialog-header", "dialog-bg", "mermaid-node-bg", "panel-header", "panel-bg", "raised", "surface", "canvas"]
+    .find((color) => pick.colors.some((item) => item === color));
+  const foreground = ["panel-marked", "on-accent", "panel-selected-ink", ...pick.colors.filter((color) => color.startsWith("file-")),
+    "mermaid-node-ink", "dialog-ink", "text-ink", "panel-ink", "muted", "ink"]
+    .find((color) => pick.colors.some((item) => item === color));
+  const style: CSSProperties = {
+    background: pick.layout === "twin" && pick.row === "current" && pick.colors.includes("accent")
+      ? "color-mix(in srgb, var(--accent) 20%, var(--panel-bg))" : background && `var(--${background})`,
+    color: foreground && `var(--${foreground})`,
+    fontFamily: pick.font && `var(--${pick.font}-font)`,
+    fontSize: (pick.view && preferences.viewFontSizes[pick.view]) || (pick.font && `var(--${pick.font}-size)`),
+    borderColor: pick.colors.includes("accent") ? "var(--accent)" : "var(--line)",
+  };
+  return <div className="preview-picked-element" style={style}>{pickLabel(pick)}</div>;
+}
+
+export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage; preferences: Preferences; pick?: AppearancePick }) {
   const preview = useRef<HTMLDivElement>(null);
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const shortcuts = shortcutBindings(preferences);
@@ -52,7 +71,7 @@ export function SettingsPreview({ page, preferences }: { page: PreviewPage; pref
     <section className="settings-preview" aria-label={t("Settings preview")}>
       <h3>{t("Preview")}</h3>
       <div className="preview-frame" ref={preview}>
-        {page === "dialogs" ? (
+        {pick ? <PickPreview pick={pick} preferences={preferences} /> : page === "dialogs" ? (
           <div className="preview-dialog">
             <strong>{t("Copy report.pdf")}</strong>
             <div className="preview-field">{t("Downloads")}</div>
