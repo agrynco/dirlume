@@ -150,6 +150,8 @@ node scripts/server-smoke.mjs
 
 On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature. To include the FTP smoke test locally, install `pyftpdlib==2.2.0` in Python and set `DIRLUME_FTP_PYTHON` to that Python executable. Use a UI automation build so the fixture keeps its FTP profiles separate.
 
+For Windows memory investigations, [measure WebView2 by PID and process role](docs/webview2-memory.md).
+
 ## Archives
 
 Install the [7-Zip command-line tools](https://www.7-zip.org/download.html) to create and browse local archives. Dirlume looks for `7zz`, `7z`, or `7za` on the executable search path and in common installation directories. Select local items and press **Shift+F1** to create a ZIP, 7z, TAR, or WIM archive when the installed tool supports the format. The dialog supports compression profiles, AES encryption, split volumes, and a self-extracting option when the Windows SFX module is installed. Profiles store compression options without passwords.
