@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dirlume Issue Writer"
+  short_description: "Draft and file Dirlume GitHub issues"
+  default_prompt: "Use $dirlume-issue-writer to turn my context into a Dirlume GitHub issue and publish it if I ask to file it."
