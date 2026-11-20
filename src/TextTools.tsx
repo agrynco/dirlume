@@ -5,14 +5,14 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, 
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { api, describeError, documentPath, isPermissionError, placePath, readPlaceText, savePlaceText, textEncodingLabels, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
 import { isMarkdownFile, type MarkdownPosition } from "./markdown";
 import type { TaskMarker } from "./MarkdownPreview";
 import { useMarkdownSearch } from "./MarkdownSearch";
-import { MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { MainMenu, type MainMenuHandle, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
 import { eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import type { BaseTheme, Palette } from "./appearance";
@@ -55,6 +55,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const [hex, setHex] = useState(false);
   const [syntaxTarget, setSyntaxTarget] = useState<HTMLDivElement | null>(null);
   const [syntax, setSyntax] = useState("auto");
+  const [syntaxOptions, setSyntaxOptions] = useState<readonly string[]>([]);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ line: 1, column: 1, canUndo: false, canRedo: false });
   const [hexSize, setHexSize] = useState<number>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -185,7 +186,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     const content = selectionText ||
       (selection?.anchorNode && section.current?.contains(selection.anchorNode) ? selection.toString() : "");
     if (content) {
-      const copy = isTauri() ? api.copyPath(content) : navigator.clipboard.writeText(content);
+      const copy = isTauri() ? api.copyText(content) : navigator.clipboard.writeText(content);
       void copy.catch((failure: unknown) => setError(describeError(failure)));
     }
   }
@@ -199,7 +200,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     }
   }
 
-  type Action = MenuGroup["items"][number] & { command?: Command };
+  type Action = MenuAction & { command?: Command };
   const key = (command: Command) => showShortcut(shortcuts[command][0]);
   const action = (label: string, command: Command, run: () => void, disabled = false): Action =>
     ({ label, command, run, disabled, shortcut: key(command) });
@@ -224,7 +225,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     action("Go to start", "documentStart", () => sourceActions.current?.goToStart()),
     action("Go to end", "documentEnd", () => sourceActions.current?.goToEnd()),
   ] : [];
-  const menuGroups = [
+  const menuGroups: MenuGroup[] = [
     { label: "File", items: fileActions },
     { label: editing ? "Edit" : "Selection", items: selectionActions },
     ...(navigationActions.length || !editing ? [
@@ -233,7 +234,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     ...(sourceVisible ? [{ label: "Syntax", items: [
       { label: "Automatic", run: () => setSyntax("auto") },
       { label: "Plain text", run: () => setSyntax("plain") },
-      { label: "Choose syntax…", run: () => syntaxTarget?.querySelector("select")?.focus() },
+      { label: "Choose syntax…", disabled: !syntaxOptions.length,
+        items: syntaxOptions.map((name) => ({ label: name, run: () => setSyntax(name) })) },
     ] }] : []),
   ];
   const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), closeAction];
@@ -333,7 +335,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
               fontSize={fontSize} value={text} syntaxTarget={sourceVisible ? syntaxTarget : null} onChange={setText}
-              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax} />
+              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax}
+              onSyntaxOptions={setSyntaxOptions} />
           </Suspense>
         </div>
       </>}
@@ -654,7 +657,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       {documents && <div className="comparison-editors" hidden={!editing}>
         {compareSides.map((side) => <section key={side} className="comparison-editor text-window" data-editing="true"
           aria-label={t(side === "left" ? "Left file" : "Right file")}>
-          <div className="comparison-editor-name" title={placePath(files[side].place)}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
+          <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
             <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === "left"}
               value={documents[side]} syntaxTarget={null} onChange={(text) => {
@@ -667,10 +670,10 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       {computed && !editing && (
         <div className="comparison" data-layout={layout} style={columns} ref={output} tabIndex={0} aria-label={t("File differences")}>
           <div className={`comparison-head${split ? " comparison-head-split" : ""}`}>
-            <span title={left.name}>{left.name}</span>
+            <span data-tooltip={left.name}>{left.name}</span>
             {split ? <SplitDivider label={t("Comparison divider")} className="comparison-divider" value={ratio} onResize={setRatio} />
               : <span aria-hidden="true">→</span>}
-            <span title={right.name}>{right.name}</span>
+            <span data-tooltip={right.name}>{right.name}</span>
           </div>
           {computed.blocks.map((block, index) => collapse && block.group === null && block.rows.length > 6 && !expanded.includes(index)
             ? <Button key={index} type="button" className="diff-unchanged" onClick={() => setExpanded((items) => [...items, index])}>

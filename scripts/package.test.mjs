@@ -23,6 +23,7 @@ test("release metadata pairs the signed packages with their platform and exact v
     for (const [platform, extensions] of Object.entries(formats)) {
       const files = extensions.map((extension) => `Dirlume-${label}-${platform}.${extension}`);
       files.push(`Dirlume-Server-${label}-${platform}.tar.gz`, `Dirlume-${label}-${platform}-portable.zip`);
+      if (platform === "windows-x64") files.push(`Dirlume-${label}-${platform}-portable.zip.sig`);
       for (const path of files) {
         await writeFile(join(release, path), path);
         await writeFile(join(release, `${path}.sha256`), "placeholder checksum");
@@ -44,6 +45,7 @@ test("release metadata pairs the signed packages with their platform and exact v
     assert.equal(manifest.version, product);
     const packages = {
       "windows-x86_64": `Dirlume-${label}-windows-x64.setup.exe`,
+      "windows-x86_64-portable": `Dirlume-${label}-windows-x64-portable.zip`,
       "linux-x86_64": `Dirlume-${label}-linux-x64.AppImage`,
       "darwin-x86_64": `Dirlume-${label}-macos-x64.app.tar.gz`,
       "darwin-aarch64": `Dirlume-${label}-macos-arm64.app.tar.gz`,

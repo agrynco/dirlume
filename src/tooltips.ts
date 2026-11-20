@@ -7,6 +7,40 @@ function tooltipTarget(target: EventTarget | null) {
   return target instanceof Element ? target.closest<HTMLElement>(selector) : null;
 }
 
+function normalize(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function clipsContent(element: HTMLElement) {
+  const wider = element.clientWidth > 0 && element.scrollWidth > element.clientWidth + 1;
+  const taller = element.clientHeight > 0 && element.scrollHeight > element.clientHeight + 1;
+  if (!wider && !taller) return false;
+  const style = getComputedStyle(element);
+  return (wider && style.overflowX !== "visible") || (taller && style.overflowY !== "visible");
+}
+
+function fits(element: HTMLElement, anchor: HTMLElement) {
+  if (!element.getClientRects().length || getComputedStyle(element).visibility !== "visible") return false;
+  for (let current: HTMLElement | null = element; current && current !== anchor.parentElement; current = current.parentElement) {
+    if (clipsContent(current)) return false;
+  }
+  return !Array.from(element.querySelectorAll("*")).some((child) => child instanceof HTMLElement && clipsContent(child));
+}
+
+function tooltipText(anchor: HTMLElement) {
+  const { tooltip, tooltipAction, tooltipShortcut } = anchor.dataset;
+  if (!tooltip) return;
+  const action = normalize(tooltipAction ?? tooltip);
+  const hasVisibleLabel = [anchor, ...anchor.querySelectorAll("*")].some((element) => {
+    if (!(element instanceof HTMLElement) || element.closest("kbd")) return false;
+    const text = normalize(element.innerText);
+    return ` ${text} `.includes(` ${action} `) && fits(element, anchor);
+  });
+  const hasVisibleShortcut = !tooltipShortcut || Array.from(anchor.querySelectorAll("kbd")).some((key) =>
+    normalize(key.dataset.shortcut ?? key.innerText) === normalize(tooltipShortcut) && fits(key, anchor));
+  if (!hasVisibleLabel || !hasVisibleShortcut) return tooltip;
+}
+
 export function installTooltips() {
   const tooltip = document.createElement("div");
   tooltip.id = tooltipId;
@@ -33,10 +67,11 @@ export function installTooltips() {
   }
 
   const observer = new MutationObserver(() => {
-    if (!trigger?.isConnected || trigger.closest("[hidden], dialog:not([open])") || !trigger.dataset.tooltip) {
+    const text = trigger && tooltipText(trigger);
+    if (!trigger?.isConnected || trigger.closest("[hidden], dialog:not([open])") || !text) {
       hide();
-    } else if (tooltip.textContent !== trigger.dataset.tooltip) {
-      tooltip.textContent = trigger.dataset.tooltip;
+    } else if (tooltip.textContent !== text) {
+      tooltip.textContent = text;
       position(trigger);
     }
   });
@@ -59,14 +94,15 @@ export function installTooltips() {
     trigger = anchor;
     pointerX = x;
     timer = window.setTimeout(() => {
-      const text = anchor.dataset.tooltip;
+      const text = tooltipText(anchor);
       if (!anchor.isConnected || !text || !anchor.getClientRects().length) { hide(); return; }
       tooltip.textContent = text;
       (anchor.closest("dialog[open]") ?? document.body).append(tooltip);
       tooltip.showPopover?.();
       position(anchor);
       anchor.setAttribute("aria-describedby", [anchor.getAttribute("aria-describedby"), tooltipId].filter(Boolean).join(" "));
-      observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tooltip", "hidden", "open"] });
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
+        attributeFilter: ["data-tooltip", "data-tooltip-action", "data-tooltip-shortcut", "data-shortcut", "hidden", "open"] });
     }, hoverDelay);
   }
 

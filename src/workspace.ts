@@ -61,14 +61,16 @@ export function restorePane(saved?: SavedPane): PaneState {
 }
 
 function savePane(pane: PaneState, failedFtp?: SavedFtpLocation): SavedPane {
-  const { place, history, position, selected, marked, filter, sort } = closeSearchResults(pane);
+  const { place: shown, history, position, selected, marked, filter, sort } = closeSearchResults(pane);
+  const catalog = shown?.kind === "connections";
+  const place = catalog ? shown.from : shown;
   const localHistory = history.filter(isLocal);
   const local = isLocal(place);
   const localPosition = local ? history.slice(0, position + 1).filter(isLocal).length - 1 : localHistory.length - 1;
   return {
     place: local ? place : localHistory[localPosition] ?? null,
-    history: localHistory, position: localPosition, selected: local ? selected : null,
-    marked: local ? marked : [], filter: local ? filter : "", sort,
+    history: localHistory, position: localPosition, selected: local && !catalog ? selected : null,
+    marked: local && !catalog ? marked : [], filter: local && !catalog ? filter : "", sort,
     ftp: place?.kind === "ftp" ? { profileId: place.profileId, segments: place.segments } : failedFtp,
   };
 }

@@ -267,7 +267,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   return (
     <div className="process-browser">
       {lockingPath && <div className="locking-process-target">
-        <span title={lockingPath}>{t("Locking processes for {0}", lockingPath)}</span>
+        <span data-tooltip={lockingPath}>{t("Locking processes for {0}", lockingPath)}</span>
         <Button type="button" onClick={() => setRevision((previous) => previous + 1)}>{t("Refresh")}</Button>
         <Button type="button" onClick={onClose}>{t("Back to files")}</Button>
       </div>}

@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Copy, Pencil } from "lucide-react";
-import { folderLabel, isFileServer, placePath, windowsClient, type Place } from "./api";
+import { folderLabel, isFileServer, placePath, windowsClient, type FileLocation } from "./api";
 import { Button } from "./Button";
 import { t } from "./i18n";
 import { parentPlace, type Side } from "./panes";
@@ -15,14 +15,14 @@ function parentPath(path: string, windows: boolean) {
   return trimmed.slice(0, root ? end + 1 : end);
 }
 
-function placeKey(place: Place) {
+function placeKey(place: FileLocation) {
   const source = place.kind === "local" || place.kind === "smbRoot" ? [] :
     place.kind === "kswitcher" ? [place.directory, place.peer] : [place.id];
   return JSON.stringify([place.kind, ...source, placePath(place)]);
 }
 
-function breadcrumbPlaces(place: Place | null, limit = 4, inSameSource = false) {
-  const places: Place[] = [];
+function breadcrumbPlaces(place: FileLocation | null, limit = 4, inSameSource = false) {
+  const places: FileLocation[] = [];
   const kind = place?.kind;
   while (place && places.length < limit && (!inSameSource || place.kind === kind)) {
     places.push(place);
@@ -36,10 +36,10 @@ function breadcrumbPlaces(place: Place | null, limit = 4, inSameSource = false) 
 
 export function AddressField({ side, place, showHidden, onNavigate, onNavigateAncestor, onCopy, focusFiles }: {
   side: Side;
-  place: Place | null;
+  place: FileLocation | null;
   showHidden: boolean;
   onNavigate: (path: string) => void;
-  onNavigateAncestor: (place: Place) => void;
+  onNavigateAncestor: (place: FileLocation) => void;
   onCopy: (path: string) => void;
   focusFiles: () => void;
 }) {
@@ -56,7 +56,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   const [overflow, setOverflow] = useState(false);
   const [hoverX, setHoverX] = useState<number>();
   const [draft, setDraft] = useState(path);
-  const [branch, setBranch] = useState<Place[]>([]);
+  const [branch, setBranch] = useState<FileLocation[]>([]);
   const branchIndex = branch.findIndex((folder) => placeKey(folder) === location);
   const forward = branchIndex < 0 ? [] : branch.slice(branchIndex + 1);
   const crumbs = breadcrumbPlaces(place);
@@ -109,7 +109,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
     return () => observer.disconnect();
   }, [editing]);
 
-  function goTo(folder: Place, goingUp = false) {
+  function goTo(folder: FileLocation, goingUp = false) {
     if (goingUp && place && !forward.length && folder.kind === place.kind) {
       setBranch(breadcrumbPlaces(place, Infinity, true));
     }

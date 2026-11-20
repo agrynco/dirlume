@@ -106,6 +106,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
+  const catalog = pane.place?.kind === "connections";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const [locationsOpen, setLocationsOpen] = useState(false);
@@ -160,6 +161,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
     return () => { cancelled = true; };
   }, [localFolder, pane.loading, pane.entries]);
   const free = localFolder && space?.folder === localFolder ? space.value : null;
+  const freeLabel = free ? t("{0} free of {1}", formatSize(free.available), formatSize(free.total)) : undefined;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
   useLayoutEffect(() => {
@@ -224,7 +226,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
-  const operationLabel = t(pane.loading ? "Opening folder…" : "Calculating folder sizes…");
+  const loadingLabel = t("Opening folder…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
   const sources = [
@@ -262,7 +264,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
-      <header className={`pane-heading${localFolder && !host && !processView && !search ? " local-heading" : ""}`}>
+      <header className={`pane-heading${(catalog || localFolder && !host) && !processView && !search ? " local-heading" : ""}`}>
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
@@ -274,7 +276,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
           <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
-          {!processView && pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
+          {!processView && pane.place && pane.place.kind !== "connections" && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
           {!processView && host && <span className="remote-name" data-tooltip={path}>SMB · {host}</span>}
@@ -304,18 +306,20 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           </Button>}
         </div>
       </header>
-      {twin && free && !search && !processView && <div className="pane-volume" title={t("Free space on this drive")}>
+      {twin && free && !search && !processView && <div className="pane-volume">
         <HardDrive aria-hidden="true" />
         <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span>
-        <span className="pane-volume-free">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+        <span className="pane-volume-free" data-tooltip={freeLabel}>{freeLabel}</span>
         <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
       </div>}
       <div className="navigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
-        <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
-          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
+        <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
+        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-path={path}>
+          <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
+        </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
+          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
         <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
           if (!locationsOpen) return;
           const shortcut = eventShortcut(event);
@@ -354,7 +358,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
               <div className="location-source-group" role="group" aria-label={t("Sources")}>
                 {sources.map(({ label, key, Icon, open }) => (
                   <Button key={label} shortcut={showShortcut(key[0])} onClick={() => { setLocationsOpen(false); open(); }}>
-                    <Icon /> {label}{key.length > 0 && <kbd aria-hidden="true">{showShortcut(key[0])}</kbd>}
+                    <Icon /> <span>{label}</span>{key.length > 0 && <kbd aria-hidden="true">{showShortcut(key[0])}</kbd>}
                   </Button>
                 ))}
               </div>
@@ -363,13 +367,13 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
         </div>
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
-      {(pane.loading || pane.measuring.length > 0) && <div className="pane-progress">
-        <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? operationLabel}>
+      {pane.loading && <div className="pane-progress">
+        <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
           <LoaderCircle className="spin" aria-hidden="true" />
-          <span>{operationLabel}</span>
+          <span>{loadingLabel}</span>
           {pane.loadingPath && <span className="pane-progress-path">{pane.loadingPath}</span>}
         </div>
-        <Button type="button" aria-label={t(pane.loading ? "Cancel folder navigation" : "Cancel folder size calculation")}
+        <Button type="button" aria-label={t("Cancel folder navigation")}
           shortcut={cancelKey} onClick={onCancelFolderOperation}>
           {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
         </Button>
@@ -403,7 +407,7 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
           const top = event.currentTarget.scrollTop;
           setViewport((previous) => ({ ...previous, top }));
         }}
-        aria-multiselectable="true" aria-busy={pane.loading}
+        aria-multiselectable={!catalog} aria-busy={pane.loading}
         aria-activedescendant={selected >= 0 ? `${side}-file-${selected}` : undefined} tabIndex={0}>
         {virtual && <div ref={rowProbe} className="file-row-probe" aria-hidden="true" />}
         {indices.map((index, offset) => {
@@ -468,10 +472,16 @@ export function Pane({ side, active, layout, showHidden, pane, entries, location
       <footer className="pane-footer">
         <span className="pane-counts">{search ? countText(entries.length, "match") :
           <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
-        <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
-          search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>
-        {free && !search && !twin && <span className="pane-free" title={t("Free space on this drive")}>
-          <span className="pane-free-full">{t("{0} free of {1}", formatSize(free.available), formatSize(free.total))}</span>
+        {!pane.loading && pane.measuring.length > 0 ? <div className="pane-measurement">
+          <div className="pane-progress-status" role="status">
+            <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
+          </div>
+          <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
+            shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
+        </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
+          search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
+        {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
+          <span className="pane-free-full">{freeLabel}</span>
           <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
           <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
         </span>}

@@ -89,7 +89,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     ] :
       feature === "viewer" ? ["Reading area", "Max width (px)", "Maximum content width (px)", "Full width", "Mermaid diagrams",
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
-      feature === "terminal" ? ["Resize step (rows)", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
+      feature === "terminal" ? ["Resize step (rows)", "Paste on right-click", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Installed fonts", "Size (px)", "font size",
       ...(views.length ? ["zoom", "wheel"] : []), ...views.map((view) => viewFonts[view].label), ...terms);
   });
@@ -318,6 +318,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               <OptionalNumberInput label={t("Resize step (rows)")} size={preferences.terminalResizeRows === 1 ? undefined : preferences.terminalResizeRows}
                 fallback="1" min={1} max={maxTerminalResizeRows}
                 onChange={(rows) => onChange({ ...preferences, terminalResizeRows: rows ?? 1 })} />
+            </label>
+            <label className="field-checkbox"><SettingSearchLabel label="Paste on right-click" />
+              <input type="checkbox" checked={preferences.terminalPasteOnRightClick}
+                onChange={(event) => onChange({ ...preferences, terminalPasteOnRightClick: event.target.checked })} />
             </label>
             {windowsClient && <label className="field-checkbox"><SettingSearchLabel label="Automatically refresh environment variables" />
               <input type="checkbox" checked={preferences.refreshEnvironment}

@@ -10,8 +10,13 @@ use super::{restore_update, PendingUpdate, UpdateOffer, MANIFEST_FAILED};
 #[derive(Deserialize)]
 pub struct UpdateFixture {
     result: PathBuf,
+    phase: PathBuf,
     expected: String,
     reject: bool,
+    #[serde(default)]
+    replacement_failure: bool,
+    #[serde(default)]
+    check_clipboard: bool,
     metadata: serde_json::Value,
 }
 
@@ -55,8 +60,29 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
         return;
     };
     let upgraded = app.package_info().version.to_string() == fixture.expected;
+    let _ = fs::write(
+        &fixture.phase,
+        format!("{}: loading the main WebView", app.package_info().version),
+    );
+    #[cfg(windows)]
+    let portable = crate::portable::root().is_some();
+    #[cfg(not(windows))]
+    let portable = false;
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
-    let _ = webview.eval(format!("({script})({upgraded}, {});", fixture.reject));
+    let _ = webview.eval(format!(
+        "({script})({upgraded}, {}, {portable}, {}, {});",
+        fixture.reject, fixture.replacement_failure, fixture.check_clipboard
+    ));
+}
+
+#[tauri::command]
+pub fn updater_fixture_phase(app: AppHandle, phase: String) -> DesktopResult<()> {
+    let fixture = read(&app).ok_or("Missing updater fixture configuration")?;
+    fs::write(
+        fixture.phase,
+        format!("{}: {phase}", app.package_info().version),
+    )
+    .map_err(message)
 }
 
 #[tauri::command]
@@ -88,6 +114,30 @@ async fn wait_for_window(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     Err(format!("Timed out waiting for {action}."))
+}
+
+#[tauri::command]
+pub async fn updater_fixture_normal_window(app: AppHandle) -> DesktopResult<()> {
+    read(&app).ok_or("Missing updater fixture configuration")?;
+    let main = app
+        .get_webview_window("main")
+        .ok_or("Missing main window")?;
+    wait_for_window("the main window to become visible", || {
+        main.is_visible().map_err(message)
+    })
+    .await?;
+    if main.is_maximized().map_err(message)? {
+        main.unmaximize().map_err(message)?;
+    }
+    main.set_size(LogicalSize::new(780, 480)).map_err(message)?;
+    main.center().map_err(message)?;
+    main.set_focus().map_err(message)?;
+    wait_for_window("a resizable main window in its normal state", || {
+        Ok(main.is_resizable().map_err(message)?
+            && !main.is_maximized().map_err(message)?
+            && !main.is_fullscreen().map_err(message)?)
+    })
+    .await
 }
 
 #[tauri::command]

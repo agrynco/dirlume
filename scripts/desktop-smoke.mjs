@@ -7,17 +7,21 @@ import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
+import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
+import { testSystemTheme } from "./system-theme-smoke.mjs";
 import { testMarkdown } from "./markdown-smoke.mjs";
 import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
 import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
+import { testTerminalPaste } from "./terminal-paste-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
@@ -28,11 +32,16 @@ import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
-import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
-if (process.env.CI) await testSmbNavigation();
+if (process.env.CI) {
+  await testSmbNavigation();
+  await testFolderMeasurement();
+  await testSyntaxMenu();
+  await testTerminalPaste();
+}
 const temp = await fixture("desktop-");
 const src = join(temp, "from");
 const dst = join(temp, "to");
@@ -149,20 +158,17 @@ try {
   await page.getByRole("heading", { name: "Dirlume" }).waitFor();
   assert.equal(await page.locator(".topbar-scheme").count(), 0, "The scheme picker is hidden by default.");
   await page.waitForFunction(() => window.__TAURI_INTERNALS__.invoke("plugin:window|is_visible", { label: "main" }));
+  const resizeMain = page.locator(".statusbar > .window-resize-marker");
+  await checkResizeMarker(resizeMain);
+  assert.equal(await resizeMain.evaluate((marker) => {
+    const status = marker.parentElement.querySelector("span:last-of-type")?.getBoundingClientRect();
+    return !!status && status.right < marker.getBoundingClientRect().left;
+  }), true);
   await page.getByRole("button", { name: "Maximize window" }).click();
+  await resizeMain.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Restore window" }).click();
   await page.getByRole("button", { name: "Maximize window" }).waitFor();
-  const resizeMain = page.getByRole("button", { name: "Resize Dirlume", exact: true });
-  await resizeMain.waitFor();
-  assert.equal(await resizeMain.evaluate((grip) => {
-    const corner = grip.getBoundingClientRect();
-    return innerWidth - corner.right <= 2 && innerHeight - corner.bottom <= 2;
-  }), true);
-  const initialWidth = await page.evaluate(() => innerWidth);
-  await resizeMain.press("ArrowRight");
-  await page.waitForFunction((width) => innerWidth > width, initialWidth);
-  await resizeMain.press("ArrowLeft");
-  await page.waitForFunction((width) => innerWidth === width, initialWidth);
+  await checkResizeMarker(resizeMain);
   assert.equal(await page.locator(".window-titlebar").getAttribute("data-tauri-drag-region"), "deep");
   assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
@@ -215,6 +221,31 @@ try {
   await tooltip.filter({ hasText: /^Find files \(Alt\+F7\)$/ }).waitFor();
   await page.keyboard.press("Escape");
   await tooltip.waitFor({ state: "hidden" });
+  async function checkTooltip(button, expected) {
+    await button.dispatchEvent("pointerover", { pointerType: "mouse" });
+    if (expected) {
+      await tooltip.waitFor();
+      assert.equal(await tooltip.textContent(), expected);
+    } else {
+      await button.evaluate(() => new Promise((resolve) => setTimeout(resolve, 525)));
+      assert.equal(await tooltip.isVisible(), false);
+    }
+    await button.dispatchEvent("pointerout", { pointerType: "mouse" });
+    await tooltip.waitFor({ state: "hidden" });
+  }
+  const rightTools = page.getByRole("region", { name: "right pane", exact: true });
+  await checkTooltip(rightTools.getByRole("button", { name: "Refresh folder", exact: true }), "Refresh folder");
+  const leftTools = page.getByRole("region", { name: "left pane", exact: true });
+  const locationsTrigger = leftTools.getByRole("button", { name: "Locations for left pane", exact: true });
+  await locationsTrigger.click();
+  const sshSource = leftTools.getByRole("button", { name: "SSH", exact: true });
+  assert.equal(await sshSource.locator("kbd").innerText(), "5");
+  const homeLocation = leftTools.getByRole("button", { name: "Home", exact: true });
+  const homePath = await homeLocation.getAttribute("data-tooltip");
+  assert.ok(homePath && homePath !== "Home");
+  await checkTooltip(homeLocation, homePath);
+  await checkTooltip(sshSource);
+  await locationsTrigger.click();
   async function editAddress(side) {
     const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
     if (!await input.isVisible()) {
@@ -413,6 +444,7 @@ try {
   await shortcuts.click();
   await options.getByRole("button", { name: "Remove Ctrl+H from Show or hide hidden files", exact: true }).click();
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await checkTooltip(hiddenToggle, "Show hidden files");
   await rightList.focus();
   await rightList.dispatchEvent("keydown", ukrainianCtrlH);
   await rightList.press("Control+h");
@@ -423,6 +455,7 @@ try {
   await options.getByRole("button", { name: "Add shortcut for Show or hide hidden files", exact: true }).click();
   await options.getByRole("textbox", { name: "New shortcut for Show or hide hidden files" }).press("Control+Shift+h");
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await checkTooltip(hiddenToggle, "Show hidden files (Ctrl+Shift+H)");
   await leftList.press("Control+Shift+h");
   await hiddenFile.waitFor();
   await hiddenFolder.waitFor();
@@ -642,11 +675,11 @@ try {
   await page.keyboard.press("ArrowRight");
   await left.getByRole("option", { name: /^file-1004.tmp/, selected: true }).waitFor();
   await page.keyboard.press("Shift+ArrowUp");
-  await left.getByRole("option", { name: /^file-1003.tmp/, selected: true }).waitFor();
-  assert.equal(await left.getByRole("option", { selected: true }).count(), 2);
+  await left.locator('.file-row[data-current="true"][data-tooltip="file-1003.tmp"]').waitFor();
+  assert.deepEqual(await left.locator(".file-row.marked").getAttribute("data-tooltip"), "file-1004.tmp");
   await page.keyboard.press("Shift+ArrowDown");
-  await left.getByRole("option", { name: /^file-1004.tmp/, selected: true }).waitFor();
-  assert.equal(await left.getByRole("option", { selected: true }).count(), 1);
+  await left.locator('.file-row[data-current="true"][data-tooltip="file-1004.tmp"]').waitFor();
+  assert.equal(await left.locator(".file-row.marked").count(), 2);
   assert.ok(await left.getByRole("option").count() < 100);
   await leftPane.getByRole("button", { name: "Close search results" }).click();
   await leftPane.getByRole("heading", { name: "bulk" }).waitFor({ state: "attached" });
@@ -666,32 +699,57 @@ try {
   assert.ok(guideIndex > 1 && guideIndex + 2 < orderedRows.length);
   await page.keyboard.press("Shift+ArrowDown");
   await page.keyboard.press("Shift+ArrowDown");
+  assert.deepEqual(await markedRows(), ["guide.md", nextAfterGuide]);
+  const activeRow = (list) => list.locator('.file-row[data-current="true"]').getAttribute("data-tooltip");
+  assert.equal(await activeRow(left), orderedRows[guideIndex + 2]);
+  await page.keyboard.press("Shift+ArrowUp");
   assert.deepEqual(await markedRows(), orderedRows.slice(guideIndex, guideIndex + 3));
-  await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), ["guide.md", nextAfterGuide]);
-  await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), ["guide.md"]);
-  await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), orderedRows.slice(guideIndex - 1, guideIndex + 1));
+  assert.equal(await activeRow(left), nextAfterGuide);
 
-  const distantRow = left.getByRole("option", { name: /^second.txt/ });
-  await distantRow.click();
-  await distantRow.click({ modifiers: ["Control"] });
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Shift+ArrowDown");
-  assert.deepEqual(await markedRows(), [...orderedRows.slice(1, 3), "second.txt"]);
-  await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), [orderedRows[1], "second.txt"]);
-
-  await guideRow.click();
-  await left.locator(".file-row").nth(guideIndex + 1).click({ modifiers: ["Control"] });
-  await guideRow.click({ modifiers: ["Control"] });
-  assert.deepEqual(await markedRows(), ["guide.md", nextAfterGuide]);
-  await page.keyboard.press("Shift+ArrowDown");
-  assert.deepEqual(await markedRows(), []);
-  await page.keyboard.press("Shift+ArrowUp");
-  assert.deepEqual(await markedRows(), [nextAfterGuide]);
+  const keyboardFolder = join(temp, "keyboard-marking");
+  const singleItemFolder = join(keyboardFolder, "single");
+  await mkdir(singleItemFolder, { recursive: true });
+  for (const name of ["a.txt", "b.txt", "c.txt"]) await writeFile(join(keyboardFolder, name), "");
+  await writeFile(join(singleItemFolder, "only.txt"), "");
+  const rightBefore = await page.locator("#right-path").getAttribute("data-path");
+  await navigate("right", keyboardFolder);
+  await right.getByRole("option", { name: /^b\.txt/ }).click();
+  await right.press("Shift+ArrowUp");
+  assert.equal(await activeRow(right), "a.txt");
+  assert.equal(await right.locator(".file-row.marked").getAttribute("data-tooltip"), "b.txt");
+  await right.getByRole("option", { name: /^c\.txt/ }).click();
+  await right.press("Shift+ArrowDown");
+  assert.equal(await activeRow(right), "c.txt");
+  assert.equal(await right.locator(".file-row.marked").getAttribute("data-tooltip"), "c.txt");
+  await navigate("right", singleItemFolder);
+  await right.getByRole("option", { name: /^only\.txt/ }).click();
+  await right.press("Shift+ArrowDown");
+  assert.equal(await activeRow(right), "only.txt");
+  assert.equal(await right.locator(".file-row.marked").getAttribute("data-tooltip"), "only.txt");
+  const leftBefore = await page.locator("#left-path").getAttribute("data-path");
+  const clipboardIs = (expected) => page.waitForFunction(async (expected) => {
+    const text = await window.__TAURI_INTERNALS__.invoke("clipboard_text");
+    return text.replaceAll("\r\n", "\n") === expected;
+  }, expected);
+  for (const [side, list] of [["left", left], ["right", right]]) {
+    await navigate(side, keyboardFolder);
+    const row = (name) => list.locator(`.file-row[data-tooltip="${name}"]`);
+    await row("c.txt").click({ modifiers: ["Control"] });
+    await row("a.txt").click({ modifiers: ["Control"] });
+    await list.press("ArrowDown");
+    await list.press("Control+Insert");
+    await clipboardIs("a.txt\nc.txt");
+    assert.equal(await activeRow(list), "b.txt");
+    assert.deepEqual(await list.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)), ["a.txt", "c.txt"]);
+    await row("b.txt").click();
+    await list.press("Control+Insert");
+    await clipboardIs("b.txt");
+    await list.press("Control+Shift+c");
+    await clipboardIs(join(keyboardFolder, "b.txt"));
+  }
+  await navigate("left", leftBefore);
+  await navigate("right", rightBefore);
+  await left.locator(".file-row").nth(guideIndex - 1).click();
   await guideRow.click();
   const dragFile = left.getByRole("option", { name: /^drag-file.txt/ });
   await dragFile.click({ modifiers: ["Control"] });
@@ -1470,11 +1528,31 @@ try {
   await page.getByRole("button", { name: "Close terminal" }).click();
 
   await withServer(async ({ invitation, config, bytes }) => {
-    await page.getByRole("button", { name: "Connect", exact: true }).click();
-    await page.getByLabel("Server invitation").fill(invitation);
-    await page.getByRole("dialog").getByRole("button", { name: "Connect", exact: true }).click();
     const remote = page.getByRole("listbox", { name: "left files", exact: true });
     const local = page.getByRole("listbox", { name: "right files", exact: true });
+    async function openRemoteConnections() {
+      await leftPane.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+      await leftPane.getByRole("button", { name: "Remote machine", exact: true }).click();
+      await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "Remote machine");
+    }
+    await openRemoteConnections();
+    assert.deepEqual(await remote.locator(".file-name-text").allTextContents(), [".."]);
+    await remote.press("Shift+F4");
+    const add = page.getByRole("dialog", { name: "Add remote machine", exact: true });
+    await add.getByLabel("Connection name").fill("Local test server");
+    await add.getByLabel("Server invitation").fill(invitation);
+    await add.getByRole("button", { name: "Save connection", exact: true }).click();
+    const savedServer = remote.getByRole("option", { name: /^Local test server/ });
+    await savedServer.click();
+    assert.doesNotMatch(await page.evaluate(() => localStorage.getItem("dirlume.remote-connections")), /dirlume-v1:/);
+    await remote.press("F4");
+    const edit = page.getByRole("dialog", { name: "Edit remote machine", exact: true });
+    assert.equal(await edit.getByLabel("Server invitation").inputValue(), "");
+    await edit.getByLabel("Connection name").fill("Saved test server");
+    await edit.getByRole("button", { name: "Save connection", exact: true }).click();
+    const renamedServer = remote.getByRole("option", { name: /^Saved test server/ });
+    await renamedServer.click();
+    await remote.press("Enter");
     await remote.getByRole("option", { name: /^folder/ }).click();
     await remote.press("Control+a");
     await properties.getByText("folder", { exact: true }).waitFor();
@@ -1509,6 +1587,14 @@ try {
     await back.click();
     await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "/");
     await back.click();
+    await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
+    await openRemoteConnections();
+    await renamedServer.click();
+    await remote.press("F8");
+    await page.getByRole("dialog", { name: "Remove connection", exact: true })
+      .getByRole("button", { name: "Remove connection", exact: true }).click();
+    await renamedServer.waitFor({ state: "detached" });
+    await remote.getByRole("option", { name: /^\.\./ }).dblclick();
     await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
   });
   await left.getByRole("option", { name: /^guide.md/ }).click({ modifiers: ["Control"] });
@@ -1833,6 +1919,8 @@ try {
   await page.keyboard.press("ArrowLeft");
   const helpItems = menu("Help").getByRole("menuitem");
   assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About", "Open error log"]);
+  const errorLogAction = helpItems.filter({ hasText: "Open error log" });
+  assert.equal(await errorLogAction.evaluate((item) => item.previousElementSibling?.getAttribute("role")), "separator");
   await page.keyboard.press("Enter");
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
@@ -1851,6 +1939,20 @@ try {
   await about.getByRole("button", { name: "User guide", exact: true }).click();
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
+  const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
+  await group("Help").click();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
+  await page.keyboard.press("Enter");
+  await errorLogViewer.waitFor();
+  await page.keyboard.press("Escape");
+  await errorLogViewer.waitFor({ state: "hidden" });
+  await group("Help").click();
+  await errorLogAction.click();
+  await errorLogViewer.waitFor();
+  await page.keyboard.press("Escape");
+  await errorLogViewer.waitFor({ state: "hidden" });
   await group("Files").click();
   const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });
   assert.match(await attributesAction.getAttribute("data-tooltip"), /Ctrl\+A/);
@@ -1981,6 +2083,7 @@ try {
   await testProcessExecutablePath(page, child.pid);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);
   page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
+  await testSystemTheme(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

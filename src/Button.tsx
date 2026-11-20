@@ -11,5 +11,6 @@ function caption(children: ReactNode): string {
 export function Button({ tooltip, title, shortcut, children, "data-tooltip": override, ...props }: ComponentPropsWithRef<"button"> & { tooltip?: string; shortcut?: string; "data-tooltip"?: string }) {
   const action = tooltip?.trim() || title?.trim() || override || props["aria-label"] || caption(children);
   const hint = shortcut ? `${action} (${shortcut})` : action;
-  return <button {...props} data-tooltip={hint || undefined}>{children}</button>;
+  return <button {...props} data-tooltip={hint || undefined} data-tooltip-action={shortcut ? action : undefined}
+    data-tooltip-shortcut={shortcut || undefined}>{children}</button>;
 }

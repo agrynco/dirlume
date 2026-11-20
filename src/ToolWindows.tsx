@@ -10,7 +10,7 @@ import { eventShortcut, persistPreferences, preferenceKey, readPreferences, shor
 import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
-import type { NamedFile } from "./api";
+import { windowsClient, type NamedFile } from "./api";
 
 export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   initialPreferences: Preferences;
@@ -33,7 +33,8 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   }, [theme, scheme]);
 
   useEffect(() => {
-    void windowHandle.setTheme(theme === "light" ? "light" : "dark").catch(() => {});
+    // Forcing a native Windows theme also overrides the system color query in WebView2.
+    if (!windowsClient) void windowHandle.setTheme(theme === "light" ? "light" : "dark").catch(() => {});
     void windowHandle.setTitle(title).catch(() => {});
   }, [theme, title]);
 

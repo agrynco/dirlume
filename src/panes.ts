@@ -1,5 +1,6 @@
-import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
+import { connectionEntries } from "./savedConnections";
 
 export type Side = "left" | "right";
 export type SortColumn = "name" | "size" | "modified" | "time";
@@ -12,7 +13,7 @@ export interface DeniedSshListing {
 }
 
 export interface SearchMatch {
-  directory: Place;
+  directory: FileLocation;
   entry: Entry;
   relativePath: string;
 }
@@ -29,7 +30,6 @@ export interface PaneState {
   entries: Entry[];
   selected: string | null;
   marked: string[];
-  keyboardRange?: { anchor: string; head: string; marking: boolean; changed: string[] };
   sizes: ReadonlyMap<string, SizeResult>;
   measuring: string[];
   history: Place[];
@@ -55,6 +55,7 @@ export const emptyPane: PaneState = {
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export function hasParentRow(place: Place | null) {
+  if (place?.kind === "connections") return true;
   // The KSwitcher drive list is a source chooser, outside the drive itself.
   return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
 }
@@ -95,43 +96,29 @@ export function selectableRange(entries: readonly Entry[], first: number, last: 
     .map(({ name }) => name).filter((name) => name !== "..");
 }
 
-export function extendKeyboardRange(pane: PaneState, entries: readonly Entry[], from: number, to: number): PaneState {
-  if (from === to) return pane;
-  const previous = pane.keyboardRange;
-  const anchor = previous && previous.head === pane.selected ? entries.findIndex(({ name }) => name === previous.anchor) : -1;
-  const start = anchor < 0 ? from : anchor;
-  const head = entries[to].name;
-  const marking = anchor >= 0 && previous ? previous.marking : !pane.marked.includes(head);
-  const marked = new Set(pane.marked);
-  // Undo just the changes from the previous span, then apply the new span.
-  if (anchor >= 0 && previous) {
-    for (const name of previous.changed) {
-      if (marking) marked.delete(name);
-      else marked.add(name);
-    }
-  }
-  const changed = selectableRange(entries, start, to).filter((name) => marked.has(name) !== marking);
-  for (const name of changed) {
-    if (marking) marked.add(name);
-    else marked.delete(name);
-  }
-  return { ...pane, selected: head, marked: [...marked], keyboardRange: { anchor: entries[start].name, head, marking, changed } };
+export function markAndMoveCursor(pane: PaneState, entries: readonly Entry[], from: number, to: number): PaneState {
+  const { name } = entries[from];
+  return {
+    ...pane,
+    selected: entries[to].name,
+    marked: name === ".." || pane.marked.includes(name) ? pane.marked : [...pane.marked, name],
+  };
 }
 
 export function showSearchResults(pane: PaneState, mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {
   const previous = pane.search?.previous ?? { selected: pane.selected, marked: pane.marked, filter: pane.filter };
   return {
-    ...pane, selected, marked: [], keyboardRange: undefined, filter: "", error: "",
+    ...pane, selected, marked: [], filter: "", error: "",
     search: { mask, matches: new Map(matches.map((match) => [match.relativePath, match])), incomplete, previous },
   };
 }
 
 export function closeSearchResults(pane: PaneState): PaneState {
-  return pane.search ? { ...pane, ...pane.search.previous, keyboardRange: undefined, search: null } : pane;
+  return pane.search ? { ...pane, ...pane.search.previous, search: null } : pane;
 }
 
 export function paneItem(pane: PaneState, entry?: Entry): { place: FilePlace; entry: Entry } | null {
-  if (!entry || entry.name === ".." || !pane.place || pane.place.kind === "smbRoot") return null;
+  if (!entry || entry.name === ".." || !pane.place || pane.place.kind === "smbRoot" || pane.place.kind === "connections") return null;
   if (pane.search) {
     const match = pane.search.matches.get(entry.name);
     return match && match.directory.kind !== "smbRoot" ? { place: match.directory, entry: match.entry } : null;
@@ -145,12 +132,12 @@ export function localPath(path: string): Extract<Place, { kind: "local" }> {
   return { kind: "local", path, parent: null };
 }
 
-export function filesystemPlace(path: string): Place {
+export function filesystemPlace(path: string): FileLocation {
   const [host, share] = uncParts(path);
   return host && !share ? { kind: "smbRoot", path: "\\\\" + host } : localPath(path);
 }
 
-export function childPlace(place: Place, name: string): Place {
+export function childPlace(place: FileLocation, name: string): FileLocation {
   if (place.kind === "server" || isFileServer(place) || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
@@ -160,7 +147,8 @@ export function childPlace(place: Place, name: string): Place {
   return localPath(place.path + (place.path.endsWith(separator) ? "" : separator) + name);
 }
 
-export function parentPlace(place: Place): Place | null {
+export function parentPlace(place: Place): FileLocation | null {
+  if (place.kind === "connections") return place.from;
   if (place.kind === "archive") return place.segments.length
     ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || isFileServer(place)) {
@@ -191,7 +179,11 @@ function folderInAncestor(from: Place | null, to: Place) {
   }
 }
 
-export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<{ place: Place; listing: Listing; elevated?: boolean }> {
+type PlaceListing<Location extends Place> = { place: Location; listing: Listing; elevated?: boolean };
+export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<FileLocation>>;
+export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>>;
+export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>> {
+  if (place.kind === "connections") return { place, listing: { entries: await connectionEntries(place.source), omitted: 0 } };
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "ssh") {
@@ -216,7 +208,7 @@ export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?:
 export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number): PaneState {
   if ((action === "refresh" || action === "background") && pane.search) {
     const updated = applyListing(closeSearchResults(pane), place, listing, action);
-    return { ...updated, selected: pane.selected, marked: pane.marked, keyboardRange: pane.keyboardRange, filter: pane.filter,
+    return { ...updated, selected: pane.selected, marked: pane.marked, filter: pane.filter,
       search: { ...pane.search, previous: { selected: updated.selected, marked: updated.marked, filter: updated.filter } } };
   }
   pane = closeSearchResults(pane);
@@ -229,7 +221,6 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
       ? [entry.name] : [];
   }) : []);
   const departed = action === "refresh" || action === "background" ? undefined : folderInAncestor(pane.place, place);
-  const keyboardRange = pane.keyboardRange;
   const history = action === "push" && !samePlace
     ? [...pane.history.slice(0, pane.position + 1), place]
     : pane.history;
@@ -241,7 +232,6 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     selected: samePlace && pane.selected &&
       (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
     marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
-    keyboardRange: samePlace && keyboardRange ? { ...keyboardRange, changed: keyboardRange.changed.filter((name) => current.has(name)) } : undefined,
     sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
     measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),
 

@@ -334,6 +334,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .main-menu-dropdown kbd { flex: none; white-space: nowrap; }
 .main-menu-dropdown button:focus-visible { outline-offset: -2px; }
 .main-menu-dropdown button[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: default; }
+.main-menu-submenu { z-index: 26; }
+.main-menu-separator { margin: 4px 2px; border-top: 1px solid var(--line); }
 .sudo-body { display: grid; gap: 8px; }
 .sudo-body small { color: var(--dialog-muted); }
 .brand { gap: 9px; }
@@ -438,6 +440,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   font: .92em var(--mono);
 }
 .address-breadcrumbs[data-editable="true"] { cursor: text; }
+.connection-address { gap: 6px; padding-inline: 8px; }
+.connection-address svg { width: 14px; height: 14px; color: var(--panel-muted); }
 .address-current, .address-ancestor { cursor: default; }
 .address-crumb-clip { min-width: 0; overflow: hidden; direction: rtl; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
@@ -488,10 +492,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .location-menu { position: relative; }
 .location-source-group { border-block-start: 1px solid var(--line); padding-block-start: 4px; margin-block-start: 4px; }
 .location-source-group kbd { min-inline-size: 2ch; padding: 0; text-align: center; background: transparent; font-size: .85em; }
-.smb-locations { display: grid; align-content: start; gap: 3px; max-height: 200px; overflow: auto; }
-.smb-locations button { justify-content: flex-start; }
-.smb-location { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; }
-.smb-location > button:first-child { overflow: hidden; text-overflow: ellipsis; }
 .location-trigger { width: 38px; gap: 2px; border-color: var(--line); }
 .location-trigger svg:last-child { width: 11px; }
 .location-popup, .file-column-menu {
@@ -661,6 +661,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   background: var(--raised);
 }
 .pane-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pane-measurement { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.pane-measurement .pane-progress-status span { flex-shrink: 1; }
+.pane-measurement > button { flex: none; width: 20px; height: 20px; min-height: 20px; }
 .pane-counts { flex: none; }
 .pane .pane-footer .pane-marked { color: var(--panel-marked); font-weight: 600; }
 .pane-free { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-inline-start: auto; }
@@ -710,7 +713,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .statusbar { justify-content: space-between; gap: 12px; padding: 0 12px; font-size: .88em; color: var(--muted); background: var(--surface); border-top: 1px solid var(--line); }
 .statusbar span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar span:last-of-type { flex: none; }
-.statusbar:has(.window-resize-grip) { position: relative; padding-right: 27px; }
+.statusbar:has(.window-resize-marker) { position: relative; padding-right: 28px; }
 .statusbar.danger span:first-child { color: var(--danger); }
 .statusbar svg { display: inline-block; vertical-align: text-bottom; }
 .terminal-card { display: flex; flex-direction: column; min-height: 0; margin: 0 12px 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--text-bg); overflow: hidden; }
@@ -808,7 +811,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   min-height: min(350px, calc(100vh - 42px)); max-height: calc(100vh - 42px);
 }
 .dialog-resizable > .dialog-footer { flex: none; }
-.dialog:has(> .window-resize-grip) > .dialog-footer { padding-right: 33px; }
+.dialog:has(> .window-resize-marker) > .dialog-footer { padding-right: 33px; }
 .dialog-resize-edge { position: absolute; touch-action: none; user-select: none; }
 .dialog-resize-edge:is([data-resize-edge="n"], [data-resize-edge="s"]) {
   left: 10px; right: 10px; height: 5px; cursor: ns-resize;
@@ -826,14 +829,17 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .dialog-resize-edge[data-resize-edge="nw"] { top: 0; left: 0; cursor: nwse-resize; }
 .dialog-resize-edge[data-resize-edge="ne"] { top: 0; right: 0; cursor: nesw-resize; }
 .dialog-resize-edge[data-resize-edge="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
-.dialog-resize-edge[data-resize-edge="se"] { bottom: 0; right: 0; cursor: nwse-resize; }
-button.window-resize-grip {
-  position: absolute; bottom: 1px; right: 1px; z-index: 1;
-  width: 23px; height: 23px; padding: 0; border-color: transparent; background: transparent;
-  opacity: .55; cursor: nwse-resize; touch-action: none;
+.window-resize-marker {
+  position: absolute; right: 0; bottom: 0; z-index: 1;
+  width: 22px; height: 22px; display: grid; place-items: end;
+  color: var(--muted); opacity: .55; cursor: nwse-resize; touch-action: none; user-select: none;
 }
-.window-resize-grip:is(:hover, :focus-visible) { opacity: 1; }
-.window-resize-grip > svg { width: 14px; height: 14px; pointer-events: none; }
+.window-resize-marker::after {
+  content: ""; width: 12px; height: 12px; pointer-events: none;
+  background: repeating-linear-gradient(135deg, transparent 0 2px, currentColor 2px 3px);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.window-resize-marker:hover { opacity: 1; }
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--raised); border-bottom: 1px solid var(--line); padding: 10px 12px 10px 16px; }
 .dialog-window { width: 100%; height: 100%; max-width: none; max-height: none; border: 0; border-radius: 0; }
 .dialog-window > .dialog-heading { display: none; }
@@ -952,7 +958,6 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 }
 .quick-search input { min-width: 0; }
 .quick-search span { color: var(--muted); }
-.ftp-connections select { width: 100%; min-width: 0; }
 .ftp-fields { display: grid; gap: 10px; }
 .ftp-fields input { min-width: 0; }
 .ftp-host-row, .ftp-encoding-row { display: grid; gap: 8px; align-items: end; }

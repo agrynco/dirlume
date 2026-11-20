@@ -44,7 +44,7 @@ Use **Settings** in the viewer or editor toolbar to open its section directly. T
 
 **Viewer → Reading area** controls the background and maximum width of text, hex, and Markdown. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
 
-Drag the Options title bar to position it independently of the main window. Drag any edge or corner to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a button to see what it does and its current shortcut when one is assigned. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
+Drag the Options title bar to position it independently of the main window. Drag any edge or corner to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a control to see details such as an icon's action, a shortcut that is missing from the control, or the full text of a clipped value. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 
 | Default keys | Action |
 | --- | --- |
@@ -68,6 +68,8 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
+| Ctrl+Insert in a file list | Copy the marked item names, one per line in pane order. With no marks, copy the name under the cursor. |
+| Ctrl+V in the terminal | Paste text into the active local or SSH session. **Options → Terminal** also enables right-click paste by default. |
 | Ctrl+Shift+C (⌘⇧C on macOS) in a file list | Copy the current file or folder's full path as text. Also available under Commands → Copy full path. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
@@ -141,6 +143,8 @@ Press **Enter** on an archive to open it in a pane. Use **F5** to extract select
 
 ## Remote sources
 
+Choose **FTP**, **SSH**, **SMB** (Windows), or **Remote machine** from either pane's sources menu to open its saved connections. Use **Shift+F4** to add a connection, **F4** to edit the selected connection, and **Enter** to connect. Open **..** to return to the previous location in that pane. Configure the connection shortcuts in **Options → Keyboard shortcuts**.
+
 **SSH.** Open the left or right pane's sources with **Alt+F1** or **Alt+F2**, then choose **SSH** or press **5**. Use **Shift+F4** to add a named connection, **F4** to edit it, or select a saved connection and press **Enter**. SSH uses SFTP, with port 22 by default. Authenticate with a password or a private key file, optionally protected by a passphrase. Dirlume keeps passwords and passphrases in the system credential store and reads the private key from its existing location.
 
 Use **Test connection** in the SSH profile form to check the entered credentials and browse the server's initial directory before saving. Approval of a new host key applies only to that test.
@@ -182,7 +186,7 @@ Use the client's tool list for argument schemas. The server works with the locat
 | Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
 
 For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
-On Windows, choose **SMB** in a pane's sources menu. Enter a server name or IP address to open its shares as folders in the pane. Open a share and use **Parent folder** at its root to return to the server's share list. A UNC path such as `\\server\documents` opens the share directly. **Save SMB location** adds the server or share to the dialog for quick access. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
+On Windows, add an **SMB** connection using a server name, IP address, or UNC share path such as `\\server\documents`. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
 
 ## Desktop diagnostics
 
@@ -198,7 +202,7 @@ Each entry records the failed operation, an error code, a timestamp in Unix mill
 
 ## CI and releases
 
-Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows NSIS, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
+Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers and portable copies, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
 Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
 
@@ -218,7 +222,9 @@ To publish manually, open **Actions → CI and releases → Run workflow** and s
 
 For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
 
-The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime. To update the Windows ZIP edition without an installer, download and extract a newer ZIP.
+The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime.
+
+Windows Portable uses **Install and restart** to update its current folder. Extract it into a folder you can write to. Move the whole folder to carry the portable marker and `dirlume-settings.json` with the app. Copies in separate folders keep separate Options preferences. For earlier ZIPs that lack the portable marker, extract a current ZIP to start using in-place updates.
 
 The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 

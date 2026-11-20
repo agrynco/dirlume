@@ -9,6 +9,7 @@ export interface Entry {
   system?: boolean;
   size: number | null;
   modified: number | null;
+  connection?: SavedConnection;
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -64,7 +65,7 @@ export interface QuickLocation {
   path: string;
 }
 
-export type Place =
+export type FileLocation =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[] }
@@ -73,9 +74,20 @@ export type Place =
   | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
-export type RemotePlace = Exclude<Place, { kind: "local" | "smbRoot" | "archive" }>;
+export const connectionSourceNames = { ftp: "FTP", ssh: "SSH", smb: "SMB", remote: "Remote machine" } as const;
+export type ConnectionSource = keyof typeof connectionSourceNames;
+export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null };
+export type Place = FileLocation | ConnectionLocation;
+export type SavedConnection =
+  | ({ kind: "ftp" } & FtpProfile)
+  | ({ kind: "ssh" } & SshProfile)
+  | { kind: "smb"; id: string; label: string; path: string }
+  | { kind: "server"; id: string; label: string; credential: string }
+  | { kind: "kswitcher"; id: string; label: string; peer: string };
+
+export type RemotePlace = Exclude<FileLocation, { kind: "local" | "smbRoot" | "archive" }>;
 export type SmbPlace = Extract<Place, { kind: "local" | "smbRoot" }>;
-export type FilePlace = Exclude<Place, { kind: "smbRoot" }>;
+export type FilePlace = Exclude<FileLocation, { kind: "smbRoot" }>;
 export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
 type FileServerPlace = FtpPlace | SshPlace;
@@ -226,6 +238,8 @@ export const api = {
   mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
   mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
+  readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
+  savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
   checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },
@@ -244,7 +258,8 @@ export const api = {
   openElevated: (directory: string) => invoke<void>("open_elevated", { directory }),
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
-  copyPath: (path: string) => invoke<void>("copy_path", { path }),
+  copyText: (text: string) => invoke<void>("copy_path", { path: text }),
+  clipboardText: () => invoke<string>("clipboard_text"),
   droppedFiles: (paths: string[]) => invoke<{ directory: string; entry: Entry }[]>("dropped_files", { paths }),
   listLocal: (path: string) => invoke<LocalListing>("list_directory", { path }),
   formatTimestamps: (timestamps: number[], style: "date" | "time" | "date_time") =>
@@ -273,6 +288,9 @@ export const api = {
   operate: (directory: string, operation: Operation) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),
+  connectSavedServer: (credential: string) => invoke<Connection & { share: string }>("connect_saved_server", { credential }),
+  saveServerInvitation: (invitation: string) => invoke<string>("save_server_invitation", { invitation }),
+  removeServerInvitation: (credential: string) => invoke<void>("remove_server_invitation", { credential }),
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
   ftpProfiles: () => invoke<FtpProfile[]>("ftp_profiles"),
   ftpWindowsCodePage: () => invoke<number | null>("ftp_windows_code_page"),
@@ -365,7 +383,7 @@ export const api = {
 export function placePath(place: Place) {
   if (place.kind === "server" || isFileServer(place)) return "/" + place.segments.join("/");
   if (place.kind === "archive") return place.path + "!/" + place.segments.join("/");
-  return place.path;
+  return place.kind === "connections" ? connectionSourceNames[place.source] : place.path;
 }
 
 export function documentPath({ place, name }: NamedFile) {
@@ -444,6 +462,7 @@ export function isLockError(error: string) {
 }
 
 export function folderLabel(place: Place) {
+  if (place.kind === "connections") return connectionSourceNames[place.source];
   if (place.kind === "server" || isFileServer(place)) return place.segments.at(-1) ?? place.address;
   if (place.kind === "archive" && place.segments.length) return place.segments.at(-1)!;
   if (place.kind === "kswitcher" && !place.path) return place.address;
