@@ -1765,6 +1765,8 @@ pub fn run() {
         #[cfg(feature = "ui-automation")]
         crate::updates::fixture::updater_fixture_result,
         #[cfg(feature = "ui-automation")]
+        crate::updates::fixture::updater_fixture_phase,
+        #[cfg(feature = "ui-automation")]
         crate::updates::fixture::updater_fixture_options_window,
         locations,
         requested_location,

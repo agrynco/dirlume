@@ -43,6 +43,7 @@ const webview = join(work, "webview");
 const keyFile = join(work, "signing.key");
 const configFile = join(work, "bundle.json");
 const resultFile = join(work, "result.json");
+const phaseFile = join(work, "phase.txt");
 const fixtureFile = join(work, "fixture.json");
 const cargoTarget = resolve("src-tauri/target/updater-smoke");
 const cli = resolve("node_modules/@tauri-apps/cli/tauri.js");
@@ -112,7 +113,11 @@ async function reportedVersion() {
     }
     await delay(500);
   }
-  throw new Error("The installed app did not report an updater result.");
+  const phase = await readFile(phaseFile, "utf8").catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+    return "The fixture did not load.";
+  });
+  throw new Error(`The installed app did not report an updater result. Last checkpoint: ${phase}`);
 }
 
 try {
@@ -157,9 +162,11 @@ try {
     reject = tampered;
     const metadata = { version: nextVersion, platforms: { [target]: { url, signature } } };
     const previousDownloads = downloads;
+    await rm(phaseFile, { force: true });
     await writeFile(fixtureFile, JSON.stringify({
-      result: resultFile, expected: nextVersion, reject, metadata, replacement_failure: replacementFailure,
-      terminal_paste: process.env.CI === "true" && target.endsWith("-portable") === false,
+      result: resultFile, phase: phaseFile, expected: nextVersion, reject, metadata,
+      replacement_failure: replacementFailure,
+      check_clipboard: process.env.CI === "true" && !target.endsWith("-portable"),
     }));
     child = startApp(executable);
     const version = await Promise.race([
