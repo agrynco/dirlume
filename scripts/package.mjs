@@ -45,11 +45,17 @@ function bundleFormats(platform, signed) {
 }
 
 function artifactNames(platform, label, signed) {
+  const portable = portableName(platform, label);
   return [
     ...bundleFormats(platform, signed).map(([, , extension]) => `Dirlume-${label}-${platform}.${extension}`),
     `Dirlume-Server-${label}-${platform}.tar.gz`,
-    `Dirlume-${label}-${platform}-portable.zip`,
+    portable,
+    ...(signed && platform === "windows-x64" ? [portable + ".sig"] : []),
   ];
+}
+
+function portableName(platform, label) {
+  return `Dirlume-${label}-${platform}-portable.zip`;
 }
 
 async function findBundle(target, kind, suffix) {
@@ -69,6 +75,7 @@ async function collectPortable(platform, target, serverBinary, output) {
 
     if (platform === "windows-x64") {
       await copyFile(join(target, "dirlume.exe"), join(stage, "Dirlume.exe"));
+      await writeFile(join(stage, ".dirlume-portable"), "");
       const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
       for (const [source, destination] of Object.entries(config.bundle.resources ?? {})) {
         const path = join(stage, destination);
@@ -99,7 +106,8 @@ async function collect(platform) {
   const product = await version();
   const number = process.env.DIRLUME_BUILD_NUMBER;
   const signed = process.env.DIRLUME_SIGNED_RELEASE === "true";
-  const outputs = artifactNames(platform, artifactVersion(product, number), signed);
+  const label = artifactVersion(product, number);
+  const outputs = artifactNames(platform, label, signed);
   const target = "src-tauri/target/release";
   await mkdir("release", { recursive: true });
   for (const [index, [kind, suffix]] of bundleFormats(platform, signed).entries()) {
@@ -116,10 +124,18 @@ async function collect(platform) {
   }
   await copyFile(binary, join(stage, executable));
   await copyFile("LICENSE", join(stage, "LICENSE"));
-  const [server, portable] = outputs.slice(-2);
+  const server = `Dirlume-Server-${label}-${platform}.tar.gz`;
+  const portable = portableName(platform, label);
   const archive = spawnSync("tar", ["-czf", join("release", server), "-C", stage, executable, "LICENSE"], { stdio: "inherit" });
   if (archive.status !== 0) throw archive.error ?? new Error("Could not archive the server binary.");
   await collectPortable(platform, target, binary, join("release", portable));
+  if (signed && platform === "windows-x64") {
+    const signature = spawnSync(process.execPath, [
+      resolve("node_modules/@tauri-apps/cli/tauri.js"), "signer", "sign",
+      "--app-version", product, resolve("release", portable),
+    ], { stdio: "inherit" });
+    if (signature.status !== 0) throw signature.error ?? new Error("Could not sign the Windows Portable package.");
+  }
   for (const file of outputs) {
     const path = join("release", file);
     if (!(await stat(path)).size) throw new Error(`Empty artifact ${file}.`);
@@ -159,17 +175,21 @@ async function verifyRelease() {
     if (!signature) throw new Error(`Missing updater signature for ${target}.`);
     platforms[target] = { signature, url: `${download}/${name}` };
   }
+  const portable = portableName("windows-x64", label);
+  const portableSignature = (await readFile(join("release", portable + ".sig"), "utf8")).trim();
+  if (!portableSignature) throw new Error("Missing updater signature for Windows Portable.");
+  platforms["windows-x86_64-portable"] = { signature: portableSignature, url: `${download}/${portable}` };
   await writeFile(join("release", "latest.json"), JSON.stringify({ version: DIRLUME_PRODUCT_VERSION, platforms }, null, 2) + "\n");
   const downloads = Object.entries(platformLabels).map(([platform, name]) => {
     const names = artifactNames(platform, label, true);
-    return `| ${name} | [Installer](${download}/${names[0]}) | [ZIP](${download}/${names.at(-1)}) |`;
+    return `| ${name} | [Installer](${download}/${names[0]}) | [ZIP](${download}/${portableName(platform, label)}) |`;
   });
   console.log([
     "## Downloads", "",
     "| Platform | Installer | Portable ZIP |", "| --- | --- | --- |",
     ...downloads, "",
     "Extract the ZIP and open the desktop app. The optional standalone server is in the `server/` folder.",
-    "On Windows, download and extract a newer ZIP to update without an installer.",
+    "Windows Portable can install signed updates in the same folder and keeps Options settings beside Dirlume.exe.",
   ].join("\n"));
 }
 

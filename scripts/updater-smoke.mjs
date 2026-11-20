@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -76,7 +76,20 @@ async function build(version, publicKey, privateKey) {
   const source = join(output, assets[0]);
   const path = join(work, `update-${version}${extension}`);
   await copyFile(source, path);
-  return { path, signature: (await readFile(`${source}.sig`, "utf8")).trim() };
+  const signature = (await readFile(`${source}.sig`, "utf8")).trim();
+  if (!windows) return { path, signature };
+  const directory = join(work, `portable-${version}`);
+  const executable = join(directory, "Dirlume.exe");
+  const zip = join(work, `portable-${version}.zip`);
+  await mkdir(directory);
+  await copyFile(join(cargoTarget, "release", "dirlume.exe"), executable);
+  await writeFile(join(directory, ".dirlume-portable"), "");
+  await writeFile(join(directory, "LICENSE"), version);
+  run("tar", ["--format", "zip", "-cf", zip, "Dirlume.exe", ".dirlume-portable", "LICENSE"], { cwd: directory });
+  run(process.execPath, [cli, "signer", "sign", "--app-version", version, zip], {
+    env: { ...process.env, TAURI_SIGNING_PRIVATE_KEY: privateKey, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "" },
+  });
+  return { path, signature, portable: { directory, executable, path: zip, signature: (await readFile(zip + ".sig", "utf8")).trim() } };
 }
 
 function startApp(executable) {
@@ -123,7 +136,7 @@ try {
   }
   assert.ok((await stat(executable)).isFile());
 
-  const bytes = await readFile(after.path);
+  let bytes = await readFile(after.path);
   let reject = true;
   let downloads = 0;
   server = createServer((request, response) => {
@@ -140,20 +153,56 @@ try {
     server.listen(0, "127.0.0.1", ready);
   });
   const url = `http://127.0.0.1:${server.address().port}/package`;
-  const metadata = { version: nextVersion, platforms: { [target]: { url, signature: after.signature } } };
-  for (const rejectPackage of [true, false]) {
-    reject = rejectPackage;
+  async function exercise(executable, target, signature, { tampered = false, replacementFailure = false } = {}) {
+    reject = tampered;
+    const metadata = { version: nextVersion, platforms: { [target]: { url, signature } } };
     const previousDownloads = downloads;
-    await writeFile(fixtureFile, JSON.stringify({ result: resultFile, expected: nextVersion, reject, metadata }));
+    await writeFile(fixtureFile, JSON.stringify({
+      result: resultFile, expected: nextVersion, reject, metadata, replacement_failure: replacementFailure,
+    }));
     child = startApp(executable);
     const version = await Promise.race([
       reportedVersion(),
       new Promise((_, failed) => child.once("error", failed)),
     ]);
-    assert.equal(version, reject ? installedVersion : nextVersion);
+    assert.equal(version, reject || replacementFailure ? installedVersion : nextVersion);
     assert.ok(downloads > previousDownloads, "Dirlume did not download the test package.");
     await rm(resultFile);
-    console.log(reject ? `Rejected a modified ${target} installer.` : `Installed ${nextVersion} over ${installedVersion} and restored saved pane settings on ${target}.`);
+    if (child.exitCode === null) await Promise.race([new Promise((ready) => child.once("exit", ready)), delay(5000)]);
+    console.log(reject ? `Rejected a modified ${target} package.` : replacementFailure
+      ? `Restored ${installedVersion} after a replacement failure on ${target}.`
+      : `Installed ${nextVersion} over ${installedVersion} and restored saved pane settings on ${target}.`);
+  }
+  await exercise(executable, target, after.signature, { tampered: true });
+  await exercise(executable, target, after.signature);
+
+  if (windows) {
+    const portableTarget = target + "-portable";
+    const first = before.portable.directory;
+    bytes = await readFile(after.portable.path);
+    const settings = "dirlume-settings.json";
+    const portablePreferences = async (directory) => JSON.parse(await readFile(join(directory, settings), "utf8"));
+    await exercise(before.portable.executable, portableTarget, after.portable.signature, { tampered: true });
+    const previous = await portablePreferences(first);
+    assert.equal(previous.viewFontSizes.left, 23);
+    assert.equal(await readFile(join(first, "LICENSE"), "utf8"), installedVersion);
+
+    const moved = join(work, "relocated-portable");
+    await mkdir(moved);
+    for (const name of ["Dirlume.exe", ".dirlume-portable", settings]) await copyFile(join(first, name), join(moved, name));
+    const relocated = { ...previous, terminalResizeRows: 4 };
+    await writeFile(join(moved, settings), JSON.stringify(relocated));
+    await mkdir(join(moved, "LICENSE"));
+    const portableExecutable = join(moved, "Dirlume.exe");
+    await exercise(portableExecutable, portableTarget, after.portable.signature, { replacementFailure: true });
+    assert.deepEqual(await portablePreferences(moved), relocated);
+    await rmdir(join(moved, "LICENSE"));
+    await exercise(portableExecutable, portableTarget, after.portable.signature);
+    assert.equal(await readFile(join(moved, "LICENSE"), "utf8"), nextVersion);
+    assert.equal((await portablePreferences(moved)).mainMenuAlignment, "right");
+    assert.equal((await portablePreferences(moved)).terminalResizeRows, 4);
+    assert.deepEqual(await portablePreferences(first), previous);
+    assert.equal(await readFile(join(first, "LICENSE"), "utf8"), installedVersion);
   }
 } finally {
   child?.kill();

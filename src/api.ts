@@ -238,6 +238,8 @@ export const api = {
   mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
   mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
+  readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
+  savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
   checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },

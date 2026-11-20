@@ -49,7 +49,7 @@ import {
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, eventShortcut, folderGroupCommand, persistPreferences, physicalFolderBinding,
+import { commandNames, commands, commandScope, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
@@ -139,7 +139,11 @@ function disconnect(place: NetworkPlace) {
   void close(place.id).catch(() => {});
 }
 
-export default function App({ initialPreferences }: { initialPreferences: Preferences }) {
+export default function App({ initialPreferences, portableUpdateError, portableSettingsError }: {
+  initialPreferences: Preferences;
+  portableUpdateError?: string | null;
+  portableSettingsError?: string | null;
+}) {
   const [startup] = useState(readWorkspace);
   const [ready, setReady] = useState(false);
   const [panes, setPanes] = useState(() => ({
@@ -190,7 +194,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   const commandTexts = useMemo(() => historyItems.map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
-  const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: "Ready" });
+  const startupError = portableUpdateError ?? portableSettingsError;
+  const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
   const pendingListings = useRef<Partial<Record<Side, AbortController>>>({});
@@ -254,8 +259,8 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, []);
 
   useEffect(() => {
-    if (isTauri()) void checkUpdates(false);
-  }, [checkUpdates]);
+    if (isTauri() && !portableUpdateError) void checkUpdates(false);
+  }, [checkUpdates, portableUpdateError]);
 
   useEffect(() => {
     if (!updateNotice || modal || helpTopic) return;
@@ -524,6 +529,14 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
   }, [preferences]);
 
   useEffect(() => {
+    function onError(event: Event) {
+      setStatus({ text: (event as CustomEvent<string>).detail, error: true });
+    }
+    window.addEventListener("dirlume-portable-settings-error", onError);
+    return () => window.removeEventListener("dirlume-portable-settings-error", onError);
+  }, []);
+
+  useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key !== preferenceKey) return;
       const next = readPreferences();
@@ -642,7 +655,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
     setModal({ kind: "installUpdate", version: update.version });
     const progress = new Channel<UpdateProgress>();
     progress.onmessage = setUpdateProgress;
-    void api.installUpdate(update.version, progress).catch((error: unknown) => {
+    void flushPortablePreferences().then(() => api.installUpdate(update.version, progress)).catch((error: unknown) => {
       installingUpdate.current = false;
       setModal(null);
       setStatus({ text: describeError(error), error: true });

@@ -46,6 +46,45 @@ pub struct UpdateProgress {
     total: Option<u64>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortableState {
+    preferences: Option<serde_json::Value>,
+    settings_error: Option<&'static str>,
+    update_error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn read_portable_state() -> Option<PortableState> {
+    #[cfg(windows)]
+    if let Some(directory) = crate::portable::root() {
+        let (preferences, settings_error) = match crate::portable::read_settings(directory) {
+            Ok(preferences) => (preferences, None),
+            Err(_) => (
+                None,
+                Some("Could not read dirlume-settings.json in this portable folder."),
+            ),
+        };
+        return Some(PortableState {
+            preferences,
+            settings_error,
+            update_error: crate::portable::take_failure(directory),
+        });
+    }
+    None
+}
+
+#[tauri::command]
+pub async fn save_portable_preferences(preferences: serde_json::Value) -> Result<(), &'static str> {
+    #[cfg(windows)]
+    if let Some(directory) = crate::portable::root() {
+        return crate::portable::save_settings(directory, &preferences)
+            .map_err(|_| "Could not save dirlume-settings.json in this portable folder.");
+    }
+    let _ = preferences;
+    Ok(())
+}
+
 impl PendingUpdate {
     fn offer(&self, update: Update) -> Result<UpdateOffer, &'static str> {
         let version = update.version.clone();
@@ -59,12 +98,17 @@ fn restore_update(
     endpoint: &str,
     metadata: serde_json::Value,
 ) -> Result<Option<Update>, &'static str> {
-    let updater = app
+    let builder = app
         .updater_builder()
         .endpoints(vec![Url::parse(endpoint).map_err(|_| MANIFEST_FAILED)?])
-        .map_err(|_| MANIFEST_FAILED)?
-        .build()
         .map_err(|_| MANIFEST_FAILED)?;
+    #[cfg(windows)]
+    let builder = if crate::portable::root().is_some() {
+        builder.target(crate::portable::UPDATE_TARGET)
+    } else {
+        builder
+    };
+    let updater = builder.build().map_err(|_| MANIFEST_FAILED)?;
     let mut update = updater
         .restore_update(metadata)
         .map_err(|_| MANIFEST_FAILED)?;
@@ -190,20 +234,34 @@ pub async fn install_update(
         .ok_or(INSTALL_FAILED)?;
     let mut downloaded = 0;
     let mut previous = std::time::Instant::now();
+    let report_progress = |bytes: usize, total| {
+        downloaded += bytes as u64;
+        if downloaded == bytes as u64
+            || total == Some(downloaded)
+            || previous.elapsed() >= Duration::from_millis(100)
+        {
+            let _ = on_progress.send(UpdateProgress { downloaded, total });
+            previous = std::time::Instant::now();
+        }
+    };
+    #[cfg(windows)]
+    if let Some(directory) = crate::portable::root() {
+        let bytes = update
+            .download(report_progress, || {})
+            .await
+            .map_err(|_| INSTALL_FAILED)?;
+        crate::desktop::blocking(move || {
+            crate::portable::stage_update(directory, &bytes).map_err(crate::desktop::message)
+        })
+        .await
+        .map_err(|_| {
+            "Could not prepare the portable update. The current copy is still available."
+        })?;
+        app.exit(0);
+        return Ok(());
+    }
     update
-        .download_and_install(
-            |bytes, total| {
-                downloaded += bytes as u64;
-                if downloaded == bytes as u64
-                    || total == Some(downloaded)
-                    || previous.elapsed() >= Duration::from_millis(100)
-                {
-                    let _ = on_progress.send(UpdateProgress { downloaded, total });
-                    previous = std::time::Instant::now();
-                }
-            },
-            || {},
-        )
+        .download_and_install(report_progress, || {})
         .await
         .map_err(|_| INSTALL_FAILED)?;
     if !cfg!(windows) {
