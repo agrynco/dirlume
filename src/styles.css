@@ -995,6 +995,11 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .settings-page-heading svg { width: 13px; height: 13px; color: var(--dialog-muted); }
 .settings-page-body { flex: 1; min-height: 0; overflow: auto; }
 .settings-page-body .shortcut-list { max-height: none; }
+.setting-search-text { color: var(--on-accent); background: var(--accent-fill); border-radius: 2px; }
+.settings-main :has(> .setting-search-alias), .settings-main .font-family:has(> label > .setting-search-alias) {
+  background: color-mix(in srgb, var(--accent-fill) 14%, transparent);
+  outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 3px;
+}
 .settings-general { display: grid; gap: 14px; }
 .settings-preview {
   flex: 0 0 auto; display: flex; flex-direction: column; max-height: 45%; min-height: 0;

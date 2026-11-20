@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties }
 import { ChevronDown } from "lucide-react";
 import { bundledFontFamily, maxFontFamilyLength } from "./appearance";
 import { Button } from "./Button";
+import { SettingSearchLabel } from "./SettingSearchLabel";
 import { readFieldHistory, rememberFieldValue } from "./HistoryField";
 
 export type InstalledFonts = { families: string[]; error?: string } | null;
@@ -100,7 +101,7 @@ export function FontFamilyField({ label, value, fallback, installed, builtIn, on
     event.stopPropagation();
     close();
   }}>
-    <label className="field" htmlFor={`${id}-input`}>{t("Font family")}</label>
+    <label className="field" htmlFor={`${id}-input`}><SettingSearchLabel label="Font family" aliases={["Installed fonts"]} /></label>
     <div className="font-family-field" ref={field}>
       <input ref={input} id={`${id}-input`} aria-label={t("{0} font family", t(label))} type="text" role="combobox"
         aria-autocomplete="list" aria-expanded={expanded} aria-controls={expanded ? id : undefined}

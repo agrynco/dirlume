@@ -817,7 +817,18 @@ try {
     assert.notEqual(optionsPage, page);
   }
   await showOptions(() => page.locator("#left-files").press("Alt+Control+S"));
+  await searchSettings.fill("menu");
+  await optionsDialog.getByRole("button", { name: "Window", exact: true }).click();
+  const alignment = optionsContent.locator("label.setting").filter({ hasText: "Main menu alignment" });
+  assert.equal(await alignment.locator("mark").innerText(), "menu");
+  await searchSettings.fill("right");
+  await alignment.locator(".setting-search-alias").waitFor();
+  assert.equal(await alignment.locator("mark").count(), 0);
+  await searchSettings.fill("menu");
   await optionsDialog.getByRole("button", { name: "General", exact: true }).click();
+  assert.equal(await optionsContent.locator("mark").innerText(), "menu");
+  await searchSettings.fill("");
+  assert.equal(await optionsContent.locator("mark, .setting-search-alias").count(), 0);
   const provider = optionsDialog.getByLabel("Remote connection");
   await provider.selectOption("kswitcher");
   const bridgePath = optionsDialog.getByRole("combobox", { name: "KSwitcher installation folder", exact: true });
