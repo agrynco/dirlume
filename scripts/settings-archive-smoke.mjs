@@ -4,7 +4,7 @@ import { chromium } from "playwright-core";
 
 const local = { id: "local", name: "Local palette", base: "light", colors: { canvas: "#f0f0f0" }, fonts: {} };
 const evening = { id: "evening", name: "Evening palette", base: "dark", colors: { canvas: "#121824" }, fonts: { panel: { family: "Fixture Sans", size: 17 } } };
-const standalone = { id: "single", name: "Standalone palette", base: "dark", colors: { canvas: "#112233" }, fonts: {} };
+const standalone = { id: "single", name: "Standalone palette", base: "sunrise", colors: { canvas: "#fef2dd" }, fonts: {} };
 const archive = (groups, schemes) => JSON.stringify({ format: "dirlume-settings", version: 1, groups, schemes });
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -93,6 +93,7 @@ try {
   assert.equal(await importedScheme.getAttribute("value"), "custom:single");
   await scheme.selectOption("custom:single");
   await button(options, "Apply").click();
+  await page.locator('html[data-theme="sunrise"]').waitFor();
   assert.equal((await readPreferences()).activeScheme, standalone.id);
 
   const other = { ...evening, id: "other", name: "Imported second", colors: { canvas: "#212c33" } };
