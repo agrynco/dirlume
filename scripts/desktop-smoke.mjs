@@ -1389,6 +1389,7 @@ try {
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const toggleTerminal = page.getByRole("button", { name: "Toggle terminal", exact: true });
   const terminalInput = page.locator(".xterm-helper-textarea");
+  const terminalFocusHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
   const paneHeight = () => left.evaluate((pane) => pane.getBoundingClientRect().height);
   const compactHeight = await paneHeight();
   await page.locator("#left-files").press("Control+ArrowRight");
@@ -1396,6 +1397,7 @@ try {
   await commandLine.fill("preserved draft");
   await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
+  await terminalFocusHint.waitFor();
   await commandLine.waitFor({ state: "hidden" });
   const firstHeight = await paneHeight();
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
@@ -1412,10 +1414,12 @@ try {
   assert.ok(expandedHeight < firstHeight, "Ctrl+Up should make more room for the terminal.");
   await terminalInput.press("F12");
   await terminal.waitFor({ state: "hidden" });
+  await terminalFocusHint.waitFor({ state: "hidden" });
   await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
   assert.equal(await paneHeight(), expandedHeight);
   await page.locator("#left-files").press("Control+ArrowDown");
+  await terminalFocusHint.waitFor({ state: "hidden" });
   assert.ok(Math.abs(await paneHeight() - firstHeight) <= 2);
   const terminalDivider = page.getByRole("separator", { name: "Resize terminal" });
   const terminalBounds = await terminalDivider.boundingBox();

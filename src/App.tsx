@@ -175,6 +175,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [terminalInputFocused, setTerminalInputFocused] = useState(false);
   const [terminalShare, setTerminalShare] = useState(0);
   const [terminalHeight, setTerminalHeight] = useState(() => {
     const height = startup?.terminalHeight;
@@ -227,6 +228,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const terminalPlace = pane.place?.kind === "ssh" ? pane.place : local;
   const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
   const terminal = terminalKey ? terminals[terminalKey] : undefined;
+  const terminalFocusHint = terminalInputFocused && terminalVisible && terminal && activeDocument === null
+    ? t(panelsHidden ? "File shortcuts paused. Use the Terminal button to return to files."
+      : "File shortcuts paused. Click a file pane to use them.")
+    : "";
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
@@ -1416,8 +1421,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   useEffect(() => {
     if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
   }, [terminalVisible, terminalKey, terminal, activeDocument]);
+  useEffect(() => {
+    const syncFocus = () => setTerminalInputFocused(document.hasFocus() && isTerminalInput(document.activeElement));
+    window.addEventListener("focus", syncFocus);
+    window.addEventListener("blur", syncFocus);
+    return () => {
+      window.removeEventListener("focus", syncFocus);
+      window.removeEventListener("blur", syncFocus);
+    };
+  }, []);
 
   function showCommandLine(moveFocus = true) {
+    setTerminalInputFocused(false);
     setTerminalShare(0);
     setPanelsHidden(false);
     if (moveFocus) requestAnimationFrame(() => commandInput.current?.focus());
@@ -1954,6 +1969,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     <div className={`app${terminalVisible ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
+      onFocusCapture={(event) => setTerminalInputFocused(isTerminalInput(event.target))}
+      onBlurCapture={(event) => {
+        if (isTerminalInput(event.target) && !isTerminalInput(event.relatedTarget)) setTerminalInputFocused(false);
+      }}
       onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"}
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
@@ -2146,10 +2165,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </>}
       </nav>
       <footer className={`statusbar${status.error ? " danger" : ""}`}>
-        <span role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
+        <span className="statusbar-message" role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
           {errorText(status.text)}
         </span>
-        <span>{pane.place?.kind === "connections" ? t("Saved connections") : pane.place?.kind === "archive" ? t(pane.place.address) :
+        <span className="statusbar-terminal-hint" role="status" aria-live="polite" data-tooltip={terminalFocusHint || undefined}>
+          {terminalFocusHint}
+        </span>
+        <span className="statusbar-location">{pane.place?.kind === "connections" ? t("Saved connections") : pane.place?.kind === "archive" ? t(pane.place.address) :
           pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
             smbHost(pane.place) ?? t("Local file system")}</span>
         <WindowResizeMarker />
