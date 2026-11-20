@@ -118,8 +118,8 @@ async function startMacPainter() {
 
 async function reportedVersion() {
   const inputs = new Set();
-  let escapeAttempts = 0;
-  let nextEscape = 0;
+  let previousScreenInput;
+  let nextScreenInput = 0;
   for (let attempt = 0; attempt < 180; attempt++) {
     try {
       const result = JSON.parse(await readFile(resultFile, "utf8"));
@@ -145,16 +145,14 @@ async function reportedVersion() {
     if (macInput) {
       const input = phase.endsWith("the native screen color cancellation") ? "escape" :
         phase.endsWith("the external screen color") ? "click" : undefined;
-      if (input === "escape" && escapeAttempts < 4 && Date.now() >= nextEscape) {
-        escapeAttempts++;
-        nextEscape = Date.now() + 1500;
-        await delay(600);
-        run(macInput, [input]);
+      if (input !== previousScreenInput) {
+        previousScreenInput = input;
+        nextScreenInput = Date.now() + 600;
       }
-      if (input === "click" && !inputs.has(input)) {
-        inputs.add(input);
-        await delay(600);
+      // The WebView records the checkpoint before AppKit accepts input.
+      if (input && Date.now() >= nextScreenInput) {
         run(macInput, [input]);
+        nextScreenInput = Date.now() + 2000;
       }
     }
     await delay(500);
