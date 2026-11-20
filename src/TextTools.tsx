@@ -186,7 +186,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
     const content = selectionText ||
       (selection?.anchorNode && section.current?.contains(selection.anchorNode) ? selection.toString() : "");
     if (content) {
-      const copy = isTauri() ? api.copyPath(content) : navigator.clipboard.writeText(content);
+      const copy = isTauri() ? api.copyText(content) : navigator.clipboard.writeText(content);
       void copy.catch((failure: unknown) => setError(describeError(failure)));
     }
   }

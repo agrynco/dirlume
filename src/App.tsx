@@ -1518,7 +1518,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function copyPath(path: string) {
-    void api.copyPath(path).then(() => setStatus({ text: "Path copied to the clipboard." }),
+    void api.copyText(path).then(() => setStatus({ text: "Path copied to the clipboard." }),
+      (error: unknown) => setStatus({ text: describeError(error), error: true }));
+  }
+
+  function copyItemNames() {
+    if (!canCopyItemNames) return;
+    const marks = new Set(pane.marked);
+    const marked = marks.size ? entries[active].filter(({ name }) => marks.has(name)) : [];
+    const items = marked.length ? marked : current ? [current] : [];
+    const names = items.map(({ name }) => pane.search?.matches.get(name)?.entry.name ?? name);
+    if (!names.length) return;
+    void api.copyText(names.join("\n")).then(() => setStatus({ text: "Item names copied to the clipboard." }),
       (error: unknown) => setStatus({ text: describeError(error), error: true }));
   }
 
@@ -1697,6 +1708,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "copyFullPath":
         if (currentFullPath !== null) copyPath(currentFullPath);
         break;
+      case "copyItemNames": copyItemNames(); break;
       case "previousCommand": {
         const previous = commandTexts[historyIndex.current + 1];
         if (previous !== undefined) {
@@ -1835,6 +1847,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     if (inField && (event.key === "Backspace" || event.key === "Delete" || command === "copyClipboard" || command === "pasteClipboard")) return;
     if (command === "copyFullPath" && (!onFiles || inField || currentFullPath === null)) return;
+    if (command === "copyItemNames" && (!onFiles || inField || !canCopyItemNames)) return;
     if (command === "attributes" && (!onFiles || inField || panelsHidden || processPanels[active])) return;
     if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
     const fileNavigation = command in rowCommands || command === "open";
@@ -1843,7 +1856,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
-    if (!event.repeat || (!["hidden", "attributes", "copyFullPath", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
+    if (!event.repeat || (!["hidden", "attributes", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command))) {
       perform(command);
     }
@@ -1873,6 +1886,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const panesAvailable = !panelsHidden && activeDocument === null;
   const filesAvailable = panesAvailable && !processPanels[active] && !pane.loading;
+  const canCopyItemNames = filesAvailable && !catalog && (pane.marked.length > 0 || !!current);
   const currentFullPath = filesAvailable && currentItem ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : null;
 
   function menuCommand(command: Command, disabled = false, label: string = commands[command].label) {
@@ -1921,6 +1935,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       menuCommand("search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       menuCommand("compare", !filesAvailable || comparison === null),
       menuCommand("copyFullPath", currentFullPath === null),
+      menuCommand("copyItemNames", !canCopyItemNames),
       menuCommand("connect", activeDocument !== null, "Connect"),
       menuCommand("swap", !panesAvailable || !canSwapPanes),
       menuCommand("commandHistory", activeDocument !== null),

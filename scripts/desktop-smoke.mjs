@@ -726,6 +726,28 @@ try {
   await right.press("Shift+ArrowDown");
   assert.equal(await activeRow(right), "only.txt");
   assert.equal(await right.locator(".file-row.marked").getAttribute("data-tooltip"), "only.txt");
+  const leftBefore = await page.locator("#left-path").getAttribute("data-path");
+  const clipboardIs = (expected) => page.waitForFunction(async (expected) => {
+    const text = await window.__TAURI_INTERNALS__.invoke("clipboard_text");
+    return text.replaceAll("\r\n", "\n") === expected;
+  }, expected);
+  for (const [side, list] of [["left", left], ["right", right]]) {
+    await navigate(side, keyboardFolder);
+    const row = (name) => list.locator(`.file-row[data-tooltip="${name}"]`);
+    await row("c.txt").click({ modifiers: ["Control"] });
+    await row("a.txt").click({ modifiers: ["Control"] });
+    await list.press("ArrowDown");
+    await list.press("Control+Insert");
+    await clipboardIs("a.txt\nc.txt");
+    assert.equal(await activeRow(list), "b.txt");
+    assert.deepEqual(await list.locator(".file-row.marked").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)), ["a.txt", "c.txt"]);
+    await row("b.txt").click();
+    await list.press("Control+Insert");
+    await clipboardIs("b.txt");
+    await list.press("Control+Shift+c");
+    await clipboardIs(join(keyboardFolder, "b.txt"));
+  }
+  await navigate("left", leftBefore);
   await navigate("right", rightBefore);
   await left.locator(".file-row").nth(guideIndex - 1).click();
   await guideRow.click();
