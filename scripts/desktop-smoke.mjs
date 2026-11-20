@@ -373,6 +373,9 @@ try {
   const parentRow = '[role="option"][data-tooltip=".."]';
   const emptyFolder = join(temp, "empty");
   await mkdir(emptyFolder);
+  const populatedFolder = join(temp, "enter-navigation");
+  await mkdir(populatedFolder);
+  await writeFile(join(populatedFolder, "first.txt"), "Enter navigation fixture");
   for (const [side, list] of [["left", leftList], ["right", rightList]]) {
     const pane = page.getByRole("region", { name: `${side} pane`, exact: true });
     const otherSide = side === "left" ? "right" : "left";
@@ -401,6 +404,14 @@ try {
     await list.press("Enter");
     await pane.getByRole("heading", { name: parse(temp).base, exact: true }).waitFor({ state: "attached" });
     await list.locator('[data-current="true"][data-tooltip="empty"]').waitFor();
+    const populatedRow = list.locator('[role="option"][data-tooltip="enter-navigation"]');
+    await populatedRow.click();
+    await list.press("Enter");
+    await list.locator('[role="option"][data-tooltip="first.txt"]').waitFor();
+    await list.locator(`${parentRow}[data-current="true"]`).waitFor();
+    assert.equal(await list.evaluate((element) => document.activeElement === element), true);
+    await list.press("Enter");
+    await populatedRow.and(list.locator('[data-current="true"]')).waitFor();
     assert.equal(await panePath(otherSide), otherPath);
     await navigate(side, parse(temp).root);
     assert.equal(await list.locator(parentRow).count(), 0);
