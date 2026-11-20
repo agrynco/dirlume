@@ -215,6 +215,31 @@ try {
   await tooltip.filter({ hasText: /^Find files \(Alt\+F7\)$/ }).waitFor();
   await page.keyboard.press("Escape");
   await tooltip.waitFor({ state: "hidden" });
+  async function checkTooltip(button, expected) {
+    await button.dispatchEvent("pointerover", { pointerType: "mouse" });
+    if (expected) {
+      await tooltip.waitFor();
+      assert.equal(await tooltip.textContent(), expected);
+    } else {
+      await button.evaluate(() => new Promise((resolve) => setTimeout(resolve, 525)));
+      assert.equal(await tooltip.isVisible(), false);
+    }
+    await button.dispatchEvent("pointerout", { pointerType: "mouse" });
+    await tooltip.waitFor({ state: "hidden" });
+  }
+  const rightTools = page.getByRole("region", { name: "right pane", exact: true });
+  await checkTooltip(rightTools.getByRole("button", { name: "Refresh folder", exact: true }), "Refresh folder");
+  const leftTools = page.getByRole("region", { name: "left pane", exact: true });
+  const locationsTrigger = leftTools.getByRole("button", { name: "Locations for left pane", exact: true });
+  await locationsTrigger.click();
+  const sshSource = leftTools.getByRole("button", { name: "SSH", exact: true });
+  assert.equal(await sshSource.locator("kbd").innerText(), "5");
+  const homeLocation = leftTools.getByRole("button", { name: "Home", exact: true });
+  const homePath = await homeLocation.getAttribute("data-tooltip");
+  assert.ok(homePath && homePath !== "Home");
+  await checkTooltip(homeLocation, homePath);
+  await checkTooltip(sshSource);
+  await locationsTrigger.click();
   async function editAddress(side) {
     const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
     if (!await input.isVisible()) {
@@ -413,6 +438,7 @@ try {
   await shortcuts.click();
   await options.getByRole("button", { name: "Remove Ctrl+H from Show or hide hidden files", exact: true }).click();
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await checkTooltip(hiddenToggle, "Show hidden files");
   await rightList.focus();
   await rightList.dispatchEvent("keydown", ukrainianCtrlH);
   await rightList.press("Control+h");
@@ -423,6 +449,7 @@ try {
   await options.getByRole("button", { name: "Add shortcut for Show or hide hidden files", exact: true }).click();
   await options.getByRole("textbox", { name: "New shortcut for Show or hide hidden files" }).press("Control+Shift+h");
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await checkTooltip(hiddenToggle, "Show hidden files (Ctrl+Shift+H)");
   await leftList.press("Control+Shift+h");
   await hiddenFile.waitFor();
   await hiddenFolder.waitFor();

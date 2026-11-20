@@ -10,11 +10,30 @@ async (upgraded, reject) => {
 
   const report = (error) => window.__TAURI_INTERNALS__.invoke("updater_fixture_result", { error });
   const preferenceKey = "dirlume.preferences.v1";
+  async function checkTooltip(control, expected) {
+    const pointer = (type) => control.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: "mouse" }));
+    pointer("pointerover");
+    if (expected) {
+      await waitFor(() => document.getElementById("dirlume-tooltip")?.textContent === expected);
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 525));
+      if (document.getElementById("dirlume-tooltip")) throw new Error("The visible SSH label and shortcut showed a redundant tooltip.");
+    }
+    pointer("pointerout");
+  }
   try {
     if (upgraded) {
       await waitFor(() => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
       await waitFor(() => document.querySelector('.topbar[data-menu-position="right"]') &&
         JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").mainMenuAlignment === "right");
+      const refresh = await waitFor(() => document.querySelector('#left-pane button[aria-label="Refresh folder"]:enabled'));
+      await checkTooltip(refresh, "Refresh folder");
+      const locations = document.querySelector("#left-pane .location-trigger");
+      locations.click();
+      const ssh = await waitFor(() => [...document.querySelectorAll("#left-pane .location-source-group button")]
+        .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
+      await checkTooltip(ssh);
+      locations.click();
       document.querySelector('.topbar button[aria-label="Options"]').click();
       await window.__TAURI_INTERNALS__.invoke("updater_fixture_options_window");
       const updates = await waitFor(() => {

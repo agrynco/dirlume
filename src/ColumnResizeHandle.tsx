@@ -19,7 +19,7 @@ export function ColumnResizeHandle({ label, min, width, onResize, onReset }: {
   return <div className="file-column-resize" role="separator" aria-orientation="vertical" tabIndex={0}
     aria-label={t("Resize {0} column", t(label))} aria-valuemin={min} aria-valuemax={maxColumnWidth} aria-valuenow={width}
     aria-valuetext={width === undefined ? t("Automatic width") : t("{0} pixels", width)}
-    title={t("Resize {0} column (drag or use the arrow keys, double-click to reset)", t(label))}
+    data-tooltip={t("Resize {0} column (drag or use the arrow keys, double-click to reset)", t(label))}
     onPointerDown={(event) => {
       const handle = event.currentTarget;
       if (event.button !== 0 || drag.current || !handle.parentElement) return;
