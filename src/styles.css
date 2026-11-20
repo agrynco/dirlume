@@ -515,15 +515,15 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .pane-filter { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line); padding: 4px 8px 4px 12px; color: var(--muted); }
 .pane-filter input { width: 100%; min-height: 28px; padding-block: 3px; }
 .pane-progress {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 8px 3px 12px;
-  border-top: 1px solid var(--line); background: var(--raised); color: var(--panel-ink); font-size: .88em;
+  display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-between; gap: 8px;
+  color: var(--panel-ink);
 }
 .pane-progress-status { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pane-progress-status svg { width: 15px; height: 15px; flex: none; color: var(--accent); }
 .pane-progress-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane-progress-status span:first-of-type { flex-shrink: 0; max-width: calc(100% - 21px); }
 .pane-progress-path { color: var(--panel-muted); }
-.pane-progress button { min-height: 25px; flex: none; padding: 2px 7px; border-color: var(--line); }
+.pane-progress button { min-height: 20px; flex: none; padding: 0 7px; border-color: var(--line); }
 .file-column-grid, .file-list-grid, .file-column-group, .file-row-group, .file-row { display: grid; min-width: 0; }
 .file-column-group, .file-row-group, .file-row { grid-template-columns: subgrid; }
 .file-row, .file-row-spacer { grid-column: 1 / -1; }

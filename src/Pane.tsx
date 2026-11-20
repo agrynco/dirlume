@@ -401,11 +401,13 @@ export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPe
           </Button>}
         </div>
       </header>
-      {twin && free && !search && !processView && <div className="pane-volume">
+      {twin && localFolder && !search && !processView && <div className="pane-volume">
         <HardDrive aria-hidden="true" />
         <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span>
-        <span className="pane-volume-free" data-tooltip={freeLabel}>{freeLabel}</span>
-        <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
+        {free && <>
+          <span className="pane-volume-free" data-tooltip={freeLabel}>{freeLabel}</span>
+          <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
+        </>}
       </div>}
       <div className="navigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
@@ -469,17 +471,6 @@ export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPe
         </div>
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
-      {pane.loading && <div className="pane-progress">
-        <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
-          <LoaderCircle className="spin" aria-hidden="true" />
-          <span>{loadingLabel}</span>
-          {pane.loadingPath && <span className="pane-progress-path">{pane.loadingPath}</span>}
-        </div>
-        <Button type="button" aria-label={t("Cancel folder navigation")}
-          shortcut={cancelKey} onClick={onCancelFolderOperation}>
-          {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
-        </Button>
-      </div>}
       {(filterOpen || pane.filter) && (
         <label className="pane-filter">
           <Search />
@@ -584,21 +575,33 @@ export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPe
         </span>)}
       </div>}
       <footer className="pane-footer">
-        <span className="pane-counts">{search ? countText(entries.length, "match") :
-          <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
-        {!pane.loading && pane.measuring.length > 0 ? <div className="pane-measurement">
-          <div className="pane-progress-status" role="status">
-            <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
+        {pane.loading ? <div className="pane-progress">
+          <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
+            <LoaderCircle className="spin" aria-hidden="true" />
+            <span>{loadingLabel}</span>
+            {pane.loadingPath && <span className="pane-progress-path">{pane.loadingPath}</span>}
           </div>
-          <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
-            shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
-        </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
-          sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
-        {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
-          <span className="pane-free-full">{freeLabel}</span>
-          <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
-          <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
-        </span>}
+          <Button type="button" aria-label={t("Cancel folder navigation")}
+            shortcut={cancelKey} onClick={onCancelFolderOperation}>
+            {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
+          </Button>
+        </div> : <>
+          <span className="pane-counts">{search ? countText(entries.length, "match") :
+            <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
+          {pane.measuring.length > 0 ? <div className="pane-measurement">
+            <div className="pane-progress-status" role="status">
+              <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
+            </div>
+            <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
+              shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
+          </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
+            sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
+          {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
+            <span className="pane-free-full">{freeLabel}</span>
+            <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
+            <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
+          </span>}
+        </>}
       </footer>
       </>}
     </section>
