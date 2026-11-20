@@ -1,6 +1,6 @@
 import { Button } from "./Button";
 import { WindowControls } from "./WindowControls";
-import { WindowResizeGrip } from "./ResizeGrip";
+import { WindowResizeMarker } from "./ResizeGrip";
 import { HistoryField } from "./HistoryField";
 import { SchemeOptions } from "./SchemeOptions";
 import { CommandField } from "./CommandField";
@@ -1975,7 +1975,7 @@ export default function App({ initialPreferences }: { initialPreferences: Prefer
         <span>{pane.place?.kind === "archive" ? t(pane.place.address) :
           pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
             smbHost(pane.place) ?? t("Local file system")}</span>
-        <WindowResizeGrip title="Dirlume" />
+        <WindowResizeMarker />
       </footer>
       {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences} onChange={(next) => {
         setLanguage(next.language);
