@@ -96,13 +96,14 @@ export function selectableRange(entries: readonly Entry[], first: number, last: 
     .map(({ name }) => name).filter((name) => name !== "..");
 }
 
-export function markAndMoveCursor(pane: PaneState, entries: readonly Entry[], from: number, to: number): PaneState {
+export function toggleMarkAndMoveCursor(pane: PaneState, entries: readonly Entry[], from: number, to: number): PaneState {
+  const selected = entries[to].name;
   const { name } = entries[from];
-  return {
-    ...pane,
-    selected: entries[to].name,
-    marked: name === ".." || pane.marked.includes(name) ? pane.marked : [...pane.marked, name],
-  };
+  if (name === "..") return { ...pane, selected };
+  const marked = pane.marked.includes(name)
+    ? pane.marked.filter((item) => item !== name)
+    : [...pane.marked, name];
+  return { ...pane, selected, marked };
 }
 
 export function showSearchResults(pane: PaneState, mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {

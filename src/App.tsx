@@ -45,8 +45,8 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownLocation, MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, markAndMoveCursor, opposite, paneCursorIndex, paneItem, parentPlace,
-  readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, visibleEntries,
+  applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, physicalFolderBinding,
@@ -1637,7 +1637,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       updatePane(active, (pane) => {
         const index = paneCursorIndex(pane, items);
         const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
-        return isRangeCommand(command) ? markAndMoveCursor(pane, items, index, next) : { ...pane, selected: items[next].name };
+        return isRangeCommand(command) ? toggleMarkAndMoveCursor(pane, items, index, next) : { ...pane, selected: items[next].name };
       });
       return;
     }
