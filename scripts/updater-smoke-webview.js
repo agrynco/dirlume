@@ -1,4 +1,4 @@
-async (upgraded, reject, portable, replacementFailure) => {
+async (upgraded, reject, portable, replacementFailure, terminalPaste) => {
   async function waitFor(read) {
     for (let attempt = 0; attempt < 450; attempt++) {
       const value = read();
@@ -10,6 +10,24 @@ async (upgraded, reject, portable, replacementFailure) => {
 
   const report = (error) => window.__TAURI_INTERNALS__.invoke("updater_fixture_result", { error });
   const preferenceKey = "dirlume.preferences.v1";
+  async function checkTerminalPaste() {
+    document.querySelector(".command-bar > button").click();
+    const terminal = await waitFor(() => document.querySelector(".terminal-card:not([hidden]) .terminal-surface"));
+    const input = await waitFor(() => terminal.querySelector(".xterm-helper-textarea"));
+    const screen = () => terminal.querySelector(".xterm-accessibility-tree")?.textContent ?? "";
+    await waitFor(() => screen().trim());
+    input.focus();
+    await window.__TAURI_INTERNALS__.invoke("copy_path", { path: "DirlumeClipboardA" });
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "v", code: "KeyV", ctrlKey: true, bubbles: true, cancelable: true }));
+    await waitFor(() => screen().includes("DirlumeClipboardA"));
+    await window.__TAURI_INTERNALS__.invoke("copy_path", { path: "DirlumeClipboardB" });
+    terminal.dispatchEvent(new MouseEvent("contextmenu", { button: 2, bubbles: true, cancelable: true }));
+    await waitFor(() => screen().includes("DirlumeClipboardADirlumeClipboardB"));
+    if (screen().split("DirlumeClipboardA").length !== 2 || screen().split("DirlumeClipboardB").length !== 2) {
+      throw new Error("Terminal clipboard text was inserted more than once.");
+    }
+    terminal.closest(".terminal-card").querySelector('button[aria-label="Close terminal"]').click();
+  }
   async function checkTooltip(control, expected) {
     const pointer = (type) => control.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: "mouse" }));
     pointer("pointerover");
@@ -41,6 +59,7 @@ async (upgraded, reject, portable, replacementFailure) => {
         .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
       await checkTooltip(ssh);
       locations.click();
+      if (terminalPaste) await checkTerminalPaste();
       document.querySelector('.topbar button[aria-label="Options"]').click();
       await window.__TAURI_INTERNALS__.invoke("updater_fixture_options_window");
       const updates = await waitFor(() => {

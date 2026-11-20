@@ -14,6 +14,8 @@ pub struct UpdateFixture {
     reject: bool,
     #[serde(default)]
     replacement_failure: bool,
+    #[serde(default)]
+    terminal_paste: bool,
     metadata: serde_json::Value,
 }
 
@@ -63,8 +65,8 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
     let portable = false;
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
     let _ = webview.eval(format!(
-        "({script})({upgraded}, {}, {portable}, {});",
-        fixture.reject, fixture.replacement_failure
+        "({script})({upgraded}, {}, {portable}, {}, {});",
+        fixture.reject, fixture.replacement_failure, fixture.terminal_paste
     ));
 }
 

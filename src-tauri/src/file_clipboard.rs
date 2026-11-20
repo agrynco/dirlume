@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf, sync::Mutex};
 
-use clipboard_rs::{Clipboard, ClipboardContext};
+use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -40,6 +40,20 @@ fn with_clipboard<T>(
 pub async fn copy_path(path: String, app: AppHandle) -> Result<()> {
     blocking(move || with_clipboard(&app, |clipboard| clipboard.set_text(path).map_err(message)))
         .await
+}
+
+#[tauri::command]
+pub async fn clipboard_text(app: AppHandle) -> Result<String> {
+    blocking(move || {
+        with_clipboard(&app, |clipboard| {
+            if clipboard.has(ContentFormat::Text) {
+                clipboard.get_text().map_err(message)
+            } else {
+                Ok(String::new())
+            }
+        })
+    })
+    .await
 }
 
 #[tauri::command]
