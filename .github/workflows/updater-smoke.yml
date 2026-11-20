@@ -2,6 +2,7 @@ name: Install signed desktop updates
 
 on:
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

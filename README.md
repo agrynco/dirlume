@@ -204,7 +204,11 @@ Install a recent release with the bundled verification key to enable in-app upda
 
 The installer and server filenames include both numbers, for example `Dirlume-0.1.1-build.42001-windows-x64.setup.exe`. In the installed app, open **Options → General → Version** to see `0.1.1+42001`. The server reports the same value with `dirlume-server --version`.
 
-To publish the next stable [GitHub Release](https://github.com/agrynco/dirlume/releases), open **Actions → CI and releases → Run workflow**, leave the branch set to `main`, and click **Run workflow**. The workflow increments the published patch version, promotes a newer prerelease to its stable version, or uses a higher source version. After all platforms pass, it verifies the packages and creates the matching `vX.Y.Z` tag and release. Pull requests and branch pushes to `main` run CI checks only.
+Open work pull requests against `prerelease`. Pull requests and pushes to that branch do not start CI. When a batch is ready, open one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open.
+
+After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
+
+To publish manually, open **Actions → CI and releases → Run workflow** and select `main`. A manual release runs the full build and test suite before publishing.
 
 For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
 
