@@ -204,7 +204,9 @@ Install a recent release with the bundled verification key to enable in-app upda
 
 The installer and server filenames include both numbers, for example `Dirlume-0.1.1-build.42001-windows-x64.setup.exe`. In the installed app, open **Options → General → Version** to see `0.1.1+42001`. The server reports the same value with `dirlume-server --version`.
 
-Open work pull requests against `prerelease`. Pull requests and pushes to that branch do not start CI. When a batch is ready, open one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open.
+Start work branches from `prerelease`. For implementation tasks, Codex runs the relevant local checks, opens a pull request into `prerelease`, and squash-merges it when ready. Pull requests and pushes to that branch do not start CI.
+
+When the batch is ready, the maintainer opens one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open.
 
 After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
 
