@@ -45,7 +45,7 @@ import { TextWindow, CompareDialog } from "./TextTools";
 import type { MarkdownLocation, MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
-  applyListing, childPlace, closeSearchResults, emptyPane, extendKeyboardRange, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, markAndMoveCursor, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, visibleEntries,
   type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
@@ -373,7 +373,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       updatePane(side, (pane) => {
         const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
-        return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [], keyboardRange: undefined } : listing;
+        return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
       });
       return true;
     };
@@ -1183,7 +1183,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function sort(side: Side, column: SortColumn) {
     updatePane(side, (pane) => ({
-      ...pane, keyboardRange: undefined, sort: { column, asc: column !== pane.sort.column || !pane.sort.asc },
+      ...pane, sort: { column, asc: column !== pane.sort.column || !pane.sort.asc },
     }));
   }
 
@@ -1361,7 +1361,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!range) selectionAnchor.current[side] = entry.name;
     const group = range && index >= 0 ? selectableRange(items, anchor < 0 ? index : anchor, index) : [];
     updatePane(side, (pane) => ({
-      ...pane, selected: entry.name, keyboardRange: undefined,
+      ...pane, selected: entry.name,
       marked: range ? [...new Set([...pane.marked, ...group])] : mark && entry.name !== ".."
         ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
         : pane.marked.includes(entry.name) ? pane.marked : [],
@@ -1626,8 +1626,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       updatePane(active, (pane) => {
         const index = paneCursorIndex(pane, items);
         const next = Math.max(0, Math.min(items.length - 1, offset === 0 ? 0 : index + offset));
-        return isRangeCommand(command) ? extendKeyboardRange(pane, items, index, next) :
-          { ...pane, selected: items[next].name, keyboardRange: undefined };
+        return isRangeCommand(command) ? markAndMoveCursor(pane, items, index, next) : { ...pane, selected: items[next].name };
       });
       return;
     }
@@ -1987,7 +1986,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
               ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
-            onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name, keyboardRange: undefined })}
+            onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
               showProcesses(side, false);
@@ -2021,7 +2020,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               const item = paneItem(panes[side], entry);
               if (item) revealResult(side, item.place, item.entry.name);
             }}
-            onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter, keyboardRange: undefined }))} onSort={(column) => sort(side, column)}
+            onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column)}
             onRemote={() => openConnections(side, "remote")} onFtp={() => openConnections(side, "ftp")}
             onSsh={() => openConnections(side, "ssh")} onSmb={() => openConnections(side, "smb")}
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
@@ -2372,7 +2371,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <McpRequests context={{
         active, panes, preferences, shortcuts: folderShortcuts, load, remote: routeLocation, refresh,
         selection: (side, names) => {
-          updatePane(side, (pane) => ({ ...pane, marked: names, selected: names[0] ?? pane.selected, keyboardRange: undefined }));
+          updatePane(side, (pane) => ({ ...pane, marked: names, selected: names[0] ?? pane.selected }));
           setActive(side);
         },
         setPreferences: (next) => { persistPreferences(next); setPreferences(next); },
