@@ -9,7 +9,7 @@ import { X } from "lucide-react";
 import { api, describeError, windowsClient, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
-import { eventShortcut } from "./preferences";
+import { bindingMatches, eventShortcut } from "./preferences";
 import "@xterm/xterm/css/xterm.css";
 
 // Focus and device reports are forwarded to the PTY without changing input state.
@@ -264,7 +264,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown" || event.isComposing) return true;
       const command = eventShortcut(event);
-      if (!pasteSettings.current.pasteShortcut.includes(command)) {
+      if (!bindingMatches(pasteSettings.current.pasteShortcut, command)) {
         if (command === "Ctrl+V") event.preventDefault();
         return true;
       }

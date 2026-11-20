@@ -6,7 +6,7 @@ import { reportFrontendError } from "./diagnostics";
 import { saveDialogSize } from "./Dialog";
 import { HelpDialog } from "./HelpDialog";
 import { setLanguage, t } from "./i18n";
-import { eventShortcut, persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
+import { bindingMatches, eventShortcut, persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
 import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
@@ -78,7 +78,7 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
     onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} />;
 
   return <div onKeyDownCapture={(event) => {
-    if (event.defaultPrevented || event.nativeEvent.isComposing || !shortcuts.help.includes(eventShortcut(event)) ||
+    if (event.defaultPrevented || event.nativeEvent.isComposing || !bindingMatches(shortcuts.help, eventShortcut(event)) ||
         (event.target instanceof Element && event.target.closest("[data-shortcut-capture]"))) return;
     event.preventDefault();
     setHelp(true);

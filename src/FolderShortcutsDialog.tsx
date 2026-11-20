@@ -5,7 +5,7 @@ import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { folderGroups, normalizeFolderPath, sameFolderShortcut, type FolderGroup, type FolderShortcut, type FolderShortcuts } from "./folderShortcuts";
 import { countText, t } from "./i18n";
-import { eventShortcut, showShortcut, type Bindings } from "./preferences";
+import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 
 type Picker = { kind: "picker"; group: FolderGroup; selection: number };
 
@@ -167,7 +167,7 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     const shortcut = eventShortcut(event);
-    const action = actions.find(({ command }) => bindings[command].includes(shortcut));
+    const action = actions.find(({ command }) => bindingMatches(bindings[command], shortcut));
     if (action) {
       event.preventDefault();
       if (!action.disabled && !event.repeat) action.run();

@@ -1,3 +1,4 @@
+import { fileMask } from "./fileMask";
 import { HistoryField } from "./HistoryField";
 import { countText, errorText, t } from "./i18n";
 import { Button } from "./Button";
@@ -38,34 +39,6 @@ async function findFtp(
     signal.removeEventListener("abort", stop);
     output.onmessage = () => {};
   }
-}
-
-function fileMask(mask: string) {
-  const pattern = [...mask.toLowerCase()];
-  return (name: string) => {
-    const letters = [...name.toLowerCase()];
-    let fileIndex = 0;
-    let maskIndex = 0;
-    let wildcard = -1;
-    let wildcardEnd = 0;
-    // Only the most recent '*' can consume another character.
-    while (fileIndex < letters.length) {
-      if (pattern[maskIndex] === "*") {
-        wildcard = maskIndex++;
-        wildcardEnd = fileIndex;
-      } else if (pattern[maskIndex] === "?" || pattern[maskIndex] === letters[fileIndex]) {
-        fileIndex++;
-        maskIndex++;
-      } else if (wildcard >= 0) {
-        maskIndex = wildcard + 1;
-        fileIndex = ++wildcardEnd;
-      } else {
-        return false;
-      }
-    }
-    while (pattern[maskIndex] === "*") maskIndex++;
-    return maskIndex === pattern.length;
-  };
 }
 
 export async function findFiles(root: FileLocation, mask: string, showHidden: boolean, signal: AbortSignal, append: (matches: SearchMatch[]) => void) {

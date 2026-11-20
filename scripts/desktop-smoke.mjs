@@ -14,6 +14,9 @@ import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testPanelModes } from "./panel-modes-smoke.mjs";
+import { testFileSort } from "./file-sort-smoke.mjs";
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
@@ -30,6 +33,7 @@ import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-s
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
 import { testDocumentWatch } from "./document-watch-smoke.mjs";
+import { testHeaderMenus } from "./menu-header-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -177,6 +181,7 @@ try {
   await checkResizeMarker(resizeMain);
   assert.equal(await page.locator(".window-titlebar").getAttribute("data-tauri-drag-region"), "deep");
   assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
+  await testHeaderMenus(page, true);
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
   async function dragHorizontally(handle, delta) {
     const bounds = await handle.boundingBox();
@@ -253,13 +258,8 @@ try {
   await checkTooltip(sshSource);
   await locationsTrigger.click();
   await testNativeAppearancePicker(page);
-  async function editAddress(side) {
-    const input = page.getByRole("combobox", { name: `${side} path`, exact: true });
-    if (!await input.isVisible()) {
-      await page.locator(`#${side}-files`).press("Control+l");
-      await input.waitFor();
-    }
-    return input;
+  function editAddress(side) {
+    return editPaneAddress(page, side);
   }
   const panePath = (side) => page.locator(`#${side}-path`).getAttribute("data-path");
   for (const side of ["left", "right"]) {
@@ -858,9 +858,11 @@ try {
   await refreshSizeFixture.click();
   await measuredItem.getByText("1 B", { exact: true }).waitFor();
   const sizeSort = leftPane.getByRole("button", { name: /^Size\b/ });
+  const sizeOrder = () => left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
   await sizeSort.click();
-  assert.deepEqual(await left.getByRole("option").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)),
-    ["..", "measured-item", "other.txt"]);
+  assert.deepEqual(await sizeOrder(), ["..", "other.txt", "measured-item"]);
+  await sizeSort.click();
+  assert.deepEqual(await sizeOrder(), ["..", "measured-item", "other.txt"]);
   await leftPane.getByRole("button", { name: /^Name\b/ }).click();
   await navigate("left", src);
   await page.getByRole("option", { name: /^notes.txt/ }).click();
@@ -1113,7 +1115,7 @@ try {
   await captureNewFolder.press("F5");
   await shortcutConflict().getByText("F5 is assigned to Copy.", { exact: true }).waitFor();
   await shortcutConflict().getByRole("button", { name: "Choose another shortcut", exact: true }).click();
-  await captureNewFolder.press("Control+F12");
+  await captureNewFolder.press("Control+Shift+F12");
   await optionsDialog.getByRole("button", { name: "Change F5 for Copy", exact: true }).waitFor();
   await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await navigate("left", attributes);
@@ -1184,7 +1186,7 @@ try {
   console.log("Verified file and folder attributes, cancel, pane refresh, and text selection.");
   await navigate("left", src);
   await page.getByRole("listbox", { name: "right files", exact: true }).focus();
-  await page.keyboard.press("Control+F12");
+  await page.keyboard.press("Control+Shift+F12");
   await page.getByRole("dialog", { name: "New folder" }).getByLabel("Name", { exact: true }).fill("verified");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("option", { name: /^verified/ }).waitFor();
@@ -1612,7 +1614,15 @@ try {
     const renamedServer = remote.getByRole("option", { name: /^Saved test server/ });
     await renamedServer.click();
     await remote.press("Enter");
-    await remote.getByRole("option", { name: /^folder/ }).click();
+    const remoteFolder = remote.getByRole("option", { name: /^folder/ });
+    await remoteFolder.waitFor();
+    await remote.press("Control+F12");
+    const remoteSort = page.getByRole("dialog", { name: "Sort by", exact: true });
+    assert.equal(await remoteSort.locator('[data-sort-mode="streamCount"]').getAttribute("aria-disabled"), "true");
+    assert.equal(await remoteSort.locator('[data-sort-mode="hardLinks"]').getAttribute("aria-disabled"), "true");
+    assert.equal(await remoteSort.locator('[data-sort-mode="modified"]').getAttribute("aria-disabled"), null);
+    await page.keyboard.press("Escape");
+    await remoteFolder.click();
     await remote.press("Control+a");
     await properties.getByText("folder", { exact: true }).waitFor();
     assert.equal(await properties.getByRole("button", { name: "Apply", exact: true }).isDisabled(), true);
@@ -2085,6 +2095,10 @@ try {
     assert.ok((light + 0.05) / (dark + 0.05) >= 4.5, `${foreground} on ${background} must be readable`);
   }
   await closeToolWindow(optionsPage, () => appearance.getByRole("button", { name: "Done", exact: true }).click());
+  // Closing the error log can return to another open document.
+  const fileWorkspace = page.getByRole("navigation", { name: "Open documents", exact: true })
+    .getByRole("button", { name: "Files", exact: true });
+  if (await fileWorkspace.isVisible()) await fileWorkspace.click();
   await navigate("left", attributes);
   const showHidden = page.getByRole("button", { name: "Show hidden files", exact: true });
   if (await showHidden.getAttribute("aria-pressed") === "false") await showHidden.click();
@@ -2125,6 +2139,7 @@ try {
   await themeRoot().waitFor();
   assert.equal(await themeRoot().evaluate((root) => getComputedStyle(root).getPropertyValue("--panel-bg").trim()), "#142560");
   console.log("Verified Classic blue colors, selection contrast, preview, and custom and built-in theme persistence.");
+  page = await testPanelModes({ page, startDesktop, exitDesktop, root: temp });
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
@@ -2144,6 +2159,7 @@ try {
   page = await testMcp({ page, root: temp, startDesktop, exitDesktop, pid: () => child.pid });
   await testSystemTheme(page);
   await testScreenColor(page);
+  page = await testFileSort({ page, startDesktop, exitDesktop, root: temp });
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

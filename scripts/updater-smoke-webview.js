@@ -43,6 +43,69 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     }
     pointer("pointerout");
   }
+  async function checkHeaderMenus() {
+    const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
+    for (const side of ["Right", "Left"]) {
+      const control = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === side);
+      control.click();
+      await waitFor(`the ${side} menu to open`, () => control.getAttribute("aria-expanded") === "true");
+      bar.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0 }));
+      await waitFor(`the ${side} menu to close`, () => control.getAttribute("aria-expanded") === "false");
+    }
+  }
+  async function checkPanelModes() {
+    const pane = await waitFor("the left file pane", () => document.querySelector('#left-files[aria-busy="false"]'));
+    const panel = pane.closest(".pane");
+    const right = document.getElementById("right-pane");
+    const originalRight = right.dataset.panelMode;
+    const key = (type, key, code, ctrlKey) => pane.dispatchEvent(new KeyboardEvent(type, {
+      key, code, ctrlKey, bubbles: true, cancelable: true,
+    }));
+    const chord = (side, digit) => {
+      key("keydown", "Control", `Control${side}`, true);
+      key("keydown", String(digit), `Digit${digit}`, true);
+      key("keyup", "Control", `Control${side}`, false);
+    };
+    pane.focus();
+    for (const [digit, id] of [[1, "brief"], [2, "medium"], [3, "full"], [4, "wide"], [8, "owners"], [9, "links"], [0, "alternativeFull"]]) {
+      chord("Left", digit);
+      await waitFor(`the ${id} panel mode`, () => panel.dataset.panelMode === id);
+      if (right.dataset.panelMode !== originalRight) throw new Error("A panel mode changed both panes.");
+      if (digit === 1 || digit === 2) {
+        const columnHeaders = panel.querySelectorAll(".file-column-group");
+        if (columnHeaders.length !== (digit === 1 ? 3 : 2)) throw new Error("The grouped mode showed the wrong number of headings.");
+      }
+    }
+    for (let digit = 0; digit < 10; digit++) {
+      chord("Right", digit);
+      await waitFor(`bookmark group ${digit}`, () =>
+        document.querySelector(".statusbar")?.textContent.includes(`No folder shortcuts in group ${digit}.`));
+      if (panel.dataset.panelMode !== "alternativeFull") throw new Error("A bookmark shortcut changed the panel mode.");
+    }
+    chord("Left", 3);
+    await waitFor("the restored Full panel mode", () => panel.dataset.panelMode === "full");
+  }
+  async function checkFileSort() {
+    const pane = await waitFor("the file pane for sorting", () => document.querySelector('#left-files[aria-busy="false"]'));
+    const send = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
+      key, bubbles: true, cancelable: true, ...modifiers,
+    }));
+    pane.focus();
+    send(pane, "F12", { ctrlKey: true });
+    const popup = await waitFor("the Sort by menu", () => document.querySelector(".sort-menu"));
+    const entries = popup.querySelectorAll("[data-sort-mode]");
+    if (entries.length !== 15 || entries[0].dataset.sortMode !== "name" || entries[14].dataset.sortMode !== "streamSize") {
+      throw new Error("The Sort by menu omitted a sort mode.");
+    }
+    const current = popup.querySelector('button[data-sort-mode="name"]');
+    if (current.getAttribute("aria-checked") !== "true") throw new Error("Name was not the initial selection.");
+    send(current, "-");
+    await waitFor("descending file name order", () => current.getAttribute("aria-label").includes("Descending"));
+    send(current, "+");
+    await waitFor("ascending file name order", () => current.getAttribute("aria-label").includes("Ascending"));
+    popup.closest("dialog").querySelector('button[aria-label="Close dialog"]').click();
+    await waitFor("focus back in the file pane", () => !document.querySelector(".sort-menu") && document.activeElement === pane);
+  }
   async function checkDocumentMode() {
     const fileName = "document-mode-fixture.txt";
     const key = (target, key, modifiers = {}) => target.dispatchEvent(new KeyboardEvent("keydown", {
@@ -143,6 +206,9 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
         .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
       await checkTooltip(ssh);
       locations.click();
+      await checkHeaderMenus();
+      await checkPanelModes();
+      await checkFileSort();
       if (fixtureDirectory) await checkDocumentMode();
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();

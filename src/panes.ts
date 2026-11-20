@@ -3,7 +3,9 @@ import { locale, t } from "./i18n";
 import { connectionEntries } from "./savedConnections";
 
 export type Side = "left" | "right";
-export type SortColumn = "name" | "size" | "modified" | "time";
+import { compareFileEntries, defaultFileSort, sortMode, type FileSort, type SortMode, type SortSettings } from "./fileSort";
+import type { PanelMetadata } from "./api";
+export type { SortColumn } from "./fileSort";
 export type ListingAction = "push" | "refresh" | number;
 
 export interface DeniedSshListing {
@@ -44,15 +46,15 @@ export interface PaneState {
   deniedSshListing?: DeniedSshListing;
   sudoListing?: boolean;
   search: SearchResults | null;
-  sort: { column: SortColumn; asc: boolean };
+  sort: FileSort;
 }
 
 export const emptyPane: PaneState = {
   place: null, entries: [], selected: null, marked: [], sizes: new Map(), measuring: [], history: [], position: -1,
-  filter: "", loading: false, omitted: 0, error: "", search: null, sort: { column: "name", asc: true },
+  filter: "", loading: false, omitted: 0, error: "", search: null, sort: defaultFileSort,
 };
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
 
 export function hasParentRow(place: Place | null) {
   if (place?.kind === "connections") return true;
@@ -64,21 +66,37 @@ export function folderMeasurement(pane: PaneState, entry: Entry) {
   return entry.directory && !entry.link && !pane.search ? pane.sizes.get(entry.name) : undefined;
 }
 
-export function visibleEntries(pane: PaneState, hidden: boolean) {
+export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortSettings,
+  canSort: (mode: SortMode) => boolean, metadata: ReadonlyMap<string, PanelMetadata>, descriptions: ReadonlyMap<string, string>, pending: boolean) {
   const filter = pane.filter.toLocaleLowerCase();
-  const { column, asc } = pane.sort;
+  const chosen = sortMode(pane.sort.column);
+  const available = canSort(chosen) && !pending;
+  const sort = available ? pane.sort : { ...pane.sort, asc: true };
   const entries = pane.search
     ? Array.from(pane.search.matches.values(), ({ entry, relativePath }) => ({ ...entry, name: relativePath }))
     : pane.entries;
-  const visible = entries
-    .filter((entry) => (hidden || !entry.hidden) && (!filter || entry.name.toLocaleLowerCase().includes(filter)))
-    .sort((a, b) => {
-      if (a.directory !== b.directory) return a.directory ? -1 : 1;
-      const byName = collator.compare(a.name, b.name);
-      const metric = (entry: Entry) => column === "size" ? (folderMeasurement(pane, entry)?.bytes ?? entry.size) : entry.modified;
-      const order = column === "name" ? byName : (metric(a) ?? -1) - (metric(b) ?? -1) || byName;
-      return asc ? order : -order;
-    });
+  const visible = compareFileEntries(
+    entries.filter((entry) => (hidden || !entry.hidden) && (!filter || entry.name.toLocaleLowerCase().includes(filter))),
+    sort, available ? chosen : "name", settings, pane.marked,
+    (entry) => pane.search?.matches.get(entry.name)?.entry.name ?? entry.name,
+    (entry, field) => {
+      switch (field) {
+        case "modified": return entry.modified;
+        case "size": return folderMeasurement(pane, entry)?.bytes ?? entry.size;
+        case "description": return entry.description ?? descriptions.get(entry.name);
+        case "hardLinks": return entry.directory || entry.link ? undefined : entry.hardLinks ?? metadata.get(entry.name)?.hardLinks;
+        case "owner":
+        case "created":
+        case "accessed":
+        case "changed":
+        case "allocated":
+        case "streamCount":
+        case "streamSize":
+          return entry[field] ?? metadata.get(entry.name)?.[field];
+        default: return undefined;
+      }
+    },
+  );
   if (!pane.search && hasParentRow(pane.place)) {
     visible.unshift({ name: "..", directory: true, link: false, hidden: false, size: null, modified: null });
   }

@@ -5,13 +5,45 @@ import { reportFrontendError } from "./diagnostics";
 import { isTauri } from "@tauri-apps/api/core";
 import { folderGroups, type FolderGroup } from "./folderShortcuts";
 import { api, windowsClient, type QuickLocation } from "./api";
+import { defaultPanelModes, isPanelMode, panelModeDigits, panelModeIds, panelModeNames, readPanelModes, type PanelModeId, type PanelModes } from "./panelModes";
+
+import { defaultSortSettings, isSortMode, readSortSettings, sortModeIds, sortModes, type SortMode, type SortSettings } from "./fileSort";
+
+type SortModeCommand = `sortMode-${SortMode}`;
+const sortModeCommands = Object.fromEntries(sortModeIds.map((mode) =>
+  [sortModeCommand(mode), { label: "Sort by {0}", key: sortModes[mode].key }],
+)) as Record<SortModeCommand, { label: string; key: string }>;
+
+export function sortModeCommand(mode: SortMode): SortModeCommand {
+  return `sortMode-${mode}`;
+}
+
+export function commandSortMode(command: Command): SortMode | undefined {
+  if (!command.startsWith("sortMode-")) return;
+  const mode = command.slice("sortMode-".length);
+  if (isSortMode(mode)) return mode;
+}
 
 type FolderGroupCommand = `addFolderGroup${FolderGroup}` | `openFolderGroup${FolderGroup}`;
+export type PanelModeCommand = `panelMode-${PanelModeId}`;
+const panelModeCommands = Object.fromEntries(panelModeIds.map((id) =>
+  [panelModeCommand(id), { label: "Switch to {0} panel mode", key: `LeftCtrl+${panelModeDigits[id]}` }],
+)) as Record<PanelModeCommand, { label: string; key: string }>;
+
+export function panelModeCommand(id: PanelModeId): PanelModeCommand {
+  return `panelMode-${id}`;
+}
+
+export function commandPanelMode(command: Command): PanelModeId | undefined {
+  if (!command.startsWith("panelMode-")) return;
+  const id = command.slice("panelMode-".length);
+  if (isPanelMode(id)) return id;
+}
 const macDocumentKeys = typeof navigator !== "undefined" && /Macintosh/.test(navigator.userAgent);
 const documentModifier = macDocumentKeys ? "Meta" : "Ctrl";
 const folderGroupCommands = Object.fromEntries(folderGroups.flatMap((group) => [
   [`addFolderGroup${group}`, { label: "Add folder shortcut to group {0}", key: `Ctrl+Shift+${group}` }],
-  [`openFolderGroup${group}`, { label: "Open folder shortcut group {0}", key: `Ctrl+${group}` }],
+  [`openFolderGroup${group}`, { label: "Open folder shortcut group {0}", key: `RightCtrl+${group}` }],
 ])) as Record<FolderGroupCommand, { label: string; key: string }>;
 const driveLetters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
   "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"] as const;
@@ -122,6 +154,16 @@ export const commands = {
   folderShortcuts: { label: "Folder shortcuts", key: "" },
   addFolderShortcut: { label: "Bookmark current folder in group 8", key: "Ctrl+Shift+F8" },
   ...folderGroupCommands,
+  ...panelModeCommands,
+  ...sortModeCommands,
+  sortMenu: { label: "Sort modes", key: "Ctrl+F12" },
+  sortGroups: { label: "Use sort groups", key: "" },
+  sortMarkedFirst: { label: "Show selected first", key: "Shift+F12" },
+  sortDirectoriesFirst: { label: "Show directories first", key: "" },
+  sortAscending: { label: "Sort ascending", key: "+" },
+  sortDescending: { label: "Sort descending", key: "-" },
+  sortReverse: { label: "Reverse sort direction", key: "*" },
+  sortEditCriteria: { label: "Edit sort tie-breakers", key: "F4" },
   pickerAddFolder: { label: "Add a folder shortcut from the picker", key: "Insert" },
   pickerEditFolder: { label: "Edit the selected folder shortcut", key: "F4" },
   pickerRemoveFolder: { label: "Remove the selected folder shortcut", key: "Delete" },
@@ -135,6 +177,8 @@ export type ShortcutScheme = { id: string; name: string; bindings: Bindings };
 export type Provider = "server" | "kswitcher";
 
 const alternateDefaults: Partial<Record<Command, { oldCommand: string; key: string }>> = {
+  sortAscending: { oldCommand: "sortAscendingAlternate", key: "Shift++" },
+  sortReverse: { oldCommand: "sortReverseAlternate", key: "Shift+*" },
   firstRow: { oldCommand: "firstRowAlternate", key: "Home" },
   lastRow: { oldCommand: "lastRowAlternate", key: "End" },
   refresh: { oldCommand: "refreshAlternate", key: "" },
@@ -151,6 +195,10 @@ export function commandLabel(command: Command) {
   const folder = folderGroupCommand(command);
   const drive = /^drive([A-Z])Sources$/.exec(command)?.[1];
   if (drive) return t(commands[command].label, `${drive}:`);
+  const sort = commandSortMode(command);
+  if (sort) return t(commands[command].label, t(sortModes[sort].label).toLocaleLowerCase());
+  const mode = commandPanelMode(command);
+  if (mode) return t(commands[command].label, t(panelModeNames[mode]));
   return folder ? t(commands[command].label, folder.group) : t(commands[command].label);
 }
 
@@ -169,6 +217,7 @@ export function commandScope(command: Command) {
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
+  if (command === "sortAscending" || command === "sortDescending" || command === "sortReverse" || command === "sortEditCriteria") return "sortMenu";
   return "main";
 }
 
@@ -185,15 +234,22 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));
 }
 
+function shortcutOverlap(left: string, right: string) {
+  return left === right || left.replace(/^(Left|Right)Ctrl\+/, "Ctrl+") === right ||
+    right.replace(/^(Left|Right)Ctrl\+/, "Ctrl+") === left;
+}
+
 export function shortcutConflicts(bindings: Bindings, command: Command, key: string) {
-  return commandNames.filter((other) => other !== command && bindings[other].includes(key) && shortcutScopesOverlap(other, command));
+  return commandNames.filter((other) => other !== command && bindings[other].some((binding) => shortcutOverlap(binding, key)) && shortcutScopesOverlap(other, command));
 }
 
 export function assignShortcut(bindings: Bindings, command: Command, key: string, replacing?: string): Bindings {
   const next = { ...bindings };
-  for (const other of shortcutConflicts(bindings, command, key)) next[other] = bindings[other].filter((binding) => binding !== key);
+  for (const other of shortcutConflicts(bindings, command, key)) next[other] = bindings[other].filter((binding) => !shortcutOverlap(binding, key));
   if (!bindings[command].includes(key)) {
-    next[command] = replacing ? bindings[command].map((binding) => binding === replacing ? key : binding) : [...bindings[command], key];
+    const current = bindings[command];
+    next[command] = replacing ? current.flatMap((binding) => binding === replacing ? [key] :
+      shortcutOverlap(binding, key) ? [] : [binding]) : [...current.filter((binding) => !shortcutOverlap(binding, key)), key];
   }
   return next;
 }
@@ -210,6 +266,9 @@ export interface Preferences {
   language: Language;
   theme: Theme;
   layout: PanelLayout;
+  panelModes: PanelModes;
+  sortSettings: SortSettings;
+  selectedPanelModes: Record<"left" | "right", PanelModeId>;
   actionButtonWidth: ActionButtonWidth;
   mainMenuAlignment: MenuPosition;
   systemLightScheme: string;
@@ -242,7 +301,7 @@ export const defaultBindings = Object.fromEntries<readonly string[]>(commandName
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
     command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" &&
-    !folderGroupCommand(command) && commandScope(command) !== "folderPicker"
+    !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
   return [command, [key, alternateDefaults[command]?.key].filter((value): value is string => Boolean(value))];
 })) as Bindings;
@@ -259,6 +318,11 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
   };
   const candidates = commandNames.flatMap((command) => {
     const value = saved?.[command];
+    const group = folderGroupCommand(command);
+    const legacyDefault = group && !group.add && version < 7 ? `Ctrl+${group.group}` : undefined;
+    const migrated = legacyDefault && (value === legacyDefault ||
+      (Array.isArray(value) && value.length === 1 && value[0] === legacyDefault));
+    if (migrated) return defaultBindings[command].map((key) => ({ command, key, configured: false }));
     if (Array.isArray(value)) return value.flatMap((key: unknown) =>
       typeof key === "string" && key && (command !== "zoomFont" || wheelBindings.includes(key)) ? [{ command, key, configured: true }] : []);
     const useSaved = typeof value === "string" && (version > 0 || value !== oldDefaults[command]) &&
@@ -274,15 +338,14 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
     ];
   });
   const accepted = new Set<(typeof candidates)[number]>();
-  const owners = new Map<string, Command[]>();
+  const owners: { key: string; command: Command }[] = [];
   // Existing choices take precedence over newly introduced defaults.
   for (const binding of [...candidates.filter(({ configured }) => configured), ...candidates.filter(({ configured }) => !configured)]) {
     const { command, key } = binding;
     if (!key || (command === "zoomFont" && !wheelBindings.includes(key))) continue;
-    const previous = owners.get(key) ?? [];
-    if (previous.some((other) => shortcutScopesOverlap(other, command))) continue;
+    if (owners.some((other) => shortcutOverlap(other.key, key) && shortcutScopesOverlap(other.command, command))) continue;
     accepted.add(binding);
-    owners.set(key, [...previous, command]);
+    owners.push({ key, command });
   }
   return Object.fromEntries<readonly string[]>(commandNames.map((command) => [command,
     candidates.flatMap((binding) => binding.command === command && binding.key && accepted.has(binding) ? [binding.key] : []),
@@ -310,6 +373,8 @@ export function readPreferences(): Preferences {
   const defaults: Preferences = {
     theme: "system", layout: "standard", actionButtonWidth: "compact", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
     mainMenuAlignment: "center", activeShortcutScheme: null, shortcutSchemes: [],
+    sortSettings: defaultSortSettings,
+    panelModes: defaultPanelModes, selectedPanelModes: { left: "full", right: "full" },
     viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
     terminalResizeRows: 1, terminalPasteOnRightClick: true,
   };
@@ -338,6 +403,12 @@ export function readPreferences(): Preferences {
       language: readLanguage(saved.language),
       theme: readTheme(saved.theme),
       layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
+      sortSettings: readSortSettings(saved.sortSettings),
+      panelModes: readPanelModes(saved.panelModes),
+      selectedPanelModes: {
+        left: isPanelMode(saved.selectedPanelModes?.left) ? saved.selectedPanelModes.left : "full",
+        right: isPanelMode(saved.selectedPanelModes?.right) ? saved.selectedPanelModes.right : "full",
+      },
       actionButtonWidth: saved.actionButtonWidth === "full" || saved.actionButtonWidth === "compact"
         ? saved.actionButtonWidth : defaults.actionButtonWidth,
       mainMenuAlignment: readMenuAlignment(saved.mainMenuAlignment) ?? readMenuAlignment(saved.menuPosition) ?? defaults.mainMenuAlignment,
@@ -391,7 +462,7 @@ export function flushPortablePreferences() {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  const settings = { ...preferences, bindingDefaults: 6 };
+  const settings = { ...preferences, bindingDefaults: 7 };
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;
@@ -404,9 +475,48 @@ export function persistPreferences(preferences: Preferences) {
   });
 }
 
-export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {
+const heldControl = new Set<"ControlLeft" | "ControlRight">();
+
+export function trackControlKeys() {
+  function track(event: KeyboardEvent) {
+    if (!event.ctrlKey) heldControl.clear();
+    if (event.code !== "ControlLeft" && event.code !== "ControlRight") return;
+    if (event.type === "keyup") heldControl.delete(event.code);
+    else if (!event.repeat) heldControl.add(event.code);
+  }
+
+  window.addEventListener("keydown", track, true);
+  window.addEventListener("keyup", track, true);
+  window.addEventListener("blur", () => heldControl.clear());
+}
+
+function controlSide() {
+  if (heldControl.size !== 1) return undefined;
+  return heldControl.has("ControlLeft") ? "LeftCtrl" : "RightCtrl";
+}
+
+export function bindingMatches(bindings: readonly string[], shortcut: string) {
+  if (!shortcut) return false;
+  if (bindings.includes(shortcut)) return true;
+  const side = controlSide();
+  return Boolean(side && shortcut.startsWith("Ctrl+") && bindings.includes(side + shortcut.slice(4)));
+}
+
+export function captureShortcut(event: KeyboardEvent, distinguishControl: boolean) {
+  if (event.getModifierState("AltGraph") && event.code === "AltRight") return "";
+  const shortcut = eventShortcut(event);
+  if (!distinguishControl || !shortcut.startsWith("Ctrl+")) return shortcut;
+  const side = controlSide();
+  return side && !event.getModifierState("AltGraph") ? side + shortcut.slice(4) : "";
+}
+
+export function eventShortcut(event: { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }, key = event.key) {
   const { ctrlKey, metaKey, altKey, shiftKey } = event;
-  if (["Control", "Meta", "Alt", "Shift", "Unidentified", "Dead", "Process"].includes(key)) return "";
+  if (ctrlKey && !metaKey && !altKey && event.code && key === event.key) {
+    if (/^Digit[0-9]$/.test(event.code)) key = event.code.slice(5);
+    else if (/^Numpad[0-9]$/.test(event.code) && /^[0-9]$/.test(key)) key = event.code;
+  }
+  if (["Control", "Meta", "Alt", "AltGraph", "Shift", "Unidentified", "Dead", "Process"].includes(key)) return "";
   return [
     ...(ctrlKey ? ["Ctrl"] : []),
     ...(metaKey ? ["Meta"] : []),
@@ -416,15 +526,10 @@ export function eventShortcut(event: { key: string; ctrlKey: boolean; metaKey: b
   ].join("+");
 }
 
-export function physicalFolderBinding(event: KeyboardEvent, shortcuts: Bindings): FolderGroupCommand | undefined {
-  if (!event.ctrlKey || event.metaKey || event.altKey || event.getModifierState("AltGraph") || !/^Digit[0-9]$/.test(event.code)) return;
-  const command = `${event.shiftKey ? "addFolderGroup" : "openFolderGroup"}${event.code.at(-1)}` as FolderGroupCommand;
-  if (shortcuts[command].includes(defaultBindings[command][0])) return command;
-}
 
 export function quickSearchSeed(event: KeyboardEvent, bindings: readonly string[]): string | null {
   const shortcut = eventShortcut(event);
-  if (shortcut && bindings.includes(shortcut)) return "";
+  if (bindingMatches(bindings, shortcut)) return "";
   if (!bindings.includes("Alt+Letter")) return null;
   if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
   if (Array.from(event.key).length === 1 && /\p{L}/u.test(event.key)) return event.key;
@@ -439,8 +544,10 @@ export function wheelShortcut(event: WheelEvent) {
 
 const arrows: Record<string, string> = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
 
-export function showShortcut(shortcut = "") {
+export function showShortcut(shortcut = ""): string {
   const readable = shortcut.replace(/\bArrow(?:Left|Right|Up|Down)\b/g, (key) => arrows[key]);
+  if (readable.startsWith("LeftCtrl+")) return t("Left Ctrl") + "+" + showShortcut(readable.slice(9));
+  if (readable.startsWith("RightCtrl+")) return t("Right Ctrl") + "+" + showShortcut(readable.slice(10));
   if (mac) return readable.replaceAll("Meta+", "⌘").replaceAll("Ctrl+", "⌃").replaceAll("Alt+", "⌥").replaceAll("Shift+", "⇧");
   return readable.replace(/(^|\+)Meta\+/, "$1" + metaKeyLabel + "+");
 }

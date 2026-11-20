@@ -12,7 +12,7 @@ import { MenuAlignmentSetting, menuAlignmentTerms } from "./MenuAlignmentSetting
 import { matchesSettings, SettingSearchLabel, SettingsSearchTerms } from "./SettingSearchLabel";
 import { api, windowsClient } from "./api";
 import {
-  actionButtonWidths, assignShortcut, commandLabel, commandNames, commands, defaultBindings, eventShortcut, maxTerminalResizeRows,
+  actionButtonWidths, assignShortcut, commandLabel, commandNames, commands, defaultBindings, captureShortcut, commandPanelMode, folderGroupCommand, maxTerminalResizeRows,
   panelLayouts, shortcutBindings, shortcutConflicts, showShortcut, wheelBindings, type ActionButtonWidth, type Bindings, type Command,
   type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
@@ -21,7 +21,11 @@ import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOption
 import { languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
-type Page = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
+import { SortGroupsSettings } from "./FileSortMenu";
+import { PanelModeSettings, panelModeSettingsLabels } from "./PanelModeSettings";
+import { defaultPanelModes, isPanelMode, panelModeIds, panelModeName, panelModeNames, validPanelMode, type PanelModeId } from "./panelModes";
+
+type Page = AppearanceSection | FeaturePage | PanelModeId | "sortGroups" | "viewFonts" | "general" | "shortcuts";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
 type ShortcutCapture = { command: Command; replacing?: string };
 type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
@@ -40,8 +44,8 @@ function readOptionsLocation(): OptionsLocation {
   try {
     const saved = JSON.parse(localStorage.getItem(optionsLocationKey) ?? "null") as Partial<OptionsLocation> | null;
     const page = saved?.page;
-    if (!page || (page !== "general" && page !== "shortcuts" && !isFeaturePage(page) &&
-        !appearancePages.some(({ id }) => id === page))) return defaults;
+    if (!page || (page !== "general" && page !== "shortcuts" && page !== "sortGroups" && !isFeaturePage(page) &&
+        !isPanelMode(page) && !appearancePages.some(({ id }) => id === page))) return defaults;
     const scrollTop = saved.scrollTop;
     return {
       page,
@@ -67,6 +71,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [page, setPage] = useState(initialLocation.page);
   const [query, setQuery] = useState(initialLocation.query);
   const [expanded, setExpanded] = useState(initialLocation.expanded);
+  const [modesExpanded, setModesExpanded] = useState(isPanelMode(initialLocation.page));
   const pageBody = useRef<HTMLDivElement>(null);
   const schemeSelect = useRef<HTMLSelectElement>(null);
   const [preferences, onChange] = useState(saved);
@@ -84,6 +89,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     else historyDates.set(date, [entry]);
   }
   const [capture, setCapture] = useState<ShortcutCapture | null>(null);
+  const [distinguishControl, setDistinguishControl] = useState(false);
   const [conflict, setConflict] = useState<{ key: string; owners: Command[] } | null>(null);
   const [schemeDialog, setSchemeDialog] = useState<ShortcutSchemeDialog | null>(null);
   const [buildVersion, setBuildVersion] = useState("");
@@ -112,14 +118,20 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
       "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
+  const modesMatch = panelModeIds.filter((id) => matches("Panel modes", panelModeNames[id],
+    panelModeName(id, preferences.panelModes), ...panelModeSettingsLabels));
+  const showSortGroups = matches("Sort groups", "Use sort groups", "Filename mask", "Before unmatched items", "After unmatched items");
+  const invalidSettings = preferences.sortSettings.groups.some(({ mask }) => !mask.trim());
+  const modePage = isPanelMode(page) ? page : undefined;
+  const invalidModes = panelModeIds.filter((id) => !validPanelMode(preferences.panelModes[id]));
   const allShortcuts = matches("Keyboard shortcuts", "keymap bindings", "Shortcut scheme");
   const visibleCommands = commandNames.filter((command) =>
     (windowsClient || !/^drive[A-Z]Sources$/.test(command)) &&
     (allShortcuts || matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut))));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
-  const isAppearance = !feature && page !== "general" && page !== "shortcuts";
-  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : "Keyboard shortcuts");
+  const isAppearance = !feature && page !== "sortGroups" && !isPanelMode(page) && page !== "general" && page !== "shortcuts";
+  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : page === "sortGroups" ? "Sort groups" : "Keyboard shortcuts");
 
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
@@ -171,7 +183,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   function apply() {
-    if (hasChanges) onChange(applyPreferences(preferences));
+    if (hasChanges && !invalidModes.length && !invalidSettings) onChange(applyPreferences(preferences));
   }
 
   function saveLocation() {
@@ -244,13 +256,19 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     finishCapture(command);
   }
 
+  function beginCapture(command: Command, replacing?: string) {
+    setDistinguishControl(replacing ? /^(Left|Right)Ctrl\+/.test(replacing) :
+      !!commandPanelMode(command) || folderGroupCommand(command)?.add === false);
+    setCapture({ command, replacing });
+  }
+
   function captureKey(event: KeyboardEvent, current: ShortcutCapture) {
     event.preventDefault();
     event.stopPropagation();
     const { command } = current;
     if (event.key === "Escape") return finishCapture(command);
     if (event.repeat || event.nativeEvent.isComposing) return;
-    const shortcut = command === "menuAlternate" && event.key === "Alt" && !event.ctrlKey && !event.metaKey && !event.shiftKey ? "Alt" : eventShortcut(event);
+    const shortcut = command === "menuAlternate" && event.key === "Alt" && !event.ctrlKey && !event.metaKey && !event.shiftKey ? "Alt" : captureShortcut(event.nativeEvent, distinguishControl);
     if (!shortcut) return;
     if (shortcuts[command].includes(shortcut)) return finishCapture(command);
     const owners = shortcutConflicts(shortcuts, command, shortcut);
@@ -269,9 +287,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <RotateCcw /> {t("Restore defaults")}
         </Button>
       )}
-      {standalone && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
-      <Button type="button" disabled={!hasChanges} onClick={apply}>{t("Apply")}</Button>
-      <Button type="button" className="primary" onClick={() => { apply(); close(); }}>{t("Done")}</Button>
+      {!selection && modePage && <Button type="button" onClick={() => onChange({
+        ...preferences, panelModes: { ...preferences.panelModes, [modePage]: defaultPanelModes[modePage] },
+      })}><RotateCcw /> {t("Reset")}</Button>}
+      {(standalone || modePage) && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
+      <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={apply}>{t("Apply")}</Button>
+      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => { apply(); close(); }}>{t("Done")}</Button>
     </>}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
@@ -284,6 +305,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 event.preventDefault();
                 if (showGeneral) select("general");
                 else if (featureMatches.length) select(featureMatches[0]);
+                else if (modesMatch.length) select(modesMatch[0]);
+                else if (showSortGroups) select("sortGroups");
                 else if (appearanceMatches.length) select(appearanceMatches[0].id);
                 else if (showShortcuts) select("shortcuts");
               }} />
@@ -297,6 +320,23 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
             </Button>)}
+            {showSortGroups && <Button type="button" aria-pressed={!selection && page === "sortGroups"} onClick={() => select("sortGroups")}>
+              {t("Sort groups")}
+            </Button>}
+            {modesMatch.length > 0 && <>
+              <Button type="button" aria-expanded={modesExpanded || searching} aria-controls="options-panel-modes"
+                onClick={() => {
+                  if (!modePage || selection) { select(modesMatch[0]); setModesExpanded(true); }
+                  else setModesExpanded(!modesExpanded);
+                }}>
+                {modesExpanded || searching ? <ChevronDown /> : <ChevronRight />} {t("Panel modes")}
+              </Button>
+              <div id="options-panel-modes" className="settings-tree-branch" hidden={!modesExpanded && !searching}>
+                {modesMatch.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
+                  {panelModeName(id, preferences.panelModes)}
+                </Button>)}
+              </div>
+            </>}
             {appearanceMatches.length > 0 && (
               <>
                 <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
@@ -328,13 +368,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </section>)}
               </div>
             </>}
-            {!showGeneral && !featureMatches.length && !appearanceMatches.length && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
+            {!showGeneral && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showSortGroups && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
           <header className="settings-page-heading">
             {(isAppearance || selection) && <><span>{t("Appearance")}</span><ChevronRight aria-hidden="true" /></>}
-            <h3>{selection ? pickLabel(selection) : t(title ?? "General")}</h3>
+            {!selection && modePage && <><span>{t("Panel modes")}</span><ChevronRight aria-hidden="true" /></>}
+            <h3>{selection ? pickLabel(selection) : modePage ? panelModeName(modePage, preferences.panelModes) : t(title ?? "General")}</h3>
           </header>
           {!selection && page === "shortcuts" && <div className="shortcut-scheme-bar">
             <label><SettingSearchLabel label="Shortcut scheme" aliases={["keymap", "bindings"]} />
@@ -415,6 +456,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}
             views={featureOptions[page].views} preferences={preferences} onChange={onChange} />
         </>
+      ) : page === "sortGroups" ? (
+        <SortGroupsSettings groups={preferences.sortSettings.groups} onChange={(groups) =>
+          onChange({ ...preferences, sortSettings: { ...preferences.sortSettings, groups } })} />
+      ) : isPanelMode(page) ? (
+        <PanelModeSettings key={page} mode={preferences.panelModes[page]} defaultName={t(panelModeNames[page])}
+          onChange={(mode) => onChange({ ...preferences, panelModes: { ...preferences.panelModes, [page]: mode } })} />
       ) : page === "viewFonts" ? (
         <div className="dialog-body appearance-settings"><ViewFontSettings preferences={preferences} onChange={onChange} /></div>
       ) : isAppearance ? (
@@ -437,18 +484,24 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </select> : <div className="shortcut-bindings">
                   {bindings.map((binding) => <div key={binding} className="shortcut-binding">
                     <Button type="button" className="shortcut-key" aria-label={t("Change {0} for {1}", showShortcut(binding), label)}
-                      onClick={() => setCapture({ command, replacing: binding })}><span>{showShortcut(binding)}</span></Button>
+                      onClick={() => beginCapture(command, binding)}><span>{showShortcut(binding)}</span></Button>
                     <Button type="button" className="icon-button shortcut-remove" aria-label={t("Remove {0} from {1}", showShortcut(binding), label)} onClick={() => {
                       updateShortcuts({ ...shortcuts, [command]: bindings.filter((key) => key !== binding) });
                       finishCapture(command);
                     }}><X aria-hidden="true" /></Button>
                   </div>)}
                   <Button type="button" className="shortcut-add" data-add-shortcut={command} aria-label={t("Add shortcut for {0}", label)}
-                    onClick={() => setCapture({ command })}><Plus aria-hidden="true" /> {t("Add shortcut")}</Button>
-                  {capture?.command === command && <input key={capture.replacing ?? "add"}
+                    onClick={() => beginCapture(command)}><Plus aria-hidden="true" /> {t("Add shortcut")}</Button>
+                  {capture?.command === command && <div className="shortcut-capture"><input key={capture.replacing ?? "add"}
                     aria-label={capture.replacing ? t("New shortcut to replace {0} for {1}", showShortcut(capture.replacing), label) : t("New shortcut for {0}", label)}
                     readOnly autoFocus data-shortcut-capture placeholder={t("Press a shortcut")}
-                    onKeyDown={(event) => captureKey(event, capture)} />}
+                                        onKeyDown={(event) => {
+                      if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
+                      captureKey(event, capture);
+                    }} />
+                    <label><input type="checkbox" checked={distinguishControl}
+                      onChange={(event) => setDistinguishControl(event.target.checked)} /> {t("Distinguish left and right Ctrl")}</label>
+                  </div>}
                 </div>}
               </div>;
             })}
@@ -456,7 +509,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </>
       )}
           </div>
-          <SettingsPreview page={page} preferences={preferences} pick={selection ?? undefined} />
+          {((!isPanelMode(page) && page !== "sortGroups") || selection) && <SettingsPreview page={isPanelMode(page) || page === "sortGroups" ? "general" : page} preferences={preferences} pick={selection ?? undefined} />}
         </div>
       </div>
     </Dialog>

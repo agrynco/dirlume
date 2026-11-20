@@ -1,53 +1,94 @@
 import { t } from "./i18n";
-import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, Check } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from "react";
+import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "./Button";
-import { formatDate, formatSize, type PaneState, type Side, type SortColumn } from "./panes";
+import { formatDate, type PaneState, type Side, type SortColumn } from "./panes";
+import { isNameField, panelFields, type PanelColumn, type PanelField, type PanelModeId } from "./panelModes";
 
-const columns = [
-  { key: "name", label: "Name" },
-  { key: "size", label: "Size" },
-  { key: "modified", label: "Date" },
-  { key: "time", label: "Time" },
-] as const;
-const storageKey = (side: Side) => `dirlume.file-column-layout.${side}`;
-type OptionalColumn = Exclude<SortColumn, "name">;
-type ColumnVisibility = Partial<Record<OptionalColumn, boolean>>;
-type ColumnLayout = { visibility: ColumnVisibility };
+const sorts: Partial<Record<PanelField, SortColumn>> = {
+  name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified", time: "time", owner: "owner", links: "hardLinks",
+};
+export const fieldClass: Record<PanelField, string> = {
+  name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified",
+  time: "time", owner: "owner", links: "links",
+};
+const storageKey = (side: Side, mode: PanelModeId) =>
+  `dirlume.file-column-layout.${side}${mode === "full" ? "" : "." + mode}`;
+export type ColumnVisibility = Partial<Record<string, boolean>>;
 
-export function readColumnLayout(side: Side): ColumnLayout {
-  const layout: ColumnLayout = { visibility: {} };
+export function readColumnLayout(side: Side, mode: PanelModeId): ColumnVisibility {
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey(side)) ?? "null") as (Partial<ColumnLayout> & { version?: number }) | null;
-    for (const { key } of columns) {
-      if (key !== "name") {
-        const visible = saved?.visibility?.[key] ?? (key === "time" && saved?.version !== 2 ? saved?.visibility?.modified : undefined);
-        if (typeof visible === "boolean") layout.visibility[key] = visible;
-      }
-    }
+    const saved = JSON.parse(localStorage.getItem(storageKey(side, mode)) ?? "null") as
+      { visibility?: ColumnVisibility; version?: number } | null;
+    if (saved?.visibility) return {
+      ...saved.visibility,
+      time: saved.version !== 2 ? saved.visibility.time ?? saved.visibility.modified : saved.visibility.time,
+    };
   } catch { /* Use defaults if the saved layout cannot be read. */ }
-  return layout;
+  return {};
 }
 
-export function saveColumnLayout(side: Side, layout: ColumnLayout) {
-  try { localStorage.setItem(storageKey(side), JSON.stringify({ ...layout, version: 2 })); } catch { /* The current layout still applies. */ }
+export function saveColumnLayout(side: Side, mode: PanelModeId, visibility: ColumnVisibility) {
+  try { localStorage.setItem(storageKey(side, mode), JSON.stringify({ visibility, version: 2 })); }
+  catch { /* The current layout still applies. */ }
 }
 
-type ColumnMenu = { x: number; y: number; visible: Record<OptionalColumn, boolean>; trigger: HTMLElement | null };
 
-export function FileColumns({ container, layout, sort, onSort, onVisibility }: {
+
+const friendlyLabel = (field: PanelField) => isNameField(field) ? "Name" : field === "bytes" ? "Size" : panelFields[field];
+
+export function columnGroupTrack(groups: PanelColumn[][], index: number): CSSProperties {
+  return { gridColumn: `${1 + groups.slice(0, index).reduce((count, group) => count + group.length, 0)} / span ${groups[index].length}` };
+}
+
+const autoWidths: Partial<Record<PanelField, number>> = { size: 9, bytes: 12, date: 13, time: 9, links: 5 };
+
+export function panelColumnTracks(columns: PanelColumn[]) {
+  const names = columns.filter(({ field }) => isNameField(field)).length;
+  const minimumPerName = names ? `min(5ch, ${55 / names}%)` : "0px";
+  const nameMinimum = names ? `min(${names * 5}ch, 55%)` : "0px";
+  const fixed = columns.flatMap(({ field, width }, i) => {
+    if (width.endsWith("%")) return [];
+    const chars = Number(width) || autoWidths[field];
+    if (!chars) return [];
+    const padded = `calc(${chars}ch + 8px)`;
+    const expression = width === "0" && (field === "date" || field === "time")
+      ? `var(--file-${field}-width, ${padded})` : isNameField(field)
+        ? `max(0px, calc(${padded} - ${minimumPerName}))` : padded;
+    return [{ i, chars, expression }];
+  });
+  const totalFixed = fixed.reduce((total, { chars }) => total + chars, 0);
+  const used = fixed.map(({ expression }) => expression).join(" + ") || "0px";
+  return columns.map(({ field, width }, i) => {
+    if (width.endsWith("%")) {
+      const share = Number.parseInt(width, 10) / 100;
+      const extra = `max(0px, calc((100% - (${used}) - ${nameMinimum}) * ${share}))`;
+      return isNameField(field) ? `calc(${minimumPerName} + ${extra})` : extra;
+    }
+    const slot = fixed.find((item) => item.i === i);
+    if (slot) {
+      const extra = `min(${slot.expression}, max(0px, calc((100% - ${nameMinimum}) * ${slot.chars / totalFixed})))`;
+      return isNameField(field) ? `calc(${minimumPerName} + ${extra})` : extra;
+    }
+    return isNameField(field) ? `minmax(${minimumPerName}, 1fr)` : "minmax(0, 1fr)";
+  }).join(" ");
+}
+
+export function FileColumns({ container, groups, columns, tracks, visibility, sort, onSort, onVisibility }: {
   container: Ref<HTMLDivElement>;
-  layout: ColumnLayout;
+  groups: PanelColumn[][];
+  columns: PanelColumn[];
+  tracks: string;
+  visibility: ColumnVisibility;
   sort: PaneState["sort"];
   onSort: (column: SortColumn) => void;
-  onVisibility: (column: OptionalColumn, visible: boolean) => void;
+  onVisibility: (column: string, visible: boolean) => void;
 }) {
-  const { visibility } = layout;
   const nameColumn = useRef<HTMLDivElement>(null);
-  const menuElement = useRef<HTMLDivElement>(null);
+
   const widthProbes = useRef<HTMLDivElement>(null);
-  const [menu, setMenu] = useState<ColumnMenu | null>(null);
+  const [menu, setMenu] = useState<ColumnMenuAnchor | null>(null);
 
   useLayoutEffect(() => {
     const probes = widthProbes.current;
@@ -66,96 +107,33 @@ export function FileColumns({ container, layout, sort, onSort, onVisibility }: {
     return () => observer.disconnect();
   }, []);
 
-  useLayoutEffect(() => {
-    const element = menuElement.current;
-    if (!menu || !element) return;
-    element.style.left = `${Math.max(6, Math.min(menu.x, window.innerWidth - element.offsetWidth - 6))}px`;
-    element.style.top = `${Math.max(6, Math.min(menu.y, window.innerHeight - element.offsetHeight - 6))}px`;
-    element.querySelector<HTMLButtonElement>("button:enabled")?.focus({ preventScroll: true });
-  }, [menu]);
+  const choices = [...new Map(columns.map(({ field }) => [fieldClass[field], friendlyLabel(field)]))]
+    .map(([key, label]) => {
+      const checked = key === "name" || visibility[key] !== false;
+      return { key, label, checked, disabled: key === "name", toggle: () => onVisibility(key, !checked) };
+    });
 
-  useEffect(() => {
-    if (!menu) return;
-    const dismiss = () => setMenu(null);
-    const dismissOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menuElement.current?.contains(event.target)) dismiss();
-    };
-    window.addEventListener("pointerdown", dismissOutside);
-    window.addEventListener("resize", dismiss);
-    window.addEventListener("blur", dismiss);
-    return () => {
-      window.removeEventListener("pointerdown", dismissOutside);
-      window.removeEventListener("resize", dismiss);
-      window.removeEventListener("blur", dismiss);
-    };
-  }, [menu]);
-
-  function openMenu(header: HTMLDivElement, x: number, y: number, target: EventTarget | null) {
-    const displayed = (column: OptionalColumn) => {
-      const cell = header.querySelector(`.col-${column}`);
-      return !!cell && getComputedStyle(cell).display !== "none";
-    };
-    const trigger = target instanceof HTMLElement ? target.closest<HTMLElement>("button, [tabindex]") : null;
-    setMenu({ x, y, visible: { size: displayed("size"), modified: displayed("modified"), time: displayed("time") },
-      trigger: trigger ?? nameColumn.current?.querySelector("button") ?? null });
-  }
-
-  return <div className="file-columns" ref={container} onContextMenu={(event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    openMenu(event.currentTarget, event.clientX, event.clientY, event.target);
-  }} onKeyDown={(event) => {
-    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const bounds = (event.target as HTMLElement).getBoundingClientRect();
-    openMenu(event.currentTarget, bounds.left, bounds.bottom, event.target);
-  }}>
-    <div className="file-column-grid">
-      {columns.map(({ key, label }) => (
-        <div key={key} ref={key === "name" ? nameColumn : undefined} className={`file-column col-${key}`}>
-          <Button type="button" onClick={() => onSort(key)} tooltip={t("Sort by {0}", t(label).toLocaleLowerCase())}>
-            <span>{t(label)}</span>{sort.column === key && (sort.asc ? <ArrowUp /> : <ArrowDown />)}
-          </Button>
-        </div>
-      ))}
+  return <div className="file-columns" ref={container} {...columnMenuBindings((_, anchor) => setMenu(anchor))}>
+    <div className="file-column-grid" style={{ gridTemplateColumns: tracks }}>
+      {groups.map((group, groupIndex) => <div key={groupIndex} className="file-column-group" style={columnGroupTrack(groups, groupIndex)}>
+        {group.map(({ field }, index) => {
+          const key = sorts[field];
+          const label = friendlyLabel(field);
+          return <div key={index} ref={groupIndex === 0 && isNameField(field) ? nameColumn : undefined} className={`file-column col-${fieldClass[field]}`}>
+            {key ? <Button type="button" onClick={() => onSort(key)} tooltip={t("Sort by {0}", t(label).toLocaleLowerCase())}>
+              <span>{t(label)}</span>{sort.column === key && (sort.asc ? <ArrowUp /> : <ArrowDown />)}
+            </Button> : <span className="file-column-label" data-tooltip={t(label)}>{t(label)}</span>}
+          </div>;
+        })}
+      </div>)}
     </div>
     <div ref={widthProbes} className="file-column-probes" aria-hidden="true">
-      {columns.slice(1).map(({ key, label }) => {
+      {(["date", "time"] as const).map((field) => {
         const date = new Date(2088, 10, 28, 11, 48).getTime() / 1000;
-        const sample = key === "size" ? `≥ ${formatSize(1023.9 * 1024 ** 4)}` : formatDate(date, key === "time" ? "time" : "date");
-        return <div key={key} data-column={key}><span>{t(label)}</span><span>{sample}</span></div>;
+        return <div key={field} data-column={field}><span>{t(panelFields[field])}</span><span>{formatDate(date, field)}</span></div>;
       })}
     </div>
-    {menu && createPortal(
-      <div className="file-column-menu" ref={menuElement} role="menu" aria-label={t("Columns")}
-        onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
-        onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setMenu(null); }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            (menu.trigger?.isConnected && menu.trigger.getClientRects().length ? menu.trigger :
-              nameColumn.current?.querySelector("button"))?.focus({ preventScroll: true });
-            setMenu(null);
-            return;
-          }
-          if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home" && event.key !== "End") return;
-          event.preventDefault();
-          event.stopPropagation();
-          const choices = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:enabled")];
-          const index = choices.indexOf(document.activeElement as HTMLButtonElement);
-          const next = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 :
-            (index + (event.key === "ArrowUp" ? -1 : 1) + choices.length) % choices.length;
-          choices[next]?.focus();
-        }}>
-        {columns.map(({ key, label }) => {
-          const checked = key === "name" || (visibility[key] ?? menu.visible[key]);
-          return <Button type="button" key={key} role="menuitemcheckbox" aria-checked={checked} disabled={key === "name"}
-            onClick={() => { if (key !== "name") onVisibility(key, !checked); }}>
-            <span className="file-column-check" aria-hidden="true">{checked && <Check />}</span>{t(label)}
-          </Button>;
-        })}
-      </div>, document.body)}
+    {menu && <ColumnMenu anchor={menu} choices={choices} fallback={() => nameColumn.current?.querySelector("button")}
+      onClose={() => setMenu(null)} />}
   </div>;
 }

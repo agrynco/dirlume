@@ -1,6 +1,6 @@
 ---
 name: dirlume-issue-writer
-description: Draft or create Dirlume GitHub issues from user context. Use for new features, improvements to existing behavior, and bug reports in agrynco/dirlume.
+description: Draft, create, or revise Dirlume GitHub issues from user context. Use for new features, improvements to existing behavior, and bug reports in agrynco/dirlume.
 ---
 
 # Write a Dirlume GitHub issue
@@ -9,7 +9,7 @@ Read [AGENTS.md](../../../AGENTS.md). Write a concise, specific title and an Eng
 
 | Category | When it applies | Body sections | Usual label |
 | --- | --- | --- | --- |
-| New feature | Adds a capability users cannot perform in Dirlume today. | **Problem**, **Requested behavior**, **Acceptance criteria** | `enhancement` |
+| New feature | Adds a capability users cannot perform in Dirlume today. | **Problem**, **Requested behavior**, **Acceptance criteria** | `new feature` |
 | Improvement | Changes how an existing capability works or feels. | **Current behavior**, **Requested behavior**, **Acceptance criteria** | `enhancement` |
 | Bug | Existing, documented, or intended behavior fails. | **Steps to reproduce**, **Actual behavior**, **Expected behavior**. Include **Environment** or **Regression** when details are available. | `bug` |
 
@@ -18,9 +18,15 @@ Read [AGENTS.md](../../../AGENTS.md). Write a concise, specific title and an Eng
 - Make acceptance criteria observable. Use GitHub task-list checkboxes for feature and improvement criteria. For bugs, make the expected result verifiable from the reproduction steps and add separate acceptance criteria when additional regression cases matter.
 - Apply Dirlume's development instructions where relevant. Cover affected platforms, configurable shortcuts, shared UI components, or a KSwitcher Files parity checklist update when the request touches them. Link related GitHub work and include supplied evidence after removing credentials, personal information, and private paths. Ask for clarification when a missing detail would substantially change the scope or expected result.
 
+## Development readiness
+
+- Use `ready for dev` when the scope and verification criteria are clear enough to start.
+- Use `needs refinement` when a concrete unresolved requirement or dependency prevents work from starting. Identify what needs to be resolved.
+- Choose exactly one readiness label independently of the issue's type label. When a requested revision changes readiness, replace only the previous readiness label and preserve the other labels. If the body includes a readiness line, use `Ready for Dev: Yes` with `ready for dev` and `Ready for Dev: No` with `needs refinement`.
+
 ## Check and publish
 
-1. Target `agrynco/dirlume`. Search open and closed issues using the affected UI, action, or symptom. If an existing issue already covers the same work, return its link. If the context establishes a distinct follow-up or a recurrence after a fix, explain the difference and link the earlier issue.
-2. Use verified repository labels and any applicable template defaults. Use the existing `enhancement` label for both new features and improvements. Apply additional metadata only when supported by the template, repository conventions, or the user's request.
-3. When the user asks to create or file an issue, publish it using the GitHub connector, or authenticated `gh` if the connector is unavailable. If the user asks for a draft or supplies context without authorizing publication, return the title, Markdown body, and proposed label in chat. Publishing an issue does not authorize edits to other issues or work on the implementation.
-4. Verify the saved issue and return its number, URL, and applied label. If the create result is unclear, search for the title before retrying. If publication is blocked, return the draft and identify the blocker.
+1. Target `agrynco/dirlume`. For a revision, read the specified issue and its current labels. For a new issue, search open and closed issues using the affected UI, action, or symptom. If an existing issue already covers the same work, return its link. If the context establishes a distinct follow-up or a recurrence after a fix, explain the difference and link the earlier issue.
+2. Use verified repository labels. Apply the type and readiness conventions above alongside applicable template defaults. Include other metadata only when supported by the template, repository conventions, or the user's request.
+3. When the user asks to file an issue or update it on GitHub, use the GitHub connector, or authenticated `gh` if the connector is unavailable. If the user asks for a draft or supplies context without authorizing publication, return the title, Markdown body, and proposed labels in chat. Publishing an issue does not authorize edits to other issues or work on the implementation.
+4. Verify the saved issue and return its number, URL, and applied labels. If the create result is unclear, search for the title before retrying. If publication is blocked, return the draft and identify the blocker.

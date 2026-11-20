@@ -25,7 +25,7 @@ export async function testFilenameRendering(page, root) {
       content: field.textContent,
       width: range.getBoundingClientRect().width,
       visibleWidth: field.clientWidth,
-      overflowing: field.scrollWidth > field.clientWidth,
+      overflowing: [field, ...field.children].some((part) => part.scrollWidth > part.clientWidth),
       fontFamily, fontSize, textOverflow, direction,
       selected: field.closest('[role="option"]').getAttribute("data-current") === "true",
       expected: selected,

@@ -118,6 +118,8 @@ async function startMacPainter() {
 
 async function reportedVersion() {
   const inputs = new Set();
+  let escapeAttempts = 0;
+  let nextEscape = 0;
   for (let attempt = 0; attempt < 180; attempt++) {
     try {
       const result = JSON.parse(await readFile(resultFile, "utf8"));
@@ -143,9 +145,14 @@ async function reportedVersion() {
     if (macInput) {
       const input = phase.endsWith("the native screen color cancellation") ? "escape" :
         phase.endsWith("the external screen color") ? "click" : undefined;
-      if (input && !inputs.has(input)) {
+      if (input === "escape" && escapeAttempts < 4 && Date.now() >= nextEscape) {
+        escapeAttempts++;
+        nextEscape = Date.now() + 1500;
+        await delay(600);
+        run(macInput, [input]);
+      }
+      if (input === "click" && !inputs.has(input)) {
         inputs.add(input);
-        if (!macPainter) await startMacPainter();
         await delay(600);
         run(macInput, [input]);
       }
@@ -221,6 +228,8 @@ try {
       check_clipboard: process.env.CI === "true" && !target.endsWith("-portable"),
       check_screen_color: !!macInput,
     }));
+    // Keep the painter behind the sampler without opening another window during sampling.
+    if (macInput && !tampered && !replacementFailure && !macPainter) await startMacPainter();
     child = startApp(executable);
     const version = await Promise.race([
       reportedVersion(),

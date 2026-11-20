@@ -36,9 +36,10 @@ export async function testNewFolder({ page, startDesktop, exitDesktop, root }) {
   // Restore the default after testing the custom New folder shortcut.
   const window = await openOptionsWindow(page);
   const options = window.getByRole("dialog", { name: "Options", exact: true });
+  await options.getByRole("searchbox", { name: "Search settings", exact: true }).fill("");
   await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  await options.getByRole("button", { name: "Change Ctrl+F12 for New folder", exact: true }).click();
-  await options.getByRole("textbox", { name: "New shortcut to replace Ctrl+F12 for New folder", exact: true }).press("F7");
+  await options.getByRole("button", { name: "Change Ctrl+Shift+F12 for New folder", exact: true }).click();
+  await options.getByRole("textbox", { name: "New shortcut to replace Ctrl+Shift+F12 for New folder", exact: true }).press("F7");
   await closeToolWindow(window, () => options.getByRole("button", { name: "Done", exact: true }).click());
 
   await open();

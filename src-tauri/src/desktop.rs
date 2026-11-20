@@ -208,6 +208,53 @@ fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
     Ok(local::absolute(directory)?.join(local::name_component(name)?))
 }
 
+#[derive(serde::Deserialize)]
+struct PanelMetadataRequest {
+    directory: String,
+    name: String,
+    owner: bool,
+    links: bool,
+    #[serde(default, rename = "sortFields")]
+    sort_fields: Vec<crate::file_attributes::SortField>,
+}
+
+#[tauri::command]
+async fn stream_sort_supported(directory: String) -> Result<bool> {
+    blocking(move || {
+        let directory = local::absolute(&directory).map_err(message)?;
+        Ok(crate::file_attributes::stream_sort_supported(directory))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn panel_metadata(
+    items: Vec<PanelMetadataRequest>,
+) -> Result<Vec<crate::file_attributes::PanelMetadata>> {
+    blocking(move || {
+        if items.len() > 64 {
+            return Err("Too many file metadata requests.".into());
+        }
+        Ok(items
+            .into_iter()
+            .map(|item| {
+                selected(&item.directory, &item.name).map_or_else(
+                    |_| crate::file_attributes::PanelMetadata::default(),
+                    |path| {
+                        crate::file_attributes::PanelMetadata::read(
+                            &path,
+                            item.owner,
+                            item.links,
+                            &item.sort_fields,
+                        )
+                    },
+                )
+            })
+            .collect())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn file_attributes(
     directory: String,
@@ -1830,6 +1877,8 @@ pub fn run() {
         list_directory,
         disk_space,
         crate::timestamps::format_timestamps,
+        panel_metadata,
+        stream_sort_supported,
         file_attributes,
         update_file_attributes,
         operate,
