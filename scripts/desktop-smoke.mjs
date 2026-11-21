@@ -2232,6 +2232,8 @@ try {
   await testScreenColor(page);
   page = await testFileSort({ page, startDesktop, exitDesktop, root: temp });
   await testNativeQuickView(page, temp);
+  await navigate("left", attributes);
+  await testNativeSpaceAnalyzer(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
@@ -2249,4 +2251,19 @@ try {
       await setTimeout(400);
     }
   }
+}
+
+async function testNativeSpaceAnalyzer(page) {
+  const exactButton = (scope, name) => scope.getByRole("button", { name, exact: true });
+  const pane = page.getByRole("region", { name: "left pane", exact: true });
+  await exactButton(pane, "Analyze space").click();
+  const analyzer = page.getByRole("region", { name: "Space Analyzer", exact: true });
+  await exactButton(analyzer, "Rescan").waitFor();
+  await exactButton(analyzer, "Stop").waitFor({ state: "hidden" });
+  assert.equal(await analyzer.getByRole("combobox", { name: "Size metric" }).inputValue(), "allocated");
+  await analyzer.getByText("system-hidden.dll", { exact: true }).click();
+  await exactButton(analyzer, "Show in other pane").click();
+  await page.locator("#right-files").getByRole("option", { name: /^system-hidden\.dll/, selected: true }).waitFor();
+  await exactButton(analyzer, "Close").click();
+  await page.waitForFunction(() => document.activeElement?.id === "left-files");
 }

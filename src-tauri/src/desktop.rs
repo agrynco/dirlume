@@ -2061,6 +2061,8 @@ pub fn run() {
         installed_fonts,
         list_directory,
         disk_space,
+        crate::space_analyzer::space_mount,
+        crate::space_analyzer::list_space_directory,
         crate::timestamps::format_timestamps,
         panel_metadata,
         stream_sort_supported,
