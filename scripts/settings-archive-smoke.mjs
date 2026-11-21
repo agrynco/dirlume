@@ -60,11 +60,53 @@ try {
     await button(options, "Import settings").click();
   };
 
-  await page.setViewportSize({ width: 1800, height: 770 });
+  async function assertAdjacent(control) {
+    const bounds = await control.evaluate((input) => {
+      const label = input.closest("label");
+      const text = label.firstElementChild.getBoundingClientRect();
+      const field = input.getBoundingClientRect();
+      return { gap: field.left - text.right, verticalOffset: Math.abs((field.top + field.bottom - text.top - text.bottom) / 2),
+        fits: field.right <= label.getBoundingClientRect().right + 1 };
+    });
+    assert.ok(bounds.gap >= 0 && bounds.gap <= 9 && bounds.verticalOffset <= 1 && bounds.fits, JSON.stringify(bounds));
+  }
+
+  await button(options, "Appearance").click();
+  const menuAlignment = options.getByRole("combobox", { name: "Main menu alignment", exact: true });
+  for (const width of [600, 1800]) {
+    await page.setViewportSize({ width, height: 770 });
+    await assertAdjacent(menuAlignment);
+  }
+  await button(options, "Panel modes").click();
+  const modeSettings = options.locator(".panel-mode-settings");
+  for (const width of [600, 1800]) {
+    await page.setViewportSize({ width, height: 770 });
+    for (const mode of ["Brief", "Medium", "Full", "Wide", "File owners", "File links", "Alternative full"]) {
+      await button(options, mode).click();
+      await assertAdjacent(modeSettings.getByRole("textbox", { name: "Name", exact: true }));
+      const pairs = await modeSettings.getByRole("checkbox").evaluateAll((inputs) => inputs.map((input) => {
+        const checkbox = input.getBoundingClientRect();
+        return { left: checkbox.left, gap: input.closest("label").firstElementChild.getBoundingClientRect().left - checkbox.right };
+      }));
+      assert.ok(pairs.length > 1 && pairs.every(({ left, gap }) => left === pairs[0].left && gap >= 0 && gap <= 9), mode);
+    }
+  }
+  const folderExtensions = check(modeSettings, "Align folder extensions");
+  const wasChecked = await folderExtensions.isChecked();
+  await modeSettings.getByText("Align folder extensions", { exact: true }).click();
+  assert.equal(await folderExtensions.isChecked(), !wasChecked);
+  await folderExtensions.press("Space");
+  assert.equal(await folderExtensions.isChecked(), wasChecked);
+
   await button(options, "Main File Panels").click();
   const visibility = check(options, "Hide action button icons");
   const panelLayout = options.getByRole("combobox", { name: "Panel layout", exact: true });
   const buttonWidth = options.getByRole("combobox", { name: "Action button width", exact: true });
+  for (const width of [600, 1800]) {
+    await page.setViewportSize({ width, height: 770 });
+    await assertAdjacent(panelLayout);
+    await assertAdjacent(buttonWidth);
+  }
   const actionBar = page.locator(".actionbar");
   assert.equal(await visibility.isChecked(), false);
   await panelLayout.selectOption("twin");
