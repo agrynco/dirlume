@@ -401,7 +401,7 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
   }
 
   return <section className={"pane environment-pane environment-" + side + (active ? " active" : "")}
-    aria-labelledby={title} data-help-topic="terminal" onFocus={onFocus} onKeyDown={keyDown}>
+    aria-labelledby={title} data-help-topic="terminal" data-pane-side={side} onFocus={onFocus} onKeyDown={keyDown}>
     <header className="pane-heading"><span className="pane-title" id={title}><Braces />{scopeName(mode)}</span>
       {scope && <Button className="icon-button" aria-label={t("Parent folder")} onClick={() => navigate("root")}><ArrowUp /></Button>}
       <Button onClick={onClose}>{t("Back to files")}</Button>

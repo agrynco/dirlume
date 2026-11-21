@@ -147,7 +147,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose }: {
   }
 
   return <>
-    <section className={"pane git-pane git-pane-" + side} aria-label={t("Branches")} data-help-topic="files">
+    <section className={"pane git-pane git-pane-" + side} aria-label={t("Branches")} data-help-topic="files" data-pane-side={side}>
       <header className="pane-heading">
         <span className="pane-title"><GitBranch aria-hidden="true" />{t("Branches")}</span>
         <Button onClick={onRefresh}>{t("Refresh")}</Button>
@@ -171,7 +171,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose }: {
           {!visible.length && <p className="pane-empty">{t("No matching branches.")}</p>}
         </div> : <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>}
     </section>
-    <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")} data-help-topic="files">
+    <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")} data-help-topic="files" data-pane-side={opposite(side)}>
       <header className="pane-heading">
         <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
         {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}

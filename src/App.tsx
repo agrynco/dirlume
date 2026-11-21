@@ -39,6 +39,7 @@ import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
+import { PaneSources, type PaneSource } from "./PaneSources";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { SearchDialog } from "./SearchDialog";
@@ -184,6 +185,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   visiblePanes.current = panes;
   const [rowRename, setRowRename] = useState<RowRename | null>(null);
   const [locations, setLocations] = useState<QuickLocation[]>([]);
+  const [sourceMenu, setSourceMenu] = useState<{ side: Side; returnFocus: HTMLElement | null } | null>(null);
   const [focusedSide, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
@@ -739,6 +741,63 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     document.getElementById(side + (environmentPanels[side] ? "-environment" : "-files"))?.focus();
   }
 
+  function paneCovered(side: Side) {
+    return !!gitView || environmentPanels[side] !== null || side === previewSide || side === spaceSide;
+  }
+
+  function closeSourceMenu(restoreFocus: boolean) {
+    setSourceMenu(null);
+    if (restoreFocus) requestAnimationFrame(() => {
+      const previous = sourceMenu?.returnFocus;
+      if (previous?.isConnected && !previous.closest("[inert], [hidden]")) previous.focus({ preventScroll: true });
+      else focus(active);
+    });
+  }
+
+  function toggleSourceMenu(side: Side) {
+    if (sourceMenu?.side === side) { closeSourceMenu(true); return; }
+    const previous = sourceMenu?.returnFocus ?? document.activeElement;
+    setPanelsHidden(false);
+    setSourceMenu({ side, returnFocus: previous instanceof HTMLElement ? previous : null });
+  }
+
+  function revealWorkspaceSide(side: Side) {
+    if (gitView) setGitView(null);
+    if (environmentPanels[side]) setEnvironmentPanels((panels) => ({ ...panels, [side]: null }));
+    if (side === spaceSide) setSpaceAnalyzer(null);
+    if (side === previewSide) setQuickViewSource(null);
+  }
+
+  function focusRevealedSide(side: Side) {
+    requestAnimationFrame(() => {
+      if (document.activeElement?.closest(".location-popup")) return;
+      setActive(side);
+      document.getElementById(side + "-files")?.focus({ preventScroll: true });
+    });
+  }
+
+  function openPaneSource(side: Side, source: PaneSource) {
+    closeSourceMenu(false);
+    revealWorkspaceSide(side);
+    if (source === "processes") showProcesses(side, true);
+    else if (typeof source === "string") openConnections(side, source);
+    else {
+      const other = panes[opposite(side)].place;
+      const otherDrive = other?.kind === "local" && /^([a-z]:)(?:[\\/]|$)/i.exec(other.path)?.[1]?.toUpperCase();
+      const path = driveSourceCommand(source) && other?.kind === "local" && otherDrive === source.label.toUpperCase()
+        ? other.path : source.path;
+      showProcesses(side, false);
+      void load(side, filesystemPlace(path));
+    }
+    focusRevealedSide(side);
+  }
+
+  function paneSources(side: Side, overlay = false) {
+    return <PaneSources side={side} overlay={overlay} open={sourceMenu?.side === side && (overlay || !paneCovered(side))}
+      locations={locations} shortcuts={shortcuts} onToggle={() => toggleSourceMenu(side)} onClose={closeSourceMenu}
+      onPick={(source) => openPaneSource(side, source)} />;
+  }
+
   function selectDocument(id: number | null) {
     setActiveDocument(id);
     if (id === null && !panelsHidden) requestAnimationFrame(() => focus(active));
@@ -758,7 +817,29 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (!event.repeat) openSettings();
       return;
     }
-    if (event.target instanceof Element && event.target.closest("[role=menu]")) return;
+    const element = event.target instanceof HTMLElement ? event.target : null;
+    if (element?.closest("[role=menu], .inline-rename")) return;
+    if (activeDocument === null && shortcut) {
+      const command = commandNames.find((name) => name !== "settings" && commandScope(name) === "main" && bindingMatches(shortcuts[name], shortcut));
+      const sourceSide = command === "leftLocations" ? "left" : command === "rightLocations" ? "right" : null;
+      const bookmark = command && folderGroupCommand(command);
+      const inField = element?.closest("input, select, textarea, [contenteditable]");
+      const inSources = element?.closest(".location-popup");
+      const openBookmark = bookmark && !bookmark.add && !panelsHidden && !inSources &&
+        (!inField || !!inField.closest(".git-pane, .environment-pane, .quick-view, .space-analyzer"));
+      if (sourceSide || openBookmark) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        if (sourceSide) toggleSourceMenu(sourceSide);
+        else if (openBookmark) {
+          const focused = element?.closest<HTMLElement>("[data-pane-side]")?.dataset.paneSide;
+          openFolderGroup(focused === "left" || focused === "right" ? focused : active, bookmark.group);
+        }
+        return;
+      }
+      if (inSources) return;
+    }
     if (!gitView && !environmentActive && bindingMatches(shortcuts.cancelMeasure, shortcut) && activeDocument === null &&
         !panelsHidden && cancelFolderOperation(active)) {
       event.preventDefault();
@@ -774,7 +855,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       selectDocument(ids[(index + direction + ids.length) % ids.length]);
       return;
     }
-    const element = event.target instanceof Element ? event.target : null;
     const noControl = !element?.closest(".app");
     if (noControl && bindingMatches(shortcuts.attributes, shortcut)) return;
     const inTitlebar = element?.closest(".topbar") && !element.closest("select, input");
@@ -1176,6 +1256,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (entry) setModal({ kind: "folderShortcuts", side: active, screen: { kind: "edit", group, entry } });
   }
 
+  function openFolderGroup(side: Side, number: FolderGroup) {
+    const group = folderShortcuts[number];
+    if (!group.length) setStatus({ text: t("No folder shortcuts in group {0}.", number) });
+    else if (group.length === 1) void openFolderShortcut(side, group[0]);
+    else setModal({ kind: "folderShortcuts", side, screen: { kind: "picker", group: number, selection: 0 } });
+  }
+
   function closeFolderShortcuts(side: Side) {
     setModal(null);
     requestAnimationFrame(() => {
@@ -1184,6 +1271,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   async function openFolderShortcut(side: Side, entry: FolderShortcut) {
+    if (paneCovered(side)) {
+      revealWorkspaceSide(side);
+      focusRevealedSide(side);
+    }
     if (entry.remote) {
       await openNetworkFolderShortcut(side, entry.remote, entry.path);
       return;
@@ -1288,7 +1379,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   function showProcesses(side: Side, visible: boolean, path?: string) {
     if (visible) cancelFolderOperation(side);
     setProcessPanels((panels) => ({ ...panels, [side]: visible ? { path } : null }));
-    requestAnimationFrame(() => focus(side));
+    requestAnimationFrame(() => {
+      if (!document.activeElement?.closest(".location-popup")) focus(side);
+    });
   }
 
   function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
@@ -1822,6 +1915,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function perform(command: Command, groupStep = 0) {
+    if (command === "leftLocations" || command === "rightLocations") {
+      toggleSourceMenu(command === "leftLocations" ? "left" : "right");
+      return;
+    }
     if (command === "swap") {
       swapPanes();
       return;
@@ -1886,12 +1983,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const bookmark = folderGroupCommand(command);
     if (bookmark) {
       if (bookmark.add) addFolderShortcut(bookmark.group);
-      else if (!panelsHidden) {
-        const group = folderShortcuts[bookmark.group];
-        if (!group.length) setStatus({ text: t("No folder shortcuts in group {0}.", bookmark.group) });
-        else if (group.length === 1) void openFolderShortcut(active, group[0]);
-        else setModal({ kind: "folderShortcuts", side: active, screen: { kind: "picker", group: bookmark.group, selection: 0 } });
-      }
+      else if (!panelsHidden) openFolderGroup(active, bookmark.group);
       return;
     }
     if (command === "addFolderShortcut") {
@@ -1911,7 +2003,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         showProcesses(active, false);
         return;
       }
-      if (!["switchPane", "swap", "back", "forward", "parent", "leftLocations", "rightLocations",
+      if (!["switchPane", "swap", "back", "forward", "parent",
         "shrinkLeft", "growLeft", "settings", "help", "menu", "close", "terminal", "commandHistory", "connect"].includes(command)) return;
     }
     if (catalog && !processPanels[active]) {
@@ -1962,15 +2054,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "help": setHelpTopic(topicForControl(document.activeElement, contextHelpTopic(undefined, editingDocument))); break;
       case "menu": mainMenu.current?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
-      case "leftLocations":
-      case "rightLocations": {
-        const side = command === "leftLocations" ? "left" : "right";
-        if (side === previewSide || side === spaceSide) break;
-        if (panelsHidden) setPanelsHidden(false);
-        setActive(side);
-        requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
-        break;
-      }
       case "shrinkLeft": setSplit(clampSplit(split - 1)); break;
       case "growLeft": setSplit(clampSplit(split + 1)); break;
       case "terminal":
@@ -2248,7 +2331,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           run: () => setPanelMode(side, id),
         })),
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
-        menuCommand(side === "left" ? "leftLocations" : "rightLocations", !!gitView || !!environmentPanels[side] || activeDocument !== null || side === previewSide || side === spaceSide, "Sources"),
+        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
@@ -2358,7 +2441,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
           <Pane key={swappedPanes ? opposite(side) : side} side={side}
-            active={active === side} covered={showingGit || !!environmentPanels[side] || side === previewSide || side === spaceSide}
+            active={active === side} covered={paneCovered(side)}
             layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
             preserveScroll={showingGit || !!environmentPanels[side] || side === spaceSide}
@@ -2382,14 +2465,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                 void load(side, { ...place, segments: path.split("/").filter(Boolean) });
               } else void load(side, filesystemPlace(path));
             }}
-            onLocalLocation={(location) => {
-              const other = panes[opposite(side)].place;
-              const otherDrive = other?.kind === "local" && /^([a-z]:)(?:[\\/]|$)/i.exec(other.path)?.[1]?.toUpperCase();
-              const path = driveSourceCommand(location) && other?.kind === "local" && otherDrive === location.label.toUpperCase()
-                ? other.path : location.path;
-              showProcesses(side, false);
-              void load(side, filesystemPlace(path));
-            }}
+            onLocalLocation={(location) => openPaneSource(side, location)}
             onPathAncestor={(place) => { showProcesses(side, false); void load(side, place); }}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
@@ -2412,9 +2488,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (item) revealResult(side, item.place, item.entry.name);
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column, true)}
-            onRemote={() => openConnections(side, "remote")} onFtp={() => openConnections(side, "ftp")}
-            onSsh={() => openConnections(side, "ssh")} onSmb={() => openConnections(side, "smb")}
-            sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
+            sourceMenu={paneSources(side)} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
         {(["left", "right"] as const).map((side) => {
@@ -2447,6 +2521,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
             message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} onFocusFiles={() => focus(active)} />
         </Suspense>}
+        {sourceMenu && paneCovered(sourceMenu.side) && paneSources(sourceMenu.side, true)}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator"
           aria-label={t("Resize terminal")} aria-orientation="horizontal" aria-valuenow={Math.round(terminalShare)} tabIndex={0}
           onPointerDown={(event) => {
