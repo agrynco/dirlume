@@ -135,7 +135,33 @@ export async function testAppearancePicker() {
     await page.keyboard.press("Escape");
     await heading(page, "Status bar").waitFor();
     assert.equal(await toolbar.inputValue(), "#245978");
-    await options.getByRole("button", { name: "Apply", exact: true }).click();
+    const apply = options.getByRole("button", { name: "Apply", exact: true });
+    const naming = page.getByRole("dialog", { name: "Name color scheme", exact: true });
+    const schemeName = naming.getByRole("textbox", { name: "Scheme name", exact: true });
+    const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")));
+    const before = await saved();
+    const assertPrefilled = async (expected) => {
+      await schemeName.waitFor();
+      assert.equal(await schemeName.inputValue(), expected);
+      assert.ok(await schemeName.evaluate((field) => field.matches(":focus-visible") &&
+        field.selectionStart === 0 && field.selectionEnd === field.value.length));
+    };
+    await apply.click();
+    await assertPrefilled("Custom scheme");
+    await page.keyboard.press("Escape");
+    await naming.waitFor({ state: "hidden" });
+    assert.ok(await apply.evaluate((button) => button === document.activeElement));
+    assert.deepEqual(await saved(), before);
+    assert.equal(await toolbar.inputValue(), "#245978");
+    await apply.click();
+    await assertPrefilled("Custom scheme");
+    await page.keyboard.insertText("Slate status");
+    assert.equal(await schemeName.inputValue(), "Slate status");
+    await schemeName.press("Enter");
+    await naming.waitFor({ state: "hidden" });
+    assert.ok(await options.isVisible());
+    assert.equal((await saved()).schemes[0].name, "Slate status");
+    assert.equal(Object.hasOwn((await saved()).schemes[0], "suggestedName"), false);
     await done();
 
     await row.click();
@@ -191,6 +217,22 @@ export async function testAppearancePicker() {
     await options.getByRole("button", { name: "Picker history", exact: true }).click();
     await options.locator(".picker-history").getByRole("button", { name: "Status bar", exact: true }).click();
     assert.equal(await toolbar.inputValue(), "#245978");
+    const search = options.getByRole("searchbox", { name: "Search settings" });
+    await search.fill("Window background");
+    await search.press("Enter");
+    const active = options.getByRole("combobox", { name: "Color scheme", exact: true });
+    await active.selectOption("light");
+    await hex(page, "Window background").fill("#f0f3f6");
+    await done();
+    await assertPrefilled("Custom scheme 2");
+    await naming.getByRole("button", { name: "Cancel", exact: true }).click();
+    assert.equal((await saved()).schemes.length, 1);
+    await done();
+    await assertPrefilled("Custom scheme 2");
+    await schemeName.press("Enter");
+    await options.waitFor({ state: "hidden" });
+    await page.reload();
+    assert.deepEqual((await saved()).schemes.map(({ name }) => name), ["Slate status", "Custom scheme 2"]);
     console.log("Verified appearance targets, grouped controls, draft preview, cancellation, and private date-grouped history.");
   } finally {
     await browser.close();

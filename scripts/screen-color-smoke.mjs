@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
-import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 const run = promisify(execFile);
 const command = (script) => ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand",
@@ -154,7 +154,10 @@ export async function testScreenColor(page) {
     await color.locator('[data-tooltip="Selected color #245978"]').waitFor();
     await color.getByRole("button", { name: "Use color", exact: true }).click();
     assert.equal(await options.getByRole("textbox", { name: "Block background hex", exact: true }).inputValue(), "#245978");
-    await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
+    await closeToolWindow(tool, async () => {
+      await options.getByRole("button", { name: "Done", exact: true }).click();
+      await keepSuggestedColorSchemeName(tool);
+    });
     for (const result of [escape, click]) {
       if (result.stdout.trim()) console.log(result.stdout.trim());
     }

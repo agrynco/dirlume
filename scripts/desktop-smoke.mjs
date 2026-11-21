@@ -42,7 +42,7 @@ import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
-import { checkResizeMarker, closeToolWindow, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -1623,6 +1623,7 @@ try {
   const textBackground = optionsDialog.getByLabel("Editor, viewer, and terminal background hex");
   await textBackground.fill("#101924");
   await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await keepSuggestedColorSchemeName(optionsPage);
   await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await assertTerminalContrast(lightYellow);
   if (process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT, scale: "css" });
@@ -1925,7 +1926,10 @@ try {
     }
   }
   await featureSearch.fill("");
-  await closeToolWindow(optionsPage, () => featureDialog.getByRole("button", { name: "Done", exact: true }).click());
+  await closeToolWindow(optionsPage, async () => {
+    await featureDialog.getByRole("button", { name: "Done", exact: true }).click();
+    if (!optionsPage.isClosed()) await keepSuggestedColorSchemeName(optionsPage);
+  });
   await exitDesktop(page);
   page = await startDesktop();
   await page.getByRole("button", { name: "Options", exact: true }).waitFor();

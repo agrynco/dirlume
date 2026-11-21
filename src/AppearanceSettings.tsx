@@ -102,12 +102,15 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     onChange(selectAppearance(preferences, value));
   }
 
-  function create(fonts = applied?.fonts ?? {}, colors = applied?.colors ?? {}, viewFontSizes = preferences.viewFontSizes) {
+  function create({
+    fonts = applied?.fonts ?? {}, colors = applied?.colors ?? {}, viewFontSizes = preferences.viewFontSizes, automaticName = true,
+  }: { fonts?: Scheme["fonts"]; colors?: Palette; viewFontSizes?: Preferences["viewFontSizes"]; automaticName?: boolean } = {}) {
     let number = 1;
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
+    const name = number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number);
     const scheme: Scheme = {
-      id: `scheme-${number}`, name: number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number),
-      base, colors, fonts,
+      id: `scheme-${number}`, name, base, colors, fonts,
+      ...(automaticName ? { suggestedName: name } : {}),
     };
     setManagedId(scheme.id);
     onChange({ ...preferences, viewFontSizes, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
@@ -129,13 +132,13 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     }
     const scheme = Object.hasOwn(surfaceColors, group) ? applied : active;
     if (scheme) update({ ...scheme, fonts }, viewFontSizes);
-    else create(fonts, applied?.colors, viewFontSizes);
+    else create({ fonts, viewFontSizes });
   }
 
   function setColor(color: Color, value?: string, surface?: Surface) {
     const scheme = surface || color === "viewer-outside-bg" ? applied : active;
     if (scheme) update({ ...scheme, colors: { ...scheme.colors, [color]: value } });
-    else if (value) create(applied?.fonts, { ...applied?.colors, [color]: value });
+    else if (value) create({ colors: { ...applied?.colors, [color]: value } });
   }
 
   function remove(scheme: Scheme) {
@@ -170,7 +173,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
               <SchemeOptions schemes={preferences.schemes} />
             </select>
           </label>
-          <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> <SettingSearchLabel label="New scheme" /></Button>
+          <Button type="button" className="appearance-button" onClick={() => create({ automaticName: false })}><Plus /> <SettingSearchLabel label="New scheme" /></Button>
         </div>
         <MenuAlignmentSetting label="Main menu alignment" value={preferences.mainMenuAlignment}
           onChange={(mainMenuAlignment) => onChange({ ...preferences, mainMenuAlignment })} />

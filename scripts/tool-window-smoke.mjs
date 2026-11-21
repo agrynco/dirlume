@@ -32,6 +32,15 @@ export async function closeToolWindow(tool, trigger = () => tool.keyboard.press(
   await Promise.all([tool.waitForEvent("close", { timeout: 8000 }), trigger()]);
 }
 
+export async function keepSuggestedColorSchemeName(page) {
+  const naming = page.getByRole("dialog", { name: "Name color scheme", exact: true });
+  const visible = await naming.isVisible().catch((error) => {
+    if (page.isClosed()) return false;
+    throw error;
+  });
+  if (visible) await naming.getByRole("button", { name: "Save scheme", exact: true }).click();
+}
+
 export async function testMarkdownOptionsDismissal(page, source) {
   const name = "options-reader.md";
   await writeFile(join(source, name), "# Options dismissal fixture\n\nOriginal Markdown document.\n");
