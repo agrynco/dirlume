@@ -73,6 +73,7 @@ export async function testScreenColor(page) {
           [DllImport("user32.dll")] public static extern bool GetPhysicalCursorPos(out Point point);
           [DllImport("user32.dll")] public static extern System.IntPtr WindowFromPhysicalPoint(Point point);
           [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr window, System.Text.StringBuilder name, int length);
+          [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern System.IntPtr GetClassLongPtr(System.IntPtr window, int index);
           [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint process);
           [DllImport("user32.dll")] public static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr context);
           [DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr window, System.IntPtr after, int x, int y, int width, int height, uint flags);
@@ -85,17 +86,31 @@ export async function testScreenColor(page) {
         $info = New-Object SampleInput+CursorInfo
         $info.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][SampleInput+CursorInfo])
         $crosshair = [SampleInput]::LoadCursor([IntPtr]::Zero, [IntPtr]::new(32515))
+        $point = New-Object SampleInput+Point
+        $name = [System.Text.StringBuilder]::new(128)
+        $cursorSuppressed = 2
+        $classCursorIndex = -12
         for ($attempt = 0; $attempt -lt 100; $attempt++) {
           if ($expected -and ![SampleInput]::SetPhysicalCursorPos((102 + ($attempt % 2)), 152)) {
             throw 'Could not move the pointer over the external application.'
           }
-          if ([SampleInput]::GetCursorInfo([ref]$info) -and (($info.Cursor -eq $crosshair) -eq $expected)) { return }
+          if ([SampleInput]::GetCursorInfo([ref]$info) -and [SampleInput]::GetPhysicalCursorPos([ref]$point)) {
+            $hit = [SampleInput]::WindowFromPhysicalPoint($point)
+            $null = $name.Clear()
+            $null = [SampleInput]::GetClassName($hit, $name, $name.Capacity)
+            $sampling = $name.ToString() -eq 'Dirlume.ScreenSampler'
+            if (!$expected -and !$sampling -and $info.Cursor -ne $crosshair) { return }
+            if ($expected -and $sampling -and [SampleInput]::GetClassLongPtr($hit, $classCursorIndex) -eq $crosshair) {
+              if ($info.Cursor -eq $crosshair) { return }
+              # Windows omits the global cursor handle while drawing is suppressed.
+              if (($info.Flags -band $cursorSuppressed) -ne 0) {
+                [Console]::WriteLine('Verified the sampler crosshair class while Windows suppressed the visible system cursor.')
+                return
+              }
+            }
+          }
           Start-Sleep -Milliseconds 30
         }
-        $point = New-Object SampleInput+Point
-        $null = [SampleInput]::GetPhysicalCursorPos([ref]$point)
-        $name = [System.Text.StringBuilder]::new(128)
-        $null = [SampleInput]::GetClassName([SampleInput]::WindowFromPhysicalPoint($point), $name, $name.Capacity)
         throw "Expected crosshair=$expected at ($($point.X), $($point.Y)); window class=$name, cursor=$($info.Cursor), flags=$($info.Flags), crosshair=$crosshair."
       }
       ${action === "place" ? `
@@ -125,14 +140,14 @@ export async function testScreenColor(page) {
     await input("place");
     await eyedropper.click();
     await hint.waitFor();
-    await input("escape");
+    const escape = await input("escape");
     await hint.waitFor({ state: "hidden" });
     assert.equal(await hex.inputValue(), previous);
     await input("restored");
 
     await eyedropper.click();
     await hint.waitFor();
-    await input("click");
+    const click = await input("click");
     await hint.waitFor({ state: "hidden" });
     assert.equal(await hex.inputValue(), "#245978");
     await input("restored");
@@ -140,7 +155,10 @@ export async function testScreenColor(page) {
     await color.getByRole("button", { name: "Use color", exact: true }).click();
     assert.equal(await options.getByRole("textbox", { name: "Block background hex", exact: true }).inputValue(), "#245978");
     await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
-    console.log("Verified the crosshair over an external Windows application and cursor restoration after sampling and Esc.");
+    for (const result of [escape, click]) {
+      if (result.stdout.trim()) console.log(result.stdout.trim());
+    }
+    console.log("Verified the sampling overlay over an external Windows application, color sampling, and restoration after Esc and selection.");
   } finally {
     clearTimeout(timeout);
     if (painter.exitCode === null) {
