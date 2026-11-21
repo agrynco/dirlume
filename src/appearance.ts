@@ -36,6 +36,15 @@ const modernThemes = new Set<BaseTheme>(["lavender", "emerald", "aurora", "midni
 export const isLightTheme = (theme: BaseTheme) => lightThemes.has(theme);
 export const readTheme = (value: unknown): Theme => isTheme(value) ? value : "system";
 
+const syntaxColors = {
+  "syntax-keyword": "Syntax keywords",
+  "syntax-string": "Syntax strings",
+  "syntax-number": "Syntax numbers and constants",
+  "syntax-comment": "Syntax comments",
+  "syntax-type": "Syntax types and tags",
+  "syntax-property": "Syntax properties and functions",
+} as const;
+
 export const colorGroups = {
   window: {
     label: "Window",
@@ -99,12 +108,7 @@ export const colorGroups = {
     colors: {
       "text-bg": "Editor, viewer, and terminal background",
       "text-ink": "Editor, viewer, and terminal text",
-      "syntax-keyword": "Syntax keywords",
-      "syntax-string": "Syntax strings",
-      "syntax-number": "Syntax numbers and constants",
-      "syntax-comment": "Syntax comments",
-      "syntax-type": "Syntax types and tags",
-      "syntax-property": "Syntax properties and functions",
+      ...syntaxColors,
       added: "Added lines",
       removed: "Removed lines",
     },
@@ -140,15 +144,77 @@ export function fileColor({ name, directory, hidden, system }: Pick<Entry, "name
 
 export type Color = {
   [Group in keyof typeof colorGroups]: keyof (typeof colorGroups)[Group]["colors"];
-}[keyof typeof colorGroups] | keyof typeof viewerColors | keyof typeof mermaidColors;
+}[keyof typeof colorGroups] | keyof typeof viewerColors | keyof typeof mermaidColors | SurfaceColor;
 export const viewerColors = { "viewer-bg": "Viewer background" } as const;
 export const mermaidColors = {
   "mermaid-node-bg": "Block background",
   "mermaid-node-ink": "Block text",
   "mermaid-node-border": "Block border",
 } as const;
-const colors = [...Object.values(colorGroups).flatMap(({ colors }) => Object.keys(colors)),
-  ...Object.keys(viewerColors), ...Object.keys(mermaidColors)] as Color[];
+type ColorFields = Record<string, readonly [label: string, fallback: string]>;
+function surfaceSyntax<Prefix extends "viewer" | "editor">(prefix: Prefix) {
+  return Object.fromEntries(Object.entries(syntaxColors).map(([key, label]) => [
+    `${prefix}-${key}`, [label, `var(--${key})`] as const,
+  ])) as Record<`${Prefix}-${keyof typeof syntaxColors}`, readonly [string, string]>;
+}
+
+export const surfaceColors = {
+  viewer: {
+    "viewer-text-bg": ["Viewer text background", "var(--viewer-bg)"],
+    "viewer-ink": ["Viewer text", "var(--text-ink)"],
+    "viewer-selection": ["Viewer selection", "Highlight"],
+    ...surfaceSyntax("viewer"),
+  },
+  editor: {
+    "editor-bg": ["Editor background", "var(--text-bg)"],
+    "editor-ink": ["Editor text", "var(--text-ink)"],
+    "editor-selection": ["Editor selection", "Highlight"],
+    "editor-caret": ["Editor caret", "var(--text-ink)"],
+    "editor-gutter": ["Editor line-number gutter", "var(--raised)"],
+    "editor-active-line": ["Editor active line", "transparent"],
+    ...surfaceSyntax("editor"),
+  },
+  hex: {
+    "hex-bg": ["Hex Viewer background", "var(--viewer-bg)"],
+    "hex-ink": ["Hex Viewer text", "var(--text-ink)"],
+  },
+  markdown: {
+    "markdown-bg": ["Markdown background", "var(--viewer-bg)"],
+    "markdown-ink": ["Markdown body text", "var(--text-ink)"],
+    "markdown-link": ["Markdown links", "var(--accent)"],
+    "markdown-search": ["Markdown search highlights", "var(--accent-fill)"],
+  },
+  terminal: {
+    "terminal-bg": ["Terminal background", "var(--text-bg)"],
+    "terminal-ink": ["Terminal text", "var(--text-ink)"],
+    "terminal-cursor": ["Terminal cursor", "var(--accent)"],
+    "terminal-selection": ["Terminal selection", "var(--panel-selection)"],
+  },
+  command: {
+    "command-bg": ["Command line input background", "var(--canvas)"],
+    "command-ink": ["Command line text", "var(--ink)"],
+    "command-caret": ["Command line caret", "var(--ink)"],
+    "command-selection": ["Command line selection", "Highlight"],
+  },
+  compare: {
+    "compare-bg": ["Compare files background", "var(--text-bg)"],
+    "compare-ink": ["Compare files text", "var(--text-ink)"],
+    "compare-selection": ["Compare files selection", "Highlight"],
+    "compare-added": ["Compare files added lines", "var(--added)"],
+    "compare-removed": ["Compare files removed lines", "var(--removed)"],
+  },
+} as const satisfies Record<string, ColorFields>;
+
+export type Surface = keyof typeof surfaceColors;
+type SurfaceColor = { [Group in Surface]: keyof (typeof surfaceColors)[Group] }[Surface];
+const surfaceColorFields = Object.assign({}, ...Object.values(surfaceColors)) as Record<SurfaceColor, readonly [string, string]>;
+export const colorLabels = Object.assign({}, ...Object.values(colorGroups).map(({ colors }) => colors),
+  viewerColors, mermaidColors, Object.fromEntries(Object.entries(surfaceColorFields).map(([key, [label]]) => [key, label]))) as Record<Color, string>;
+const colors = Object.keys(colorLabels) as Color[];
+
+export function colorKeysForSurface(surface: Surface): SurfaceColor[] {
+  return Object.keys(surfaceColors[surface]) as SurfaceColor[];
+}
 
 export const bundledFontFamily = "GoMono Nerd Font Mono";
 
@@ -160,6 +226,10 @@ export const fontGroups = {
   viewer: { label: "Viewer", fallback: "var(--mono)" },
   editor: { label: "Editor", fallback: "var(--mono)" },
   terminal: { label: "Terminal", fallback: "var(--mono)" },
+  hex: { label: "Hex Viewer", fallback: "var(--viewer-font)" },
+  markdown: { label: "Markdown preview", fallback: "var(--markdown-inherited-font)" },
+  command: { label: "Command line", fallback: "var(--terminal-font)" },
+  compare: { label: "Compare files", fallback: "var(--mono)" },
 } as const;
 
 export type FontGroup = keyof typeof fontGroups;
@@ -182,10 +252,38 @@ export const maxFontFamilyLength = 80;
 export const maxSchemeNameLength = 48;
 export const isHexColor = (value: string) => /^#[a-f\d]{6}$/i.test(value);
 
-export function inheritedFont(scheme: Scheme | null, group: FontGroup): Required<Font> {
-  const parent = group === "panel" || group === "dialog" ? scheme?.fonts.ui :
-    group === "viewer" || group === "editor" || group === "terminal" ? scheme?.fonts.mono : undefined;
-  return { family: parent?.family || bundledFontFamily, size: parent?.size ?? 18 };
+const fontParents: Partial<Record<FontGroup, FontGroup>> = {
+  dialog: "ui", viewer: "mono", editor: "mono", terminal: "mono",
+  hex: "viewer", markdown: "viewer", command: "terminal", compare: "mono",
+};
+
+export function effectiveFontSize(fonts: Fonts | undefined, group: FontGroup): number {
+  return fonts?.[group]?.size ?? inheritedFontSize(fonts, group);
+}
+
+function inheritedFontSize(fonts: Fonts | undefined, group: FontGroup): number {
+  const parent = fontParents[group];
+  return parent ? effectiveFontSize(fonts, parent) : group === "ui" ? 14 : group === "panel" ? 15 : 18;
+}
+
+export function inheritedFont(scheme: Scheme | null, group: FontGroup, families?: readonly string[]): Required<Font> {
+  function family(key: FontGroup): string {
+    if (key === "markdown" && !scheme?.fonts.viewer?.family?.trim() && !scheme?.fonts.mono?.family?.trim()) {
+      return savedFamily("ui") ?? "System font";
+    }
+    const parent = fontParents[key];
+    return parent ? savedFamily(parent) ?? family(parent) : key === "ui" ? "System font" : bundledFontFamily;
+  }
+  function savedFamily(key: FontGroup) {
+    const name = scheme?.fonts[key]?.family?.trim();
+    return isAvailableFont(name, families) ? name : undefined;
+  }
+  return { family: family(group), size: inheritedFontSize(scheme?.fonts, group) };
+}
+
+export function isAvailableFont(name: string | undefined, families: readonly string[] | undefined): name is string {
+  return Boolean(name && (!families || name.toLocaleLowerCase() === bundledFontFamily.toLocaleLowerCase() ||
+    families.some((family) => family.toLocaleLowerCase() === name.toLocaleLowerCase())));
 }
 
 const systemColorQuery = "(prefers-color-scheme: dark)";
@@ -262,11 +360,7 @@ export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = 
   root.dataset.theme = base;
   if (modernThemes.has(base)) root.dataset.look = "modern";
   else delete root.dataset.look;
-  for (const color of colors) {
-    const value = scheme?.colors[color];
-    if (value) root.style.setProperty(`--${color}`, value);
-    else root.style.removeProperty(`--${color}`);
-  }
+  applyColors(root, scheme?.colors);
   for (const group of fontKeys) {
     const font = scheme?.fonts[group];
     const family = group === "mono" ? "--mono" : `--${group}-font`;
@@ -276,10 +370,37 @@ export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = 
     if (font?.size) root.style.setProperty(`--${group}-size`, `${font.size}px`);
     else root.style.removeProperty(`--${group}-size`);
   }
-  if (scheme?.fonts.viewer?.family?.trim() || scheme?.fonts.mono?.family?.trim()) {
-    root.style.setProperty("--markdown-font", "var(--viewer-font)");
+  root.style.setProperty("--markdown-inherited-font",
+    scheme?.fonts.viewer?.family?.trim() || scheme?.fonts.mono?.family?.trim() ? "var(--viewer-font)" : "var(--ui-font)");
+  const compareFamily = scheme?.fonts.compare?.family?.trim();
+  if (compareFamily) root.style.setProperty("--compare-editor-font", `${CSS.escape(compareFamily)}, var(--editor-font)`);
+  else root.style.removeProperty("--compare-editor-font");
+  if (scheme?.fonts.compare?.size) root.style.setProperty("--compare-editor-size", `${scheme.fonts.compare.size}px`);
+  else root.style.removeProperty("--compare-editor-size");
+  const markdownFamily = scheme?.fonts.markdown?.family?.trim();
+  if (markdownFamily) root.style.setProperty("--markdown-code-font", `${CSS.escape(markdownFamily)}, var(--viewer-font)`);
+  else root.style.removeProperty("--markdown-code-font");
+}
+
+function applyColors(root: HTMLElement, palette?: Palette) {
+  for (const color of colors) {
+    const value = palette?.[color] ?? surfaceColorFields[color as SurfaceColor]?.[1];
+    if (value) root.style.setProperty(`--${color}`, value);
+    else root.style.removeProperty(`--${color}`);
   }
-  else root.style.removeProperty("--markdown-font");
+  for (const color of ["viewer-selection", "editor-selection", "compare-selection", "command-selection", "markdown-search"] as const) {
+    const value = palette?.[color];
+    const fallback = color === "markdown-search" ? "var(--on-accent)" : "HighlightText";
+    root.style.setProperty(`--${color}-ink`, value ? contrastingText(value) : fallback);
+  }
+}
+
+function contrastingText(hex: string) {
+  const [red, green, blue] = [1, 3, 5].map((offset) => {
+    const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue > 0.179 ? "#000000" : "#ffffff";
 }
 
 export function basePalette(base: BaseTheme, overrides?: Palette): Palette {
@@ -287,10 +408,7 @@ export function basePalette(base: BaseTheme, overrides?: Palette): Palette {
   const sample = document.createElement("div");
   sample.hidden = true;
   sample.dataset.theme = base;
-  for (const color of colors) {
-    const value = overrides?.[color];
-    if (value) sample.style.setProperty(`--${color}`, value);
-  }
+  applyColors(sample, overrides);
   document.body.append(sample);
   const style = getComputedStyle(sample);
   const result: Palette = {};
@@ -301,7 +419,7 @@ export function basePalette(base: BaseTheme, overrides?: Palette): Palette {
     const value = style.getPropertyValue(`--${color}`).trim();
     if (isHexColor(value)) {
       result[color] = value;
-    } else if (value && pixel) {
+    } else if (value && value !== "transparent" && pixel) {
       sample.style.color = "var(--" + color + ")";
       pixel.clearRect(0, 0, 1, 1);
       pixel.fillStyle = getComputedStyle(sample).color;

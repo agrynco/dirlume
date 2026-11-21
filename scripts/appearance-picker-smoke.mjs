@@ -139,7 +139,7 @@ export async function testAppearancePicker() {
     await done();
 
     await row.click();
-    for (const [key, title, color] of [["F3", "Viewer", "Viewer background"], ["F4", "Editor", "Editor, viewer, and terminal background"]]) {
+    for (const [key, title, color] of [["F3", "Viewer", "Viewer text background"], ["F4", "Editor", "Editor background"]]) {
       await left.press(key);
       const document = page.locator(".text-window:not([hidden]) :is(.text-view, .code-surface)");
       await document.waitFor();
@@ -151,11 +151,15 @@ export async function testAppearancePicker() {
     }
     await left.press("F12");
     await open();
-    await pick(page.locator(".terminal-surface"), "Terminal", "Editor, viewer, and terminal background");
+    await pick(page.locator(".terminal-surface"), "Terminal", "Terminal background");
     await done();
 
     await page.evaluate(({ historyKey }) => {
       const entries = JSON.parse(localStorage.getItem(historyKey));
+      for (const entry of entries) {
+        if (entry.target === "terminal") entry.colors = ["text-bg", "text-ink", "accent", "panel-selection"];
+        if (entry.target === "editor") entry.colors = ["text-bg", "text-ink", "line"];
+      }
       const previousDate = new Date();
       previousDate.setDate(previousDate.getDate() - 1);
       entries.at(-1).time = previousDate.getTime();
@@ -167,6 +171,11 @@ export async function testAppearancePicker() {
     const dates = await options.locator(".picker-history h4").allTextContents();
     assert.equal(dates.length, 2);
     assert.ok(Date.parse(dates[0]) > Date.parse(dates[1]));
+    for (const [title, color] of [["Terminal", "Terminal cursor"], ["Editor", "Editor line-number gutter"]]) {
+      await options.locator(".picker-history").getByRole("button", { name: title, exact: true }).click();
+      await heading(page, title).waitFor();
+      await hex(page, color).waitFor();
+    }
     await options.locator(".picker-history").getByRole("button", { name: "Status bar", exact: true }).click();
     await heading(page, "Status bar").waitFor();
     assert.equal(await toolbar.inputValue(), "#245978");

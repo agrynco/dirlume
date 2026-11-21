@@ -1221,7 +1221,7 @@ try {
   await page.keyboard.press("F2");
   const editor = page.getByRole("region", { name: "draft.md", exact: true });
   await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF-8$/ }).waitFor();
-  await editor.locator(".document-heading").getByRole("combobox", { name: "Syntax" }).waitFor();
+  await editor.locator(".document-heading").getByRole("button", { name: "Syntax", exact: true }).waitFor();
   assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
     parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
   assert.equal(await editor.getByRole("button", { name: "Save", exact: true }).count(), 0);
@@ -1357,7 +1357,7 @@ try {
   assert.equal(await textFontFamily.inputValue(), "Arial");
   await textFontSize.fill("18");
   await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
-  assert.equal(await fontSize(markdownSurface), 18, "Apply should update an open Markdown preview with saved wheel zoom.");
+  assert.equal(await fontSize(markdownSurface), linkedMarkdownFont, "Changing the family while keeping the same base size should preserve zoom.");
   assert.match(await markdownFamily(), /^Arial,/);
   await textFontFamily.fill("Georgia");
   await textFontSize.fill("16");
@@ -1416,13 +1416,13 @@ try {
   const hexSurface = ".text-window:not([hidden]) .hex-view";
   const hexFont = await fontSize(hexSurface);
   await wheelFont(hexSurface, -120);
-  const viewerFont = await fontSize(hexSurface);
-  assert.ok(viewerFont > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
+  const enlargedHexFont = await fontSize(hexSurface);
+  assert.ok(enlargedHexFont > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
   await page.getByRole("button", { name: "Close document", exact: true }).click();
   await left.getByRole("option", { name: /^sample.rs/ }).click();
   await page.keyboard.press("F3");
   await page.getByText("fn", { exact: true }).first().waitFor();
-  assert.equal(await fontSize(codeSurface), viewerFont, "Text and hex should share the viewer setting.");
+  assert.equal(await fontSize(codeSurface), hexFont, "Hexadecimal zoom should leave the text viewer size alone.");
   await page.keyboard.press("Escape");
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 
@@ -1444,7 +1444,7 @@ try {
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
   const terminalSplit = await paneSplit();
   for (const key of ["ArrowUp", "ArrowDown", "Control+ArrowLeft", "Control+ArrowRight",
-    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "F1", "F5", "F8", "Alt+F7"]) {
+    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "F5", "F8", "Alt+F7"]) {
     await terminalInput.press(key);
   }
   assert.equal(await paneSplit(), terminalSplit);
@@ -1762,8 +1762,8 @@ try {
   await showOptions();
   assert.equal(await optionsDialog.getByRole("button", { name: "Text tools", exact: true }).getAttribute("aria-pressed"), "true");
   await optionsDialog.getByRole("button", { name: "View font sizes", exact: true }).click();
-  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Markdown preview font size" }).inputValue(), String(enlargedMarkdown));
-  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
+  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Markdown reading view font size" }).inputValue(), String(enlargedMarkdown));
+  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Hexadecimal view font size" }).inputValue(), String(enlargedHexFont));
   await optionsDialog.getByRole("button", { name: "Window", exact: true }).click();
   assert.equal(await optionsDialog.getByLabel("Scheme name").inputValue(), "Blueprint");
   assert.equal(await page.locator("html").evaluate((element) => element.style.getPropertyValue("--file-hidden")), "#41536d");
@@ -1875,7 +1875,7 @@ try {
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
   async function checkFeatureFontLayout() {
-    const fits = await featureDialog.locator(".font-setting:has(.feature-font-sizes)").evaluate((group) => {
+    const fits = await featureDialog.locator(".font-setting:has(.feature-font-sizes)").first().evaluate((group) => {
       const family = group.querySelector(".font-family").getBoundingClientRect();
       const size = group.querySelector(".font-size-controls").getBoundingClientRect();
       const details = group.querySelector(".feature-font-sizes").getBoundingClientRect();

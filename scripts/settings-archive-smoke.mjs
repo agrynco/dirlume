@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
 const local = { id: "local", name: "Local palette", base: "light", colors: { canvas: "#f0f0f0" }, fonts: {} };
-const evening = { id: "evening", name: "Evening palette", base: "dark", colors: { canvas: "#121824" }, fonts: { panel: { family: "Fixture Sans", size: 17 } } };
+const evening = {
+  id: "evening", name: "Evening palette", base: "dark",
+  colors: { canvas: "#121824", "terminal-cursor": "#abcdef", "editor-syntax-keyword": "#ffee22" },
+  fonts: { panel: { family: "Fixture Sans", size: 17 }, markdown: { family: "An unavailable font", size: 22 } },
+};
 const standalone = { id: "single", name: "Standalone palette", base: "sunrise", colors: { canvas: "#fef2dd" }, fonts: {} };
 const archive = (groups, schemes) => JSON.stringify({ format: "dirlume-settings", version: 1, groups, schemes });
 
@@ -101,6 +105,8 @@ try {
   assert.deepEqual(themeFile.groups, {});
   assert.deepEqual(themeFile.schemes.map(({ name }) => name), [local.name, evening.name]);
   assert.deepEqual(themeFile.schemes[1].fonts.panel, evening.fonts.panel);
+  assert.deepEqual(themeFile.schemes[1].fonts.markdown, evening.fonts.markdown);
+  assert.deepEqual(themeFile.schemes[1].colors, evening.colors);
 
   await button(options, "Export settings").click();
   for (const group of ["General", "Appearance", "Keyboard shortcuts", "Main File Panels", "Terminal", "Viewer"]) {
@@ -161,9 +167,11 @@ try {
   const invalidDialog = dialog("Could not import settings");
   for (const [input, message] of [
     ["{bad json", "The settings file is invalid."],
-    [JSON.stringify({ ...themeFile, version: 2 }), "This settings file version is not supported."],
+    [JSON.stringify({ ...themeFile, version: 3 }), "This settings file version is not supported."],
     [archive({ filePanels: { layout: "bad" } }, []), "The settings file is invalid."],
     [archive({ terminal: { terminalResizeRows: 51 } }, []), "The settings file is invalid."],
+    [archive({}, [{ ...evening, colors: { "terminal-cursor": "#bad" } }]), "The settings file is invalid."],
+    [archive({}, [{ ...evening, fonts: { compare: { size: 400 } } }]), "The settings file is invalid."],
   ]) {
     await startImport(input);
     await invalidDialog.getByRole("alert").getByText(message, { exact: true }).waitFor();
@@ -202,6 +210,10 @@ try {
   assert.equal(current.layout, "classic");
   assert.equal(current.mainMenuAlignment, "left");
   assert.equal(current.activeShortcutScheme, "my-shortcuts");
+  await startImport(archive({ appearance: { viewFontSizes: { viewer: 23 } } }, []));
+  await button(importDialog, "Import").click();
+  await importDialog.waitFor({ state: "hidden" });
+  assert.deepEqual((await readPreferences()).viewFontSizes, { viewer: 23, hex: 23 });
 
   await page.evaluate(() => localStorage.removeItem("dirlume.preferences.v1"));
   await page.reload();

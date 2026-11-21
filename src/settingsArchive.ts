@@ -1,4 +1,5 @@
 import { readSchemes, type Scheme } from "./appearance";
+import { migrateSharedViewerZoom } from "./viewFonts";
 import {
   migratePreferenceValues, normalizePreferences, preferenceBindingVersion, preferenceDefinitions, preferenceGroups, preferenceKeys,
   type PreferenceGroup, type Preferences,
@@ -13,7 +14,7 @@ export type SettingsArchive = { groups: Groups; schemes: Scheme[] };
 export type SettingsSelection = { groups: PreferenceGroup[]; schemes: string[] };
 
 const format = "dirlume-settings";
-const version = 1;
+const version = 2;
 const invalidFile = "The settings file is invalid.";
 
 function isRecord(value: unknown): value is GroupValues {
@@ -64,7 +65,9 @@ export function parseSettingsArchive(contents: string): SettingsArchive {
     if (Object.hasOwn(raw, "version")) throw new Error(invalidFile);
     return { groups: {}, schemes: [readArchiveScheme(raw)] };
   }
-  if (raw.format !== format || (raw.version !== version && raw.version !== 0)) throw new Error("This settings file version is not supported.");
+  if (raw.format !== format || (raw.version !== version && raw.version !== 1 && raw.version !== 0)) {
+    throw new Error("This settings file version is not supported.");
+  }
   if (!isRecord(raw.groups) || !Array.isArray(raw.schemes)) throw new Error(invalidFile);
   const bindings = raw.version === 0 ? 0 : preferenceBindingVersion;
   const values: GroupValues = Object.create(null);
@@ -72,6 +75,9 @@ export function parseSettingsArchive(contents: string): SettingsArchive {
     if (!Object.hasOwn(preferenceGroups, group)) continue;
     if (!isRecord(data)) throw new Error(invalidFile);
     Object.assign(values, data);
+  }
+  if (raw.version !== version && Object.hasOwn(values, "viewFontSizes")) {
+    values.viewFontSizes = migrateSharedViewerZoom(values.viewFontSizes);
   }
   const migrated = migratePreferenceValues({ ...values, bindingDefaults: bindings });
   const schemes = raw.schemes.map(readArchiveScheme);

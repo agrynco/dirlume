@@ -130,6 +130,9 @@ jobs:
       - name: Verify selective settings import and export
         if: github.event.action != 'closed'
         run: node scripts/settings-archive-smoke.mjs
+      - name: Verify independent text surface appearance
+        if: github.event.action != 'closed'
+        run: node scripts/text-appearance-smoke.mjs
       - name: Verify Quick View in both panes
         if: github.event.action != 'closed'
         run: node scripts/quick-view-smoke.mjs

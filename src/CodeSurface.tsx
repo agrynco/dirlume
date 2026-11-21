@@ -4,7 +4,7 @@ import { cursorDocEnd, cursorDocStart, defaultKeymap, history, historyKeymap, re
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, type Command } from "@codemirror/view";
+import { EditorView, highlightActiveLine, keymap, lineNumbers, type Command } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { languageChoices } from "./syntaxCatalog";
 
@@ -76,7 +76,7 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
         extensions: [
           palette, languageSlot.of([]), editSlot.of([]), labelSlot.of([]), lineNumbers(),
           EditorView.lineWrapping,
-          ...(editing ? [history(), keymap.of(managed ? defaultKeymap.filter(({ run }) => !run || !managedCommands.includes(run)) :
+          ...(editing ? [history(), highlightActiveLine(), keymap.of(managed ? defaultKeymap.filter(({ run }) => !run || !managedCommands.includes(run)) :
             [...defaultKeymap, ...historyKeymap])] : []),
           EditorView.updateListener.of((update) => {
             if (editing && update.docChanged && update.transactions.some((transaction) =>

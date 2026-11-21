@@ -1,4 +1,4 @@
-import { colorGroups, fontGroups, mermaidColors, viewerColors, type Color, type FontGroup } from "./appearance";
+import { colorKeysForSurface, colorLabels, fontGroups, mermaidColors, type Color, type FontGroup, type Surface } from "./appearance";
 import { locale, t } from "./i18n";
 import { panelLayouts, type PanelLayout } from "./preferences";
 import { viewFonts, type ViewFont } from "./viewFonts";
@@ -8,7 +8,8 @@ const targets = {
   button: "Button", panel: "File panels", panelHeader: "Panel headers and footers",
   row: "File row", dialog: "Dialog", dialogHeader: "Dialog header or footer",
   dialogField: "Dialog field", viewer: "Viewer", editor: "Editor", terminal: "Terminal",
-  diagram: "Mermaid diagrams", comparison: "Compare files",
+  diagram: "Mermaid diagrams", comparison: "Compare files", hex: "Hex Viewer", markdown: "Markdown preview",
+  command: "Command line",
 } as const;
 
 export type AppearancePick = {
@@ -22,8 +23,18 @@ export type AppearancePick = {
 
 export type PickHistoryEntry = AppearancePick & { id: string; time: number };
 const historyKey = "dirlume.appearance-picks";
-export const colorLabels = Object.assign({}, ...Object.values(colorGroups).map(({ colors }) => colors),
-  viewerColors, mermaidColors) as Record<Color, string>;
+const pickedSurfaces: Partial<Record<AppearancePick["target"], Surface>> = {
+  viewer: "viewer", editor: "editor", terminal: "terminal", comparison: "compare",
+  hex: "hex", markdown: "markdown", command: "command",
+};
+
+export function pickedSurface(pick: Pick<AppearancePick, "target" | "font">) {
+  return pick.font === "ui" ? undefined : pickedSurfaces[pick.target];
+}
+
+function surfacePick(target: AppearancePick["target"], surface: Surface): AppearancePick {
+  return { target, font: surface, colors: colorKeysForSurface(surface), view: Object.hasOwn(viewFonts, surface) ? surface as ViewFont : undefined };
+}
 
 export function pickLabel(pick: AppearancePick) {
   if (pick.layout) {
@@ -42,6 +53,9 @@ export function readAppearancePick(value: unknown): AppearancePick | null {
   const pick = value as Partial<AppearancePick>;
   if (typeof pick.target !== "string" || !Object.hasOwn(targets, pick.target) ||
       !Array.isArray(pick.colors) || !pick.colors.every((color) => typeof color === "string" && Object.hasOwn(colorLabels, color))) return null;
+  const target = pick.target === "viewer" && pick.view === "markdown" ? "markdown" : pick.target;
+  const surface = pickedSurface({ target, font: pick.font });
+  if (surface) return surfacePick(target, surface);
   return {
     target: pick.target, colors: [...new Set(pick.colors)],
     font: pick.font && Object.hasOwn(fontGroups, pick.font) ? pick.font : undefined,
@@ -76,6 +90,8 @@ export function resolvePick(element: Element): Target | null {
   }
 
   if (element.closest("[data-appearance-picker], .window-controls, .window-resize-marker, .dialog-resize-edge, .pane-divider, .terminal-divider, video, audio, .file-list > [aria-hidden=true]")) return null;
+  const comparison = match(".comparison, .comparison-editor", surfacePick("comparison", "compare"));
+  if (comparison) return comparison;
   const dialog = element.closest("dialog[open]");
   if (dialog && !dialog.classList.contains("dialog-window")) {
     const warning = dialog.hasAttribute("data-tone");
@@ -111,24 +127,21 @@ export function resolvePick(element: Element): Target | null {
       view: pane.id === "right-pane" ? "right" : "left", row: current ? "current" : marked ? "marked" : undefined } };
   }
 
-  const text = element.closest(".text-window, .comparison-editor");
+  const text = element.closest(".text-window");
   if (text) {
     const editing = text.getAttribute("data-editing") === "true";
-    const comparison = text.classList.contains("comparison-editor");
-    const markdown = element.closest(".markdown-preview") !== null;
-    const colors: Color[] = [editing || comparison ? "text-bg" : "viewer-bg", "text-ink", "line"];
-    if (element.closest(".code-surface")) colors.push(...Object.keys(colorGroups.text.colors).filter((key) => key.startsWith("syntax-")) as Color[]);
-    if (comparison) colors.push("added", "removed");
-    return match(".mermaid-preview, .mermaid-diagram", { target: "diagram", colors: [...Object.keys(mermaidColors) as Color[], "viewer-bg"], font: "viewer", view: "markdown" }) ??
+    return match(".mermaid-preview, .mermaid-diagram", { target: "diagram", colors: [...Object.keys(mermaidColors) as Color[], "markdown-bg"], font: "markdown", view: "markdown" }) ??
       match(".document-heading, .document-shortcuts, .syntax-toolbar", { target: editing ? "editor" : "viewer", colors: ["dialog-header", "ink", "muted", "line"], font: "ui" }) ??
-      { element: element.closest(".text-view, .code-surface") ?? text, pick: { target: comparison ? "comparison" : editing ? "editor" : "viewer",
-        colors, font: editing || comparison ? "editor" : "viewer", view: comparison || editing ? "editor" : markdown ? "markdown" : "viewer" } };
+      match(".hex-view", surfacePick("hex", "hex")) ??
+      match(".markdown", surfacePick("markdown", "markdown")) ??
+      { element: element.closest(".text-view, .code-surface") ?? text, pick: editing ? surfacePick("editor", "editor") : surfacePick("viewer", "viewer") };
   }
 
   return match(".statusbar", { target: "status", colors: ["surface", "muted", "line", ...(element.closest(".statusbar.danger") ? ["danger"] as const : [])], font: "ui" }) ??
-    match(".terminal-surface", { target: "terminal", colors: ["text-bg", "text-ink", "accent", "panel-selection"], font: "terminal" }) ??
+    match(".terminal-surface", surfacePick("terminal", "terminal")) ??
     match(".terminal-card header", { target: "terminal", colors: ["raised", "ink", "muted", "line"], font: "ui" }) ??
-    match(".terminal-card, .command-bar", { target: "terminal", colors: ["text-bg", "text-ink", "line"], font: "terminal" }) ??
+    match(".terminal-card", surfacePick("terminal", "terminal")) ??
+    match(".command-bar", surfacePick("command", "command")) ??
     match(".main-menu, [role=menu]", { target: "menu", colors: ["surface", "raised", "ink", "muted", "line", "accent"], font: "ui" }) ??
     match(".pane-heading, .pane-footer, .file-columns, .pane-tools, .pane address, .pane-drive-bar, .pane-status", {
       target: "panelHeader", colors: ["panel-header", "panel-ink", "panel-muted", "line", "accent"], font: "panel",
