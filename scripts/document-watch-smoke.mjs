@@ -49,8 +49,9 @@ export async function testDocumentWatch(page, root) {
   await keep.click();
   await changed.waitFor({ state: "hidden" });
   await editor.getByText("Unsaved text", { exact: true }).waitFor();
+  await input.focus();
   await input.press("End");
-  await input.pressSequentially(" continued");
+  await page.keyboard.insertText(" continued");
   await editor.getByText("Unsaved text continued", { exact: true }).waitFor();
   await input.press("Control+s");
   await editor.getByRole("alert").filter({ hasText: "The file changed on disk." }).waitFor();

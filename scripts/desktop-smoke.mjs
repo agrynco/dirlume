@@ -34,7 +34,7 @@ import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-s
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
 import { testDocumentWatch } from "./document-watch-smoke.mjs";
-import { openMainMenu, revealMainMenu, testHeaderMenus } from "./menu-header-smoke.mjs";
+import { openMainMenu, revealMainMenu, testCommandIcons, testHeaderMenus } from "./menu-header-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -42,7 +42,7 @@ import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
-import { checkResizeMarker, closeToolWindow, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -60,6 +60,7 @@ const src = join(temp, "from");
 const dst = join(temp, "to");
 const diagnostics = join(temp, "diagnostics");
 const diagnosticsFile = join(diagnostics, "diagnostics.jsonl");
+const highlightsDirectory = join(temp, "release-highlights");
 const attributes = join(temp, "attributes");
 await mkdir(src);
 await mkdir(dst);
@@ -116,6 +117,7 @@ async function startDesktop() {
       DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
       DIRLUME_SSH_TEST_CONFIG: join(temp, "ssh-config"),
       DIRLUME_TEST_DIAGNOSTICS_DIR: diagnostics,
+      DIRLUME_TEST_HIGHLIGHTS_DIR: highlightsDirectory,
     },
   });
   let startupError = "";
@@ -135,6 +137,15 @@ async function startDesktop() {
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
   page.setDefaultTimeout(8000);
+  await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+  const release = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("installed_release"));
+  if (release.showOnStartup) {
+    const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
+    for (const highlight of release.highlights) await whatsNew.getByText(highlight, { exact: true }).waitFor();
+    await whatsNew.getByRole("button", { name: "Close", exact: true }).click();
+    await whatsNew.waitFor({ state: "hidden" });
+    assert.equal(await readFile(join(highlightsDirectory, release.version), "utf8"), "");
+  }
   return page;
 }
 
@@ -185,6 +196,7 @@ try {
   assert.equal(await page.locator(".window-titlebar").getAttribute("data-tauri-drag-region"), "deep");
   assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
   await testHeaderMenus(page, true);
+  await testCommandIcons(page, true);
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
   async function dragHorizontally(handle, delta) {
     const bounds = await handle.boundingBox();
@@ -1611,6 +1623,7 @@ try {
   const textBackground = optionsDialog.getByLabel("Editor, viewer, and terminal background hex");
   await textBackground.fill("#101924");
   await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await keepSuggestedColorSchemeName(optionsPage);
   await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   await assertTerminalContrast(lightYellow);
   if (process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_DARK_TERMINAL_SCREENSHOT, scale: "css" });
@@ -1913,7 +1926,10 @@ try {
     }
   }
   await featureSearch.fill("");
-  await closeToolWindow(optionsPage, () => featureDialog.getByRole("button", { name: "Done", exact: true }).click());
+  await closeToolWindow(optionsPage, async () => {
+    await featureDialog.getByRole("button", { name: "Done", exact: true }).click();
+    if (!optionsPage.isClosed()) await keepSuggestedColorSchemeName(optionsPage);
+  });
   await exitDesktop(page);
   page = await startDesktop();
   await page.getByRole("button", { name: "Options", exact: true }).waitFor();

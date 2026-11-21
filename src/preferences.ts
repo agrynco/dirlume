@@ -1,4 +1,4 @@
-import { readSchemes, readSystemScheme, readTheme, type Scheme, type Theme } from "./appearance";
+import { readRetainedFonts, readSchemes, readSystemScheme, readTheme, type RetainedFonts, type Scheme, type Theme } from "./appearance";
 import { migrateSharedViewerZoom, validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
@@ -282,6 +282,7 @@ export interface Preferences {
   showTitlebarScheme: boolean;
   activeScheme: string | null;
   schemes: Scheme[];
+  retainedFonts?: RetainedFonts;
   hidden: boolean;
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
@@ -419,6 +420,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   kswitcher: { group: "general", portable: false, read: (value) => typeof value === "string" ? value : "" },
   theme: { group: "appearance", portable: true, read: readTheme },
   schemes: { group: "appearance", portable: "items", read: readSchemes },
+  retainedFonts: { group: "appearance", portable: true, read: readRetainedFonts },
   activeScheme: { group: "appearance", portable: true,
     read: (value, get) => get("schemes").find(({ id }) => id === value)?.id ?? null,
     acceptsReference: (value) => value === null || typeof value === "string" && value.length > 0 },
@@ -592,11 +594,15 @@ export function eventShortcut(event: { key: string; code?: string; ctrlKey: bool
 }
 
 
-export function quickSearchSeed(event: KeyboardEvent, bindings: readonly string[]): string | null {
+export function quickSearchSeed(event: KeyboardEvent, bindings: readonly string[], includeDigits = false): string | null {
   const shortcut = eventShortcut(event);
   if (bindingMatches(bindings, shortcut)) return "";
   if (!bindings.includes("Alt+Letter")) return null;
   if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (includeDigits) {
+    if (/^[0-9]$/.test(event.key)) return event.key;
+    if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
+  }
   if (Array.from(event.key).length === 1 && /\p{L}/u.test(event.key)) return event.key;
   // Option on macOS can emit a symbol or dead key for a physical letter key.
   if (mac && /^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase();
