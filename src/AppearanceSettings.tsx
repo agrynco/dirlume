@@ -6,12 +6,13 @@ import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
   basePalette, baseThemes, builtInThemes, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
   isAvailableFont, isHexColor, surfaceColors,
-  maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, useSystemTheme, viewerColors,
+  maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, systemTheme, useSystemTheme, viewerColors,
   type Color, type Font, type FontGroup, type Palette, type Scheme, type Surface,
 } from "./appearance";
 import { maxViewerContentWidth, minViewerContentWidth, type Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { ColorPicker } from "./ColorPicker";
+import { Dialog } from "./Dialog";
 import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
 import { SchemeOptions } from "./SchemeOptions";
 import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFont } from "./viewFonts";
@@ -64,13 +65,16 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   views?: readonly ViewFont[];
   selection?: AppearancePick;
 }) {
-  const [deleting, setDeleting] = useState(false);
+  const [managedId, setManagedId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const system = useSystemTheme();
   const [palette, setPalette] = useState<Palette>({});
   const [picker, setPicker] = useState<{ color: Color; label: string; initial: string; previous: Preferences; surface?: Surface } | null>(null);
   const [installed, setInstalled] = useState<InstalledFonts>(null);
   const active = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
   const { scheme: applied, theme } = resolveAppearance(preferences, system);
+  const managed = preferences.schemes.find(({ id }) => id === managedId) ?? applied ?? preferences.schemes[0];
+  const deleting = preferences.schemes.find(({ id }) => id === deleteId);
   const base = theme;
   const overrides = applied?.colors;
   const picked = selection && pickedSurface(selection);
@@ -95,7 +99,6 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   }, [showingFonts]);
 
   function select(value: string) {
-    setDeleting(false);
     onChange(selectAppearance(preferences, value));
   }
 
@@ -106,7 +109,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
       id: `scheme-${number}`, name: number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number),
       base, colors, fonts,
     };
-    setDeleting(false);
+    setManagedId(scheme.id);
     onChange({ ...preferences, viewFontSizes, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
   }
 
@@ -136,14 +139,14 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   }
 
   function remove(scheme: Scheme) {
+    if (resolveAppearance(preferences, systemTheme()).scheme?.id === scheme.id) return;
     const schemes = preferences.schemes.filter(({ id }) => id !== scheme.id);
     onChange({
-      ...preferences, theme: scheme.base, activeScheme: null,
-      schemes,
+      ...preferences, schemes,
       systemLightScheme: readSystemScheme(preferences.systemLightScheme, schemes, "light"),
       systemDarkScheme: readSystemScheme(preferences.systemDarkScheme, schemes, "dark"),
     });
-    setDeleting(false);
+    setDeleteId(null);
   }
 
   function colorFields(keys: readonly Color[], surface?: Surface) {
@@ -188,26 +191,42 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
             </select>
           </label>
         </div>
-        {active && (
-          <div className="appearance-header scheme-identity">
+        {managed && <fieldset className="view-font-group scheme-management">
+          <legend><SettingSearchLabel label="Manage custom color schemes" /></legend>
+          <label className="field"><SettingSearchLabel label="Scheme to manage" aliases={preferences.schemes.map(({ name }) => name)} />
+            <select aria-label={t("Scheme to manage")} value={managed.id} onChange={(event) => setManagedId(event.target.value)}>
+              {preferences.schemes.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+          <div className="appearance-header">
             <label className="field"><SettingSearchLabel label="Scheme name" />
-              <HistoryField historyKey="appearance-scheme-name" aria-label={t("Scheme name")} type="text" value={active.name}
-                maxLength={maxSchemeNameLength} onValueChange={(name) => update({ ...active, name })} />
-            </label>
-            <label className="field"><SettingSearchLabel label="Base theme" aliases={baseThemes.map((theme) => builtInThemes[theme])} />
-              <select aria-label={t("Base theme")} value={active.base} onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
-                {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
-              </select>
+              <HistoryField historyKey="appearance-scheme-name" aria-label={t("Scheme name")} type="text" value={managed.name}
+                maxLength={maxSchemeNameLength} onValueChange={(name) => update({ ...managed, name })} />
             </label>
             <Button type="button" className="icon-button appearance-button" aria-label={t("Delete scheme")}
-              tooltip={t("Delete scheme")} onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
+              tooltip={t("Delete scheme")} disabled={managed.id === applied?.id} onClick={() => setDeleteId(managed.id)}>
+              <Trash2 aria-hidden="true" />
+            </Button>
           </div>
-        )}
-        {active && deleting && <div className="scheme-confirm">
-          <span>{t("Delete this color scheme?")}</span>
-          <Button type="button" onClick={() => setDeleting(false)}>{t("Keep scheme")}</Button>
-          <Button type="button" className="negative" onClick={() => remove(active)}>{t("Delete scheme")}</Button>
-        </div>}
+          {managed.id === applied?.id && <p className="appearance-hint">{t("Switch to another color scheme before deleting this one.")}</p>}
+          {active?.id === managed.id &&
+            <label className="field"><SettingSearchLabel label="Base theme" aliases={baseThemes.map((theme) => builtInThemes[theme])} />
+              <select aria-label={t("Base theme")} value={active.base}
+                onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
+                {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
+              </select>
+            </label>}
+        </fieldset>}
+        {deleting && <Dialog title={t("Delete color scheme")} tone="warning" onClose={() => setDeleteId(null)} footer={<>
+          <Button type="button" data-initial-focus onClick={() => setDeleteId(null)}>{t("Keep scheme")}</Button>
+          <Button type="button" className="alert-confirm" disabled={deleting.id === applied?.id}
+            onClick={() => remove(deleting)}>{t("Delete scheme")}</Button>
+        </>}>
+          <div className="dialog-body">
+            <p>{t("Delete this color scheme?")} <strong>{deleting.name}</strong></p>
+            {deleting.id === applied?.id && <p>{t("Switch to another color scheme before deleting this one.")}</p>}
+          </div>
+        </Dialog>}
       </>}
       {!(surfaces.length ? applied : active) && <p className="appearance-hint">{showingFonts ? t("Changing a font creates a custom scheme.") :
         t("Editing a color creates a custom scheme.")}</p>}

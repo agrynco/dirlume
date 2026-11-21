@@ -1284,9 +1284,8 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .appearance-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
 .appearance-header .appearance-button { min-height: 34px; border-color: var(--line); }
 .favorite-schemes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
-.scheme-identity { grid-template-columns: minmax(0, 1fr) minmax(90px, 125px) auto; }
-.scheme-confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.scheme-confirm span { flex: 1; }
+.scheme-management { min-width: 0; }
+.scheme-management :is(select, input) { min-width: 0; max-width: 100%; }
 .appearance-hint { color: var(--muted); }
 .color-settings h4 { margin: 2px 0; }
 .color-settings, .font-settings { display: grid; gap: 7px; }

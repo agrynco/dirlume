@@ -136,6 +136,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   });
   const appearanceMatches = appearancePages.filter(({ id, label, terms }) => matches("Appearance", label, ...terms,
     ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",
+      "Manage custom color schemes", "Scheme to manage", ...preferences.schemes.map(({ name }) => name),
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
       "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const modesMatch = panelModeIds.filter((id) => matches("Panel modes", panelModeNames[id],
