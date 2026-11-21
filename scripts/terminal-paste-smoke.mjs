@@ -49,8 +49,8 @@ export async function testTerminalPaste() {
       const input = terminal.locator(".xterm-helper-textarea");
       const surface = terminal.locator(".terminal-surface");
       const status = page.locator(".statusbar");
-      const paneHint = status.getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
-      const terminalOnlyHint = status.getByText("File shortcuts paused. Use the Terminal button to return to files.", { exact: true });
+      const paneHint = status.getByRole("status").filter({ hasText: "File shortcuts paused. Click a file pane to use them." });
+      const terminalOnlyHint = status.getByRole("status").filter({ hasText: "File shortcuts paused. Use the Terminal button to return to files." });
       const actions = page.getByRole("navigation", { name: "File actions", exact: true });
       const terminalButton = actions.getByRole("button", { name: "Terminal", exact: true });
       const showTerminal = async () => {

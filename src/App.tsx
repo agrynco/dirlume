@@ -37,6 +37,7 @@ import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
+import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
@@ -149,6 +150,10 @@ function isRangeCommand(command: Command) {
 
 function isTerminalInput(target: EventTarget | null) {
   return target instanceof Element && target.closest(".terminal-surface") !== null;
+}
+
+function hasTerminalShortcutFocus(target: EventTarget | null) {
+  return isTerminalInput(target) || (target instanceof Element && !!target.closest("[data-terminal-shortcut-help]"));
 }
 
 function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | undefined): HelpTopic {
@@ -314,10 +319,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const terminalPlace = pane.place?.kind === "ssh" ? pane.place : local;
   const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
   const terminal = terminalKey ? terminals[terminalKey] : undefined;
-  const terminalFocusHint = terminalInputFocused && terminalVisible && terminal && activeDocument === null
-    ? t(panelsHidden ? "File shortcuts paused. Use the Terminal button to return to files."
-      : "File shortcuts paused. Click a file pane to use them.")
-    : "";
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
@@ -327,6 +328,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
   const [helpTopic, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
+  const terminalFocusHint = (terminalInputFocused || helpTopic === "terminalShortcuts") && terminalVisible && terminal && activeDocument === null
+    ? <TerminalShortcutHint panelsHidden={panelsHidden} onHelp={() => setHelpTopic("terminalShortcuts")} /> : undefined;
 
   const checkUpdates = useCallback(async (manual: boolean) => {
     if (manual) {
@@ -1743,6 +1746,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return session;
   }
 
+  function focusTerminalInput() {
+    requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLTextAreaElement>(".terminal-card:not([hidden]) .xterm-helper-textarea");
+      input?.focus({ preventScroll: true });
+      if (input && document.activeElement === input) setTerminalInputFocused(document.hasFocus());
+    });
+  }
+
   function followShellDirectory(session: TerminalSession, path: string) {
     if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active]) return;
     const current = latest.current[active];
@@ -1773,7 +1784,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
   }, [terminalVisible, terminalKey, terminal, activeDocument]);
   useEffect(() => {
-    const syncFocus = () => setTerminalInputFocused(document.hasFocus() && isTerminalInput(document.activeElement));
+    const syncFocus = () => setTerminalInputFocused(document.hasFocus() && hasTerminalShortcutFocus(document.activeElement));
     window.addEventListener("focus", syncFocus);
     window.addEventListener("blur", syncFocus);
     return () => {
@@ -2173,7 +2184,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           else showCommandLine();
         } else if (openTerminal()) {
           setPanelsHidden(true);
-          requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".terminal-card:not([hidden]) .xterm-helper-textarea")?.focus());
+          focusTerminalInput();
         }
         break;
       case "commandPath":
@@ -2502,9 +2513,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       data-layout={preferences.layout} data-status-bar={preferences.showStatusBar ? undefined : "hidden"}
       style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
-      onFocusCapture={(event) => setTerminalInputFocused(isTerminalInput(event.target))}
+      onFocusCapture={(event) => setTerminalInputFocused(hasTerminalShortcutFocus(event.target))}
       onBlurCapture={(event) => {
-        if (isTerminalInput(event.target) && !isTerminalInput(event.relatedTarget)) setTerminalInputFocused(false);
+        if (hasTerminalShortcutFocus(event.target) && !hasTerminalShortcutFocus(event.relatedTarget)) setTerminalInputFocused(false);
       }}
       onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"}
@@ -2752,7 +2763,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
-            focusHint={preferences.showStatusBar ? undefined : terminalFocusHint}
+            focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
             pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onPasteError={(error) => setStatus({ text: describeError(error), error: true })}
@@ -2812,9 +2823,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <span className="statusbar-message" role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
           {errorText(status.text)}
         </span>
-        <span className="statusbar-terminal-hint" role="status" aria-live="polite" data-tooltip={terminalFocusHint || undefined}>
-          {terminalFocusHint}
-        </span>
+        {terminalFocusHint}
         <span className="statusbar-location">{pane.place?.kind === "connections" ? t("Saved connections") : pane.place?.kind === "archive" ? t(pane.place.address) :
           pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
             smbHost(pane.place) ?? t("Local file system")}</span>
@@ -3082,7 +3091,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           setModal(null);
         }} />
       )}
-      {helpTopic && <HelpDialog initialTopic={helpTopic} language={preferences.language} onClose={() => setHelpTopic(null)} />}
+      {helpTopic && <HelpDialog initialTopic={helpTopic} language={preferences.language} copyShortcuts={shortcuts.copy} onClose={() => {
+        setHelpTopic(null);
+        if (helpTopic === "terminalShortcuts") focusTerminalInput();
+      }} />}
       <McpRequests context={{
         active, panes, preferences, shortcuts: folderShortcuts, load, remote: routeLocation, refresh,
         selection: (side, names) => {

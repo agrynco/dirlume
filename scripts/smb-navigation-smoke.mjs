@@ -181,7 +181,7 @@ export async function testSmbNavigation() {
     await right.getByRole("option", { name: /^ssh-notes/ }).waitFor();
     await right.press("F12");
     const sshTerminal = page.locator(".terminal-card").filter({ has: page.getByRole("heading", { name: "SSH terminal", exact: true }) });
-    const terminalHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
+    const terminalHint = page.locator(".statusbar").getByRole("status").filter({ hasText: "File shortcuts paused. Click a file pane to use them." });
     await sshTerminal.waitFor();
     await terminalHint.waitFor();
     await page.waitForFunction(() => typeof window.sshPrompt === "function");
