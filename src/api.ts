@@ -50,6 +50,15 @@ export interface Listing {
   omitted: number;
 }
 
+export type SpaceChange =
+  | { parent: number; name: string; directory: boolean; size: number | null; allocated: number | null; shared: boolean }
+  | { closed: number; error: string | null; partial: boolean };
+
+export type SpaceScanEvent =
+  | { kind: "start"; strategy: "walk" | "mft" }
+  | { kind: "batch"; changes: SpaceChange[] }
+  | { kind: "finished" };
+
 export type FtpSearchEvent =
   | { kind: "batch"; segments: string[]; prefix: string; entries: Entry[] }
   | { kind: "done"; omitted: number };
@@ -339,7 +348,9 @@ export const api = {
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
   spaceMount: (path: string) => invoke<{ path: string; share: boolean }>("space_mount", { path }),
-  listSpaceDirectory: (root: string, segments: string[]) => invoke<Listing>("list_space_directory", { root, segments }),
+  scanLocalSpace: (root: string, id: string, output: Channel<SpaceScanEvent>) =>
+    invoke<void>("scan_local_space", { root, id, output }),
+  cancelSpaceScan: (id: string) => invoke<void>("cancel_space_scan", { id }),
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),

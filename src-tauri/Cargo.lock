@@ -1527,6 +1527,7 @@ dependencies = [
  "keyring",
  "libc",
  "notify",
+ "ntfs-mft",
  "objc2-app-kit",
  "open",
  "openssh-sftp-client",
@@ -3833,6 +3834,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "ntfs-mft"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1378f68110f13e8a0a5c56f521721b5dded69bb263dd7551784d0c98335945f"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "log",
+ "rustc-hash",
+ "thiserror 2.0.21",
+ "windows 0.62.2",
+ "zerocopy",
 ]
 
 [[package]]

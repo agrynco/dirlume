@@ -72,18 +72,37 @@ async function fixture(browser, layout, source = "local") {
               ? [dir("branch"), ...Array.from({ length: 135 }, (_, i) => file("row-" + i, i))] : [fileA]) };
           case "connect_smb":
             return { kind: "opened", warning: null, listing: { path: args.path, parent: null, ...listing([dir("open")]) } };
-          case "list_space_directory":
-            window.spaceCalls.push({ command, ...args });
-            if (args.root === base && !args.segments.length) return listing([file("root-only", 1, 4096)]);
-            if (args.segments[0] === "locked") throw new Error("Permission denied");
-            if (args.segments.join("/") === "branch/sub") return listing([fileA]);
-            if (args.segments[0] === "branch" && window.holdSpace) {
-              return new Promise((done) => { window.finishOldSpace = () => done(listing([file("stale.dat", large, large)])); });
-            }
-            if (args.segments[0] === "branch") return listing([dir("sub"), file("extra.dat", 2, branchExtra)]);
-            if (args.segments.length) return listing([]);
+          case "scan_local_space": {
+            window.spaceCalls.push({ command, root: args.root });
+            const send = (event) => args.output.onmessage(event);
+            const batch = (...changes) => send({ kind: "batch", changes });
+            const child = (parent, entry) => ({ parent, name: entry.name, directory: entry.directory,
+              size: entry.size, allocated: entry.allocated ?? null, shared: false });
+            const closed = (id, error = null) => ({ closed: id, error, partial: !!error });
+            send({ kind: "start", strategy: "mft" });
+            batch(child(0, file("discarded-before-fallback", 123, 4096)));
+            send({ kind: "start", strategy: "walk" });
             if (window.failSpaceRoot) throw new Error("Permission denied");
-            return listing(top);
+            if (args.root === base) {
+              batch(child(0, file("root-only", 1, 4096)), closed(0));
+            } else {
+              const children = top.filter((entry) => !entry.link).map((entry) => child(0, entry));
+              Object.assign(children.find((entry) => entry.name === "shared-b"), { shared: true, allocated: 0 });
+              batch(...children, closed(0));
+              if (window.holdSpace) {
+                await new Promise((resolve) => { window.finishOldSpace = resolve; });
+                batch(child(1, file("stale.dat", large, large)));
+              } else {
+                const sub = children.length + 1;
+                batch(child(1, dir("sub")), child(1, file("extra.dat", 2, branchExtra)), closed(1),
+                  child(sub, fileA), closed(sub), closed(3), closed(4, "Permission denied"));
+              }
+            }
+            send({ kind: "finished" });
+            return;
+          }
+          case "cancel_space_scan": window.spaceCalls.push({ command, id: args.id }); return;
+
           case "ftp_profiles": return [{ id: "ftp", label: "FTP fixture", host: "fixture", port: 21 }];
           case "ssh_profiles": return [{ id: "sftp", label: "SFTP fixture", host: "fixture", port: 22 }];
           case "connect_ftp": return { id: 1, address: "fixture", origin: "ftp://fixture", segments: ["open"], listing: logical(["open"]) };
@@ -138,6 +157,7 @@ try {
   const roots = await grid.locator(".space-entry-label").allTextContents();
   assert.deepEqual(roots.slice(0, 3), ["open", "largest.dat", "branch"]);
   assert.ok(!roots.includes("outside-link"));
+  assert.ok(!roots.includes("discarded-before-fallback"));
   assert.match(await row(grid, "branch").locator(".space-size").innerText(), /48%/);
   await row(grid, "branch").click();
   await grid.press("ArrowRight");
@@ -165,15 +185,16 @@ try {
   await files.press("Control+Shift+d");
   await local.waitForFunction(() => window.finishOldSpace);
   await row(analyzer, "branch").waitFor();
-  const rootsBeforeSwap = await local.evaluate(() => window.spaceCalls.filter(({ segments }) => segments.length === 0).length);
+  const rootsBeforeSwap = await local.evaluate(() => window.spaceCalls.filter(({ command }) => command === "scan_local_space").length);
   await button(analyzer, "Stop").press("Control+u");
   await analyzer.and(local.locator(".space-analyzer-right")).waitFor();
   await button(analyzer, "Stop").waitFor();
-  assert.equal(await local.evaluate(() => window.spaceCalls.filter(({ segments }) => segments.length === 0).length), rootsBeforeSwap);
+  assert.equal(await local.evaluate(() => window.spaceCalls.filter(({ command }) => command === "scan_local_space").length), rootsBeforeSwap);
   await button(analyzer, "Stop").press("Control+u");
   await analyzer.and(local.locator(".space-analyzer-left")).waitFor();
   await button(analyzer, "Stop").click();
   await analyzer.getByRole("status").getByText("Partial results").waitFor();
+  assert.ok(await local.evaluate(() => window.spaceCalls.some(({ command }) => command === "cancel_space_scan")));
   await local.evaluate(() => { window.holdSpace = false; });
   await button(analyzer, "Rescan").click();
   await local.evaluate(() => window.finishOldSpace());
@@ -206,8 +227,7 @@ try {
     await pane(page, "right").locator("summary[aria-label='Analysis scope']").click();
     await pane(page, "right").getByRole("button", { name: new RegExp("^" + label) }).click();
     await row(page.getByRole("region", { name: "Space Analyzer" }), "root-only").waitFor();
-    const call = await page.evaluate(() => window.spaceCalls.find((item) => item.command === "list_space_directory"));
-    assert.deepEqual(call.segments, []);
+    const call = await page.evaluate(() => window.spaceCalls.find((item) => item.command === "scan_local_space"));
     assert.equal(call.root, { local: "C:\\fixture\\mount", unc: "\\\\fixture\\storage", mounted: "/mnt/samba" }[source]);
     await page.close();
   }

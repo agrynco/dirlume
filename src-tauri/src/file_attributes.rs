@@ -121,7 +121,7 @@ pub fn stream_sort_supported(directory: &Path) -> bool {
 }
 
 #[cfg(windows)]
-pub fn space_usage(path: &Path) -> (Option<u64>, Option<String>) {
+pub fn space_usage(path: &Path) -> (Option<u64>, Option<(u64, u128)>) {
     platform::space_usage(path)
 }
 
@@ -291,7 +291,7 @@ mod platform {
             .flatten()
     }
 
-    pub(super) fn space_usage(path: &Path) -> (Option<u64>, Option<String>) {
+    pub(super) fn space_usage(path: &Path) -> (Option<u64>, Option<(u64, u128)>) {
         use std::{mem::size_of_val, os::windows::io::AsRawHandle};
         use windows_sys::Win32::Storage::FileSystem::{
             FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
@@ -320,8 +320,7 @@ mod platform {
                     )
                 };
                 let id = u128::from_le_bytes(identity.FileId.Identifier);
-                (success != 0 && id != 0)
-                    .then(|| format!("{}:{id:032x}", identity.VolumeSerialNumber))
+                (success != 0 && id != 0).then_some((identity.VolumeSerialNumber, id))
             })
             .flatten();
         (allocated_bytes(&file), id)

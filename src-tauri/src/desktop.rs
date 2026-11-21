@@ -2095,6 +2095,7 @@ pub fn run() {
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
         .manage(watch::Measurements::default())
+        .manage(crate::space_analyzer::Scans::default())
         .manage(Arc::new(crate::completion::CompletionQueue::default()))
         .manage(crate::processes::ProcessMonitor::default())
         .manage(crate::mcp::McpService::default())
@@ -2165,7 +2166,8 @@ pub fn run() {
         list_directory,
         disk_space,
         crate::space_analyzer::space_mount,
-        crate::space_analyzer::list_space_directory,
+        crate::space_analyzer::scan_local_space,
+        crate::space_analyzer::cancel_space_scan,
         crate::git_view::git_repository,
         crate::git_view::git_history,
         crate::git_view::git_details,

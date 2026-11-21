@@ -218,14 +218,25 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
   const metric = result.supportsAllocation ? metricChoice ?? "allocated" : "logical";
   const scanning = result.phase === "scanning";
   const incomplete = result.phase === "partial" || unavailable(result.root, metric) > 0;
-  const folder = result.nodes.get(zoom) ?? result.root;
-  const entry = result.nodes.get(selected) ?? result.root;
+  const folder = result.nodes[zoom] ?? result.root;
+  const entry = result.nodes[selected] ?? result.root;
 
   useLayoutEffect(() => { closeButton.current?.focus(); }, []);
   useEffect(() => {
     const controller = new AbortController();
     scan.current = controller;
-    void scanSpace(resolvePlace(place), controller.signal, setResult);
+    let previousRoot: SpaceNode | undefined;
+    void scanSpace(resolvePlace(place), controller.signal, (next) => {
+      if (previousRoot && previousRoot !== next.root) {
+        setExpanded(new Set([0]));
+        setSelected(0);
+        setZoom(0);
+        setRevealError("");
+        revealRequest.current++;
+      }
+      previousRoot = next.root;
+      setResult(next);
+    });
     return () => { controller.abort(); revealRequest.current += 1; };
   }, [revision, place, resolvePlace]);
 
