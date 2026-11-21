@@ -11,10 +11,18 @@ async function finished(analyzer) {
   await button(analyzer, "Stop").waitFor({ state: "hidden" });
 }
 
+async function assertBreadcrumbs(analyzer, names) {
+  const bar = analyzer.locator(".space-target .address-breadcrumbs");
+  assert.deepEqual(await bar.locator(".address-ancestor > span, .address-current").allTextContents(), names);
+  assert.equal(await bar.locator(".address-ancestor > svg").count(), names.length - 1);
+  assert.equal(await bar.getByRole("button").count(), 0);
+}
+
 async function fixture(browser, layout, source = "local") {
-  const windows = source === "local" || source === "unc" || source === "kswitcher";
+  const windows = ["local", "long", "unc", "kswitcher"].includes(source);
   const page = await browser.newPage({ viewport: { width: 1120, height: 760 },
-    userAgent: windows ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" : "Mozilla/5.0 (X11; Linux x86_64)" });
+    userAgent: windows ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" : source === "mac" ?
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" : "Mozilla/5.0 (X11; Linux x86_64)" });
   page.setDefaultTimeout(8000);
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -22,7 +30,9 @@ async function fixture(browser, layout, source = "local") {
   });
   await page.addInitScript(({ windows, layout, source }) => {
     const joiner = windows ? "\\" : "/";
-    const base = source === "unc" ? "\\\\fixture\\storage" : windows ? "C:\\fixture\\mount" : "/mnt/samba";
+    const base = source === "unc" ? "\\\\fixture\\storage" : source === "long" ?
+      "C:\\A long directory with many characters\\Another long directory with many characters" :
+      windows ? "C:\\fixture\\mount" : source === "mac" ? "/Users/fixture" : "/mnt/samba";
     const folder = base + joiner + "open";
     const other = windows ? "C:\\other" : "/other";
     const gib = 1024 ** 3;
@@ -122,6 +132,7 @@ try {
   await button(left, "Analyze space").click();
   const analyzer = local.getByRole("region", { name: "Space Analyzer", exact: true });
   await finished(analyzer);
+  await assertBreadcrumbs(analyzer, ["C:", "fixture", "mount", "open"]);
   assert.ok((await local.evaluate(() => window.spaceCalls[0].root)).endsWith("\\mount\\open"));
   const grid = analyzer.getByRole("treegrid");
   const roots = await grid.locator(".space-entry-label").allTextContents();
@@ -141,6 +152,7 @@ try {
   await analyzer.getByRole("button", { name: /^branch,/ }).click();
   await analyzer.getByRole("button", { name: /^sub,/ }).click();
   await analyzer.getByRole("button", { name: /^payload.dat,/ }).click();
+  await assertBreadcrumbs(analyzer, ["C:", "fixture", "mount", "open"]);
   await button(analyzer, "Show in other pane").click();
   await pane(local, "right").getByRole("option", { name: /^payload.dat/, selected: true }).waitFor();
   await button(analyzer, "Close").click();
@@ -200,6 +212,23 @@ try {
     await page.close();
   }
 
+  for (const [source, names] of [["mounted", ["/", "mnt", "samba", "open"]], ["mac", ["/", "Users", "fixture", "open"]],
+    ["long", ["C:", "A long directory with many characters", "Another long directory with many characters", "open"]]]) {
+    const page = await fixture(browser, "standard", source);
+    await button(pane(page, "left"), "Analyze space").click();
+    const target = page.getByRole("region", { name: "Space Analyzer", exact: true });
+    await finished(target);
+    await assertBreadcrumbs(target, names);
+    if (source === "long") {
+      await page.setViewportSize({ width: 600, height: 500 });
+      await target.locator(".address-ellipsis").waitFor();
+      assert.equal(await target.locator(".address-current").evaluate((current) =>
+        current.getBoundingClientRect().right <= current.closest(".address-crumb-clip").getBoundingClientRect().right + 1), true);
+      assert.equal(await target.locator(".address-breadcrumbs").getAttribute("title"), names.join("\\"));
+    }
+    await page.close();
+  }
+
   for (const [menu, profile, source, label] of [
     ["FTP", "FTP fixture", "ftp", "Analyze connection root"],
     ["FTP", "SFTP fixture", "ssh", "Analyze connection root"],
@@ -222,6 +251,7 @@ try {
     else await remote.getByText("File size", { exact: true }).waitFor();
     await row(remote, "broken").getByText("Unavailable").waitFor();
     if (source === "ftp") {
+      await assertBreadcrumbs(remote, ["fixture", "open"]);
       await page.evaluate(() => { window.spaceFailure = "Connection reset by peer"; });
       await button(remote, "Rescan").click();
       await remote.getByRole("alert").filter({ hasText: "Reconnect and rescan." }).waitFor();
@@ -230,6 +260,7 @@ try {
       await button(remote, "Rescan").click();
       await remote.getByRole("alert").waitFor({ state: "hidden" });
       await finished(remote);
+      await assertBreadcrumbs(remote, ["fixture", "open"]);
     }
     await row(remote, "nested").dblclick();
     await row(remote, "remote.dat").click();

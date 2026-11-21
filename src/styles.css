@@ -490,6 +490,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
 .address-ancestor { display: flex; align-items: center; }
 .address-ancestor button { min-height: 28px; padding: 2px 7px; }
+.address-ancestor > span { padding: 2px 7px; }
 .address-ancestor svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
 .address-current { padding: 3px 8px; }
 .address-forward { display: flex; min-width: 0; max-width: 45%; overflow: hidden; white-space: nowrap; }
@@ -497,6 +498,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-forward button { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: .64; }
 .address-forward button:is(:hover, :focus-visible) { opacity: 1; }
 .address-overflow { position: absolute; inset-inline-start: 0; background: var(--canvas); }
+.address-ellipsis { padding: 2px 7px; pointer-events: none; }
 .address-actions {
   position: absolute; z-index: 6; top: 100%; right: 0; display: flex; width: max-content; gap: 2px; padding: 2px;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised); box-shadow: 0 3px 12px var(--overlay);
@@ -745,10 +747,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .space-scope small { width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--panel-muted); }
 .space-analyzer { overflow: hidden; }
 .space-analyzer .pane-title svg { flex: none; width: 16px; height: 16px; }
-.space-target {
-  flex: none; padding: 5px 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--panel-muted); background: var(--raised); border-bottom: 1px solid var(--line);
-}
+.space-target { flex: none; padding: 0 8px 5px; background: var(--raised); }
 .space-toolbar, .space-footer, .space-map-heading {
   display: flex; align-items: center; flex: none; flex-wrap: wrap; gap: 5px 8px; min-width: 0; padding: 5px 8px;
   background: var(--raised); font: .9em/1.25 var(--ui-font);
