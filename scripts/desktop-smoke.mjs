@@ -2032,6 +2032,15 @@ try {
   await openMainMenu(page, "Help");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
+  const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
+  const releaseNotes = whatsNew.getByRole("link", { name: `Full release notes for ${productVersion}`, exact: true });
+  assert.match(await releaseNotes.getAttribute("href"), new RegExp(`/releases/tag/v${productVersion.replaceAll(".", "\\.")}$`));
+  await page.keyboard.press("Escape");
+  await whatsNew.waitFor({ state: "hidden" });
+  await openMainMenu(page, "Help");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
   const about = page.getByRole("dialog", { name: "About", exact: true });
   await about.getByText("Dirlume", { exact: true }).waitFor();
   await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
@@ -2045,8 +2054,7 @@ try {
   await page.keyboard.press("Escape");
   const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
   await openMainMenu(page, "Help");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
   await page.keyboard.press("Enter");
   await errorLogViewer.waitFor();
