@@ -290,6 +290,151 @@ async function checkImageDocuments(page) {
   await page.waitForFunction(() => document.activeElement?.id === "right-files");
 }
 
+async function checkImageEditor(page, side, name, capture = false) {
+  const editor = page.locator(".image-editor:not([hidden])");
+  const viewer = page.locator(".image-document:not(.image-editor):not([hidden])");
+  const size = (node, value) => node.getByText(value + " px", { exact: true }).waitFor();
+  const field = (name) => editor.getByRole("spinbutton", { name, exact: true });
+  await row(page, side, name).click();
+  await list(page, side).press("F4");
+  await size(editor, "1,200 × 800");
+  await editor.press("]");
+  await size(editor, "800 × 1,200");
+  await control(editor, "Crop").click();
+  const overlay = editor.locator(".image-crop-overlay");
+  const frame = await overlay.boundingBox();
+  const screen = (x, y) => [frame.x + x * frame.width / 800, frame.y + y * frame.height / 1200];
+  await page.mouse.move(...screen(20, 20));
+  await page.mouse.down();
+  await page.mouse.move(...screen(200, 150), { steps: 5 });
+  await page.mouse.up();
+  assert.ok(Math.abs(Number(await field("Crop width").inputValue()) - 180) <= 2);
+  assert.ok(Math.abs(Number(await field("Crop height").inputValue()) - 130) <= 2);
+  await page.mouse.move(...screen(100, 80));
+  await page.mouse.down();
+  await page.mouse.move(...screen(132, 117), { steps: 5 });
+  await page.mouse.up();
+  assert.ok(Math.abs(Number(await field("Crop left").inputValue()) - 52) <= 2);
+  assert.ok(Math.abs(Number(await field("Crop top").inputValue()) - 57) <= 2);
+  const ratio = editor.getByRole("combobox", { name: "Aspect ratio", exact: true });
+  await ratio.selectOption("Custom");
+  await field("Ratio width").fill("5");
+  await field("Ratio height").fill("4");
+  await control(editor, "Swap aspect ratio").click();
+  await field("Crop width").fill("400");
+  assert.equal(await field("Crop height").inputValue(), "500");
+  await ratio.selectOption("16:9");
+  await field("Crop width").fill("720");
+  await field("Crop left").fill("50");
+  await field("Crop top").fill("30");
+  assert.equal(await field("Crop left").inputValue(), "50");
+  assert.equal(await field("Crop top").inputValue(), "30");
+  assert.equal(await field("Crop height").inputValue(), "405");
+  await control(editor, "Actual size").click();
+  assert.equal(await field("Crop width").inputValue(), "720");
+  assert.equal(await field("Crop height").inputValue(), "405");
+  await control(editor, "Fit").click();
+  if (capture) await page.screenshot({ path: process.env.DIRLUME_IMAGE_EDIT_CAPTURE });
+  await control(editor, "Apply crop").click();
+  await size(editor, "720 × 405");
+  await control(editor, "Undo").click();
+  await size(editor, "800 × 1,200");
+  await control(editor, "Redo").click();
+  await size(editor, "720 × 405");
+  await control(editor, "Crop").click();
+  await control(editor, "Cancel crop").click();
+  await size(editor, "720 × 405");
+  await editor.press("F6");
+  await size(viewer, "1,200 × 800");
+  await viewer.press("F4");
+  await viewer.getByLabel("Hexadecimal contents").waitFor();
+  await viewer.press("F6");
+  await size(editor, "720 × 405");
+  await editor.press("Escape");
+  const unsaved = page.getByRole("dialog", { name: "Unsaved changes", exact: true });
+  await control(unsaved, "Cancel").click();
+  await size(editor, "720 × 405");
+  return editor;
+}
+
+async function checkNativeImageEdits(page, directory) {
+  const name = "image-edit.png";
+  const source = join(directory, name);
+  const original = Buffer.from(await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1200;
+    canvas.height = 800;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#18a0b4";
+    context.fillRect(0, 0, 1200, 800);
+    context.fillStyle = "#e64930";
+    context.fillRect(30, 730, 16, 20);
+    return canvas.toDataURL("image/png").split(",")[1];
+  }), "base64");
+  await writeFile(source, original);
+  const collision = join(directory, "image-edit-edited.png");
+  await writeFile(collision, "existing file");
+  await control(page.locator("#left-pane"), "Refresh folder").click();
+  const editor = await checkImageEditor(page, "left", name, Boolean(process.env.DIRLUME_IMAGE_EDIT_CAPTURE));
+  assert.deepEqual(await readFile(source), original);
+  await control(editor, "Save a copy").click();
+  const copyDialog = page.getByRole("dialog", { name: "Save a copy", exact: true });
+  const save = () => control(copyDialog, "Save a copy").click();
+  assert.equal(await copyDialog.getByRole("combobox", { name: "File destination", exact: true }).inputValue(), collision);
+  await save();
+  await copyDialog.getByRole("alert").getByText("A file already exists at that path. Choose a new file name.").waitFor();
+  const target = join(directory, "crop-saved.png");
+  await copyDialog.getByRole("combobox", { name: "File destination", exact: true }).fill(target);
+  await save();
+  await copyDialog.waitFor({ state: "hidden" });
+  assert.equal(await readFile(collision, "utf8"), "existing file");
+  assert.deepEqual(await readFile(source), original);
+  const decoded = await page.evaluate(async (encoded) => {
+    const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0))], { type: "image/png" }));
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    context.drawImage(bitmap, 0, 0);
+    return [bitmap.width, bitmap.height, ...context.getImageData(0, 0, 1, 1).data];
+  }, (await readFile(target)).toString("base64"));
+  assert.deepEqual(decoded, [720, 405, 230, 73, 48, 255]);
+  await control(editor, "Rotate right").click();
+  const replace = page.getByRole("dialog", { name: "Replace original", exact: true });
+  await control(editor, "Replace original").click();
+  await replace.getByText(/camera and color profile metadata may be lost/).waitFor();
+  await writeFile(source, "external change");
+  await control(replace, "Replace original").click();
+  await replace.getByRole("alert").getByText("The original image changed on disk. You can still save a copy.").waitFor();
+  await control(replace, "Cancel").click();
+  const unsaved = page.getByRole("dialog", { name: "Unsaved changes", exact: true });
+  await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("plugin:window|close", { label: "main" }));
+  await control(unsaved, "Cancel").click();
+  await editor.press("Escape");
+  await control(unsaved, "Save a copy").click();
+  const recovery = join(directory, "crop-recovered.png");
+  await copyDialog.getByRole("combobox", { name: "File destination", exact: true }).fill(recovery);
+  await save();
+  await editor.waitFor({ state: "hidden" });
+  assert.equal(await readFile(source, "utf8"), "external change");
+  assert.ok((await readFile(recovery)).length > 0);
+  await row(page, "left", "crop-saved.png").click();
+  await list(page, "left").press("F3");
+  const viewer = page.locator(".image-document:not(.image-editor):not([hidden])");
+  await viewer.getByText("720 × 405 px", { exact: true }).waitFor();
+  await viewer.press("F6");
+  await editor.getByText("720 × 405 px", { exact: true }).waitFor();
+  await control(editor, "Rotate right").click();
+  await control(editor, "Replace original").click();
+  await control(replace, "Replace original").click();
+  await replace.waitFor({ state: "hidden" });
+  await control(editor, "Rotate right").waitFor();
+  await editor.press("F6");
+  await viewer.getByText("405 × 720 px", { exact: true }).waitFor();
+  await viewer.press("F10");
+  console.log("Verified image crop, rotation, draft mode switches, save collisions and external changes in the Windows editor.");
+}
+
 export async function testNativeQuickView(page, root) {
   const left = join(root, "quick-view-left");
   const right = join(root, "quick-view-right");
@@ -332,6 +477,7 @@ export async function testNativeQuickView(page, root) {
   await checkViews(page);
   await checkImageDocuments(page);
   assert.deepEqual(await readFile(image), png);
+  await checkNativeImageEdits(page, left);
   console.log("Verified native Windows Quick View for text, Markdown, sandboxed HTML and image files in both panes.");
 }
 
@@ -343,13 +489,14 @@ export async function testBrowserQuickView(userAgent) {
     page.on("pageerror", (error) => console.error(error));
     const png = [...await pngFixture(page)];
     const largePng = [...await pngFixture(page, 1600, 900)];
+    const editPng = [...await pngFixture(page, 1200, 800)];
     let externalRequests = 0;
     await page.route("https://external.invalid/**", (route) => { externalRequests++; return route.abort(); });
     await page.route("http://dirlume.test/**", (route) => {
       const path = new URL(route.request().url()).pathname;
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
-    await page.addInitScript(({ front, back, png, largePng, imageTimes, binaryHeader, largeBytes, middleByte, middleMarker, endMarker }) => {
+    await page.addInitScript(({ front, back, png, largePng, editPng, imageTimes, binaryHeader, largeBytes, middleByte, middleMarker, endMarker }) => {
       if (location.hostname !== "dirlume.test") return;
       const path = /Windows/i.test(navigator.userAgent) ? "C:\\fixture\\" : "/fixture/";
       const panel = (name) => ({ place: { kind: "local", path: path + name, parent: null } });
@@ -363,7 +510,8 @@ export async function testBrowserQuickView(userAgent) {
           if (command === "locations") return [{ label: "Home", path: path + "left" }];
           if (command === "list_directory") return {
             path: args.path, parent: null, omitted: 0,
-            entries: Object.keys(args.path.endsWith("left") ? { ...front, folder: null, "07-slow.txt": "", "08-unreadable.txt": "" } : back).map(file),
+            entries: Object.keys(args.path.endsWith("left") ? { ...front, folder: null, "07-slow.txt": "", "08-unreadable.txt": "",
+              ...(window.useEditorFixture ? { "image-edit.png": null } : {}) } : back).map(file),
           };
           if (command === "read_text") {
             if (args.name === "06-binary.bin") throw "The file contains binary data.";
@@ -388,13 +536,15 @@ export async function testBrowserQuickView(userAgent) {
           }
           if (command === "read_preview_image") {
             const name = args.source.name;
-            return new Uint8Array(name === "05-image.png" ? png : name === "15-corrupt.png" ? [0, 1] : largePng).buffer;
+            return new Uint8Array(name === "05-image.png" ? png : name === "15-corrupt.png" ? [0, 1] : name === "image-edit.png" ? editPng : largePng).buffer;
           }
+          if (command === "open_image_edit") return { id: "edit", width: 1200, height: 800, canReplace: true };
+          if (command === "read_image_edit") return new Uint8Array(editPng).buffer;
           if (command === "file_icons") return [];
           return null;
         },
       };
-    }, { front, back, png, largePng, imageTimes: Object.fromEntries(viewerOrder.map((name) => [name, modified(name)])),
+    }, { front, back, png, largePng, editPng, imageTimes: Object.fromEntries(viewerOrder.map((name) => [name, modified(name)])),
       binaryHeader, largeBytes, middleByte, middleMarker, endMarker });
     await page.goto("http://dirlume.test/");
     await checkViews(page);
@@ -411,6 +561,12 @@ export async function testBrowserQuickView(userAgent) {
     assert.equal(await right.getByText("Could not read this file: Permission denied", { exact: true }).isVisible(), true);
     await toggle(page).click();
     await checkImageDocuments(page);
+    await page.evaluate(() => { window.useEditorFixture = true; });
+    await control(page.locator("#left-pane"), "Refresh folder").click();
+    const editor = await checkImageEditor(page, "left", "image-edit.png");
+    await editor.press("Escape");
+    await control(page.getByRole("dialog", { name: "Unsaved changes", exact: true }), "Discard").click();
+    await editor.waitFor({ state: "hidden" });
 
     await page.getByRole("button", { name: "Options", exact: true }).click();
     const options = page.getByRole("dialog", { name: "Options", exact: true });

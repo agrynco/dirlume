@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { describeError, readPlacePreviewImage, type NamedFile } from "./api";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { describeError, readPlacePreviewImage, uncParts, type NamedFile } from "./api";
 import { bindingMatches, wheelShortcut } from "./preferences";
 
 const imageTypes: Record<string, string> = {
@@ -9,6 +9,10 @@ const imageTypes: Record<string, string> = {
 export function imageType(name: string) {
   const extension = /\.([^.]+)$/.exec(name)?.[1].toLowerCase();
   return extension && Object.hasOwn(imageTypes, extension) ? imageTypes[extension] : undefined;
+}
+
+export function canEditImage({ name, place }: NamedFile) {
+  return place.kind === "local" && !uncParts(place.path)[0] && /\.(?:png|jpe?g)$/i.test(name);
 }
 
 export function useImageSource(file: NamedFile, revision = 0) {
@@ -103,8 +107,8 @@ export function useImageViewport(wheel: readonly string[] = []) {
   };
 }
 
-export function ImageViewport({ name, url, view, hidden = false }: {
-  name: string; url?: string; view: ReturnType<typeof useImageViewport>; hidden?: boolean;
+export function ImageViewport({ name, url, view, hidden = false, children }: {
+  name: string; url?: string; view: ReturnType<typeof useImageViewport>; hidden?: boolean; children?: ReactNode;
 }) {
   return <div className="quick-view-image-canvas" ref={view.canvas} tabIndex={0} hidden={hidden}
     data-pannable={view.panning || undefined}
@@ -131,6 +135,7 @@ export function ImageViewport({ name, url, view, hidden = false }: {
           transform: `translate(-50%, -50%) rotate(${view.turns * 90}deg)`,
         }} onLoad={({ currentTarget }) => view.setNatural({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight })}
         onError={() => view.setFailed(true)} />}
+        {children}
       </div>
     </div>
   </div>;

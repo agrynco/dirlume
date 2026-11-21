@@ -1454,6 +1454,35 @@ button.color-swatch {
 .image-document .document-heading > button { grid-column: 3; grid-row: 1; }
 .image-document-toolbar, .image-controls { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .image-document-toolbar { gap: 8px; }
+.image-view-only { color: var(--muted); font-size: .9em; }
+.image-editor-toolbar { row-gap: 6px; }
+.image-save-actions { margin-inline-start: auto; }
+.image-crop-toolbar { border-top: 1px solid var(--line); }
+.image-crop-toolbar label { display: inline-flex; gap: 5px; align-items: center; font-size: .9em; }
+.image-crop-toolbar input { width: 8ch; padding-inline: 5px; }
+.image-edit-pixels { position: absolute; inset: 0; overflow: hidden; }
+.image-edit-pixels img { top: 0; left: 0; max-width: none; transform-origin: top left; }
+.image-crop-overlay { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
+.image-crop-overlay::before {
+  content: ""; position: absolute; inset: 0; background: #0008;
+  clip-path: polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+    var(--crop-left) var(--crop-top), var(--crop-left) var(--crop-bottom),
+    var(--crop-right) var(--crop-bottom), var(--crop-right) var(--crop-top), var(--crop-left) var(--crop-top));
+}
+.image-crop-selection {
+  position: absolute; box-shadow: 0 0 0 1px var(--on-accent);
+  outline: 1px solid var(--accent-fill); cursor: move;
+}
+.image-crop-overlay[data-moving] .image-crop-selection { cursor: grabbing; }
+.image-crop-selection [data-corner] {
+  position: absolute; width: 14px; height: 14px; border: 2px solid var(--accent-fill);
+  border-radius: 2px; background: var(--on-accent); transform: translate(-50%, -50%);
+}
+.image-crop-selection [data-corner="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+.image-crop-selection [data-corner="ne"] { top: 0; left: 100%; cursor: nesw-resize; }
+.image-crop-selection [data-corner="sw"] { top: 100%; left: 0; cursor: nesw-resize; }
+.image-crop-selection [data-corner="se"] { top: 100%; left: 100%; cursor: nwse-resize; }
+.image-save-body form { display: grid; gap: 6px; min-width: 0; }
 .hex-toolbar > span { margin-inline-start: auto; color: var(--muted); white-space: nowrap; font: 12px var(--mono); }
 .text-view, .code-surface {
   flex: 1; margin: 0 14px 12px; min-height: 0; overflow: auto; padding: 11px;

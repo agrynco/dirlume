@@ -290,7 +290,7 @@ async fn disk_space(path: String) -> Result<crate::disk_space::DiskSpace> {
     .await
 }
 
-fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
+pub(crate) fn selected(directory: &str, name: &str) -> io::Result<PathBuf> {
     Ok(local::absolute(directory)?.join(local::name_component(name)?))
 }
 
@@ -1510,7 +1510,7 @@ pub(crate) fn check_preview_image_size(length: u64) -> Result<()> {
     Ok(())
 }
 
-fn load_preview_image(path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn load_preview_image(path: &Path) -> Result<Vec<u8>> {
     let file = open_regular_file(path)?;
     check_preview_image_size(file.metadata().map_err(message)?.len())?;
     let mut bytes = Vec::new();
@@ -1898,16 +1898,20 @@ async fn save_text(directory: String, name: String, original: String, text: Stri
     .await
 }
 
-fn save_local_text(path: &Path, original: &str, text: &str) -> Result<()> {
+pub(crate) fn lock_local_save(path: &Path) -> Result<std::sync::MutexGuard<'static, ()>> {
     use std::hash::{DefaultHasher, Hash, Hasher};
     static SAVES: [Mutex<()>; 64] = [const { Mutex::new(()) }; 64];
     let mut hash = DefaultHasher::new();
     same_file::Handle::from_path(path)
         .map_err(message)?
         .hash(&mut hash);
-    let _guard = SAVES[(hash.finish() % SAVES.len() as u64) as usize]
+    SAVES[(hash.finish() % SAVES.len() as u64) as usize]
         .lock()
-        .map_err(message)?;
+        .map_err(message)
+}
+
+fn save_local_text(path: &Path, original: &str, text: &str) -> Result<()> {
+    let _guard = lock_local_save(path)?;
     let metadata = fs::symlink_metadata(path).map_err(message)?;
     let revision = local_transfer::FileRevision::capture(path, &metadata).map_err(message)?;
     fs::OpenOptions::new()
@@ -1948,6 +1952,13 @@ fn save_local_text(path: &Path, original: &str, text: &str) -> Result<()> {
         }
     }
     revision.verify(path).map_err(message)?;
+    publish_local_replacement(path, staged)
+}
+
+pub(crate) fn publish_local_replacement(
+    path: &Path,
+    staged: tempfile::NamedTempFile,
+) -> Result<()> {
     #[cfg(unix)]
     staged.persist(path).map_err(message)?;
     #[cfg(windows)]
@@ -2099,6 +2110,7 @@ pub fn run() {
         .manage(Arc::new(crate::completion::CompletionQueue::default()))
         .manage(crate::processes::ProcessMonitor::default())
         .manage(crate::mcp::McpService::default())
+        .manage(crate::image_edit::ImageEdits::default())
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
@@ -2224,6 +2236,10 @@ pub fn run() {
         save_ssh_text,
         read_text,
         read_preview_image,
+        crate::image_edit::open_image_edit,
+        crate::image_edit::read_image_edit,
+        crate::image_edit::save_image_edit,
+        crate::image_edit::close_image_edit,
         resolve_text_link,
         open_web_link,
         read_server_text,
