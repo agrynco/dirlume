@@ -151,6 +151,7 @@ pub enum FailureCode {
     SyntaxError,
     RangeError,
     UnhandledRejection,
+    PreviewFallback,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -169,10 +170,80 @@ struct Entry<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     os_code: Option<i32>,
     recent_actions: &'a VecDeque<Action>,
+    #[serde(flatten)]
+    detail: Option<EntryDetail<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum EntryDetail<'a> {
+    Panic(&'a PanicDetails),
+    Frontend(&'a FrontendDetails),
+    FileRead(&'a FileReadDetails),
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReadSurface {
+    QuickView,
+    Viewer,
+    Editor,
+    Compare,
+    SortMetadata,
+    Mcp,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReadReason {
+    MissingFile,
+    AccessDenied,
+    SharingViolation,
+    NonRegularFile,
+    SizeLimit,
+    BinaryContent,
+    UnsupportedEncoding,
+    Io,
+    Unknown,
+    NotBinary,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReadStage {
+    Select,
+    Open,
+    Read,
+    Decode,
+    ByteProbe,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReadCause {
+    pub(crate) stage: ReadStage,
+    pub(crate) reason: ReadReason,
     #[serde(skip_serializing_if = "Option::is_none")]
-    panic: Option<&'a PanicDetails>,
+    pub(crate) os_code: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ReadOutcome {
+    Failed,
+    Recovered,
+}
+
+#[derive(Serialize)]
+struct FileReadDetails {
+    surface: Option<ReadSurface>,
+    platform: &'static str,
+    outcome: ReadOutcome,
+    #[serde(flatten)]
+    cause: ReadCause,
     #[serde(skip_serializing_if = "Option::is_none")]
-    frontend: Option<&'a FrontendDetails>,
+    fallback: Option<ReadCause>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -337,16 +408,15 @@ impl Diagnostics {
         code: FailureCode,
         os_code: Option<i32>,
         actions: &VecDeque<Action>,
-        frontend: Option<&FrontendDetails>,
+        detail: Option<EntryDetail<'_>>,
     ) {
         let entry = Entry {
             timestamp_ms: timestamp(),
             operation,
             code,
-            os_code: os_code.filter(|code| matches!(code, 1..=65535)),
+            os_code,
             recent_actions: actions,
-            panic: None,
-            frontend,
+            detail,
         };
         let _ = append(&self.path, &entry);
     }
@@ -358,8 +428,7 @@ impl Diagnostics {
             code: FailureCode::Panic,
             os_code: None,
             recent_actions: actions,
-            panic: Some(details),
-            frontend: None,
+            detail: Some(EntryDetail::Panic(details)),
         };
         let _ = append(&self.path, &entry);
     }
@@ -515,20 +584,58 @@ fn operation_detail(detail: Option<&str>) -> &'static str {
 }
 
 pub fn failure(operation: &str, code: FailureCode, os_code: Option<i32>) {
-    record_failure(operation, code, os_code, None);
+    record_failure(
+        operation,
+        code,
+        os_code.filter(|code| matches!(code, 1..=65535)),
+        None,
+    );
 }
 
 fn record_failure(
     operation: &str,
     code: FailureCode,
     os_code: Option<i32>,
-    frontend: Option<&FrontendDetails>,
+    detail: Option<EntryDetail<'_>>,
 ) {
     if let (Some(log), Some(operation)) = (LOG.get(), operation_name(operation)) {
         if let Ok(actions) = log.actions.lock() {
-            log.write(operation, code, os_code, &actions, frontend);
+            log.write(operation, code, os_code, &actions, detail);
         }
     }
+}
+
+pub(crate) fn file_read(
+    surface: Option<ReadSurface>,
+    cause: ReadCause,
+    fallback: Option<ReadCause>,
+    recovered: bool,
+) {
+    let os_code = fallback.and_then(|error| error.os_code).or(cause.os_code);
+    let code = if recovered {
+        FailureCode::PreviewFallback
+    } else if os_code.is_some() {
+        FailureCode::OsError
+    } else {
+        FailureCode::NativeError
+    };
+    let details = FileReadDetails {
+        surface,
+        platform: std::env::consts::OS,
+        outcome: if recovered {
+            ReadOutcome::Recovered
+        } else {
+            ReadOutcome::Failed
+        },
+        cause,
+        fallback,
+    };
+    record_failure(
+        "read_text",
+        code,
+        os_code,
+        Some(EntryDetail::FileRead(&details)),
+    );
 }
 
 #[tauri::command]
@@ -546,7 +653,12 @@ pub(crate) async fn report_diagnostic(
         &operation
     };
     let frontend = frontend.map(|report| FrontendDetails::from_report(report, &window));
-    record_failure(operation, code, os_code, frontend.as_ref());
+    record_failure(
+        operation,
+        code,
+        os_code.filter(|code| matches!(code, 1..=65535)),
+        frontend.as_ref().map(EntryDetail::Frontend),
+    );
 }
 
 #[cfg(test)]
