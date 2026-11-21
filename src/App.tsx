@@ -22,7 +22,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { canAnalyze, type SpacePlace } from "./spaceScan";
+import { canAnalyze, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { EnvironmentMode } from "./EnvironmentPane";
 import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
@@ -208,6 +208,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
   const [spaceAnalyzer, setSpaceAnalyzer] = useState<{ side: Side; place: SpacePlace } | null>(null);
+  const [fileRevision, setFileRevision] = useState(0);
   const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
@@ -1566,6 +1567,33 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     } });
   }
 
+  function fileLocationsChanged() {
+    refresh("left");
+    refresh("right");
+    setFileRevision((revision) => revision + 1);
+  }
+
+  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace, entries: readonly Entry[]) {
+    const remote = place.kind === "ftp" || place.kind === "ssh" ? place : undefined;
+    const archive = place.kind === "archive" ? place : undefined;
+    setModal({
+      kind: remote || archive || smbHost(place) ? "delete" : command,
+      path: placePath(place), remote, archive, names: entries.map(({ name }) => name),
+      directories: entries.filter(({ directory, link }) => directory && !link).map(({ name }) => name),
+    });
+  }
+
+  function spaceItemAction(side: Side, item: SpaceLocalItem, command: SpaceItemCommand) {
+    if (busy || modal) return;
+    if (command === "copy" || command === "move") {
+      const targetSide = opposite(side);
+      const target = panes[targetSide];
+      openTransfer(command, item.place, [item],
+        paneCovered(targetSide) || processPanels[targetSide] || target.search ||
+          command === "move" && isFileServer(target.place) ? null : target.place);
+    } else confirmDeletion(command, item.place, [item.entry]);
+  }
+
   function transfer(kind: "copy" | "move") {
     const source = pane.place;
     if (!source || source.kind === "smbRoot" || source.kind === "connections" || !current || pane.loading) {
@@ -1742,6 +1770,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   async function submitRowRename(rename: RowRename, name: string) {
     if (name !== rename.name) {
       await renameItem(rename.place, rename.name, name);
+      if (rename.place.kind === "local") setFileRevision((revision) => revision + 1);
       if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
         await load(rename.side, rename.place, "refresh", name);
         refresh(opposite(rename.side));
@@ -2284,11 +2313,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         if (writable && !pane.search && current && !busy && !pane.loading) {
           const marked = entries[active].filter(({ name }) => markedNames[active].has(name));
           const selected = marked.length ? marked : [current];
-          setModal({
-            kind: permanentDelete || archive ? "delete" : command, path: placePath(writable), remote: fileServer, archive,
-            names: selected.map(({ name }) => name),
-            directories: selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name),
-          });
+          confirmDeletion(command, writable, selected);
         }
         break;
       }
@@ -2671,6 +2696,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <p className="pane-empty" role="status">{t("Scanning…")}</p>
         </section>}>
           <SpaceAnalyzer key={placePath(spaceAnalyzer.place)} side={spaceAnalyzer.side} place={spaceAnalyzer.place}
+            shortcuts={shortcuts} fileRevision={fileRevision} operationsAvailable={!busy && !modal}
+            onItemAction={(item, command) => spaceItemAction(spaceAnalyzer.side, item, command)}
             resolvePlace={resolveSpacePlace} onClose={closeSpaceAnalyzer}
             onReveal={(place, reveal) => revealSpace(spaceAnalyzer.side, place, reveal)} />
         </Suspense>}
@@ -2928,7 +2955,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       )}
       {modal?.kind === "transfer" && (
         <TransferDialog transfer={modal.transfer} showHidden={preferences.hidden} onClose={() => setModal(null)}
-          onFinished={(success) => { refresh("left"); refresh("right"); if (success) setStatus({ text: "Transfer complete" }); }} />
+          onFinished={(success) => { fileLocationsChanged(); if (success) setStatus({ text: "Transfer complete" }); }} />
       )}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
@@ -3073,8 +3100,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {modal?.kind === "archivePassword" && <ArchivePasswordDialog onClose={() => setModal(null)}
         onOpen={async (password) => { await openArchive(modal.side, modal.path, password); setModal(null); }} />}
       {modal?.kind === "deletion" && <DeletionDialog deletion={modal.deletion} onClose={() => setModal(null)} onFinished={(result) => {
-        refresh("left");
-        refresh("right");
+        fileLocationsChanged();
         if (result && !result.cancelled && result.counts.failed + result.counts.skipped + result.counts.unprocessed === 0) {
           setStatus({ text: t(modal.deletion.permanent ? "Deleted {0}." : "Moved {0} to Trash.", countText(result.counts.completed, "item")) });
         }
@@ -3115,8 +3141,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           } else if (operation) {
             if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);
-            refresh("left");
-            refresh("right");
+            fileLocationsChanged();
             if (modal.kind === "newFile") {
               openDocument({ place: { kind: "local", path: modal.path, parent: null }, name: operation.name }, true);
             }

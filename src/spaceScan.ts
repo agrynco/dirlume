@@ -1,5 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, folderLabel, isFileServer, placePath, type FileLocation, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
+import { api, describeError, folderLabel, isFileServer, placePath, type Entry, type FileLocation, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
 export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
@@ -69,11 +69,37 @@ export function initialSpaceResult(place: SpacePlace): SpaceResult {
 
 export function spaceLocation(root: SpacePlace, entry: SpaceNode): { place: SpacePlace; reveal?: string } {
   const reveal = entry.directory ? undefined : entry.name;
+  const segments = spaceSegments(reveal === undefined ? entry : entry.parent);
+  return { place: segments.reduce((place, name) => childPlace(place, name) as SpacePlace, root), reveal };
+}
+
+export function spaceSegments(entry: SpaceNode | null) {
   const segments: string[] = [];
-  for (let current = reveal === undefined ? entry : entry.parent; current?.parent; current = current.parent) {
+  for (let current = entry; current?.parent; current = current.parent) {
     segments.push(current.name);
   }
-  return { place: segments.reverse().reduce((place, name) => childPlace(place, name) as SpacePlace, root), reveal };
+  return segments.reverse();
+}
+
+export function nearestSpaceNode(root: SpaceNode, segments: readonly string[]) {
+  let current = root;
+  for (const name of segments) {
+    const child = current.children.find((entry) => entry.name === name);
+    if (!child) break;
+    current = child;
+  }
+  return current;
+}
+
+export type SpaceLocalItem = { place: Extract<Place, { kind: "local" }>; entry: Entry };
+export type SpaceItemCommand = "copy" | "move" | "recycle" | "delete";
+
+export function spaceLocalItem(root: SpacePlace, node: SpaceNode): SpaceLocalItem | null {
+  if (root.kind !== "local" || !node.parent) return null;
+  const parent = spaceLocation(root, node.parent).place;
+  if (parent.kind !== "local") return null;
+  return { place: parent, entry: { name: node.name, directory: node.directory, link: false, hidden: false,
+    size: node.missingLogical ? null : node.logical, modified: null } };
 }
 
 export function sortedSpaceChildren(entry: SpaceNode, metric: Metric) {
