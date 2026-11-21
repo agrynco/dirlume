@@ -52,8 +52,11 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
         if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
         return;
       }
+      const afterClose = document.activeElement;
       requestAnimationFrame(() => {
         if (document.querySelector("dialog[data-context-help]")) return;
+        const active = document.activeElement;
+        if (active !== afterClose && active !== document.body && active?.isConnected) return;
         if (focused instanceof HTMLElement && focused.isConnected && focused.getClientRects().length &&
             !focused.closest("[inert], [hidden], :disabled")) {
           focused.focus({ preventScroll: true });
