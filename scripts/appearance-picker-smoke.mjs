@@ -191,6 +191,27 @@ export async function testAppearancePicker() {
     await options.getByRole("button", { name: "Picker history", exact: true }).click();
     await options.locator(".picker-history").getByRole("button", { name: "Status bar", exact: true }).click();
     assert.equal(await toolbar.inputValue(), "#245978");
+    await selectPage("Appearance");
+    const colorScheme = options.getByRole("combobox", { name: "Color scheme", exact: true });
+    const preview = options.locator(".preview-frame");
+    await colorScheme.selectOption("lavender");
+    const gradient = await preview.evaluate((frame) => getComputedStyle(frame).backgroundImage);
+    assert.match(gradient, /gradient/);
+    await options.getByRole("button", { name: "New scheme", exact: true }).click();
+    await hex(page, "Window background").fill("#f4f0eb");
+    assert.equal(await preview.evaluate((frame) => getComputedStyle(frame).backgroundColor), "rgb(244, 240, 235)");
+    assert.equal(await preview.evaluate((frame) => getComputedStyle(frame).backgroundImage), "none");
+    await options.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(244, 240, 235)");
+    await done();
+    await page.reload();
+    await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(244, 240, 235)");
+    await open();
+    await selectPage("Appearance");
+    await options.getByRole("button", { name: "Reset window background", exact: true }).click();
+    assert.equal(await preview.evaluate((frame) => getComputedStyle(frame).backgroundImage), gradient);
+    await done();
+    await page.waitForFunction((image) => getComputedStyle(document.body).backgroundImage === image, gradient);
     console.log("Verified appearance targets, grouped controls, draft preview, cancellation, and private date-grouped history.");
   } finally {
     await browser.close();
