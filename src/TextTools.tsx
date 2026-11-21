@@ -31,7 +31,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, colors,
+export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors,
   onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
@@ -40,6 +40,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   shortcuts: Bindings;
   fontSizes: ViewFontSizes;
   viewerContentWidth?: number;
+  viewerMarkdownContentWidth?: number | "full";
   colors?: Palette;
   onZoom: ZoomViewFont;
   onOptions: () => void;
@@ -93,6 +94,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const searchField = useRef<HTMLInputElement>(null);
   const markdownVisible = Boolean(document && preview && !hex);
   const markdownViewer = markdownVisible && !editing;
+  const contentWidth = markdownViewer ? viewerMarkdownContentWidth ?? viewerContentWidth : viewerContentWidth;
   const sourceVisible = Boolean(document && !preview && !hex);
   const search = useMarkdownSearch(markdownContent, markdownScroll, searchOpen ? searchQuery.trim() : "",
     active && markdownViewer, markdownSource, htmlFormatting);
@@ -344,9 +346,12 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   }
 
   return (
-    <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
+    <section ref={section} style={{ ...viewFontStyle(fontSize),
+      "--viewer-content-width": typeof contentWidth === "number" ? `${contentWidth}px` : undefined,
+    } as CSSProperties}
       hidden={!active} className="text-window" data-text-surface={fontView}
-      data-help-topic={editing ? "editor" : "viewer"} data-editing={editing} data-reading={!editing || preview}
+      data-help-topic={editing ? "editor" : "viewer"} data-editing={editing}
+      data-limited-width={typeof contentWidth === "number" || undefined}
       aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
@@ -444,7 +449,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
-              fontSize={fontSize} value={text} onChange={setText}
+              fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>
         </div>

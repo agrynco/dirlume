@@ -130,7 +130,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   }
 
   function setColor(color: Color, value?: string, surface?: Surface) {
-    const scheme = surface ? applied : active;
+    const scheme = surface || color === "viewer-outside-bg" ? applied : active;
     if (scheme) update({ ...scheme, colors: { ...scheme.colors, [color]: value } });
     else if (value) create(applied?.fonts, { ...applied?.colors, [color]: value });
   }
@@ -149,9 +149,10 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   function colorFields(keys: readonly Color[], surface?: Surface) {
     return keys.map((color) => {
       const label = colorLabels[color];
-      const value = palette[color] ?? (color === "editor-active-line" ? "" : "#000000");
+      const value = palette[color] ?? (color === "editor-active-line" || color === "viewer-outside-bg" ? "" : "#000000");
       return <ColorField key={color} label={label} value={value} surface={surface}
-        custom={Boolean((surface ? applied : active)?.colors[color])} onChange={(value) => setColor(color, value, surface)}
+        custom={Boolean((surface || color === "viewer-outside-bg" ? applied : active)?.colors[color])}
+        onChange={(value) => setColor(color, value, surface)}
         onOpen={() => setPicker({ color, label, initial: value || "#000000", previous: preferences, surface })} />;
     });
   }
@@ -217,6 +218,8 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           installed={installed} disabled={!applied} onChange={(font) => setFont(surface, font)}>
           <div className="color-settings">{colorFields(colorKeysForSurface(surface), surface)}</div>
           {surfaceViews.length > 0 && <ViewFontSettings views={surfaceViews} preferences={preferences} onChange={onChange} />}
+          {!selection && fontGroup === "viewer" && surface === "markdown" &&
+            <MarkdownWidthSettings preferences={preferences} onChange={onChange} />}
         </FontFields>;
       })}
       {showingFonts && (
@@ -260,6 +263,33 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     </div>
   );
 }
+
+function MarkdownWidthSettings({ preferences, onChange }: {
+  preferences: Preferences;
+  onChange: (next: Preferences) => void;
+}) {
+  const width = preferences.viewerMarkdownContentWidth;
+  const mode = typeof width === "number" ? "custom" : width ?? "inherit";
+  const setWidth = (viewerMarkdownContentWidth?: Preferences["viewerMarkdownContentWidth"]) =>
+    onChange({ ...preferences, viewerMarkdownContentWidth });
+  return <>
+    <label className="setting unit-setting">
+      <SettingSearchLabel label="Markdown reading width" aliases={["Use shared width", "Full width", "Custom width"]} />
+      <select aria-label={t("Markdown reading width")} value={mode} onChange={({ target }) =>
+        setWidth(target.value === "custom" ? preferences.viewerContentWidth ?? 960 : target.value === "full" ? "full" : undefined)}>
+        <option value="inherit">{t("Use shared width")}</option>
+        <option value="full">{t("Full width")}</option>
+        <option value="custom">{t("Custom width")}</option>
+      </select>
+    </label>
+    {typeof width === "number" && <label className="setting unit-setting">
+      <SettingSearchLabel label="Markdown max width (px)" />
+      <OptionalNumberInput label={t("Markdown max width (px)")} size={width} fallback=""
+        min={minViewerContentWidth} max={maxViewerContentWidth} onChange={setWidth} />
+    </label>}
+  </>;
+}
+
 function ColorField({ label, value, custom, surface, onChange, onOpen }: {
   label: string;
   value: string;
@@ -279,7 +309,7 @@ function ColorField({ label, value, custom, surface, onChange, onOpen }: {
       <Button type="button" className="color-swatch" aria-label={t("{0} color", t(label))} aria-haspopup="dialog"
         style={{ "--swatch": value || "transparent" } as CSSProperties} onClick={onOpen} />
       <HistoryField historyKey="appearance-hex" type="text" aria-label={t("{0} hex", t(label))} value={hex} maxLength={7} spellCheck={false}
-        placeholder={value ? undefined : t("No highlight")}
+        placeholder={value ? undefined : t(label === "Outside reading area background" ? "Inherited" : "No highlight")}
         onBlur={() => setHex(value)} onValueChange={(change) => {
           setHex(change);
           if (isHexColor(change)) onChange(change.toLowerCase());

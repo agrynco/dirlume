@@ -29,13 +29,14 @@ export type SourceActions = {
 };
 const managedCommands: Command[] = [selectAll, cursorDocStart, cursorDocEnd];
 
-export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, onChange,
+export default function CodeSurface({ fileName, editing, locked, active, fontSize, readingWidth, value, onChange,
   ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus }: {
   fileName: string;
   editing: boolean;
   locked: boolean;
   active: boolean;
   fontSize?: number;
+  readingWidth?: number;
   value: string;
   onChange: (text: string) => void;
   ref?: Ref<SourceActions>;
@@ -95,6 +96,7 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
         ],
       }),
     });
+    if (!editing) view.scrollDOM.tabIndex = 0;
     editor.current = view;
     return () => { editor.current = null; view.destroy(); };
   }, [editing, fileName, languageSlot, editSlot, labelSlot, managed]);
@@ -132,10 +134,11 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
 
   useEffect(() => {
     if (active) editor.current?.requestMeasure();
-  }, [active, fontSize]);
+  }, [active, fontSize, readingWidth]);
 
   useEffect(() => {
     if (active && editing) editor.current?.focus();
+    else if (active) editor.current?.scrollDOM.focus({ preventScroll: true });
   }, [active, editing]);
 
   useEffect(() => {

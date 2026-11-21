@@ -62,7 +62,7 @@ Choose a **Shortcut scheme** to switch the full set of bindings. **New scheme** 
 
 Use **Settings** in the viewer or editor toolbar to open its section directly. The controls show the inherited font family and pixel size when no override is set. New installations use **GoMono Nerd Font Mono** at **18 px**.
 
-**Viewer → Reading area** controls the background and maximum width of text, hex, and Markdown. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
+**Viewer → Reading area** controls the shared maximum width and the background beside a narrower reading column. The document scrolls at the right edge of the Viewer. Under **Viewer → Markdown**, rendered Markdown can use the shared width, a custom width, or full width. Markdown in **Source** uses the shared width. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
 
 Drag the Options title bar to position it independently of the main window. Drag any edge or corner to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a control to see details such as an icon's action, a shortcut that is missing from the control, or the full text of a clipped value. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 

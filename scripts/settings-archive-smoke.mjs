@@ -5,7 +5,7 @@ import { chromium } from "playwright-core";
 const local = { id: "local", name: "Local palette", base: "light", colors: { canvas: "#f0f0f0" }, fonts: {} };
 const evening = {
   id: "evening", name: "Evening palette", base: "dark",
-  colors: { canvas: "#121824", "terminal-cursor": "#abcdef", "editor-syntax-keyword": "#ffee22" },
+  colors: { canvas: "#121824", "terminal-cursor": "#abcdef", "editor-syntax-keyword": "#ffee22", "viewer-outside-bg": "#670456" },
   fonts: { panel: { family: "Fixture Sans", size: 17 }, markdown: { family: "An unavailable font", size: 22 } },
 };
 const standalone = { id: "single", name: "Standalone palette", base: "sunrise", colors: { canvas: "#fef2dd" }, fonts: {} };
@@ -24,6 +24,7 @@ try {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({
       layout: "standard", mainMenuAlignment: "right", schemes: [local, evening], activeScheme: null,
       kswitcher: "Fixture installation folder",
+      viewerContentWidth: 630, viewerMarkdownContentWidth: "full",
       activeShortcutScheme: "custom-keys", bindingDefaults: 7,
       shortcutSchemes: [{ id: "custom-keys", name: "My keys", bindings: { newFile: ["Ctrl+Alt+N"] } }],
     }));
@@ -120,6 +121,7 @@ try {
   assert.equal(Object.hasOwn(settingsFile.groups.general, "kswitcher"), false);
   assert.deepEqual(settingsFile.groups.shortcuts.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
   assert.equal(settingsFile.groups.filePanels.hideActionButtonIcons, true);
+  assert.deepEqual(settingsFile.groups.viewer, { viewerContentWidth: 630, viewerMarkdownContentWidth: "full" });
   await button(options, "Main File Panels").click();
   await visibility.uncheck();
   await button(options, "Apply").click();
@@ -170,6 +172,7 @@ try {
     [JSON.stringify({ ...themeFile, version: 3 }), "This settings file version is not supported."],
     [archive({ filePanels: { layout: "bad" } }, []), "The settings file is invalid."],
     [archive({ terminal: { terminalResizeRows: 51 } }, []), "The settings file is invalid."],
+    [archive({ viewer: { viewerMarkdownContentWidth: "invalid" } }, []), "The settings file is invalid."],
     [archive({}, [{ ...evening, colors: { "terminal-cursor": "#bad" } }]), "The settings file is invalid."],
     [archive({}, [{ ...evening, fonts: { compare: { size: 400 } } }]), "The settings file is invalid."],
   ]) {
@@ -220,6 +223,8 @@ try {
   await page.evaluate(() => {
     const key = "dirlume.preferences.v1";
     const saved = JSON.parse(localStorage.getItem(key));
+    delete saved.viewerContentWidth;
+    delete saved.viewerMarkdownContentWidth;
     localStorage.setItem(key, JSON.stringify({ ...saved, schemes: [], shortcutSchemes: [], activeShortcutScheme: null }));
   });
   await page.reload();
@@ -227,11 +232,17 @@ try {
   await startImport(JSON.stringify(themeFile));
   await button(importDialog, "Import").click();
   assert.deepEqual((await readPreferences()).schemes, themeFile.schemes);
-  await startImport(archive({ shortcuts: settingsFile.groups.shortcuts }, []));
+  await startImport(archive({ viewer: { viewerContentWidth: 640 } }, []));
+  await button(importDialog, "Import").click();
+  assert.equal((await readPreferences()).viewerContentWidth, 640);
+  assert.equal((await readPreferences()).viewerMarkdownContentWidth, undefined);
+  await startImport(archive({ shortcuts: settingsFile.groups.shortcuts, viewer: settingsFile.groups.viewer }, []));
   await button(importDialog, "Import").click();
   const restored = await readPreferences();
   assert.equal(restored.activeShortcutScheme, "custom-keys");
   assert.deepEqual(restored.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
+  assert.equal(restored.viewerContentWidth, 630);
+  assert.equal(restored.viewerMarkdownContentWidth, "full");
   console.log("Verified selective settings export and import, theme and shortcut round trips, legacy migration, retired settings, replacement confirmation, restart, and cancel and error handling.");
 } finally {
   await browser.close();
