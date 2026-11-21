@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
 
 use crate::{
-    desktop::{blocking, message, Result},
+    desktop::{blocking, blocking_for, message, Result},
     diagnostics::{failure, FailureCode},
     local, ssh,
 };
@@ -293,7 +293,7 @@ pub async fn open_terminal(
         .as_ref()
         .map(|source| ssh_state.connection(source.connection))
         .transpose()?;
-    let (terminal, tracks_prompt) = blocking(move || {
+    let (terminal, tracks_prompt) = blocking_for("open_terminal", move || {
         if let (Some(source), Some(connection)) = (&request.ssh, connection) {
             let dimensions = size(request.rows, request.cols);
             let terminal = ssh::open_shell(
