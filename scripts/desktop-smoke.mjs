@@ -34,7 +34,7 @@ import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-s
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
 import { testDocumentWatch } from "./document-watch-smoke.mjs";
-import { openMainMenu, revealMainMenu, testHeaderMenus } from "./menu-header-smoke.mjs";
+import { openMainMenu, revealMainMenu, testCommandIcons, testHeaderMenus } from "./menu-header-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
@@ -185,6 +185,7 @@ try {
   assert.equal(await page.locator(".window-titlebar").getAttribute("data-tauri-drag-region"), "deep");
   assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
   await testHeaderMenus(page, true);
+  await testCommandIcons(page, true);
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
   async function dragHorizontally(handle, delta) {
     const bounds = await handle.boundingBox();
