@@ -2,6 +2,7 @@
   "version": "0.1.19",
   "highlights": [
     "Get command and path suggestions as you type in local and Dirlume SSH terminals.",
-    "Browse binaries in Quick View and recognize headers and embedded text in a scrollable character dump."
+    "Browse binaries in Quick View and recognize headers and embedded text in a scrollable character dump.",
+    "Open images with F3, zoom around the pointer, and browse the visible images in the same tab."
   ]
 }

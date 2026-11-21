@@ -125,6 +125,12 @@ export const commands = {
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
+  imagePrevious: { label: "Previous image", key: "ArrowLeft" },
+  imageNext: { label: "Next image", key: "ArrowRight" },
+  imageZoomIn: { label: "Zoom in on image", key: "Ctrl+=" },
+  imageZoomOut: { label: "Zoom out from image", key: "Ctrl+-" },
+  imageActualSize: { label: "Show image at actual size", key: "1" },
+  imageFit: { label: "Fit image to window", key: "0" },
   switchDocumentMode: { label: "Switch between Viewer and Editor", key: "F6" },
   saveText: { label: "Save text", key: "Ctrl+S" },
   closeText: { label: "Close the viewer or editor", key: "F10" },
@@ -216,6 +222,7 @@ export function commandScope(command: Command) {
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
+  if (command.startsWith("image")) return "image";
   if (command === "switchDocumentMode" || command === "saveText" || command === "closeText" ||
       command === "cancelText" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
@@ -234,6 +241,8 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   const commands = [left, right];
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
+  if ((leftScope === "image" || rightScope === "image") &&
+      commands.some((command) => ["viewAsHex", "closeText", "cancelText", "switchDocumentMode", "nextDocument", "previousDocument", "settings"].includes(command))) return true;
   if (commands.includes("swap") && (leftScope === "compare" || rightScope === "compare")) return true;
   return (leftScope === "text" || rightScope === "text" || leftScope === "viewer" || rightScope === "viewer") &&
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));

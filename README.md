@@ -130,6 +130,8 @@ Press **Ctrl+Q** or select **Quick View** in the main toolbar to preview the cur
 
 Quick View shows binary files as scrollable single-cell characters in file order. Each byte uses the DOS CP437 glyph mapping, and zero bytes appear as blank cells. Rows wrap to fit the pane.
 
+Press **F3** to open a PNG, JPEG, GIF, WebP, or BMP up to 16 MiB in the image Viewer. **Fit** shows the whole image and **100%** shows the original pixels. Drag a zoomed image to pan, or hold the configured wheel-zoom modifier and scroll to zoom around the pointer. **Previous image** and **Next image** follow the originating pane's sort order and filter in the same tab. Use **F4** to switch between the image and Hex, and **Esc** or **F10** to return to the last viewed file.
+
 With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Git View works offline with locally available objects and leaves the working tree and index intact. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
 
 ### Environment variables

@@ -56,6 +56,8 @@ import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
 import { applyAppearance, isLightTheme, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
+import { ImageDocument } from "./ImageDocument";
+import { imageType } from "./ImageViewport";
 import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
@@ -93,6 +95,7 @@ type DocumentTab = DocumentWindow & {
   position?: MarkdownPosition;
   back?: MarkdownLocation[];
   forward?: MarkdownLocation[];
+  imageIndex?: number;
 };
 
 function sameRenameLocation(current: Place | null, place: RenameLocation) {
@@ -825,7 +828,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function selectDocument(id: number | null) {
     setActiveDocument(id);
-    if (id === null && !panelsHidden) requestAnimationFrame(() => focus(active));
+    if (id === null && !panelsHidden) {
+      const document = documents.find((tab) => tab.id === activeDocument);
+      const source = document?.imageOrigin ?? active;
+      if (document?.imageOrigin) {
+        const file = document.file;
+        const row = entries[source].find((entry) => {
+          const candidate = fileFor(source, entry);
+          return candidate && sameDocumentFile(candidate, file);
+        });
+        if (row) updatePane(source, (pane) => ({ ...pane, selected: row.name }));
+      }
+      requestAnimationFrame(() => focus(source));
+    }
   }
 
   const workspaceKeys = useEffectEvent((event: globalThis.KeyboardEvent) => {
@@ -904,13 +919,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition) {
+  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side) {
     const existing = documents.find((item) => item.editing === editing && sameDocumentFile(item.file, file));
     const id = existing?.id ?? ++nextDocument.current;
+    const imageOrigin = !editing && imageType(file.name) ? origin : undefined;
+    const imageIndex = imageOrigin ? imagesInPane(imageOrigin, file).findIndex((candidate) => sameDocumentFile(candidate, file)) : undefined;
     if (!existing) {
-      setDocuments((current) => [...current, { id, file, editing, position }]);
-    } else if (position) {
-      setDocuments((current) => current.map((tab) => tab.id === id ? { ...tab, position } : tab));
+      setDocuments((current) => [...current, { id, file, editing, position, imageOrigin, imageIndex }]);
+    } else if (position || imageOrigin) {
+      setDocuments((current) => current.map((tab) => tab.id === id
+        ? { ...tab, position: position ?? tab.position, imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex }
+        : tab));
     }
     selectDocument(id);
   }
@@ -942,7 +961,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const remaining = documents.filter((document) => document.id !== id);
     setDocuments(remaining);
     dirtyDocuments.current.delete(id);
-    if (activeDocument === id) selectDocument(documents[index - 1]?.id ?? null);
+    if (activeDocument === id) {
+      const { file, editing } = documents[index];
+      selectDocument(!editing && imageType(file.name) ? null : documents[index - 1]?.id ?? null);
+    }
   }
 
   async function openErrorLog() {
@@ -1841,6 +1863,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? { place: item.place, name: item.entry.name } : null;
   }
 
+  function imagesInPane(side: Side, file: NamedFile) {
+    const source = panes[side];
+    const place = source.place;
+    if (!source.search && (place?.kind !== file.place.kind || placePath(place) !== placePath(file.place) ||
+        (place.kind !== "local" && !sameConnection(place, file.place)))) return [];
+    return entries[side].flatMap((entry) => {
+      if (!imageType(entry.name)) return [];
+      const image = fileFor(side, entry);
+      return image ? [image] : [];
+    });
+  }
+
   const comparisonMarked = pane.marked.length < 2 ? [] : entries[active]
     .filter(({ name }) => markedNames[active].has(name))
     .map((entry) => fileFor(active, entry))
@@ -2170,7 +2204,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || writableTextPlace(file.place))) openDocument(file, command === "edit");
+        if (file && (command === "view" || writableTextPlace(file.place))) openDocument(file, command === "edit", undefined, active);
         break;
       }
       case "compare": {
@@ -2573,8 +2607,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
-        {documents.map(({ id, file, editing, position, back, forward }) => (
-          <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
+        {documents.map(({ id, file, editing, position, back, forward, imageOrigin, imageIndex }) => {
+          const documentKey = JSON.stringify([id, placePath(file.place), file.name]);
+          if (!editing && imageType(file.name)) {
+            const candidates = activeDocument === id ? imagesInPane(imageOrigin ?? active, file) : [];
+            const index = candidates.findIndex((image) => sameDocumentFile(file, image));
+            const current = index >= 0 ? index : Math.max(0, imageIndex ?? 0);
+            return <ImageDocument key={documentKey} file={file} active={activeDocument === id} shortcuts={shortcuts}
+              previous={candidates[current - 1]} next={candidates[index >= 0 ? current + 1 : current]}
+              onNavigate={(image) => setDocuments((current) => current.map((tab) => tab.id === id
+                ? { ...tab, file: image, imageIndex: candidates.indexOf(image) } : tab))}
+              onClose={() => closeDocument(id)} />;
+          }
+          return (
+          <TextWindow key={documentKey}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}
@@ -2601,7 +2647,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               }
               for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
             }} onClose={() => closeDocument(id)} />
-        ))}
+          );
+        })}
       </div>
       <Suspense fallback={terminalVisible && activeDocument === null ?
         <div className="terminal-card pane-empty" role="status">{t("Opening terminal…")}</div> : null}>
