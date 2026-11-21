@@ -55,6 +55,12 @@ async function assertDivider(page, side) {
   assert.equal(movedTarget < initialTarget, side === "right");
   await page.keyboard.press("Control+ArrowRight");
   await page.waitForFunction((value) => document.querySelector(".pane-divider").getAttribute("aria-valuenow") === String(value), initial);
+  if (await page.evaluate(() => /Macintosh/.test(navigator.userAgent))) {
+    await page.keyboard.press("Meta+ArrowLeft");
+    await page.waitForFunction((value) => document.querySelector(".pane-divider").getAttribute("aria-valuenow") === String(value), initial - 1);
+    await page.keyboard.press("Meta+ArrowRight");
+    await page.waitForFunction((value) => document.querySelector(".pane-divider").getAttribute("aria-valuenow") === String(value), initial);
+  }
 }
 
 async function checkViews(page) {
@@ -168,10 +174,10 @@ export async function testNativeQuickView(page, root) {
   console.log("Verified native Windows Quick View for text, Markdown, sandboxed HTML and image files in both panes.");
 }
 
-async function testBrowserQuickView() {
+export async function testBrowserQuickView(userAgent) {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
-    const page = await browser.newPage({ viewport: { width: 1020, height: 720 } });
+    const page = await browser.newPage({ userAgent, viewport: { width: 1020, height: 720 } });
     page.setDefaultTimeout(8000);
     page.on("pageerror", (error) => console.error(error));
     const png = [...await pngFixture(page)];
@@ -229,9 +235,12 @@ async function testBrowserQuickView() {
 
     await page.getByRole("button", { name: "Options", exact: true }).click();
     const options = page.getByRole("dialog", { name: "Options", exact: true });
+    const mac = await page.evaluate(() => /Macintosh/.test(navigator.userAgent));
+    const initial = mac ? "⌃Q" : "Ctrl+Q";
+    const replacement = mac ? "⌃⌥Q" : "Ctrl+Alt+Q";
     await control(options, "Keyboard shortcuts").click();
-    await control(options, "Change Ctrl+Q for Quick View").click();
-    await options.getByRole("textbox", { name: "New shortcut to replace Ctrl+Q for Quick View", exact: true }).press("Control+Alt+q");
+    await control(options, "Change " + initial + " for Quick View").click();
+    await options.getByRole("textbox", { name: "New shortcut to replace " + initial + " for Quick View", exact: true }).press("Control+Alt+q");
     await control(options, "Done").click();
     await row(page, "left", "01-alpha.txt").click();
     await page.keyboard.press("Control+q");
@@ -241,7 +250,7 @@ async function testBrowserQuickView() {
     await toggle(page).click();
     await page.getByRole("button", { name: "Options", exact: true }).click();
     await control(options, "Keyboard shortcuts").click();
-    await control(options, "Remove Ctrl+Alt+Q from Quick View").click();
+    await control(options, "Remove " + replacement + " from Quick View").click();
     await control(options, "Done").click();
     await list(page, "left").focus();
     await page.keyboard.press("Control+Alt+q");

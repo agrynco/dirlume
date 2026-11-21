@@ -94,9 +94,10 @@ async function checkMenuBindings(page) {
     await button(page, "Options").click();
     await button(options, "Keyboard shortcuts").click();
   };
+  const mac = await page.evaluate(() => /Macintosh/.test(navigator.userAgent));
   const sequences = [
-    ["Open main menu", "F9", "Ctrl+Alt+F9", "Control+Alt+F9"],
-    ["Open main menu (alternate)", "Alt", "Ctrl+Alt+F10", "Control+Alt+F10"],
+    ["Open main menu", "F9", mac ? "⌃⌥F9" : "Ctrl+Alt+F9", "Control+Alt+F9"],
+    ["Open main menu (alternate)", "Alt", mac ? "⌃⌥F10" : "Ctrl+Alt+F10", "Control+Alt+F10"],
   ];
   await openBindings();
   for (const [name, old, , shortcut] of sequences) {
@@ -162,10 +163,10 @@ async function checkNestedMenu(page) {
   await bar.waitFor({ state: "hidden" });
 }
 
-async function testBrowserHeader() {
+export async function testBrowserHeader(userAgent) {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
-    const page = await browser.newPage({ viewport: { width: 1120, height: 730 } });
+    const page = await browser.newPage({ userAgent, viewport: { width: 1120, height: 730 } });
     page.setDefaultTimeout(8000);
     await page.route("http://dirlume.test/**", (route) => {
       const path = new URL(route.request().url()).pathname;
