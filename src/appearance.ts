@@ -72,6 +72,8 @@ export const colorGroups = {
       "panel-selected-ink": "Active selection text",
       "panel-inactive-selection": "Inactive selection background",
       "panel-marked": "Marked items",
+      "panel-current-marked-bg": "Current marked row background",
+      "panel-current-marked-outline": "Current marked row outline",
     },
   },
   files: {
