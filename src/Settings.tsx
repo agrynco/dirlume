@@ -20,7 +20,7 @@ import {
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
-import type { HelpTopic } from "./helpContent";
+import type { HelpTopic } from "./helpTopics";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 

@@ -119,7 +119,7 @@ export function FileColumns({ container, groups, columns, tracks, samples, visib
       return { key, label, checked, disabled: key === "name", toggle: () => onVisibility(key, !checked) };
     });
 
-  return <div className="file-columns" ref={container} {...columnMenuBindings((_, anchor) => setMenu(anchor))}>
+  return <div className="file-columns" data-help-topic="paneColumns" ref={container} {...columnMenuBindings((_, anchor) => setMenu(anchor))}>
     <div className="file-column-grid" style={{ gridTemplateColumns: tracks }}>
       {groups.map((group, groupIndex) => <div key={groupIndex} className="file-column-group" style={columnGroupTrack(groups, groupIndex)}>
         {group.map(({ field }, index) => {

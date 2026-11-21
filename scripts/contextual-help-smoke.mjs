@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-async function openFixture(browser, language = "en") {
-  const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
+async function openFixture(browser, language = "en", userAgent) {
+  const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, userAgent });
   page.setDefaultTimeout(8000);
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -18,6 +18,14 @@ async function openFixture(browser, language = "en") {
       invoke: async (command, args) => {
         if (command === "locations") return [{ label: "Home", path: root }, { label: "Downloads", path: root + "/other" }];
         if (command === "list_directory") return { path: args.path, parent: null, entries: [file], omitted: 0 };
+        if (command === "space_mount") return { path: root, share: false };
+        if (command === "scan_local_space") {
+          args.output.onmessage({ kind: "start", strategy: "walk" });
+          args.output.onmessage({ kind: "batch", changes: [{ parent: 0, name: file.name, directory: false, size: 7, allocated: 4096 }] });
+          await new Promise((resolve) => { window.finishContextScan = resolve; });
+          args.output.onmessage({ kind: "batch", changes: [{ closed: 0 }] });
+          args.output.onmessage({ kind: "finished" });
+        }
         if (command === "file_icons") return [];
         if (command === "read_text") return { text: "A note\n", encoding: "utf8" };
         if (command === "open_terminal") return true;
@@ -58,6 +66,28 @@ try {
   await currentTopic(help, "files").waitFor();
   await closeHelp(page, help, files);
 
+  const drive = page.getByRole("button", { name: "Locations for left pane", exact: true });
+  await drive.click();
+  const picker = page.getByRole("group", { name: "Left pane sources", exact: true });
+  const source = picker.getByRole("button", { name: /^Downloads/ });
+  await page.keyboard.press("ArrowDown");
+  await openHelp(page, source, "paneSources");
+  await help.locator('.help-reading a[href="#help-remote"]').click();
+  await currentTopic(help, "remote").waitFor();
+  await closeHelp(page, help, source);
+  assert.equal(await picker.isVisible(), true);
+  await page.keyboard.press("Escape");
+  await picker.waitFor({ state: "hidden" });
+
+  await files.press(await page.evaluate(() => /Macintosh/.test(navigator.userAgent)) ? "Meta+l" : "Control+l");
+  const address = page.locator("#left-address");
+  await address.fill("Unsubmitted draft");
+  await openHelp(page, address, "paneAddress");
+  await closeHelp(page, help, address);
+  assert.equal(await address.inputValue(), "Unsubmitted draft");
+  await address.press("Escape");
+
+  await drive.hover();
   await page.getByRole("button", { name: "Find files", exact: true }).click();
   const search = page.getByRole("dialog", { name: "Find files", exact: true });
   const mask = search.getByRole("textbox", { name: "File mask", exact: true });
@@ -122,6 +152,64 @@ try {
   assert.equal(await help.count(), 0);
   await page.close();
 
+  for (const [userAgent, sides] of [
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64)", ["right", "left"]],
+    ["Mozilla/5.0 (X11; Linux x86_64)", ["right"]],
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", ["left"]],
+  ]) {
+    const workspace = await openFixture(browser, "en", userAgent);
+    const guide = workspace.getByRole("dialog", { name: "Help", exact: true });
+    for (const side of sides) {
+      const other = side === "left" ? "right" : "left";
+      const scanPane = workspace.locator(`#${side}-pane`);
+      const files = workspace.locator(`#${other}-files`);
+      const drive = workspace.getByRole("button", { name: `Locations for ${other} pane`, exact: true });
+      const file = files.locator('[data-tooltip="note.txt"]');
+      await file.click();
+      await files.press("Insert");
+      const marks = await files.locator(".marked").count();
+      const selected = await files.getAttribute("aria-activedescendant");
+      await scanPane.getByRole("button", { name: "Analyze space", exact: true }).click();
+      const analyzer = workspace.getByRole("region", { name: "Space Analyzer", exact: true });
+      const stop = analyzer.getByRole("button", { name: "Stop", exact: true });
+      const treemap = analyzer.getByRole("button", { name: "Treemap", exact: true });
+      const metric = analyzer.getByRole("combobox", { name: "Size metric", exact: true });
+      await stop.waitFor();
+      await drive.hover();
+      await workspace.keyboard.press("F1");
+      await currentTopic(guide, "paneSources").waitFor();
+      await guide.getByText(`This control changes the source for the ${other} pane.`, { exact: true }).waitFor();
+      await workspace.keyboard.press("Escape");
+      await guide.waitFor({ state: "hidden" });
+
+      await analyzer.locator(".space-target").hover();
+      await workspace.keyboard.press("F1");
+      await currentTopic(guide, "spacePath").waitFor();
+      assert.match(await guide.locator(".help-reading").innerText(), /root being scanned/);
+      await workspace.keyboard.press("Escape");
+      await guide.waitFor({ state: "hidden" });
+
+      await treemap.focus();
+      await drive.hover();
+      await workspace.keyboard.press("Tab");
+      assert.equal(await metric.evaluate((node) => node === document.activeElement), true);
+      await workspace.keyboard.press("F1");
+      await currentTopic(guide, "spaceMetric").waitFor();
+      assert.match(await guide.locator(".help-reading").innerText(), /allocated storage/);
+      await closeHelp(workspace, guide, metric);
+      assert.equal(await stop.isVisible(), true);
+      assert.equal(await files.locator(".marked").count(), marks);
+      assert.equal(await files.getAttribute("aria-activedescendant"), selected);
+
+      await openHelp(workspace, stop, "spaceActions");
+      await workspace.evaluate(() => window.finishContextScan());
+      await stop.waitFor({ state: "hidden" });
+      await closeHelp(workspace, guide, analyzer.getByRole("treegrid"));
+      await analyzer.getByRole("button", { name: "Close", exact: true }).click();
+    }
+    await workspace.close();
+  }
+
   for (const [language, helpLabel, operations] of [
     ["uk", "Довідка", "Операції з файлами"],
     ["ru", "Справка", "Операции с файлами"],
@@ -136,10 +224,15 @@ try {
     await currentTopic(guide, "operations").waitFor();
     assert.equal(await guide.locator("#help-operations h3").innerText(), operations);
     assert.equal(await localized.locator("html").getAttribute("lang"), language);
+    await guide.locator('.help-contents a[href="#help-spaceAnalyzer"]').click();
+    const metrics = guide.locator('.help-reading a[href="#help-spaceMetric"]');
+    await metrics.click();
+    await currentTopic(guide, "spaceMetric").waitFor();
+    assert.match(await guide.locator(".help-reading").innerText(), language === "uk" ? /виділене сховище/ : /выделенное хранилище/);
     await closeHelp(localized, guide, pane);
     await localized.close();
   }
-  console.log("Verified contextual Help, related links, focus restoration, three offline languages, and remappable F1.");
+  console.log("Verified pointer and keyboard Help in both panes, scan continuity, deferred focus, related links, three offline languages, and remappable F1.");
 } finally {
   await browser.close();
 }

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { BookOpen, Bug, Check, ChevronRight, CodeXml, Coffee, Package, X, type LucideIcon } from "lucide-react";
 import { Button } from "./Button";
+import { helpIsOpen } from "./contextHelp";
 import { Dialog } from "./Dialog";
 import { api, describeError } from "./api";
 import { errorText, t } from "./i18n";
@@ -130,7 +131,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
     function outside(event: PointerEvent) {
       const group = event.target instanceof Element ? event.target.closest(".main-menu-group") : null;
       // The menubar stretches across the header. Only its controls and dropdowns are menu content.
-      if (!group || !bar.current?.contains(group)) close(false);
+      if (!helpIsOpen() && (!group || !bar.current?.contains(group))) close(false);
     }
     document.addEventListener("pointerdown", outside, true);
     return () => document.removeEventListener("pointerdown", outside, true);
@@ -181,7 +182,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
         const from = event.relatedTarget;
         if (from instanceof HTMLElement && !event.currentTarget.contains(from)) priorFocus.current = from;
       }}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close(false); }}
+      onBlur={(event) => { if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) close(false); }}
       onKeyDown={keyDown}>
       {groups.map(({ label, items }, index) => {
         const shown = expanded === index;

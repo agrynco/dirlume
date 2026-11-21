@@ -36,7 +36,7 @@ import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
-import { HelpDialog, type HelpTopic } from "./HelpDialog";
+import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
@@ -78,6 +78,7 @@ import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts
 import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
+const HelpDialog = lazy(() => import("./HelpDialog"));
 const QuickView = lazy(() => import("./QuickView"));
 const SpaceAnalyzer = lazy(() => import("./SpaceAnalyzer"));
 const GitView = lazy(() => import("./GitView"));
@@ -164,7 +165,7 @@ function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | u
   if (modal === "search" || modal === "compare") return modal;
   if (modal === "connect" || modal === "smb" || modal === "connectionEditor") return "remote";
   if (modal === "createArchive" || modal === "archivePassword") return "archives";
-  if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename" || modal === "deletion") return "operations";
+  if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename" || modal === "deletion") return "actionDialogs";
   return editing === undefined ? "files" : editing ? "editor" : "viewer";
 }
 
@@ -330,7 +331,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
-  const [helpTopic, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
+  const [helpRequest, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
+  const helpTopic = helpRequest?.topic;
   const terminalFocusHint = (terminalInputFocused || helpTopic === "terminalShortcuts") && terminalVisible && terminal && activeDocument === null
     ? <TerminalShortcutHint panelsHidden={panelsHidden} onHelp={() => setHelpTopic("terminalShortcuts")} /> : undefined;
 
@@ -2543,20 +2545,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         if (hasTerminalShortcutFocus(event.target) && !hasTerminalShortcutFocus(event.relatedTarget)) setTerminalInputFocused(false);
       }}
       onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
-      <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"}
+      <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"} data-help-topic="workspace"
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
         <div className="brand">
           <span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1>
         </div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
         <div className="top-actions">
-          {panesAvailable && formattedPreview && <div className="quick-view-modes" role="group" aria-label={t("Quick View format")}>
+          {panesAvailable && formattedPreview && <div className="quick-view-modes" role="group" data-help-topic="quickView" aria-label={t("Quick View format")}>
             <Button aria-pressed={!quickViewSourceText} onClick={() => { setQuickViewSourceText(false); focus(active); }}>{t("Rendered")}</Button>
             <Button aria-pressed={quickViewSourceText} onClick={() => { setQuickViewSourceText(true); focus(active); }}>{t("Source")}</Button>
           </div>}
-          <Button className="icon-button" aria-label={t("Quick View")} aria-pressed={quickViewSource !== null}
+          <Button className="icon-button" data-help-topic="quickView" aria-label={t("Quick View")} aria-pressed={quickViewSource !== null}
             shortcut={keyLabel("quickView")} disabled={!canToggleQuickView} onClick={() => perform("quickView")}><ScanEye /></Button>
-          <Button className="icon-button" aria-label={t("Git View")} aria-pressed={showingGit} shortcut={keyLabel("gitView")}
+          <Button className="icon-button" data-help-topic="gitView" aria-label={t("Git View")} aria-pressed={showingGit} shortcut={keyLabel("gitView")}
             disabled={!canToggleGitView} onClick={() => perform("gitView")}><GitBranch /></Button>
           <Button className="toolbar-button topbar-connect" data-help-topic="remote" aria-label={t("Connect")} shortcut={keyLabel("connect")} disabled={showingGit} onClick={() => perform("connect")}>
             <Server /> <span>{t("Connect")}</span>
@@ -2679,7 +2681,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} onFocusFiles={() => focus(active)} />
         </Suspense>}
         {sourceMenu && paneCovered(sourceMenu.side) && paneSources(sourceMenu.side, true)}
-        {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator"
+        {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator" data-help-topic="workspace"
           aria-label={t("Resize terminal")} aria-orientation="horizontal" aria-valuenow={Math.round(terminalShare)} tabIndex={0}
           onPointerDown={(event) => {
             if (event.button !== 0 || !event.isPrimary) return;
@@ -2816,7 +2818,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
       <div className="actionbar-row" hidden={!showFileActions}>
-        <nav ref={actionbar} className="actionbar" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
+        <nav ref={actionbar} className="actionbar" data-help-topic="operations" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
           {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
             fileActions.map(({ command, label, Icon, disabled }) => (
             <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
@@ -2846,7 +2848,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </nav>
         {resizeInDocuments && <WindowResizeMarker />}
       </div>
-      {preferences.showStatusBar ? <footer className={`statusbar${status.error ? " danger" : ""}`}>
+      {preferences.showStatusBar ? <footer data-help-topic="workspace" className={`statusbar${status.error ? " danger" : ""}`}>
         <span className="statusbar-message" role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
           {errorText(status.text)}
         </span>
@@ -3122,10 +3124,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           setModal(null);
         }} />
       )}
-      {helpTopic && <HelpDialog initialTopic={helpTopic} language={preferences.language} copyShortcuts={shortcuts.copy} onClose={() => {
-        setHelpTopic(null);
-        if (helpTopic === "terminalShortcuts") focusTerminalInput();
-      }} />}
+      {helpRequest && <Suspense fallback={null}>
+        <HelpDialog initialTopic={helpRequest.topic} side={helpRequest.side} language={preferences.language} copyShortcuts={shortcuts.copy} onClose={() => {
+          setHelpTopic(null);
+          if (helpTopic === "terminalShortcuts") focusTerminalInput();
+        }} />
+      </Suspense>}
       <McpRequests context={{
         active, panes, preferences, shortcuts: folderShortcuts, load, remote: routeLocation, refresh,
         selection: (side, names) => {
