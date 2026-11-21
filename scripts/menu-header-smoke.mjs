@@ -154,6 +154,9 @@ async function checkNestedMenu(page) {
     assert.equal(await before.evaluate((node) => node === document.activeElement), true);
   }
   await openNested();
+  await before.click();
+  await bar.waitFor({ state: "hidden" });
+  await openNested();
   await bar.getByRole("menuitem", { name: "Run item", exact: true }).click();
   await page.getByText("Item ran", { exact: true }).waitFor();
   await bar.waitFor({ state: "hidden" });
@@ -170,11 +173,13 @@ async function testBrowserHeader() {
     });
     await page.addInitScript(() => {
       const home = /Windows/i.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
+      const entry = { name: "note.txt", directory: false, link: false, size: 4, modified: null };
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command) => {
           if (command === "locations") return [{ label: "Home", path: home }];
-          if (command === "list_directory") return { path: home, parent: null, entries: [], omitted: 0 };
+          if (command === "list_directory") return { path: home, parent: null, entries: [entry], omitted: 0 };
+          if (command === "read_text") return { text: "Note", encoding: "utf8" };
           if (command === "file_icons") return [];
           return null;
         },
@@ -182,6 +187,14 @@ async function testBrowserHeader() {
     });
     await page.goto("http://dirlume.test/");
     await testHeaderMenus(page);
+    await page.locator('#left-files [data-tooltip="note.txt"]').click();
+    await page.keyboard.press("F3");
+    await page.getByRole("menubar", { name: "Document menu", exact: true }).waitFor();
+    await revealMainMenu(page);
+    await page.keyboard.press("Escape");
+    await mainMenu(page).waitFor({ state: "hidden" });
+    await page.keyboard.press("Escape");
+    await page.getByRole("listbox", { name: "left files", exact: true }).waitFor();
     await checkMenuBindings(page);
     const nested = await browser.newPage();
     nested.setDefaultTimeout(8000);

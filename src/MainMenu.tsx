@@ -32,7 +32,7 @@ export type MainMenuHandle = { open: () => void };
 
 export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByDefault = false }: {
   groups: MenuGroup[];
-  shortcut: string;
+  shortcut?: string;
   ref?: Ref<MainMenuHandle>;
   label?: string;
   hiddenByDefault?: boolean;
