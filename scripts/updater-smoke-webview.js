@@ -46,7 +46,9 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
   }
   async function checkOptionalStatusBar() {
     const workspace = document.querySelector(".workspace");
-    const fullHeight = workspace.getBoundingClientRect().height;
+    const app = workspace.closest(".app");
+    const spaceBelowWorkspace = () => app.getBoundingClientRect().bottom - workspace.getBoundingClientRect().bottom;
+    const fullSpace = spaceBelowWorkspace();
     function apply(showStatusBar) {
       const oldValue = localStorage.getItem(preferenceKey);
       const newValue = JSON.stringify({ ...JSON.parse(oldValue ?? "{}"), showStatusBar });
@@ -57,9 +59,14 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
     const grip = await waitFor("the resize marker in File actions", () => document.querySelector(".actionbar-row > .window-resize-marker"));
     const hitArea = grip.getBoundingClientRect();
     const actions = grip.parentElement.querySelector(".actionbar").getBoundingClientRect();
-    if (document.querySelector(".statusbar") || workspace.getBoundingClientRect().height < fullHeight + 27 ||
-      actions.right > hitArea.left + 1 || Math.abs(hitArea.right - innerWidth) > 2 || Math.abs(hitArea.bottom - innerHeight) > 2) {
-      throw new Error("Hiding the status bar did not reclaim its space and preserve a separate resize area.");
+    const frame = app.getBoundingClientRect();
+    const reclaimed = fullSpace - spaceBelowWorkspace();
+    const overlap = actions.right - hitArea.left;
+    const rightInset = frame.right - hitArea.right;
+    const bottomInset = frame.bottom - hitArea.bottom;
+    if (document.querySelector(".statusbar") || reclaimed < 27 ||
+      overlap > 1 || Math.abs(rightInset) > 2 || Math.abs(bottomInset) > 2) {
+      throw new Error(`Unexpected hidden status bar layout. Reclaimed ${reclaimed}px, action overlap ${overlap}px, resize insets ${rightInset}px and ${bottomInset}px.`);
     }
     apply(true);
     await waitFor("the restored status bar and resize marker", () => document.querySelector(".statusbar > .window-resize-marker"));
