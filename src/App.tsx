@@ -1,3 +1,4 @@
+import { workspaceResources, type Resource } from "./workspaceResources";
 import { Button } from "./Button";
 import { WindowControls } from "./WindowControls";
 import { WindowResizeMarker } from "./ResizeGrip";
@@ -162,8 +163,8 @@ function sameDocumentFile(left: NamedFile, right: NamedFile) {
     (right.place.kind === "local" || sameConnection(left.place, right.place));
 }
 
-function disconnect(place: NetworkPlace) {
-  const close = place.kind === "ssh" ? api.disconnectSsh : place.kind === "ftp" ? api.disconnectFtp : api.disconnect;
+function disconnect(place: Resource) {
+  const close = place.kind === "archive" ? api.closeArchive : place.kind === "ssh" ? api.disconnectSsh : place.kind === "ftp" ? api.disconnectFtp : api.disconnect;
   void close(place.id).catch(() => {});
 }
 
@@ -260,7 +261,22 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const failedFtp = useRef<Partial<Record<Side, SavedFtpLocation>>>({});
   const activeModal = useRef(modal);
   activeModal.current = modal;
+  const [comparisons, setComparisons] = useState<{ left: NamedFile; right: NamedFile }[]>([]);
+  const retained = useRef(new Map<string, Resource>());
+  useEffect(() => {
+    const next = workspaceResources({
+      panes, connections: connected.current, documents, analyzer: spaceAnalyzer?.place,
+      comparisons: modal?.kind === "compare" ? [...comparisons, modal] : comparisons,
+      transfer: modal?.kind === "transfer" ? modal.transfer : undefined,
+    });
+    for (const [key, place] of retained.current) if (!next.has(key)) disconnect(place);
+    retained.current = next;
+  }, [panes, documents, comparisons, modal, spaceAnalyzer]);
   const pane = panes[active];
+  const markedNames = {
+    left: useMemo(() => new Set(panes.left.marked), [panes.left.marked]),
+    right: useMemo(() => new Set(panes.right.marked), [panes.right.marked]),
+  };
   const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
   const panesAvailable = !panelsHidden && activeDocument === null;
@@ -922,11 +938,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const index = documents.findIndex((document) => document.id === id);
     if (index < 0) return;
     const remaining = documents.filter((document) => document.id !== id);
-    const { place } = documents[index].file;
-    if ((place.kind === "server" || place.kind === "ftp") && !Object.values(connected.current).some((connection) => sameConnection(connection, place)) &&
-        !remaining.some(({ file }) => sameConnection(file.place, place))) {
-      disconnect(place);
-    }
     setDocuments(remaining);
     dirtyDocuments.current.delete(id);
     if (activeDocument === id) selectDocument(documents[index - 1]?.id ?? null);
@@ -986,7 +997,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const previous = connected.current[side];
     if (previous && !sameConnection(previous, place) && !sameConnection(connected.current[opposite(side)], previous)) {
       if (previous.kind === "ssh") dropTerminal("ssh:" + previous.id);
-      if (!documents.some(({ file }) => sameConnection(file.place, previous))) disconnect(previous);
     }
     connected.current[side] = place.kind === "server" || isFileServer(place) ? place : null;
     setActive(side);
@@ -1209,14 +1219,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const { ticket, signal } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: path }));
     try {
-      const result = await waitForListing(api.openArchive(path, password), signal);
-      if (!result) return;
-      const { listing, ...opened } = result;
-      if (ticket === request.current[side]) {
-        const place: ArchivePlace = { ...opened, kind: "archive", segments: [],
-          address: opened.writable ? "Archive" : "Read-only archive" };
-        updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
-      }
+      const { listing, ...opened } = await api.openArchive(path, password);
+      if (signal.aborted || ticket !== request.current[side]) { await api.closeArchive(opened.id); return; }
+      const place: ArchivePlace = { ...opened, kind: "archive", segments: [],
+        address: opened.writable ? "Archive" : "Read-only archive" };
+      updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
+    } catch (error) {
+      if (!signal.aborted && ticket === request.current[side]) throw error;
     } finally {
       if (ticket === request.current[side]) {
         delete pendingListings.current[side];
@@ -1454,7 +1463,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function transferItems(side: Side, selected: Entry, useMarks = true) {
     const state = panes[side];
-    const marks = useMarks ? entries[side].filter(({ name }) => state.marked.includes(name)) : [];
+    const marks = useMarks ? entries[side].filter(({ name }) => markedNames[side].has(name)) : [];
     return (marks.length ? marks : [selected]).flatMap((entry) => {
       const item = paneItem(state, entry);
       return item ? [item] : [];
@@ -1831,14 +1840,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   const comparisonMarked = pane.marked.length < 2 ? [] : entries[active]
-    .filter(({ name }) => pane.marked.includes(name))
+    .filter(({ name }) => markedNames[active].has(name))
     .map((entry) => fileFor(active, entry))
     .filter((file): file is NamedFile => file !== null);
   const comparisonLeft = comparisonMarked.length === 2 ? comparisonMarked[0] : fileFor("left");
   const comparisonRight = comparisonMarked.length === 2 ? comparisonMarked[1] : fileFor("right");
   const comparison = comparisonLeft && comparisonRight ? { left: comparisonLeft, right: comparisonRight } : null;
 
-  const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && pane.marked.includes(entry.name));
+  const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && markedNames[active].has(entry.name));
   const canMeasure = Boolean(local || ftp) && !pane.search;
   const measureEntries = !canMeasure ? [] : ftp && currentRow?.name === ".."
     ? entries[active].filter((entry) => entry.directory && !entry.link && entry.name !== "..")
@@ -2138,7 +2147,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "recycle": {
         const writable = local ?? fileServer ?? (archive?.writable ? archive : undefined);
         if (writable && !pane.search && current && !busy && !pane.loading) {
-          const marked = entries[active].filter(({ name }) => pane.marked.includes(name));
+          const marked = entries[active].filter(({ name }) => markedNames[active].has(name));
           const selected = marked.length ? marked : [current];
           setModal({
             kind: permanentDelete || archive ? "delete" : command, path: placePath(writable), remote: fileServer, archive,
@@ -2166,8 +2175,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         if (!comparison) {
           setStatus({ text: "Choose a text file in each pane to compare.", error: true });
         } else if (isTauri()) {
+          setComparisons((open) => [...open, comparison]);
           void api.openToolWindow(t("Compare files"), undefined, comparison)
-            .catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
+            .catch((error: unknown) => setStatus({ text: describeError(error), error: true }))
+            .finally(() => setComparisons((open) => open.filter((pair) => pair !== comparison)));
         } else setModal({ kind: "compare", ...comparison });
         break;
       }
@@ -2909,6 +2920,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               await batch(modal.names, (name) => remote
                 ? remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false))
                 : api.operate(modal.path, { kind: modal.kind, name }));
+            } catch (error) {
+              setStatus({ text: describeError(error), error: true });
+              setModal(null);
+              return;
             } finally {
               refresh("left");
               refresh("right");

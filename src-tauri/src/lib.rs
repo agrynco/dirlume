@@ -67,3 +67,11 @@ mod windows_smb;
 pub use desktop::run;
 
 pub const BUILD_VERSION: &str = env!("DIRLUME_BUILD_VERSION");
+
+#[cfg(feature = "desktop")]
+pub(crate) type Result<T> = std::result::Result<T, String>;
+
+#[cfg(feature = "desktop")]
+pub(crate) fn message(error: impl std::fmt::Display) -> String {
+    error.to_string()
+}

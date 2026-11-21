@@ -48,8 +48,10 @@ export function useTimestamps(values: readonly Timestamp[], style: Style = "date
         const current = previous.refresh === refresh && previous.style === style
           ? new Map(previous.labels) : new Map<number, string | null>();
         for (const [index, time] of timestamps.entries()) current.set(time, next[index] ?? null);
+        const active = new Set(values);
         for (const time of current.keys()) {
-          if (current.size <= 4096) break;
+          if (current.size <= Math.max(4096, active.size)) break;
+          if (active.has(time)) continue;
           current.delete(time);
         }
         return { style, refresh, labels: current };

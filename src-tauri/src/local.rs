@@ -605,13 +605,106 @@ pub(crate) fn preserve_directory_times(path: &Path, metadata: &fs::Metadata) -> 
     file.set_times(copy_times(metadata, true))
 }
 
+#[cfg(feature = "desktop")]
+pub(crate) fn staging_directory(parent: &Path) -> io::Result<tempfile::TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".dirlume-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    builder.tempdir_in(parent)
+}
+
+#[cfg(all(feature = "desktop", unix))]
+pub(crate) fn preserve_access(
+    source: &Path,
+    dest: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<()> {
+    use std::os::unix::{
+        ffi::OsStrExt,
+        fs::{chown, MetadataExt},
+    };
+    let staged = fs::metadata(dest)?;
+    if (staged.uid(), staged.gid()) != (metadata.uid(), metadata.gid()) {
+        chown(dest, Some(metadata.uid()), Some(metadata.gid()))?;
+    }
+    fs::set_permissions(dest, metadata.permissions())?;
+    let from = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+    let to = std::ffi::CString::new(dest.as_os_str().as_bytes())?;
+    #[cfg(target_os = "linux")]
+    for name in [c"system.posix_acl_access", c"system.posix_acl_default"] {
+        if name == c"system.posix_acl_default" && !metadata.is_dir() {
+            continue;
+        }
+        // Linux bounds each extended attribute at 64 KiB.
+        let mut data = vec![0u8; 65536];
+        let len = unsafe {
+            libc::getxattr(
+                from.as_ptr(),
+                name.as_ptr(),
+                data.as_mut_ptr().cast(),
+                data.len(),
+            )
+        };
+        let result = if len >= 0 {
+            unsafe {
+                libc::setxattr(
+                    to.as_ptr(),
+                    name.as_ptr(),
+                    data.as_ptr().cast(),
+                    len as usize,
+                    0,
+                )
+            }
+        } else {
+            let error = io::Error::last_os_error();
+            if !matches!(error.raw_os_error(), Some(libc::ENODATA | libc::ENOTSUP)) {
+                return Err(error);
+            }
+            if unsafe { libc::removexattr(to.as_ptr(), name.as_ptr()) } != 0 {
+                let error = io::Error::last_os_error();
+                if !matches!(error.raw_os_error(), Some(libc::ENODATA | libc::ENOTSUP)) {
+                    return Err(error);
+                }
+            }
+            0
+        };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if unsafe {
+        libc::copyfile(
+            from.as_ptr(),
+            to.as_ptr(),
+            std::ptr::null_mut(),
+            libc::COPYFILE_ACL,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "desktop", windows))]
+pub(crate) use copy_access as preserve_access;
+
 #[cfg(not(windows))]
 fn copy_access(_source: &Path, destination: &Path, metadata: &fs::Metadata) -> io::Result<()> {
     fs::set_permissions(destination, metadata.permissions())
 }
 
 #[cfg(windows)]
-fn copy_access(source: &Path, destination: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+pub(crate) fn copy_access(
+    source: &Path,
+    destination: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<()> {
     use std::{
         iter::once,
         os::windows::ffi::OsStrExt,

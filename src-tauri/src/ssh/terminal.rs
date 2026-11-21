@@ -5,7 +5,7 @@ use tauri::{async_runtime, ipc::Channel};
 use super::{quote, wait, Connection, Session};
 use crate::{
     desktop::{message, Result},
-    remote_transfer::Session as _,
+    remote_transfer::UploadSession as _,
     terminal::Output,
 };
 

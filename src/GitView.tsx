@@ -3,7 +3,8 @@ import { GitBranch, GitCommitHorizontal } from "lucide-react";
 import { api, type GitBranch as Branch, type GitCommit, type GitDetails, type GitHistory, type GitRepository } from "./api";
 import { Button } from "./Button";
 import { t } from "./i18n";
-import { formatDate, opposite, type Side } from "./panes";
+import { useTimestamps } from "./useTimestamps";
+import { opposite, type Side } from "./panes";
 
 function gitError(error: unknown) {
   switch (error instanceof Error ? error.message : error) {
@@ -67,13 +68,14 @@ function History({ root, tip }: { root: string; tip?: string }) {
     });
     return () => { canceled = true; };
   }, [root, tip, request]);
+  const formatDate = useTimestamps(result.commits.map(({ date }) => Math.floor(Date.parse(date) / 1000)));
   return <div className="git-history git-scroll">
     {result.commits.map((commit) => <div className="git-commit" key={commit.hash}>
       <Button type="button" aria-expanded={open === commit.hash} onClick={() => setOpen(open === commit.hash ? null : commit.hash)}>
         <GitCommitHorizontal aria-hidden="true" />
         <span><strong>{commit.subject || t("No subject")}</strong>
           <small>{commit.author}{Number.isFinite(Date.parse(commit.date)) &&
-            <> <span aria-hidden="true">·</span> {formatDate(Date.parse(commit.date) / 1000)}</>}</small></span>
+            <> <span aria-hidden="true">·</span> {formatDate(Math.floor(Date.parse(commit.date) / 1000))}</>}</small></span>
         <code>{commit.shortHash}</code>
       </Button>
       {open === commit.hash && <ChangeDetails root={root} commit={commit} />}
