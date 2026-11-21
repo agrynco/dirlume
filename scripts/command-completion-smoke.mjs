@@ -72,4 +72,43 @@ export async function testCommandCompletion(page, root) {
   await input.press("Enter");
   assert.equal(await input.inputValue(), "Write-Output 'completion-history-first'");
   console.log("Verified PowerShell command completions, editing at the caret, and command history suggestions.");
+
+  await page.locator("#left-files").press("F12");
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  const terminalInput = terminal.locator(".xterm-helper-textarea");
+  const terminalOptions = terminal.getByRole("listbox", { name: "Command suggestions", exact: true });
+  const screen = terminal.locator(".xterm-accessibility-tree");
+  const samples = [
+    ["ipconfig /re", ["/release", "/renew"]],
+    ["cmd /c dir /", ["/b"]],
+    ["Get-ChildItem -Rec", ["-Recurse"]],
+    ["dir -Rec", ["-Recurse"]],
+  ];
+  try {
+    if (execFileSync("dotnet", ["--list-sdks"], { encoding: "utf8", windowsHide: true }).trim()) {
+      samples.push(["dotnet ", ["--list-sdks"]]);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  for (const [line, candidates] of samples) {
+    await terminalInput.pressSequentially(line);
+    for (const name of candidates) await terminalOptions.getByRole("option", { name, exact: true }).waitFor({ timeout: 15000 });
+    if (line === "Get-ChildItem -Rec") {
+      assert.equal(await terminalOptions.getByRole("option").count(), 1);
+      assert.ok((await terminalOptions.boundingBox()).width < 200);
+      assert.ok(await terminalInput.evaluate((element) => element === document.activeElement));
+    }
+    await terminalInput.press("Escape");
+    await terminalOptions.waitFor({ state: "hidden" });
+    await terminalInput.press("Control+c");
+    await page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
+  }
+  await terminalInput.pressSequentially("git ch --quiet");
+  for (let i = 0; i < " --quiet".length; i++) await terminalInput.press("ArrowLeft");
+  await terminalOptions.getByRole("option", { name: "checkout", exact: true }).click();
+  await screen.getByText(/git checkout --quiet/).waitFor();
+  await terminalInput.press("Control+c");
+  await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+  console.log("Verified Windows terminal completion examples, dismissal, and replacement with the caret inside the draft.");
 }

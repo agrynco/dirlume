@@ -2242,6 +2242,7 @@ pub fn run() {
         transfer_item,
         terminal::open_terminal,
         crate::completion::complete_command,
+        crate::completion::complete_ssh_terminal,
         terminal::write_terminal,
         terminal::resize_terminal,
         terminal::close_terminal,

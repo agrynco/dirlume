@@ -1,6 +1,6 @@
 import { timestampSeconds } from "./useTimestamps";
 
-export type CommandEntry = { text: string; date: number | null };
+export type CommandEntry = { text: string; date: number | null; source?: "local" | "ssh" };
 
 const historyKey = "dirlume.command-history";
 export const historyLimit = 1000;
@@ -16,7 +16,8 @@ export function readCommandHistory(): CommandEntry[] {
       if (typeof text !== "string" || !text.trim()) return [];
       const storedDate = "date" in item ? item.date : "time" in item ? item.time : null;
       const date = typeof storedDate === "number" && Number.isFinite(new Date(storedDate).getTime()) ? storedDate : null;
-      return [{ text, date }];
+      const source = "source" in item && (item.source === "local" || item.source === "ssh") ? item.source : undefined;
+      return [{ text, date, source }];
     }).slice(0, historyLimit);
   } catch { return []; }
 }
