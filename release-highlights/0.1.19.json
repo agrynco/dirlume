@@ -5,6 +5,7 @@
     "Browse binaries in Quick View and recognize headers and embedded text in a scrollable character dump.",
     "Open images with F3, zoom around the pointer, and browse the visible images in the same tab.",
     "Rotate and crop local PNG and JPEG images with F4 and save the result as a copy.",
-    "Move across columns with Up and Down and turn whole pages with Left and Right in Brief and Medium."
+    "Move across columns with Up and Down and turn whole pages with Left and Right in Brief and Medium.",
+    "Copy, paste, or select all from the terminal context menu and open Help from the file-shortcut hint."
   ]
 }

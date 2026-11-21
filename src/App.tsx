@@ -2766,7 +2766,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
             pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
-            onPasteError={(error) => setStatus({ text: describeError(error), error: true })}
+            onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
             pendingCommands={pendingCommands[session.id] ?? noCommands}
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
