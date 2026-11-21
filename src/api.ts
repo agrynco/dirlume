@@ -371,6 +371,7 @@ export const api = {
   createArchive: (id: number, request: CreateArchive, output: Channel<number>) =>
     invoke<{ paths: string[]; warning: string }>("create_archive", { id, request, output }),
   cancelArchive: (id: number) => invoke<void>("cancel_archive", { id }),
+  closeArchive: (id: number) => invoke<void>("close_archive", { id }),
   openArchive: (path: string, password?: string) =>
     invoke<{ id: number; path: string; parent: string; writable: boolean; listing: Listing }>("open_archive", { path, password: password ?? null }),
   listArchive: (id: number, segments: string[]) => invoke<Listing>("list_archive", { id, segments }),

@@ -208,7 +208,13 @@ fn create(
         .filter(|value| !value.is_empty())
         .map(|value| value.to_lowercase().chars().collect())
         .collect();
-    let snapshot = scan(&directory, &roots, &patterns, &stopped)?;
+    let snapshot = scan(
+        &directory,
+        &roots,
+        &patterns,
+        &stopped,
+        request.delete_sources,
+    )?;
     if snapshot.is_empty() {
         return Err("No files or folders match the archive inputs.".to_owned());
     }
@@ -300,14 +306,20 @@ fn create(
     } else {
         String::new()
     };
-    if request.delete_sources && !warned && running(&stopped).is_ok() {
+    if request.delete_sources && !warned {
         // Do not remove items which were excluded, changed, or added during compression.
-        let current = scan(&directory, &roots, &patterns, &stopped);
+        let current = scan(
+            &directory,
+            &roots,
+            &patterns,
+            &stopped,
+            request.delete_sources,
+        );
         if !current.is_ok_and(|current| current == snapshot) {
-            warning = "An input changed. The archive was created and the source items were kept."
+            warning = "Input verification did not complete. The archive was created and the source items were kept."
                 .to_owned();
         } else if let Err(error) =
-            discard_inputs(&directory, &roots, &snapshot, patterns.is_empty())
+            discard_inputs(&directory, &snapshot, patterns.is_empty(), &stopped)
         {
             warning = format!("The archive was created, but some input items could not be moved to Trash. {error}");
         }
@@ -363,6 +375,7 @@ fn archive_destination(
 
 #[derive(PartialEq)]
 struct Signature {
+    identity: Option<(u64, u64)>,
     size: u64,
     modified: Option<SystemTime>,
     directory: bool,
@@ -374,6 +387,7 @@ fn scan(
     roots: &[PathBuf],
     patterns: &[Vec<char>],
     stopped: &AtomicBool,
+    track_identity: bool,
 ) -> Result<BTreeMap<PathBuf, Signature>> {
     let mut files = BTreeMap::new();
     let mut pending = roots.to_vec();
@@ -399,7 +413,7 @@ fn scan(
         let mut empty = false;
         if metadata.is_dir() {
             let before = pending.len();
-            for entry in fs::read_dir(path).map_err(message)? {
+            for entry in fs::read_dir(&path).map_err(message)? {
                 pending.push(name.join(entry.map_err(message)?.file_name()));
             }
             empty = before == pending.len();
@@ -407,6 +421,10 @@ fn scan(
         files.insert(
             name,
             Signature {
+                identity: track_identity
+                    .then(|| input_identity(&path, &metadata))
+                    .transpose()
+                    .map_err(message)?,
                 size: metadata.len(),
                 modified: metadata.modified().ok(),
                 directory: metadata.is_dir(),
@@ -417,24 +435,99 @@ fn scan(
     Ok(files)
 }
 
-fn discard_inputs(
-    directory: &Path,
-    roots: &[PathBuf],
-    all: &BTreeMap<PathBuf, Signature>,
-    unfiltered: bool,
-) -> Result<()> {
-    if unfiltered {
-        trash::delete_all(roots.iter().map(|path| directory.join(path))).map_err(message)
-    } else {
-        trash::delete_all(
-            all.iter()
-                .filter(|(_, value)| !value.directory || value.empty)
-                .map(|(path, _)| directory.join(path)),
-        )
-        .map_err(message)
+#[cfg(unix)]
+fn input_identity(_path: &Path, meta: &fs::Metadata) -> io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Ok((meta.dev(), meta.ino()))
+}
+#[cfg(windows)]
+fn input_identity(path: &Path, _meta: &fs::Metadata) -> io::Result<(u64, u64)> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+    };
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let info = unsafe { info.assume_init() };
+    let index = ((info.nFileIndexHigh as u64) << 32) | u64::from(info.nFileIndexLow);
+    if index == 0 {
+        return Err(io::Error::other(
+            "This filesystem cannot identify archive inputs for cleanup.",
+        ));
+    }
+    Ok((info.dwVolumeSerialNumber.into(), index))
+}
+
+impl Signature {
+    fn verify(&self, path: &Path) -> Result<()> {
+        let metadata = fs::symlink_metadata(path).map_err(message)?;
+        if !local::is_link(&metadata)
+            && self.directory == metadata.is_dir()
+            && self.identity == Some(input_identity(path, &metadata).map_err(message)?)
+            && (self.directory
+                || (metadata.is_file()
+                    && metadata.len() == self.size
+                    && metadata.modified().ok() == self.modified))
+        {
+            return Ok(());
+        }
+        Err(format!("An archive input changed: {}", path.display()))
     }
 }
 
+fn discard_inputs(
+    directory: &Path,
+    all: &BTreeMap<PathBuf, Signature>,
+    unfiltered: bool,
+    stopped: &AtomicBool,
+) -> Result<()> {
+    for (relative, entry) in all.iter().rev() {
+        running(stopped).map_err(message)?;
+        let path = directory.join(relative);
+        for ancestor in relative.ancestors().skip(1) {
+            if let Some(folder) = all.get(ancestor) {
+                folder.verify(&directory.join(ancestor))?;
+            }
+        }
+        entry.verify(&path)?;
+        if entry.directory && !unfiltered && !entry.empty {
+            continue;
+        }
+        // Isolate the name before the final identity check. Never recursively trash a live input folder.
+        let parent = path.parent().ok_or("Choose a parent folder.")?;
+        let holding = local::staging_directory(parent).map_err(message)?.keep();
+        let staged = holding.join(path.file_name().ok_or("Choose a file.")?);
+        let moved = renamest::rename_exclusive(&path, &staged).map_err(message);
+        let result = moved.and_then(|()| {
+            if let Err(error) = entry.verify(&staged).and_then(|()| {
+                if entry.directory {
+                    fs::remove_dir(&staged).map_err(message)
+                } else {
+                    trash::delete(&staged).map_err(message)
+                }
+            }) {
+                if renamest::rename_exclusive(&staged, &path).is_err() {
+                    return Err(format!(
+                        "{error} Recover the retained item at {}.",
+                        staged.display()
+                    ));
+                }
+                return Err(error);
+            }
+            Ok(())
+        });
+        let _ = fs::remove_dir(&holding);
+        result?;
+    }
+    Ok(())
+}
 fn sync_file(path: &Path) -> Result<()> {
     fs::OpenOptions::new()
         .write(true)
@@ -491,4 +584,46 @@ fn publish_volumes(staged: &Path, target: &Path, stopped: &AtomicBool) -> Result
         }
     }
     Ok(files.into_iter().map(|(_, path, _)| path).collect())
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    #[test]
+    fn preserves_an_arrival_after_the_manifest_was_verified() {
+        let fixture = tempfile::tempdir().unwrap();
+        let folder = fixture.path().join("input");
+        fs::create_dir(&folder).unwrap();
+        let running = AtomicBool::new(false);
+        let snapshot = scan(
+            fixture.path(),
+            &[PathBuf::from("input")],
+            &[],
+            &running,
+            true,
+        )
+        .unwrap();
+        fs::write(folder.join("new"), "keep").unwrap();
+        assert!(discard_inputs(fixture.path(), &snapshot, true, &running).is_err());
+        assert_eq!(fs::read(folder.join("new")).unwrap(), b"keep");
+    }
+    #[test]
+    fn preserves_a_replacement_with_matching_size_and_timestamp() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("input");
+        fs::write(&path, "one").unwrap();
+        let stop = AtomicBool::new(false);
+        let snapshot = scan(fixture.path(), &[PathBuf::from("input")], &[], &stop, true).unwrap();
+        let time = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::rename(&path, fixture.path().join("previous")).unwrap();
+        fs::write(&path, "two").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+        assert!(discard_inputs(fixture.path(), &snapshot, true, &stop).is_err());
+        assert_eq!(fs::read(path).unwrap(), b"two");
+    }
 }

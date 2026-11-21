@@ -106,7 +106,6 @@ export function artifactVersion(version, number = process.env.DIRLUME_BUILD_NUMB
 async function prepare(version) {
   artifactVersion(version);
   const current = await manifestVersion();
-  if (current === version) return;
   const [npm, lock, tauri, cargo, cargoLock] = await Promise.all([
     readJson("package.json"), readJson("package-lock.json"), readJson("src-tauri/tauri.conf.json"),
     readFile("src-tauri/Cargo.toml", "utf8"), readFile("src-tauri/Cargo.lock", "utf8"),
@@ -114,6 +113,7 @@ async function prepare(version) {
   if (lock.version !== current || lock.packages?.[""]?.version !== current || cargoLock.match(cargoLockVersion)?.[2] !== current) {
     throw new Error("The lockfiles must match the source product version.");
   }
+  if (current === version) return;
   npm.version = lock.version = lock.packages[""].version = tauri.version = version;
   const json = (value) => JSON.stringify(value, null, 2) + "\n";
   await Promise.all([

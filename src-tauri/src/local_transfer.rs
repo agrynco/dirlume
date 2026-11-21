@@ -60,18 +60,6 @@ impl EntryDetails {
             directory: metadata.is_dir() && !local::is_link(metadata),
         }
     }
-
-    fn from_ftp(entry: &suppaftp::list::File) -> Self {
-        Self {
-            size: entry.size() as u64,
-            modified: entry
-                .modified()
-                .duration_since(UNIX_EPOCH)
-                .ok()
-                .map(|time| time.as_secs()),
-            directory: entry.is_directory(),
-        }
-    }
 }
 
 #[derive(Serialize, Clone)]
@@ -87,20 +75,6 @@ pub struct Conflict {
 }
 
 impl Conflict {
-    pub fn ftp(
-        path: &str,
-        incoming: &fs::Metadata,
-        existing: &suppaftp::list::File,
-        replaceable: bool,
-    ) -> Self {
-        Self::network(
-            path.to_owned(),
-            incoming,
-            EntryDetails::from_ftp(existing),
-            replaceable,
-        )
-    }
-
     pub fn network(
         path: String,
         incoming: &fs::Metadata,
@@ -155,11 +129,13 @@ impl Incoming {
         }
     }
 
-    pub(crate) fn ftp(entry: &suppaftp::list::File) -> Self {
+    pub(crate) fn remote(entry: &impl crate::remote_transfer::Entry) -> Self {
         Self {
-            details: EntryDetails::from_ftp(entry),
+            details: EntryDetails::network(entry.size(), entry.modified(), entry.is_directory()),
             regular: entry.is_file(),
-            modified: Ok(entry.modified()),
+            modified: entry
+                .modified()
+                .ok_or_else(|| io::Error::other("The source modification time is unavailable.")),
         }
     }
 }
@@ -201,7 +177,11 @@ pub(crate) fn plan_target(
     let force_ask = read_only
         && options.ask_read_only
         && !matches!(options.policy, Policy::Skip | Policy::Rename);
-    let policy = if force_ask {
+    let policy = if force_ask
+        || (options.policy == Policy::Newer
+            && !incoming.details.directory
+            && incoming.modified.is_err())
+    {
         Policy::Ask
     } else {
         options.policy
@@ -280,7 +260,8 @@ fn transfer_entry(
     progress(source, 0, None)?;
     let incoming = options.copy.metadata(source)?;
     if !incoming.is_dir() && !options.copy.includes(source) {
-        return Ok(false);
+        // An excluded descendant is outside the requested copy, including during a merge.
+        return Ok(!options.moving && !ancestors.is_empty());
     }
     let Some(PlannedTarget {
         path: target,
@@ -318,7 +299,19 @@ fn transfer_entry(
         if let Some(folder) = &merge {
             verify_folder(&target, folder)?;
         } else {
-            fs::create_dir(&target)?;
+            let builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            let builder = {
+                use std::os::unix::fs::DirBuilderExt;
+                let mut builder = builder;
+                builder.mode(0o700);
+                builder
+            };
+            builder.create(&target)?;
+            if let Err(error) = local::preserve_access(source, &target, &incoming) {
+                let _ = fs::remove_dir(&target);
+                return Err(error);
+            }
         }
         let target_folder = same_file::Handle::from_path(&target)?;
         let all_transferred =
@@ -347,7 +340,7 @@ fn transfer_entry(
             verify_folder(source, &source_folder)?;
             fs::remove_dir(source)?;
         }
-        return Ok(!options.moving || all_transferred);
+        return Ok(all_transferred);
     }
 
     let original = if options.moving {
@@ -504,4 +497,85 @@ fn remove_original(source: &Path, original: &FileRevision) -> io::Result<()> {
     }
     let _ = fs::remove_dir(recovery);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cross_volume_move_preserves_the_source_directory() {
+        let Some(volume) = std::env::var_os("DIRLUME_CROSS_VOLUME_TEST_ROOT") else {
+            return;
+        };
+        let fixture = tempfile::tempdir().unwrap();
+        let target_root = tempfile::tempdir_in(volume).unwrap();
+        let source = fixture.path().join("private");
+        let target = target_root.path().join("moved");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("note"), "private").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&source, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let options = Options {
+            moving: true,
+            policy: Policy::Ask,
+            ask_read_only: false,
+            copy: Default::default(),
+        };
+        assert!(transfer(
+            &source,
+            &target,
+            &options,
+            |_, _, _| Ok(()),
+            |_| unreachable!()
+        )
+        .unwrap());
+        assert!(!source.exists());
+        assert_eq!(fs::read(target.join("note")).unwrap(), b"private");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+
+    #[test]
+    fn merge_reports_skipped_children() {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("source");
+        let target = fixture.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(source.join("keep"), "incoming").unwrap();
+        fs::write(target.join("keep"), "original").unwrap();
+        fs::write(source.join("new"), "created").unwrap();
+        let options = Options {
+            moving: false,
+            policy: Policy::Ask,
+            ask_read_only: false,
+            copy: Default::default(),
+        };
+        let completed = transfer(
+            &source,
+            &target,
+            &options,
+            |_, _, _| Ok(()),
+            |conflict| {
+                Ok(if conflict.directory {
+                    Decision::Overwrite
+                } else {
+                    Decision::Skip
+                })
+            },
+        )
+        .unwrap();
+        assert!(!completed);
+        assert_eq!(fs::read(target.join("keep")).unwrap(), b"original");
+        assert_eq!(fs::read(target.join("new")).unwrap(), b"created");
+    }
 }

@@ -13,13 +13,25 @@ use russh::client::Handle;
 use tokio::io::AsyncSeekExt;
 use uuid::Uuid;
 
-use super::{wait, VerifyHost};
+use super::{SftpFailure, SftpResult, VerifyHost};
+
 use crate::{
     desktop::{message, Result},
     local,
     protocol::RemoteListing,
-    remote_transfer::{self, Entry as _, Session as _},
+    remote_transfer::{self, DownloadSession as _, Entry as _, Session as _, UploadSession as _},
 };
+
+fn wait<T, E: Into<SftpFailure>>(
+    operation: impl std::future::Future<Output = std::result::Result<T, E>>,
+) -> SftpResult<T> {
+    tauri::async_runtime::block_on(async {
+        tokio::time::timeout(super::TIMEOUT, operation)
+            .await
+            .map_err(|_| "The SSH server did not respond in time.")?
+            .map_err(Into::into)
+    })
+}
 
 const CHUNK: u32 = 32 * 1024;
 const MAX_DEPTH: usize = 128;
@@ -29,7 +41,7 @@ pub struct Session {
     client: Handle<VerifyHost>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Entry {
     name: String,
     kind: Option<FileType>,
@@ -41,7 +53,24 @@ pub struct Entry {
     gid: Option<u32>,
 }
 
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.revision() == other.revision()
+    }
+}
+
 impl Entry {
+    pub(crate) fn revision(&self) -> impl PartialEq + std::fmt::Debug + '_ {
+        (
+            self.kind,
+            self.size,
+            self.modified,
+            self.permissions,
+            self.uid,
+            self.gid,
+        )
+    }
+
     fn new(name: String, metadata: MetaData) -> Self {
         Self {
             name,
@@ -79,6 +108,19 @@ impl remote_transfer::Entry for Entry {
     }
 }
 
+fn publish_with_link(overwrite: bool, posix: bool, hardlink: bool) -> Result<bool> {
+    if overwrite && !posix {
+        return Err("This SSH server does not support safe file replacement.".into());
+    }
+    if !overwrite && posix && !hardlink {
+        return Err(
+            "This SSH server cannot publish a new file without replacing an existing name."
+                .to_owned(),
+        );
+    }
+    Ok(!overwrite && hardlink)
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty() && !matches!(name, "." | "..") && !name.contains(['/', '\\', '\0'])
 }
@@ -100,7 +142,7 @@ impl Session {
         )
     }
 
-    fn entries(&self, segments: &[String]) -> Result<(Vec<Entry>, usize)> {
+    fn entries(&self, segments: &[String]) -> SftpResult<(Vec<Entry>, usize)> {
         let directory = wait(self.sftp.fs().open_dir(Self::absolute(segments)?))?;
         let mut stream = Box::pin(directory.clone().read_dir());
         let mut entries = Vec::new();
@@ -122,7 +164,7 @@ impl Session {
         result.and_then(|entries| closed.map(|()| entries))
     }
 
-    pub(super) fn listing(&self, segments: &[String]) -> Result<RemoteListing> {
+    pub(super) fn listing(&self, segments: &[String]) -> SftpResult<RemoteListing> {
         let (entries, omitted) = self.entries(segments)?;
         let entries = entries
             .into_iter()
@@ -145,10 +187,10 @@ impl Session {
         Ok(RemoteListing { entries, omitted })
     }
 
-    pub fn regular(&mut self, segments: &[String]) -> Result<Entry> {
-        self.stat(segments)?
+    pub fn regular(&mut self, segments: &[String]) -> SftpResult<Entry> {
+        self.stat_entry(segments)?
             .filter(Entry::is_file)
-            .ok_or_else(|| "Choose a regular SSH file.".to_owned())
+            .ok_or_else(|| "Choose a regular SSH file.".into())
     }
 
     pub fn remove(&mut self, segments: &[String], recursive: bool) -> Result<()> {
@@ -162,9 +204,9 @@ impl Session {
                     self.remove(&remote_transfer::child(segments, child.name()), true)?;
                 }
             }
-            wait(self.sftp.fs().remove_dir(path))
+            wait(self.sftp.fs().remove_dir(path)).map_err(Into::into)
         } else {
-            wait(self.sftp.fs().remove_file(path))
+            wait(self.sftp.fs().remove_file(path)).map_err(Into::into)
         }
     }
 
@@ -173,7 +215,7 @@ impl Session {
         segments: &[String],
         offset: u64,
         length: u64,
-    ) -> Result<Vec<u8>> {
+    ) -> SftpResult<Vec<u8>> {
         let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
         let result = (|| {
             wait(file.seek(SeekFrom::Start(offset)))?;
@@ -199,19 +241,19 @@ impl Session {
         segments: &[String],
         original: &Entry,
         bytes: &[u8],
-        revalidate: impl FnOnce(&mut Self) -> Result<()>,
-    ) -> Result<()> {
+        revalidate: impl FnOnce(&mut Self) -> SftpResult<()>,
+    ) -> SftpResult<()> {
         let target = Self::absolute(segments)?;
         let permissions = original
             .permissions
             .ok_or("The SSH server did not report the file permissions.")?;
         if permissions.suid() || permissions.sgid() || permissions.svtx() {
             return Err(
-                "Edit this SSH file on the server to preserve its special permissions.".to_owned(),
+                "Edit this SSH file on the server to preserve its special permissions.".into(),
             );
         }
         if !self.sftp.support_posix_rename() {
-            return Err("This SSH server does not support safe file replacement.".to_owned());
+            return Err("This SSH server does not support safe file replacement.".into());
         }
         // Confirm write access to the original file without truncating it.
         let writable = wait(self.sftp.options().write(true).open(&target))?;
@@ -229,7 +271,7 @@ impl Session {
         )?;
         let result = (|| {
             let mut content = bytes;
-            let staged = self.upload_to_stage(
+            let staged = self.stage_upload(
                 &remote_transfer::child(&directory, "text"),
                 &mut content,
                 |_| Ok(()),
@@ -247,7 +289,7 @@ impl Session {
                 attributes.permissions(permissions);
                 wait(self.sftp.fs().set_metadata(&staged, attributes.create()))?;
                 revalidate(self)?;
-                self.rename_stage(&staged, segments, true)
+                self.publish_stage(&staged, segments, true)
             })();
             if result.is_err() {
                 self.remove_stage(&staged);
@@ -263,6 +305,61 @@ impl remote_transfer::Session for Session {
     const SOURCE: &'static str = "SSH";
     type Entry = Entry;
 
+    fn stat(&mut self, segments: &[String]) -> Result<Option<Entry>> {
+        self.stat_entry(segments).map_err(Into::into)
+    }
+}
+impl Session {
+    fn stat_entry(&self, segments: &[String]) -> SftpResult<Option<Entry>> {
+        let name = segments.last().ok_or("Choose an SSH file or folder.")?;
+        let path = Self::absolute(segments)?;
+        wait(async {
+            match self.sftp.fs().symlink_metadata(path).await {
+                Ok(metadata) => Ok(Some(Entry::new(name.clone(), metadata))),
+                Err(Error::SftpError(SftpErrorKind::NoSuchFile, _)) => Ok(None),
+                Err(error) => Err(error),
+            }
+        })
+    }
+}
+
+impl remote_transfer::DownloadSession for Session {
+    fn children(&mut self, segments: &[String]) -> Result<Vec<Entry>> {
+        let (entries, omitted) = self.entries(segments)?;
+        if omitted != 0 {
+            return Err("The SSH server returned filenames that could not be read.".to_owned());
+        }
+        Ok(entries)
+    }
+
+    fn download(
+        &mut self,
+        segments: &[String],
+        output: &mut std::fs::File,
+        mut progress: impl FnMut(u64) -> Result<()>,
+    ) -> Result<()> {
+        let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
+        let result = (|| {
+            let mut buffer = Default::default();
+            let mut total = 0;
+            while let Some(mut data) = wait(file.read(CHUNK, buffer))? {
+                if data.is_empty() {
+                    return Err("The SSH server returned an empty data packet.".to_owned());
+                }
+                output.write_all(&data).map_err(message)?;
+                total += data.len() as u64;
+                progress(total)?;
+                data.clear();
+                buffer = data;
+            }
+            Ok(())
+        })();
+        let closed = wait(file.close());
+        result.and(closed.map_err(Into::into))
+    }
+}
+
+impl remote_transfer::UploadSession for Session {
     fn absolute(segments: &[String]) -> Result<String> {
         if segments.len() > MAX_DEPTH || segments.iter().any(|name| !valid_name(name)) {
             return Err("Invalid SSH file or folder path.".to_owned());
@@ -283,62 +380,43 @@ impl remote_transfer::Session for Session {
         Ok(segments)
     }
 
-    fn stat(&mut self, segments: &[String]) -> Result<Option<Entry>> {
-        let name = segments.last().ok_or("Choose an SSH file or folder.")?;
-        let path = Self::absolute(segments)?;
-        wait(async {
-            match self.sftp.fs().symlink_metadata(path).await {
-                Ok(metadata) => Ok(Some(Entry::new(name.clone(), metadata))),
-                Err(Error::SftpError(SftpErrorKind::NoSuchFile, _)) => Ok(None),
-                Err(error) => Err(error),
-            }
-        })
+    fn check_publication(&self, overwrite: bool) -> Result<()> {
+        publish_with_link(
+            overwrite,
+            self.sftp.support_posix_rename(),
+            self.sftp.support_hardlink(),
+        )
+        .map(|_| ())
     }
-
-    fn children(&mut self, segments: &[String]) -> Result<Vec<Entry>> {
-        let (entries, omitted) = self.entries(segments)?;
-        if omitted != 0 {
-            return Err("The SSH server returned filenames that could not be read.".to_owned());
-        }
-        Ok(entries)
-    }
-
     fn mkdir(&mut self, segments: &[String]) -> Result<()> {
-        wait(self.sftp.fs().create_dir(Self::absolute(segments)?))
-    }
-
-    fn download(
-        &mut self,
-        segments: &[String],
-        output: &mut impl Write,
-        mut progress: impl FnMut(u64) -> Result<()>,
-    ) -> Result<()> {
-        let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
-        let result = (|| {
-            let mut buffer = Default::default();
-            let mut total = 0;
-            while let Some(mut data) = wait(file.read(CHUNK, buffer))? {
-                if data.is_empty() {
-                    return Err("The SSH server returned an empty data packet.".to_owned());
-                }
-                output.write_all(&data).map_err(message)?;
-                total += data.len() as u64;
-                progress(total)?;
-                data.clear();
-                buffer = data;
-            }
-            Ok(())
-        })();
-        let closed = wait(file.close());
-        result.and(closed)
+        wait(self.sftp.fs().create_dir(Self::absolute(segments)?)).map_err(Into::into)
     }
 
     fn upload_to_stage(
         &mut self,
         target: &[String],
         input: &mut impl Read,
-        mut progress: impl FnMut(u64) -> Result<()>,
+        progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String> {
+        self.stage_upload(target, input, progress)
+            .map_err(Into::into)
+    }
+    fn remove_stage(&mut self, stage: &str) {
+        let _ = wait(self.sftp.fs().remove_file(stage));
+    }
+
+    fn rename_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> Result<()> {
+        self.publish_stage(stage, target, overwrite)
+            .map_err(Into::into)
+    }
+}
+impl Session {
+    fn stage_upload(
+        &mut self,
+        target: &[String],
+        input: &mut impl Read,
+        mut progress: impl FnMut(u64) -> Result<()>,
+    ) -> SftpResult<String> {
         let (_, parent) = target
             .split_last()
             .ok_or("Choose an SSH destination file.")?;
@@ -375,17 +453,13 @@ impl remote_transfer::Session for Session {
         Ok(stage)
     }
 
-    fn remove_stage(&mut self, stage: &str) {
-        let _ = wait(self.sftp.fs().remove_file(stage));
-    }
-
-    fn rename_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> Result<()> {
+    fn publish_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> SftpResult<()> {
         let target = Self::absolute(target)?;
-        if overwrite {
-            if !self.sftp.support_posix_rename() {
-                return Err("This SSH server does not support safe file replacement.".to_owned());
-            }
-        } else if self.sftp.support_posix_rename() {
+        if publish_with_link(
+            overwrite,
+            self.sftp.support_posix_rename(),
+            self.sftp.support_hardlink(),
+        )? {
             // The POSIX rename extension replaces existing names. Link the new file
             // instead so that an item created concurrently is preserved.
             wait(self.sftp.fs().hard_link(stage, &target))?;
@@ -393,5 +467,40 @@ impl remote_transfer::Session for Session {
             return Ok(());
         }
         wait(self.sftp.fs().rename(stage, target))
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+    #[test]
+    fn selects_a_supported_publication_method_before_upload() {
+        for posix in [false, true] {
+            for hardlink in [false, true] {
+                assert_eq!(
+                    publish_with_link(true, posix, hardlink).ok(),
+                    posix.then_some(false)
+                );
+                assert_eq!(
+                    publish_with_link(false, posix, hardlink).ok(),
+                    (!posix || hardlink).then_some(hardlink)
+                );
+            }
+        }
+    }
+    #[test]
+    fn reads_which_only_update_access_time_keep_the_same_revision() {
+        let entry = |time, size| Entry {
+            name: String::from("file"),
+            kind: None,
+            size: Some(size),
+            modified: None,
+            accessed: Some(time),
+            permissions: None,
+            uid: None,
+            gid: None,
+        };
+        assert_eq!(entry(1, 3), entry(2, 3));
+        assert_ne!(entry(2, 3), entry(2, 4));
     }
 }

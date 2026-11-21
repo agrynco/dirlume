@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
-    io::{self, Write},
+    io::{self, Read, Seek, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
@@ -20,7 +20,7 @@ use crate::{
         TextDocument, TEXT_LIMIT,
     },
     local,
-    local_transfer::{self, Conflict, Decision, FileRevision, Options},
+    local_transfer::{Conflict, Decision, FileRevision, Options},
     protocol::{BytePage, RemoteListing, BYTE_PAGE_SIZE},
 };
 
@@ -65,6 +65,7 @@ pub struct Archive {
     revision: FileRevision,
     generation: String,
     writable: bool,
+    byte_cache: Option<MemberCache>,
 }
 
 #[derive(Serialize)]
@@ -110,6 +111,12 @@ pub async fn open_archive(
 }
 
 #[tauri::command]
+pub fn close_archive(id: u32, state: State<'_, Archives>) -> Result<()> {
+    state.items.lock().map_err(message)?.remove(&id);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn list_archive(
     id: u32,
     segments: Vec<String>,
@@ -149,26 +156,8 @@ pub async fn read_archive_bytes(
 ) -> Result<BytePage> {
     let archive = state.get(id)?;
     blocking(move || {
-        let archive = archive.lock().map_err(message)?;
-        let entry = archive.file(&segments)?;
-        let data = if offset >= entry.size {
-            Vec::new()
-        } else {
-            archive
-                .extract(
-                    entry,
-                    ByteWindow {
-                        skip: offset,
-                        bytes: Vec::new(),
-                    },
-                    |_| Ok(()),
-                )?
-                .bytes
-        };
-        Ok(BytePage {
-            length: entry.size,
-            data,
-        })
+        let mut archive = archive.lock().map_err(message)?;
+        archive.byte_page(&segments, offset)
     })
     .await
 }
@@ -210,21 +199,31 @@ pub async fn delete_archive_entries(
     blocking(move || archive.lock().map_err(message)?.write(&paths, None)).await
 }
 
-struct ByteWindow {
-    skip: u64,
-    bytes: Vec<u8>,
+const HEX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+struct MemberCache {
+    name: Vec<String>,
+    start: u64,
+    end: u64,
+    file: fs::File,
 }
-
-impl Write for ByteWindow {
+// Consume the entire extractor output so its size and integrity checks still run.
+struct CacheWriter {
+    file: fs::File,
+    skip: u64,
+    remaining: u64,
+}
+impl Write for CacheWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let skip = self.skip.min(bytes.len() as u64) as usize;
-        self.skip -= skip as u64;
-        let count = (BYTE_PAGE_SIZE as usize - self.bytes.len()).min(bytes.len() - skip);
-        self.bytes.extend_from_slice(&bytes[skip..skip + count]);
+        let skip = self.skip.min(bytes.len() as u64);
+        self.skip -= skip;
+        let available = &bytes[skip as usize..];
+        let count = self.remaining.min(available.len() as u64) as usize;
+        self.file.write_all(&available[..count])?;
+        self.remaining -= count as u64;
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.file.flush()
     }
 }
 
@@ -257,7 +256,42 @@ impl Archive {
             revision,
             generation: Uuid::new_v4().to_string(),
             writable,
+            byte_cache: None,
         })
+    }
+
+    fn byte_page(&mut self, segments: &[String], offset: u64) -> Result<BytePage> {
+        let entry = self.file(segments)?;
+        let length = entry.size;
+        let mut data = vec![0; length.saturating_sub(offset).min(BYTE_PAGE_SIZE) as usize];
+        if !data.is_empty() {
+            let end = offset + data.len() as u64;
+            if !self.byte_cache.as_ref().is_some_and(|cache| {
+                cache.name == segments && cache.start <= offset && end <= cache.end
+            }) {
+                let start = if length <= HEX_CACHE_BYTES { 0 } else { offset };
+                let end = start.saturating_add(HEX_CACHE_BYTES).min(length);
+                let sink = CacheWriter {
+                    file: tempfile::tempfile().map_err(message)?,
+                    skip: start,
+                    remaining: end - start,
+                };
+                let file = self.extract(entry, sink, |_| Ok(()))?.file;
+                self.byte_cache = Some(MemberCache {
+                    name: segments.to_vec(),
+                    start,
+                    end,
+                    file,
+                });
+            }
+            let cache = self.byte_cache.as_mut().expect("cached member");
+            cache
+                .file
+                .seek(io::SeekFrom::Start(offset - cache.start))
+                .map_err(message)?;
+            cache.file.read_exact(&mut data).map_err(message)?;
+        }
+        Ok(BytePage { length, data })
     }
 
     fn verify(&self) -> Result<()> {
@@ -337,65 +371,17 @@ impl Archive {
         segments: &[String],
         target: &Path,
         options: &Options,
-        mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
         ask: impl FnMut(Conflict) -> io::Result<Decision>,
     ) -> Result<bool> {
-        self.verify()?;
-        let member = self
-            .index
-            .members
-            .get(segments)
-            .ok_or("The archive entry no longer exists.")?;
-        let root_name = segments.last().ok_or("Choose an archive item.")?;
-        let parent = target.parent().ok_or("Choose a destination folder.")?;
-        let staging = tempfile::tempdir_in(parent).map_err(message)?;
-        let source = staging.path().join(root_name);
-        let mut stage = |item: &Member, path: &Path| -> Result<()> {
-            progress(path, 0, None).map_err(message)?;
-            if item.link {
-                return Err("Archive links cannot be extracted.".to_owned());
-            }
-            if item.directory {
-                return fs::create_dir(path).map_err(message);
-            }
-            let bytes = AtomicU64::new(0);
-            let file = fs::File::create_new(path).map_err(message)?;
-            let sink = Tracked(file, &bytes);
-            let Tracked(file, _) = self.extract(item, sink, |_| {
-                let next = bytes.load(Ordering::Relaxed);
-                // The existing transfer progress callback also checks cancellation.
-                progress(path, next, Some(item.size))
-            })?;
-            file.sync_all().map_err(message)?;
-            progress(path, item.size, Some(item.size)).map_err(message)
-        };
-        stage(member, &source)?;
-        if member.directory {
-            for (name, child) in self
-                .index
-                .members
-                .iter()
-                .filter(|(name, _)| name.len() > segments.len() && name.starts_with(segments))
-            {
-                let path = name[segments.len()..]
-                    .iter()
-                    .fold(source.clone(), |path, component| path.join(component));
-                stage(child, &path)?;
-            }
-        }
-        self.verify()?;
-        let options = Options {
-            moving: true,
-            ..options.clone()
-        };
-        local_transfer::transfer(
-            &source,
+        crate::remote_transfer::download(
+            &mut ArchiveReader(self),
+            segments,
             target,
-            &options,
-            |item, _, _| progress(item, 0, None),
+            options,
+            progress,
             ask,
         )
-        .map_err(message)
     }
 
     fn write(&mut self, selected: &[Vec<String>], updated: Option<Vec<u8>>) -> Result<()> {
@@ -494,9 +480,73 @@ impl Archive {
             &fs::symlink_metadata(&self.path).map_err(message)?,
         )
         .map_err(message)?;
+        self.byte_cache = None;
         self.index = new_index;
         self.generation = Uuid::new_v4().to_string();
         Ok(())
+    }
+}
+
+struct ArchiveReader<'a>(&'a Archive);
+#[derive(PartialEq)]
+struct ArchiveEntry(String, Member);
+impl crate::remote_transfer::Entry for ArchiveEntry {
+    fn name(&self) -> &str {
+        &self.0
+    }
+    fn is_directory(&self) -> bool {
+        self.1.directory && !self.1.link
+    }
+    fn is_file(&self) -> bool {
+        !self.1.directory && !self.1.link
+    }
+    fn size(&self) -> Option<u64> {
+        Some(self.1.size)
+    }
+    fn modified(&self) -> Option<std::time::SystemTime> {
+        None
+    }
+}
+impl crate::remote_transfer::Session for ArchiveReader<'_> {
+    const SOURCE: &'static str = "archive";
+    type Entry = ArchiveEntry;
+    fn stat(&mut self, path: &[String]) -> Result<Option<ArchiveEntry>> {
+        self.0.verify()?;
+        Ok(self
+            .0
+            .index
+            .members
+            .get(path)
+            .and_then(|member| Some(ArchiveEntry(path.last()?.clone(), member.clone()))))
+    }
+}
+impl crate::remote_transfer::DownloadSession for ArchiveReader<'_> {
+    fn children(&mut self, path: &[String]) -> Result<Vec<ArchiveEntry>> {
+        self.0.verify()?;
+        Ok(self
+            .0
+            .index
+            .members
+            .range(path.to_vec()..)
+            .take_while(|(key, _)| key.starts_with(path))
+            .filter(|(key, _)| key.len() == path.len() + 1)
+            .map(|(key, member)| ArchiveEntry(key[path.len()].clone(), member.clone()))
+            .collect())
+    }
+    fn download(
+        &mut self,
+        path: &[String],
+        file: &mut fs::File,
+        mut progress: impl FnMut(u64) -> Result<()>,
+    ) -> Result<()> {
+        let member = self.0.file(path)?;
+        let count = AtomicU64::new(0);
+        self.0.extract(
+            member,
+            Tracked(file.try_clone().map_err(message)?, &count),
+            |_| progress(count.load(Ordering::Relaxed)).map_err(io::Error::other),
+        )?;
+        progress(member.size)
     }
 }
 
@@ -706,9 +756,30 @@ mod tests {
                     .unwrap()
             };
             assert_eq!(extract(&archive, &note), b"archive fixture");
+            assert_eq!(archive.byte_page(&note, 3).unwrap().data, b"hive fixture");
+            assert_eq!(archive.byte_page(&note, 8).unwrap().data, b"fixture");
+            let target = fixture.path().join("existing");
+            fs::write(&target, "keep").unwrap();
+            let options = Options {
+                moving: false,
+                policy: crate::local_transfer::Policy::Skip,
+                ask_read_only: false,
+                copy: Default::default(),
+            };
+            assert!(!archive
+                .copy_to(
+                    &note,
+                    &target,
+                    &options,
+                    |_, _, _| panic!("must skip before extraction"),
+                    |_| panic!("unexpected question")
+                )
+                .unwrap());
             archive
                 .write(&[note.clone().to_vec()], Some(b"updated text".to_vec()))
                 .unwrap();
+            assert!(archive.byte_cache.is_none());
+            assert_eq!(archive.byte_page(&note, 0).unwrap().data, b"updated text");
             assert_eq!(extract(&archive, &note), b"updated text");
             assert_eq!(extract(&archive, &keep), b"keep me");
             archive.write(&[keep.to_vec()], None).unwrap();

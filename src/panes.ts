@@ -226,6 +226,18 @@ export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?:
   return { place: { kind: "local", path: listing.path, parent: listing.parent }, listing };
 }
 
+function pushHistory(pane: PaneState, place: Place) {
+  const history = [...pane.history.slice(0, pane.position + 1), place];
+  if (place.kind !== "archive") return history;
+  // Each distinct open archive retains a native index, file handle and possibly a password.
+  const archives = new Set<number>();
+  for (let i = history.length - 1; i >= 0 && archives.size < 8; i--) {
+    const previous = history[i];
+    if (previous.kind === "archive") archives.add(previous.id);
+  }
+  return history.filter((item) => item.kind !== "archive" || archives.has(item.id));
+}
+
 export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number): PaneState {
   if ((action === "refresh" || action === "background") && pane.search) {
     const updated = applyListing(closeSearchResults(pane), place, listing, action);
@@ -243,7 +255,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   }) : []);
   const departed = action === "refresh" || action === "background" ? undefined : folderInAncestor(pane.place, place);
   const history = action === "push" && !samePlace
-    ? [...pane.history.slice(0, pane.position + 1), place]
+    ? pushHistory(pane, place)
     : pane.history;
   return {
     ...pane,
