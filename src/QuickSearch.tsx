@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { countText, t } from "./i18n";
+import { helpIsOpen } from "./contextHelp";
 import type { Side } from "./panes";
 
 export function useQuickSearch(side: Side, enabled = true) {
@@ -49,7 +50,7 @@ export function QuickSearch({ side, query, items, current, onChange, onMatch, on
   return <div className="quick-search">
     <label htmlFor={id}>{t("Quick search")}</label>
     <input id={id} ref={field} type="text" value={query} spellCheck={false} autoComplete="off"
-      onChange={(event) => onChange(event.target.value)} onBlur={onClose}
+      onChange={(event) => onChange(event.target.value)} onBlur={() => { if (!helpIsOpen()) onClose(); }}
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing) return;
         if (event.key === "Escape" || event.key === "Enter") {

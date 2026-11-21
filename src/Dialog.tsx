@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { ResizeMarker, WindowResizeMarker } from "./ResizeGrip";
-import type { HelpTopic } from "./helpContent";
+import type { HelpTopic } from "./helpTopics";
 
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
@@ -22,7 +22,7 @@ export function saveDialogSize(key: string, size: Dimensions) {
 }
 
 export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownCapture,
-  wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, helpTopic }: {
+  wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, helpTopic, contextHelp = false }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -36,6 +36,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   dismissOnOutside?: boolean;
   tone?: "warning";
   helpTopic?: HelpTopic;
+  contextHelp?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -44,11 +45,19 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   useLayoutEffect(() => {
     const dialog = ref.current;
     const focused = document.activeElement;
+    const container = contextHelp && focused?.closest<HTMLElement>("dialog, [data-pane-side], .text-window, .terminal-card");
     return () => {
       dialog?.close();
-      if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+      if (focused instanceof HTMLElement && focused.isConnected &&
+          (!contextHelp || focused.getClientRects().length && !focused.closest("[inert], [hidden], :disabled"))) {
+        focused.focus({ preventScroll: contextHelp });
+      } else if (container instanceof HTMLElement && container.isConnected) {
+        const target = container.querySelector<HTMLElement>("[data-help-return]") ??
+          container.querySelector<HTMLElement>("[tabindex=\"0\"], button:enabled");
+        target?.focus({ preventScroll: true });
+      }
     };
-  }, []);
+  }, [contextHelp]);
   useLayoutEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -77,7 +86,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
 
   return (
     <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
-      style={size} data-tone={tone} data-help-topic={helpTopic} aria-labelledby={heading} onKeyDown={(event) => {
+      style={size} data-tone={tone} data-help-topic={helpTopic} data-context-help={contextHelp || undefined} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
       onKeyDownCapture={(event) => {

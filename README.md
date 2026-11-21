@@ -88,7 +88,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 
 | Default keys | Action |
 | --- | --- |
-| F1 | Open the offline Help topic for the focused feature. Follow related topics in the guide and press Esc to return to the previous control. |
+| F1 | Open offline Help for the control under the pointer or the most recent keyboard focus. In an open dialog, Help stays within that dialog. Follow related sections in the guide and press Esc to return to the previous control. Change or disable Help under Options → Keyboard shortcuts. |
 | Alt or F9 | Show or hide the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to hide the menu and return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |

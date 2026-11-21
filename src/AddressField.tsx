@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type Ref 
 import { ChevronRight, Copy, Pencil } from "lucide-react";
 import { folderLabel, isFileServer, placePath, windowsClient, type FileLocation } from "./api";
 import { Button } from "./Button";
+import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
 import { parentPlace, type Side } from "./panes";
 import { PathField } from "./PathField";
@@ -157,8 +158,8 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
     focusFiles();
   }
 
-  return <div className="address" ref={root} id={side + "-path"} data-path={path} onBlur={(event) => {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+  return <div className="address" ref={root} id={side + "-path"} data-path={path} data-help-topic="paneAddress" onBlur={(event) => {
+    if (helpIsOpen() || event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
     setOverflow(false);
     if (editing && !browsing.current) {
       setEditing(false);

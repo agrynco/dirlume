@@ -391,7 +391,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
       <header className={`pane-heading${(catalog || localFolder && !host) && !processView && !search ? " local-heading" : ""}`}>
-        {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
+        {layout !== "standard" && <nav className="drive-bar" data-help-topic="paneSources" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
               onClick={() => onLocalLocation(location)}>
@@ -416,7 +416,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             <Button className="icon-button" aria-label={t("Close search results")}
               onClick={onCloseResults}><X /></Button>
           </>}
-          {!processView && <Button className="icon-button" aria-label={t("Filter folder")} aria-pressed={filterOpen}
+          {!processView && <Button className="icon-button" data-help-topic="paneFilter" aria-label={t("Filter folder")} aria-pressed={filterOpen}
             onClick={() => {
               if (filterOpen) {
                 setFilterOpen(false);
@@ -427,7 +427,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 requestAnimationFrame(() => filterField.current?.focus());
               }
             }}><Search /></Button>}
-          {!processView && <Button className="icon-button" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
+          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
             <RefreshCw />
           </Button>}
         </div>
@@ -437,11 +437,11 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span></>}
         {spaceControl}
       </div>}
-      <div className="navigation">
+      <div className="navigation" data-help-topic="paneNavigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
         <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-path={path}>
+        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-help-topic="paneSources" data-path={path}>
           <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
         </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
@@ -449,7 +449,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
       {(filterOpen || pane.filter) && (
-        <label className="pane-filter">
+        <label className="pane-filter" data-help-topic="paneFilter">
           <Search />
           <HistoryField historyKey="pane-filter" ref={filterField} aria-label={t(side === "left" ? "Filter left folder" : "Filter right folder")}
             type="text" placeholder={t("Filter this folder")} value={pane.filter} onValueChange={onFilter}
@@ -476,7 +476,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           top: Math.min(window.innerHeight - 22, rightClick.spinner.y + 12),
         }}><LoaderCircle className="spin" aria-hidden="true" /></span>, document.body)}
       <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} data-paged={paged || undefined}
-        role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
+        role="listbox" data-help-return aria-label={t(side === "left" ? "left files" : "right files")}
         {...rightClick.events}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -513,6 +513,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
                 data-file-color={fileColor(entry)}
                 aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name} data-entry-index={index}
+                data-help-topic={catalog || search ? undefined : "paneSelection"}
                 onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -553,14 +554,14 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         onChange={setQuickSearch} onMatch={onQuickMatch}
         onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
         onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
-      {pane.error && <div className="pane-error">
+      {pane.error && <div className="pane-error" data-help-topic="paneStatus">
         <span role="alert">{errorText(pane.error)}</span>
         {pane.deniedSshListing && !pane.loading &&
           <Button type="button" onClick={onRetryWithSudo}>{t("Open with sudo…")}</Button>}
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>
       </div>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
-      <footer className="pane-footer">
+      <footer className="pane-footer" data-help-topic="paneStatus">
         {pane.loading ? <div className="pane-progress">
           <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
             <LoaderCircle className="spin" aria-hidden="true" />

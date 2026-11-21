@@ -97,8 +97,8 @@ function SpaceTree({ result, metric, selected, select, expanded, toggle }: {
     event.preventDefault();
   }
 
-  return <div className="space-tree" role="treegrid" aria-label={t("Space usage")} aria-rowcount={rows.length + 1}
-    tabIndex={0} onKeyDown={keyDown}
+  return <div className="space-tree" role="treegrid" data-help-topic="spaceTree" aria-label={t("Space usage")} aria-rowcount={rows.length + 1}
+    tabIndex={0} data-help-return onKeyDown={keyDown}
     aria-activedescendant={visible.some(({ entry }) => entry.id === selected) ? id + selected : undefined}>
     <div className="space-tree-columns" role="row">
       <span role="columnheader">{t("Name")}</span><span role="columnheader" aria-sort="descending">{t("Size")}</span>
@@ -175,7 +175,7 @@ function Treemap({ folder, metric, selected, select, browse, showTree }: {
   const tiles: Tile[] = children.slice(0, limit).map((entry) => ({ entry, size: entry[metric] }));
   if (children.length > limit) tiles.push({ entry: null, size: children.slice(limit).reduce((sum, child) => sum + child[metric], 0) });
   tilesIn(tiles);
-  return <div className="space-map">
+  return <div className="space-map" data-help-topic="spaceTreemap">
     <div className="space-map-heading">
       <Button className="icon-button" aria-label={t("Parent folder")} disabled={!folder.parent}
         onClick={() => { if (folder.parent) browse(folder.parent); }}><ArrowLeft /></Button>
@@ -278,7 +278,7 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
     }
   }
 
-  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="files" data-pane-side={side}
+  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="spaceAnalyzer" data-pane-side={side}
     onKeyDown={(event) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
@@ -288,21 +288,21 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
     }}>
     <header className="pane-heading">
       <span className="pane-title"><HardDrive aria-hidden="true" />{t("Space Analyzer")}</span>
-      <Button ref={closeButton} onClick={onClose}>{t("Close")}</Button>
+      <Button ref={closeButton} data-help-topic="spaceActions" onClick={onClose}>{t("Close")}</Button>
     </header>
-    <div className="space-target"><ReadOnlyAddressBreadcrumbs place={place} path={spacePath(place)} /></div>
+    <div className="space-target" data-help-topic="spacePath"><ReadOnlyAddressBreadcrumbs place={place} path={spacePath(place)} /></div>
     <div className="space-toolbar">
       <div className="space-view-modes" role="group" aria-label={t("View")}>
-        <Button aria-pressed={view === "tree"} onClick={() => setView("tree")}>{t("Tree")}</Button>
-        <Button aria-pressed={view === "treemap"} onClick={() => setView("treemap")}>{t("Treemap")}</Button>
+        <Button data-help-topic="spaceTree" aria-pressed={view === "tree"} onClick={() => setView("tree")}>{t("Tree")}</Button>
+        <Button data-help-topic="spaceTreemap" aria-pressed={view === "treemap"} onClick={() => setView("treemap")}>{t("Treemap")}</Button>
       </div>
-      {result.supportsAllocation ? <select aria-label={t("Size metric")} value={metric}
+      {result.supportsAllocation ? <select data-help-topic="spaceMetric" aria-label={t("Size metric")} value={metric}
         onChange={(event) => setMetric(event.target.value as Metric)}>
         <option value="allocated">{t("Size on disk")}</option>
         <option value="logical">{t("File size")}</option>
-      </select> : <span>{t("File size")}</span>}
-      {scanning && <Button onClick={stop}>{t("Stop")}</Button>}
-      <Button onClick={rescan}>{t("Rescan")}</Button>
+      </select> : <span data-help-topic="spaceMetric">{t("File size")}</span>}
+      {scanning && <Button data-help-topic="spaceActions" onClick={stop}>{t("Stop")}</Button>}
+      <Button data-help-topic="spaceActions" onClick={rescan}>{t("Rescan")}</Button>
     </div>
     {result.phase !== "error" && (view === "tree" ? <SpaceTree result={result} metric={metric}
       expanded={expanded} toggle={toggle} selected={selected} select={setSelected} /> :
@@ -314,10 +314,10 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
         });
         setView("tree");
       }} />)}
-    {result.error && <p className="space-error" role="alert">{t(result.phase === "error" ? "Could not scan the folder." :
+    {result.error && <p className="space-error" role="alert" data-help-topic="spaceActions">{t(result.phase === "error" ? "Could not scan the folder." :
       "Connection interrupted. Reconnect and rescan.")} {errorText(result.error)}</p>}
-    {revealError && <p className="space-error" role="alert">{errorText(revealError)}</p>}
-    <footer className="space-footer">
+    {revealError && <p className="space-error" role="alert" data-help-topic="spaceActions">{errorText(revealError)}</p>}
+    <footer className="space-footer" data-help-topic="spaceActions">
       <span role="status">{scanning ? t("Scanning…") : incomplete ? t("Partial results") : ""}</span>
       <Button disabled={result.phase === "error"} onClick={() => void reveal()}>{t("Show in other pane")}</Button>
     </footer>

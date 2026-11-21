@@ -142,7 +142,7 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
   light: boolean;
   onFocusFiles: () => void;
 }) {
-  return <section className={`pane quick-view quick-view-${side}`} aria-label={t("Quick View")} data-pane-side={side} tabIndex={-1}>
+  return <section className={`pane quick-view quick-view-${side}`} aria-label={t("Quick View")} data-pane-side={side} data-help-topic="quickView" tabIndex={-1}>
     <header className="pane-heading">
       <div className="pane-title">
         <ScanEye />
