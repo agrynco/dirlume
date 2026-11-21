@@ -100,6 +100,7 @@ export async function testCommandIcons(page, native = false) {
     return {
       hidden: icon?.getAttribute("aria-hidden"), focusable: icon?.getAttribute("focusable"),
       iconX: icon?.getBoundingClientRect().left,
+      iconRight: icon?.getBoundingClientRect().right,
       labelX: item.querySelector(".main-menu-action-label")?.getBoundingClientRect().left,
       shortcutX: item.querySelector("kbd")?.getBoundingClientRect().left,
       fits: item.scrollWidth <= item.clientWidth,
@@ -110,6 +111,8 @@ export async function testCommandIcons(page, native = false) {
   assert.equal(new Set(rows.map(({ iconX }) => iconX)).size, 1);
   assert.equal(new Set(rows.map(({ labelX }) => labelX)).size, 1);
   assert.equal(new Set(rows.map(({ shortcutX }) => shortcutX).filter((x) => x !== undefined)).size, 1);
+  assert.ok(rows.every(({ iconRight, labelX }) => labelX - iconRight >= 12),
+    JSON.stringify(rows[0]));
   if (native) {
     await commands.getByRole("menuitem", { name: "MCP server", exact: true }).locator(".main-menu-action-icon").waitFor();
     await commands.getByRole("menuitem", { name: "Check for updates", exact: true }).locator(".main-menu-action-icon").waitFor();
@@ -129,7 +132,10 @@ export async function testCommandIcons(page, native = false) {
   assert.equal(await git.getAttribute("aria-disabled"), "true");
   assert.ok(await git.evaluate((item) => {
     const style = getComputedStyle(item);
-    return Number(style.opacity) < 1 && style.color === getComputedStyle(item.querySelector("svg")).color;
+    const icon = item.querySelector(".main-menu-action-icon");
+    const label = item.querySelector(".main-menu-action-label");
+    return Number(style.opacity) < 1 && style.color === getComputedStyle(icon).color &&
+      label.getBoundingClientRect().left - icon.getBoundingClientRect().right >= 12;
   }));
   await git.press("Enter");
   assert.ok(await commands.isVisible());
