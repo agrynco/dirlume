@@ -361,6 +361,15 @@ fn startup(scope: Scope) -> io::Result<PathBuf> {
 const HOOK_MARKER: &str = "# Dirlume managed environment";
 
 #[cfg(target_os = "macos")]
+fn add_startup_hook(old: &str, managed: &Path) -> Option<String> {
+    if old.lines().any(|row| row == HOOK_MARKER) {
+        return None;
+    }
+    let quoted = format!("'{}'", managed.to_string_lossy().replace('\'', "'\\''"));
+    Some(format!("{old}\n{HOOK_MARKER}\nif [[ -r {quoted} ]]; then\n  source {quoted}\nfi\n# End Dirlume managed environment\n"))
+}
+
+#[cfg(target_os = "macos")]
 pub(super) fn integrate(scope: Scope) -> io::Result<()> {
     let startup = startup(scope)?;
     let path = if scope == Scope::User
@@ -371,12 +380,9 @@ pub(super) fn integrate(scope: Scope) -> io::Result<()> {
         startup
     };
     let old = read(&path)?;
-    if old.lines().any(|row| row == HOOK_MARKER) {
+    let Some(updated) = add_startup_hook(&old, &managed(scope)?) else {
         return Ok(());
-    }
-    let managed = managed(scope)?;
-    let quoted = format!("'{}'", managed.to_string_lossy().replace('\'', "'\\''"));
-    let updated = format!("{old}\n{HOOK_MARKER}\nif [[ -r {quoted} ]]; then\n  source {quoted}\nfi\n# End Dirlume managed environment\n");
+    };
     replace(
         &path,
         &old,
@@ -451,5 +457,24 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value, value);
         assert_eq!(rows[0].span, 0..formatted.len());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_new_zsh_login_shell_reads_managed_variables() {
+        let fixture = tempfile::tempdir().unwrap();
+        let target = fixture.path().join("managed ' definition.zsh");
+        let value = " Préservable $PATH \"quoted\" ";
+        fs::write(&target, line("DIRLUME_TEST_VALUE", value)).unwrap();
+        let profile = add_startup_hook("# existing profile", &target).unwrap();
+        assert!(add_startup_hook(&profile, &target).is_none());
+        fs::write(fixture.path().join(".zprofile"), profile).unwrap();
+        let result = Command::new("/bin/zsh")
+            .env("ZDOTDIR", fixture.path())
+            .args(["-l", "-c", "printf %s \"$DIRLUME_TEST_VALUE\""])
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        assert_eq!(String::from_utf8(result.stdout).unwrap(), value);
     }
 }
