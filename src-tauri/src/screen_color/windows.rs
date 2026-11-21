@@ -6,16 +6,26 @@ use std::{
 
 use tauri::AppHandle;
 use windows::Win32::{
-    Foundation::{HINSTANCE, LPARAM, LRESULT, POINT, WPARAM},
-    Graphics::Gdi::{
-        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        GetPixel, ReleaseDC, SelectObject, CAPTUREBLT, HGDIOBJ, SRCCOPY,
+    Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM},
+    Graphics::{
+        Dwm::DwmFlush,
+        Gdi::{
+            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
+            GetPixel, GetStockObject, ReleaseDC, SelectObject, UpdateWindow, BLACK_BRUSH,
+            CAPTUREBLT, HBRUSH, HGDIOBJ, SRCCOPY,
+        },
     },
     UI::{
         Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, MOD_NOREPEAT, VK_ESCAPE},
         WindowsAndMessaging::{
-            CallNextHookEx, PeekMessageW, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, MSG,
-            MSLLHOOKSTRUCT, PM_REMOVE, WH_MOUSE_LL, WM_HOTKEY, WM_LBUTTONDOWN, WM_LBUTTONUP,
+            CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+            GetCursorInfo, GetSystemMetrics, LoadCursorW, PeekMessageW, RegisterClassW, SetCursor,
+            SetLayeredWindowAttributes, SetWindowsHookExW, ShowWindow, UnhookWindowsHookEx,
+            UnregisterClassW, CURSORINFO, HCURSOR, HHOOK, IDC_CROSS, LWA_ALPHA, MSG,
+            MSLLHOOKSTRUCT, PM_REMOVE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+            SM_YVIRTUALSCREEN, SW_SHOWNOACTIVATE, WH_MOUSE_LL, WM_HOTKEY, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            WS_EX_TOPMOST, WS_POPUP,
         },
     },
 };
@@ -24,6 +34,96 @@ use super::Rgb;
 use crate::desktop::{blocking, message, Result};
 
 const CANCEL_HOTKEY: i32 = 1;
+const CURSOR_CLASS: windows::core::PCWSTR = windows::core::w!("Dirlume.ScreenSampler");
+
+struct SamplingCursor {
+    module: HINSTANCE,
+    window: HWND,
+    previous: Option<HCURSOR>,
+}
+
+unsafe extern "system" fn sampler_window(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    unsafe { DefWindowProcW(window, message, wparam, lparam) }
+}
+
+impl SamplingCursor {
+    fn open(module: HINSTANCE) -> Result<Self> {
+        let cursor = unsafe { LoadCursorW(None, IDC_CROSS) }.map_err(message)?;
+        let previous = visible_cursor();
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(sampler_window),
+            hInstance: module,
+            hCursor: cursor,
+            hbrBackground: HBRUSH(unsafe { GetStockObject(BLACK_BRUSH) }.0),
+            lpszClassName: CURSOR_CLASS,
+            ..Default::default()
+        };
+        if unsafe { RegisterClassW(&class) } == 0 {
+            return Err(message(std::io::Error::last_os_error()));
+        }
+        let mut overlay = Self {
+            module,
+            window: HWND::default(),
+            previous: None,
+        };
+        // A nearly transparent window supplies the cursor across all displays without changing the system cursor scheme.
+        overlay.window = unsafe {
+            CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                CURSOR_CLASS,
+                windows::core::w!(""),
+                WS_POPUP,
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                None,
+                None,
+                Some(module),
+                None,
+            )
+        }
+        .map_err(message)?;
+        unsafe {
+            SetLayeredWindowAttributes(overlay.window, COLORREF(0), 1, LWA_ALPHA)
+                .map_err(message)?;
+            let _ = ShowWindow(overlay.window, SW_SHOWNOACTIVATE);
+            let _ = UpdateWindow(overlay.window);
+            overlay.previous = previous;
+            SetCursor(Some(cursor));
+        }
+        Ok(overlay)
+    }
+}
+
+fn visible_cursor() -> Option<HCURSOR> {
+    let mut info = CURSORINFO {
+        cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetCursorInfo(&mut info) }
+        .ok()
+        .map(|()| info.hCursor)
+}
+
+impl Drop for SamplingCursor {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.window.0.is_null() {
+                let _ = DestroyWindow(self.window);
+            }
+            let _ = UnregisterClassW(CURSOR_CLASS, Some(self.module));
+            if let Some(previous) = self.previous {
+                SetCursor(Some(previous));
+            }
+        }
+    }
+}
 
 thread_local! {
     static POINT_DOWN: Cell<Option<POINT>> = const { Cell::new(None) };
@@ -108,7 +208,7 @@ fn sample(point: POINT) -> Result<Rgb> {
     }
 }
 
-fn pick_on_worker() -> Result<Option<Rgb>> {
+fn pick_on_worker(timeout: Duration) -> Result<Option<Rgb>> {
     POINT_DOWN.set(None);
     PICKED.set(false);
     // Reserve only Escape, and consume the one selection click before it reaches the other app.
@@ -121,15 +221,19 @@ fn pick_on_worker() -> Result<Option<Rgb>> {
         unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(pick_click), Some(HINSTANCE(module)), 0) }
             .map_err(message)?,
     );
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let cursor = SamplingCursor::open(HINSTANCE(module))?;
+    let deadline = Instant::now() + timeout;
     let mut event = MSG::default();
     while Instant::now() < deadline {
         while unsafe { PeekMessageW(&mut event, None, 0, 0, PM_REMOVE) }.as_bool() {
             if event.message == WM_HOTKEY && event.wParam.0 == CANCEL_HOTKEY as usize {
                 return Ok(None);
             }
+            unsafe { DispatchMessageW(&event) };
         }
         if PICKED.get() {
+            drop(cursor);
+            let _ = unsafe { DwmFlush() };
             return POINT_DOWN.take().map(sample).transpose();
         }
         thread::sleep(Duration::from_millis(8));
@@ -138,5 +242,16 @@ fn pick_on_worker() -> Result<Option<Rgb>> {
 }
 
 pub(super) async fn pick(_app: AppHandle) -> Result<Option<Rgb>> {
-    blocking(pick_on_worker).await
+    blocking(|| pick_on_worker(Duration::from_secs(120))).await
+}
+
+#[cfg(all(test, feature = "ui-automation"))]
+#[test]
+fn restores_the_cursor_after_a_sampling_timeout() {
+    let cross = unsafe { LoadCursorW(None, IDC_CROSS) }.unwrap();
+    let previous = visible_cursor();
+    assert_eq!(pick_on_worker(Duration::ZERO).unwrap(), None);
+    if previous != Some(cross) {
+        assert_ne!(visible_cursor(), Some(cross));
+    }
 }

@@ -63,6 +63,11 @@ export async function testScreenColor(page) {
         using System.Runtime.InteropServices;
         public static class SampleInput {
           [StructLayout(LayoutKind.Sequential)] public struct Point { public int X; public int Y; }
+          [StructLayout(LayoutKind.Sequential)] public struct CursorInfo {
+            public int Size; public int Flags; public System.IntPtr Cursor; public Point Position;
+          }
+          [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CursorInfo info);
+          [DllImport("user32.dll", EntryPoint = "LoadCursorW")] public static extern System.IntPtr LoadCursor(System.IntPtr module, System.IntPtr id);
           [DllImport("user32.dll")] public static extern bool SetPhysicalCursorPos(int x, int y);
           [DllImport("user32.dll")] public static extern bool GetPhysicalCursorPos(out Point point);
           [DllImport("user32.dll")] public static extern System.IntPtr WindowFromPhysicalPoint(Point point);
@@ -73,7 +78,17 @@ export async function testScreenColor(page) {
           [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
         }
 "@
-      ${action === "click" ? `
+      function Assert-Crosshair([bool]$expected) {
+        $info = New-Object SampleInput+CursorInfo
+        $info.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][SampleInput+CursorInfo])
+        $crosshair = [SampleInput]::LoadCursor([IntPtr]::Zero, [IntPtr]::new(32515))
+        for ($attempt = 0; $attempt -lt 25; $attempt++) {
+          if ([SampleInput]::GetCursorInfo([ref]$info) -and (($info.Cursor -eq $crosshair) -eq $expected)) { return }
+          Start-Sleep -Milliseconds 30
+        }
+        throw "The sampling cursor state did not match $expected."
+      }
+      ${action === "place" ? `
         $null = [SampleInput]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
         $fixture = [IntPtr]::new([long]${fixtureHandle})
         [uint32]$owner = 0
@@ -85,29 +100,40 @@ export async function testScreenColor(page) {
         $null = [SampleInput]::GetPhysicalCursorPos([ref]$point)
         $null = [SampleInput]::GetWindowThreadProcessId([SampleInput]::WindowFromPhysicalPoint($point), [ref]$owner)
         if ($owner -ne ${painter.pid}) { throw "The external color window is covered." }
+        Assert-Crosshair $false
+      ` : action === "click" ? `
+        if (![SampleInput]::SetPhysicalCursorPos(102, 152)) { throw "Could not place the pointer over the external application." }
+        Assert-Crosshair $true
         [SampleInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
         [SampleInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
-      ` : `
+      ` : action === "escape" ? `
+        if (![SampleInput]::SetPhysicalCursorPos(102, 152)) { throw "Could not place the pointer over the external application." }
+        Assert-Crosshair $true
         [SampleInput]::keybd_event(27, 0, 0, [UIntPtr]::Zero)
         [SampleInput]::keybd_event(27, 0, 2, [UIntPtr]::Zero)
+      ` : `
+        Assert-Crosshair $false
       `}
     `), { windowsHide: true }).catch((error) => { throw new Error((error.stderr || error.message).slice(-1100)); });
+    await input("place");
     await eyedropper.click();
     await hint.waitFor();
     await input("escape");
     await hint.waitFor({ state: "hidden" });
     assert.equal(await hex.inputValue(), previous);
+    await input("restored");
 
     await eyedropper.click();
     await hint.waitFor();
     await input("click");
     await hint.waitFor({ state: "hidden" });
     assert.equal(await hex.inputValue(), "#245978");
+    await input("restored");
     await color.locator('[data-tooltip="Selected color #245978"]').waitFor();
     await color.getByRole("button", { name: "Use color", exact: true }).click();
     assert.equal(await options.getByRole("textbox", { name: "Block background hex", exact: true }).inputValue(), "#245978");
     await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
-    console.log("Verified the native eyedropper sampled an external Windows application and Esc preserved the previous color.");
+    console.log("Verified the crosshair over an external Windows application and cursor restoration after sampling and Esc.");
   } finally {
     clearTimeout(timeout);
     if (painter.exitCode === null) {
