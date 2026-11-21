@@ -770,7 +770,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function focusRevealedSide(side: Side) {
     requestAnimationFrame(() => {
-      if (document.activeElement?.closest(".location-popup")) return;
+      if (document.activeElement?.closest(".main-menu, .location-popup")) return;
       setActive(side);
       document.getElementById(side + "-files")?.focus({ preventScroll: true });
     });
@@ -1033,7 +1033,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setQuickViewSource(null);
     setEnvironmentPanels((panels) => ({ ...panels, [side]: mode }));
     setActive(side);
-    if (!mode) requestAnimationFrame(() => document.getElementById(side + "-files")?.focus());
+    if (!mode) focusRevealedSide(side);
   }
 
   async function revealSpace(side: Side, place: SpacePlace, reveal?: string) {
