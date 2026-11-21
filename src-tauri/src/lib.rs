@@ -23,6 +23,8 @@ mod ftp;
 #[cfg(feature = "desktop")]
 mod ftp_transfer;
 #[cfg(feature = "desktop")]
+mod git_view;
+#[cfg(feature = "desktop")]
 mod kswitcher;
 mod local;
 #[cfg(feature = "desktop")]

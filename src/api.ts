@@ -178,6 +178,40 @@ export interface DiskSpace {
   total: number;
 }
 
+export interface GitBranch {
+  reference: string;
+  name: string;
+  tip: string;
+  remote: boolean;
+}
+
+export interface GitRepository {
+  root: string;
+  name: string;
+  headRef: string | null;
+  head: string | null;
+  branches: GitBranch[];
+}
+
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface GitHistory {
+  commits: GitCommit[];
+  nextOffset: number | null;
+}
+
+export interface GitDetails {
+  message: string;
+  merge: boolean;
+  changes: { status: string; path: string; previousPath: string | null }[];
+}
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
@@ -271,6 +305,9 @@ export const api = {
   locations: () => invoke<QuickLocation[]>("locations"),
   spaceMount: (path: string) => invoke<{ path: string; share: boolean }>("space_mount", { path }),
   listSpaceDirectory: (root: string, segments: string[]) => invoke<Listing>("list_space_directory", { root, segments }),
+  gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
+  gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
+  gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
   processIcons: (ids: ProcessId[]) => invoke<(string | null)[]>("process_icons", { ids }),

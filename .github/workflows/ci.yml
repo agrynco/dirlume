@@ -142,6 +142,9 @@ jobs:
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
+      - name: Verify Git View
+        if: github.event.action != 'closed'
+        run: node scripts/git-view-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

@@ -362,8 +362,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 
 .workspace { position: relative; display: grid; grid-template-columns: minmax(0, var(--left-pane-width, 50fr)) 10px minmax(0, var(--right-pane-width, 50fr)); padding: 8px 8px 6px; min-height: 0; }
 .workspace[hidden] { display: none; }
-#left-pane, .quick-view-left, .space-analyzer-left { grid-column: 1; grid-row: 1; }
-#right-pane, .quick-view-right, .space-analyzer-right { grid-column: 3; grid-row: 1; }
+#left-pane, .quick-view-left, .space-analyzer-left, .git-pane-left { grid-column: 1; grid-row: 1; }
+#right-pane, .quick-view-right, .space-analyzer-right, .git-pane-right { grid-column: 3; grid-row: 1; }
 .pane[inert] { visibility: hidden; }
 .quick-view { overflow: hidden; }
 .quick-view .pane-heading { min-height: 32px; }
@@ -767,8 +767,48 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   flex: none; max-height: 35%; overflow: auto; margin: 0; padding: 5px 8px;
   overflow-wrap: anywhere; background: var(--danger-bg); color: var(--danger);
 }
+.git-pane { overflow: hidden; }
+.git-pane .pane-heading { flex-wrap: wrap; gap: 4px; }
+.git-pane .pane-heading button { flex: none; min-height: 22px; padding: 2px 6px; }
+.git-pane .pane-title { flex: 1; }
+.git-pane .pane-title svg, .git-commit svg { flex: none; width: 15px; height: 15px; }
+.git-repository {
+  display: grid; gap: 3px; padding: 6px 9px; background: var(--raised); border-bottom: 1px solid var(--line);
+}
+.git-repository > span, .git-ref { color: var(--panel-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-ref { flex: 0 1 auto; max-width: 48%; }
+.git-filter { min-width: 0; margin: 6px 7px; }
+.git-scroll { flex: 1; min-height: 0; overflow: auto; padding-block: 2px; }
+.git-branch-group { margin-block-end: 5px; }
+.git-branch-group h3, .git-details h3 { margin: 0; padding: 4px 8px; color: var(--panel-muted); font: 600 .88em/1.4 var(--ui-font); }
+.git-branch-group button, .git-commit > button {
+  width: 100%; min-height: 29px; min-width: 0; justify-content: space-between; gap: 5px; padding: 4px 8px;
+  border-radius: 0; text-align: start; font-family: var(--panel-font);
+}
+.git-branch-group button:focus-visible, .git-commit > button:focus-visible { outline-offset: -2px; }
+.git-branch-group :is(button span, button small), .git-commit > button > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.git-branch-group button[aria-selected="true"], .git-commit > button[aria-expanded="true"] {
+  background: var(--panel-selection); color: var(--panel-selected-ink);
+}
+.git-branch-group button small, .git-commit button small { font-family: var(--ui-font); opacity: .85; }
+.git-commit { border-bottom: 1px solid var(--line); }
+.git-commit > button > span { display: grid; flex: 1; gap: 2px; }
+.git-commit > button strong { overflow: hidden; text-overflow: ellipsis; }
+.git-commit > button code, .git-details code { font-family: var(--text-font); }
+.git-details { padding: 5px 8px; background: var(--raised); }
+.git-details header { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.git-details pre { margin-block: 6px; padding: 6px; background: var(--panel-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.git-details :is(p, ul) { margin: 3px 0; }
+.git-details ul { padding: 0; list-style: none; }
+.git-details li { display: grid; grid-template-columns: minmax(6em, 21%) minmax(0, 1fr); gap: 6px; padding: 3px 4px; overflow-wrap: anywhere; }
+.git-details li + li { border-top: 1px solid var(--line); }
+.git-load-more { margin: 6px; }
+.git-pane .git-error { color: var(--danger); }
 .dot { display: inline-block; width: 3px; height: 3px; margin: 0 7px 2px; border-radius: 50%; background: var(--muted); }
 .actionbar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: center; gap: 4px; padding: 0 8px 4px; overflow: hidden; }
+.actionbar[hidden] { display: none; }
 .actionbar button { justify-content: flex-start; gap: 7px; min-width: 0; min-height: 30px; padding: 0 7px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
 .actionbar button > svg { display: none; }
 .actionbar button > span { overflow: hidden; text-overflow: ellipsis; }
