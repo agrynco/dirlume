@@ -26,8 +26,7 @@ export function SettingsArchiveDialog({ action, preferences, onImport, onClose }
   const title = t(archive ? "Import settings" : "Export settings");
   const groups = archive ? settingsGroupIds.filter((id) => Object.hasOwn(archive.groups, id)) : settingsGroupIds;
   const schemes = archive?.schemes ?? preferences.schemes;
-  const [selection, setSelection] = useState<SettingsSelection>(() =>
-    archive ? { groups, schemes: schemes.map(({ id }) => id) } : { groups: [], schemes: [] });
+  const [selection, setSelection] = useState<SettingsSelection>(() => ({ groups, schemes: schemes.map(({ id }) => id) }));
   const [confirmation, setConfirmation] = useState<Replacements | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
