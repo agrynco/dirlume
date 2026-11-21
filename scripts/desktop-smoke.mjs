@@ -2005,9 +2005,9 @@ try {
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);
   await showOptions();
-  await shortcutOptions.getByRole("button", { name: "Add shortcut for Help", exact: true }).click();
-  await shortcutOptions.getByRole("textbox", { name: "New shortcut for Help", exact: true }).press("F1");
-  await closeToolWindow(optionsPage, () => shortcutOptions.getByRole("button", { name: "Done", exact: true }).click());
+  await optionsDialog.getByRole("button", { name: "Add shortcut for Help", exact: true }).click();
+  await optionsDialog.getByRole("textbox", { name: "New shortcut for Help", exact: true }).press("F1");
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
   const menubar = page.getByRole("menubar", { name: "Main menu" });
   const group = (name) => menubar.getByRole("menuitem", { name, exact: true });
