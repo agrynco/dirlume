@@ -624,7 +624,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     saveCommandHistory(historyItems);
   }, [historyItems]);
 
-  useLayoutEffect(() => applyAppearance(theme, scheme), [theme, scheme]);
+  useLayoutEffect(() => applyAppearance(theme, scheme, document.documentElement, preferences.retainedFonts),
+    [theme, scheme, preferences.retainedFonts]);
 
   const actionbar = useRef<HTMLElement>(null);
   useLayoutEffect(() => {

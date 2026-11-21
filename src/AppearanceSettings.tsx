@@ -4,7 +4,7 @@ import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  basePalette, baseThemes, builtInThemes, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
+  basePalette, baseThemes, builtInThemes, captureFonts, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
   isAvailableFont, isHexColor, surfaceColors,
   maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, systemTheme, useSystemTheme, viewerColors,
   type Color, type Font, type FontGroup, type Palette, type Scheme, type Surface,
@@ -33,7 +33,7 @@ export function ViewFontSettings({ preferences, onChange, views }: {
   function fields(keys: readonly ViewFont[]) {
     return keys.map((view) => {
       const { label, group } = viewFonts[view];
-      const fallback = effectiveFontSize(scheme?.fonts, group);
+      const fallback = parseFloat(preferences.retainedFonts?.[`--${group}-size`] ?? "") || effectiveFontSize(scheme?.fonts, group);
       return <label className="view-font-setting" key={view}>
         <SettingSearchLabel label={label} aliases={["zoom", "wheel", "font size"]} />
         <FontSizeInput label={label} size={preferences.viewFontSizes[view]} fallback={fallback}
@@ -175,6 +175,11 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           </label>
           <Button type="button" className="appearance-button" onClick={() => create({ automaticName: false })}><Plus /> <SettingSearchLabel label="New scheme" /></Button>
         </div>
+        <label className="field-checkbox">
+          <SettingSearchLabel label="Keep current fonts" />
+          <input type="checkbox" checked={preferences.retainedFonts !== undefined}
+            onChange={({ target }) => onChange({ ...preferences, retainedFonts: target.checked ? captureFonts(theme, applied) : undefined })} />
+        </label>
         <MenuAlignmentSetting label="Main menu alignment" value={preferences.mainMenuAlignment}
           onChange={(mainMenuAlignment) => onChange({ ...preferences, mainMenuAlignment })} />
         <label className="field-checkbox">

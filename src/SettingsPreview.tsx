@@ -86,8 +86,8 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
   const surface = pick && pickedSurface(pick);
   const surfaces = page === "viewer" || page === "editor" || page === "terminal" || page === "text" ? optionSurfaces[page] : [];
   useLayoutEffect(() => {
-    if (preview.current) applyAppearance(theme, scheme, preview.current);
-  }, [theme, scheme]);
+    if (preview.current) applyAppearance(theme, scheme, preview.current, preferences.retainedFonts);
+  }, [theme, scheme, preferences.retainedFonts]);
 
   return (
     <section className="settings-preview" aria-label={t("Settings preview")}>
