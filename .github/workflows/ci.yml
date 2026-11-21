@@ -145,6 +145,9 @@ jobs:
       - name: Verify Git View
         if: github.event.action != 'closed'
         run: node scripts/git-view-smoke.mjs
+      - name: Verify environment variable panes and copy review
+        if: github.event.action != 'closed'
+        run: node scripts/environment-panes-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

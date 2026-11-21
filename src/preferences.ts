@@ -84,6 +84,7 @@ export const commands = {
   view: { label: "View text or measure folder", key: "F3" },
   quickView: { label: "Quick View", key: "Ctrl+Q" },
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
+  environmentVariables: { label: "Environment variables", key: "" },
   analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
   cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
