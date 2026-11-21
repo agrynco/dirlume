@@ -3,6 +3,7 @@ import { link, mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 async function pressDigit(page, side, digit) {
   const ctrl = `Control${side}`;
@@ -55,9 +56,7 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   // Select an item in the first column before exercising horizontal navigation.
   await row("item-000.txt").click();
   await list("right").focus();
-  const menu = page.getByRole("menubar", { name: "Main menu" });
-  await menu.getByRole("menuitem", { name: "Left", exact: true }).click();
-  const leftMenu = menu.getByRole("menu", { name: "Left", exact: true });
+  const leftMenu = await openMainMenu(page, "Left");
   assert.deepEqual(await leftMenu.getByRole("menuitemradio").evaluateAll((items) =>
     items.map((item) => item.querySelector(".main-menu-choice").textContent)),
   ["Brief", "Medium", "Full", "Wide", "File owners", "File links", "Alternative full"]);

@@ -204,7 +204,7 @@ export function commandLabel(command: Command) {
 }
 
 export function commandScope(command: Command) {
-  if (command === "help" || command === "menu") return "global";
+  if (command === "help" || command === "menu" || command === "menuAlternate") return "global";
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText") return "terminal";
   if (command.endsWith("Sources")) return "sources";

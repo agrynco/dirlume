@@ -1,4 +1,5 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -22,10 +23,7 @@ export async function testLockingProcessPane(page, root) {
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
   async function open(side) {
     await row(side).click();
-    const menu = page.getByRole("menu", { name: "Files", exact: true });
-    if (!await menu.isVisible()) {
-      await page.getByRole("menubar").getByRole("menuitem", { name: "Files", exact: true }).click();
-    }
+    const menu = await openMainMenu(page, "Files");
     await menu.getByRole("menuitem", { name: "Find locking processes", exact: true }).click();
     const target = pane(side === "left" ? "right" : "left");
     await target.getByRole("grid", { name: "Running processes", exact: true }).waitFor();

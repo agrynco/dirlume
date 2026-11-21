@@ -3,6 +3,7 @@ import { link, mkdir, rename, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const modes = [
   "name", "baseName", "extension", "modified", "size", "unsorted", "created", "accessed", "changed",
@@ -33,10 +34,9 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
   await address.press("Enter");
   const row = (label) => left().locator(`[data-tooltip="${label}"]`);
   await row("alpha-2.md").waitFor();
-  const main = () => page.getByRole("menubar", { name: "Main menu" });
   async function openSort(side = "Left") {
-    await main().getByRole("menuitem", { name: side, exact: true }).click();
-    await main().getByRole("menu", { name: side, exact: true }).getByRole("menuitem", { name: "Sort modes", exact: true }).click();
+    const menu = await openMainMenu(page, side);
+    await menu.getByRole("menuitem", { name: "Sort modes", exact: true }).click();
     await active().waitFor();
   }
   async function closeSort() {

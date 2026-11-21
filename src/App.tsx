@@ -845,7 +845,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }
       return;
     }
-    if (bindingMatches(shortcuts.menu, shortcut)) {
+    if (bindingMatches(shortcuts.menu, shortcut) || bindingMatches(shortcuts.menuAlternate, shortcut)) {
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) perform("menu");
@@ -1777,8 +1777,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": openSettings(); break;
       case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
-      case "menu":
-      case "menuAlternate": (documentMenu.current ?? mainMenu.current)?.open(); break;
+      case "menu": (documentMenu.current ?? mainMenu.current)?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
@@ -2093,7 +2092,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <div className="brand">
           <span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1>
         </div>
-        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
+        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
         <div className="top-actions">
           {panesAvailable && formattedPreview && <div className="quick-view-modes" role="group" aria-label={t("Quick View format")}>
             <Button aria-pressed={!quickViewSourceText} onClick={() => { setQuickViewSourceText(false); focus(active); }}>{t("Rendered")}</Button>
