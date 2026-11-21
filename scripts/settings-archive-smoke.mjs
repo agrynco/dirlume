@@ -92,14 +92,28 @@ try {
   await openOptions();
 
   await button(options, "Export settings").click();
-  assert.equal(await button(exportDialog, "Export").isDisabled(), true);
-  await check(exportDialog, local.name).check();
-  await check(exportDialog, evening.name).check();
+  const groupChecks = exportDialog.getByRole("group", { name: "Settings groups", exact: true }).getByRole("checkbox");
+  const allChecks = exportDialog.getByRole("checkbox");
+  const assertDefaultSelection = async () => {
+    assert.ok(await allChecks.evaluateAll((inputs) => inputs.length > 0 && inputs.every((input) => input.checked)));
+    assert.equal(await button(exportDialog, "Export").isDisabled(), false);
+  };
+  await assertDefaultSelection();
+  const groupCount = await groupChecks.count();
   await page.evaluate(() => { window.cancelSave = true; });
   await button(exportDialog, "Export").click();
   await button(exportDialog, "Export").waitFor();
   assert.equal(await exported(), undefined);
   await page.evaluate(() => { window.cancelSave = false; });
+  await button(exportDialog, "Export").click();
+  await exportDialog.waitFor({ state: "hidden" });
+  const fullFile = await exported();
+  assert.equal(Object.keys(fullFile.groups).length, groupCount);
+  assert.deepEqual(fullFile.schemes.map(({ id }) => id), [local.id, evening.id]);
+
+  await button(options, "Export settings").click();
+  await assertDefaultSelection();
+  for (const group of await groupChecks.all()) await group.uncheck();
   await button(exportDialog, "Export").click();
   await exportDialog.waitFor({ state: "hidden" });
   const themeFile = await exported();
@@ -110,6 +124,9 @@ try {
   assert.deepEqual(themeFile.schemes[1].colors, evening.colors);
 
   await button(options, "Export settings").click();
+  await assertDefaultSelection();
+  for (const item of await allChecks.all()) await item.uncheck();
+  assert.equal(await button(exportDialog, "Export").isDisabled(), true);
   for (const group of ["General", "Appearance", "Keyboard shortcuts", "Main File Panels", "Terminal", "Viewer"]) {
     await check(exportDialog, group).check();
   }
@@ -229,6 +246,10 @@ try {
   });
   await page.reload();
   await openOptions();
+  await button(options, "Export settings").click();
+  await assertDefaultSelection();
+  assert.equal(await exportDialog.getByRole("group", { name: "Color schemes", exact: true }).count(), 0);
+  await button(exportDialog, "Cancel").click();
   await startImport(JSON.stringify(themeFile));
   await button(importDialog, "Import").click();
   assert.deepEqual((await readPreferences()).schemes, themeFile.schemes);
