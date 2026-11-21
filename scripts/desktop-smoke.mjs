@@ -320,7 +320,8 @@ try {
     await page.locator("#left-pane").getByRole("alert").waitFor();
     await page.evaluate((secret) => {
       const error = new TypeError(secret);
-      window.dispatchEvent(new ErrorEvent("error", { error, message: secret }));
+      const filename = document.querySelector('script[type="module"][src]').src;
+      window.dispatchEvent(new ErrorEvent("error", { error, message: secret, filename, lineno: 1, colno: 1 }));
       window.dispatchEvent(new ErrorEvent("error", { error, message: secret }));
     }, secret);
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -334,7 +335,15 @@ try {
     assert.equal(nativeErrors.length, 1, "The IPC failure and UI error use one log entry.");
     assert.equal(nativeErrors[0].recentActions.length, 32);
     assert.ok(nativeErrors[0].recentActions.every(({ operation }) => operation === "list_directory"));
-    assert.equal(records.filter(({ code }) => code === "type_error").length, 1);
+    const frontendErrors = records.filter(({ code }) => code === "type_error");
+    assert.equal(frontendErrors.length, 1);
+    const { build, origin, source, surface } = frontendErrors[0].frontend;
+    assert.ok(build);
+    assert.equal(origin, "window_error");
+    assert.equal(surface, "main");
+    assert.match(source.asset, /^index-[\w-]{8}\.js$/);
+    assert.equal(source.line, 1);
+    assert.equal(source.column, 1);
     assert.ok(!diagnosticsBeforeRestart.includes(secret), "Diagnostic records contain safe codes and operation names only.");
   }
   const fontSize = (selector) => page.locator(selector).evaluate((element) => parseFloat(getComputedStyle(element).fontSize));

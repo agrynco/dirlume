@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     fs::{self, OpenOptions},
     io::Write,
     panic::{self, AssertUnwindSafe, PanicHookInfo},
@@ -10,6 +10,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 #[tauri::command]
 pub async fn error_log() -> crate::desktop::Result<Option<String>> {
@@ -131,6 +132,7 @@ const OTHER_OPERATIONS: &[&str] = &[
 ];
 
 static LOG: OnceLock<Diagnostics> = OnceLock::new();
+static FRONTEND_ASSETS: OnceLock<HashSet<String>> = OnceLock::new();
 pub const PANIC_REJECTION: &str = "An internal operation panicked.";
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -169,6 +171,84 @@ struct Entry<'a> {
     recent_actions: &'a VecDeque<Action>,
     #[serde(skip_serializing_if = "Option::is_none")]
     panic: Option<&'a PanicDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frontend: Option<&'a FrontendDetails>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FrontendOrigin {
+    WindowError,
+    UnhandledRejection,
+    React,
+}
+
+#[derive(Deserialize, Serialize)]
+struct FrontendSource {
+    asset: String,
+    line: u32,
+    column: u32,
+}
+
+impl FrontendSource {
+    fn valid(&self, assets: &HashSet<String>) -> bool {
+        self.asset.len() <= 112
+            && (1..=1_000_000).contains(&self.line)
+            && (1..=10_000_000).contains(&self.column)
+            && assets.contains(&self.asset)
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct FrontendReport {
+    origin: FrontendOrigin,
+    source: Option<FrontendSource>,
+}
+
+#[derive(Serialize)]
+struct FrontendDetails {
+    build: &'static str,
+    platform: &'static str,
+    architecture: &'static str,
+    origin: FrontendOrigin,
+    surface: Option<&'static str>,
+    source: Option<FrontendSource>,
+}
+
+impl FrontendDetails {
+    fn from_report(report: FrontendReport, window: &tauri::WebviewWindow) -> Self {
+        let source = report.source.filter(|source| {
+            let assets = FRONTEND_ASSETS.get_or_init(|| {
+                window
+                    .app_handle()
+                    .asset_resolver()
+                    .iter()
+                    .filter_map(|(path, _)| {
+                        let asset = path.trim_start_matches('/').strip_prefix("assets/")?;
+                        let name = asset.strip_suffix(".js")?;
+                        name.bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+                            .then(|| asset.to_owned())
+                    })
+                    .collect()
+            });
+            source.valid(assets)
+        });
+        let surface = match window.label() {
+            "main" => Some("main"),
+            "options" => Some("options"),
+            label if label.starts_with("compare-") => Some("compare"),
+            _ => None,
+        };
+        Self {
+            build: crate::BUILD_VERSION,
+            platform: std::env::consts::OS,
+            architecture: std::env::consts::ARCH,
+            origin: report.origin,
+            surface,
+            source,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -257,6 +337,7 @@ impl Diagnostics {
         code: FailureCode,
         os_code: Option<i32>,
         actions: &VecDeque<Action>,
+        frontend: Option<&FrontendDetails>,
     ) {
         let entry = Entry {
             timestamp_ms: timestamp(),
@@ -265,6 +346,7 @@ impl Diagnostics {
             os_code: os_code.filter(|code| matches!(code, 1..=65535)),
             recent_actions: actions,
             panic: None,
+            frontend,
         };
         let _ = append(&self.path, &entry);
     }
@@ -277,6 +359,7 @@ impl Diagnostics {
             os_code: None,
             recent_actions: actions,
             panic: Some(details),
+            frontend: None,
         };
         let _ = append(&self.path, &entry);
     }
@@ -432,26 +515,38 @@ fn operation_detail(detail: Option<&str>) -> &'static str {
 }
 
 pub fn failure(operation: &str, code: FailureCode, os_code: Option<i32>) {
+    record_failure(operation, code, os_code, None);
+}
+
+fn record_failure(
+    operation: &str,
+    code: FailureCode,
+    os_code: Option<i32>,
+    frontend: Option<&FrontendDetails>,
+) {
     if let (Some(log), Some(operation)) = (LOG.get(), operation_name(operation)) {
         if let Ok(actions) = log.actions.lock() {
-            log.write(operation, code, os_code, &actions);
+            log.write(operation, code, os_code, &actions, frontend);
         }
     }
 }
 
 #[tauri::command]
-pub async fn report_diagnostic(
+pub(crate) async fn report_diagnostic(
+    window: tauri::WebviewWindow,
     operation: String,
     code: FailureCode,
     os_code: Option<i32>,
     detail: Option<String>,
+    frontend: Option<FrontendReport>,
 ) {
     let operation = if operation == "operate" {
         operation_detail(detail.as_deref())
     } else {
         &operation
     };
-    failure(operation, code, os_code);
+    let frontend = frontend.map(|report| FrontendDetails::from_report(report, &window));
+    record_failure(operation, code, os_code, frontend.as_ref());
 }
 
 #[cfg(test)]
@@ -544,9 +639,16 @@ mod tests {
             FailureCode::OsError,
             Some(5),
             &log.actions.lock().unwrap(),
+            None,
         );
         let restarted = Diagnostics::new(path.clone());
-        restarted.write("javascript", FailureCode::TypeError, None, &VecDeque::new());
+        restarted.write(
+            "javascript",
+            FailureCode::TypeError,
+            None,
+            &VecDeque::new(),
+            None,
+        );
         let file = fs::read_to_string(path).unwrap();
         let entries: Vec<serde_json::Value> = file
             .lines()
