@@ -1,0 +1,49 @@
+name: Sync Dirlume project status
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled, reopened, closed]
+  pull_request_target:
+    branches: [prerelease, main]
+    types: [opened, edited, synchronize, ready_for_review, converted_to_draft, reopened, closed]
+  push:
+    branches: [main, prerelease, 'codex/issue-*']
+  create:
+  delete:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: dirlume-project-status
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.repository == 'agrynco/dirlume' &&
+      (github.event_name != 'create' && github.event_name != 'delete' ||
+      github.event.ref_type == 'branch' && startsWith(github.event.ref, 'codex/issue-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      # Always run the script from the default branch, including for pull_request_target.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Verify project status rules
+        run: node --test scripts/sync-project-status.test.mjs
+      - name: Reconcile issue status
+        env:
+          PROJECT_TOKEN: ${{ secrets.DIRLUME_PROJECT_TOKEN }}
+          REPOSITORY_TOKEN: ${{ github.token }}
+        run: node scripts/sync-project-status.mjs
