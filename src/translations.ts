@@ -1,5 +1,12 @@
 // English message keys also serve as the default text. The translations are Ukrainian and Russian.
 export const translations: Readonly<Record<string, readonly [uk: string, ru: string]>> = {
+  "File pane view": ["Вигляд файлової панелі", "Вид файловой панели"],
+  "List": ["Список", "Список"],
+  "Folder sizes": ["Розміри папок", "Размеры папок"],
+  "Measuring folders…": ["Обчислення розмірів папок…", "Вычисление размеров папок…"],
+  "Collapse folder": ["Згорнути папку", "Свернуть папку"],
+  "Expand folder": ["Розгорнути папку", "Раскрыть папку"],
+  "Wait for the marked folders to finish loading.": ["Дочекайтеся завантаження позначених папок.", "Дождитесь завершения загрузки отмеченных папок."],
   "Workspace controls": ["Керування робочою областю", "Управление рабочей областью"],
   "Pane navigation": ["Навігація панелі", "Навигация панели"],
   "Address and breadcrumbs": ["Адреса й сегменти шляху", "Адрес и сегменты пути"],

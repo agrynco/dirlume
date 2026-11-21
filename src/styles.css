@@ -477,6 +477,20 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .pane.active .pane-title svg { color: var(--accent); }
 .pane-title h2 { font-size: 1.08em; margin: 0; font-weight: 650; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pane-tools { gap: 2px; }
+.pane-view-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 3px 6px; background: var(--panel-header); border-block-end: 1px solid var(--line);
+  font: .85rem var(--ui-font);
+}
+.pane-heading .pane-view-toolbar { padding: 0; border-block-end: 0; flex: 1; }
+.pane[data-layout="standard"] .local-heading:has(.pane-view-toolbar) { justify-content: space-between; }
+.pane-heading .pane-tools { flex: none; }
+.pane-view-modes { display: inline-flex; gap: 2px; }
+.pane-view-toolbar :is(button, select) { min-height: 22px; padding: 2px 7px; white-space: nowrap; }
+.pane-view-toolbar button[aria-pressed="true"] { background: var(--panel-selection); color: var(--panel-ink); border-color: var(--accent); }
+.pane-view-toolbar button > svg, .pane-size-scan svg { width: 13px; height: 13px; }
+.pane-view-metric, .pane-size-scan { color: var(--panel-muted); }
+.pane-size-scan { display: inline-flex; align-items: center; }
 .pane[data-layout="standard"] .local-heading { justify-content: flex-end; }
 .pane[data-layout="standard"] .local-heading .pane-title {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
@@ -706,6 +720,14 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .file-name, .file-size, .file-date, .file-time { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .file-name { display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+.file-tree-indent, .file-tree-spacer { display: inline-block; flex: none; }
+.file-tree-spacer { width: 16px; }
+.file-name .file-tree-expand {
+  display: grid; place-items: center; flex: none; width: 16px; min-height: 16px; padding: 0;
+  background: transparent; color: inherit; border: 0;
+}
+.file-name .file-tree-expand:hover { background: var(--hover); }
+.file-name .file-tree-expand svg { width: 13px; height: 13px; color: inherit; }
 .file-name span { overflow: hidden; text-overflow: ellipsis; }
 .file-name:has(.inline-rename) { overflow: visible; }
 .file-name .inline-rename { position: relative; flex: 1; min-width: 0; overflow: visible; }

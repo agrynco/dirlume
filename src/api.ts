@@ -13,6 +13,13 @@ export interface Entry extends Partial<PanelMetadata> {
   connection?: SavedConnection;
   description?: string | null;
   allocationId?: string;
+  tree?: {
+    parent: Extract<Place, { kind: "local" }>;
+    segments: readonly string[];
+    expanded: boolean;
+    loading: boolean;
+    error?: string;
+  };
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -270,7 +277,7 @@ export type Operation =
   | { kind: "create_file"; name: string; encoding?: TextEncoding }
   | { kind: "rename"; name: string; new_name: string };
 
-export type Deletion = { directory: string; names: string[]; permanent: boolean };
+export type Deletion = { directory: string; names: string[]; permanent: boolean; relativePaths?: string[][] };
 export type DeletionCounts = { completed: number; skipped: number; failed: number; unprocessed: number };
 export type DeletionSelection = { files: number; folders: number; bytes: number; incomplete: boolean; availableBefore: number | null };
 export type DeletionProgress = { path: string; currentTotal: number; currentProcessed: number; counts: DeletionCounts };
@@ -607,11 +614,11 @@ export function writableTextPlace(place: TextPlace) {
 
 let nextDirectoryWatch = 0;
 
-export function watchDirectory(path: string, onChange: () => void, name?: string) {
+export function watchDirectory(path: string, onChange: () => void, name?: string, recursive = false) {
   const id = ++nextDirectoryWatch;
   const changes = new Channel<null>();
   changes.onmessage = onChange;
-  const ready = invoke<void>("watch_directory", { id, path, name: name ?? null, changes });
+  const ready = invoke<void>("watch_directory", { id, path, name: name ?? null, recursive, changes });
   return {
     ready,
     stop: () => {

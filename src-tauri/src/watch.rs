@@ -123,6 +123,7 @@ pub async fn watch_directory(
     id: u32,
     path: String,
     name: Option<String>,
+    recursive: Option<bool>,
     changes: Channel<()>,
     state: State<'_, Watches>,
 ) -> Result<()> {
@@ -132,8 +133,9 @@ pub async fn watch_directory(
             local::name_component(name).map_err(message)?;
         }
         let watched = directory.to_owned();
-        let mut watcher =
-            notify::recommended_watcher(move |event: notify::Result<Event>| match event {
+        let recursive = recursive.unwrap_or(false);
+        let mut watcher = RecommendedWatcher::new(
+            move |event: notify::Result<Event>| match event {
                 Ok(event)
                     if !matches!(event.kind, EventKind::Access(_))
                         && name.as_deref().is_none_or(|name| {
@@ -149,10 +151,19 @@ pub async fn watch_directory(
                 }
                 Err(_) => failure("watch_events", FailureCode::Io, None),
                 _ => {}
-            })
-            .map_err(message)?;
+            },
+            notify::Config::default().with_follow_symlinks(!recursive),
+        )
+        .map_err(message)?;
         watcher
-            .watch(directory, RecursiveMode::NonRecursive)
+            .watch(
+                directory,
+                if recursive {
+                    RecursiveMode::Recursive
+                } else {
+                    RecursiveMode::NonRecursive
+                },
+            )
             .map_err(message)?;
         Ok(watcher)
     })

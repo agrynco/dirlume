@@ -23,3 +23,5 @@ The baseline is [KSwitcher Files v0.6.119](https://gitea.hrynco.com/hrynco/hrync
 The Space Analyzer reads Windows UNC shares through Windows and OS-mounted SMB shares through the local filesystem on Ubuntu and macOS. Filesystems and servers that expose allocated bytes can report size on disk. FTP, SSH/SFTP, KSwitcher, and Windows-hosted Dirlume Server listings use file size. A Unix-hosted Dirlume Server reports allocated bytes and hard-link identities. Older server versions can report allocation without identity, so shared allocations may be counted more than once. Remote scans skip links that the provider identifies in its listings.
 
 Local Space Analyzer tree rows support the Windows Shell menu and Dirlume's Copy, Rename or move, Trash, and permanent deletion dialogs. They share the file pane's shortcuts and resolve actions from the selected row's parent path. Expanded branches survive a refresh after a file operation.
+
+Either local file pane can use List or Tree independently of its column preset. Tree loads expanded branches and keeps marks by location across branches. Both views can show streaming folder totals from the Space Analyzer scanner.
