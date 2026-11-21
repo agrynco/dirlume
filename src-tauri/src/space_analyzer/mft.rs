@@ -1,18 +1,10 @@
 use std::{
     collections::HashMap,
-    fs::OpenOptions,
-    os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
     path::{Component, Prefix},
 };
 
-use ntfs_mft::{NtfsFileReference, NtfsName, RawMftScanOptions, Volume};
-use windows_sys::Win32::Storage::FileSystem::{
-    GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-};
-
 use super::{fs, io, local, platform, Output, Path, PathBuf};
+use ntfs_mft::{NtfsFileReference, NtfsName, RawMftScanOptions, Volume};
 
 pub(super) fn open(root: &Path) -> Option<Volume> {
     let (mount, share) = platform::mount(root).ok()?;
@@ -32,24 +24,8 @@ pub(super) fn open(root: &Path) -> Option<Volume> {
 // Directory access also verifies the live file reference (including its sequence number).
 // A rename or a recycled record must not attach another directory's children here.
 fn directory_reference(path: &Path) -> io::Result<u64> {
-    let file = OpenOptions::new()
-        .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)?;
-    let mut info = BY_HANDLE_FILE_INFORMATION::default();
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let current = u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow);
-    if info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
-        != FILE_ATTRIBUTE_DIRECTORY
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "The directory changed during the scan.",
-        ));
-    }
-    Ok(current)
+    let file = platform::open_directory(path)?;
+    platform::directory_identity(&file).map(|(_, reference)| reference)
 }
 
 fn check_directory(path: &Path, reference: u64) -> io::Result<()> {
@@ -114,7 +90,7 @@ impl Branch {
         } else {
             (item.size, item.allocated)
         };
-        let identity = item.linked.then(|| item.reference.to_string());
+        let identity = item.linked.then_some((0, u128::from(item.reference)));
         out.entry(self.id, name, false, size, allocated, identity)?;
         Ok(None)
     }

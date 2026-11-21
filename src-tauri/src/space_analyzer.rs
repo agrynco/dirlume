@@ -16,6 +16,8 @@ use crate::local;
 
 #[cfg(windows)]
 mod mft;
+#[cfg(windows)]
+mod windows_walk;
 
 #[derive(Default)]
 pub struct Scans(Mutex<HashMap<String, Arc<AtomicBool>>>);
@@ -50,7 +52,7 @@ struct Output<'a> {
     send: &'a mut dyn FnMut(ScanEvent) -> io::Result<()>,
     stop: &'a AtomicBool,
     changes: Vec<Change>,
-    identities: HashSet<String>,
+    identities: HashSet<(u64, u128)>,
     next_id: usize,
     last: Instant,
 }
@@ -101,7 +103,7 @@ impl Output<'_> {
         directory: bool,
         size: Option<u64>,
         allocated: Option<u64>,
-        identity: Option<String>,
+        identity: Option<(u64, u128)>,
     ) -> io::Result<usize> {
         let id = self.next_id;
         self.next_id += 1;
@@ -196,6 +198,13 @@ fn scan(
 }
 
 fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
+    #[cfg(windows)]
+    if let Some(volume) = windows_walk::local_ntfs(root) {
+        match windows_walk::scan(root, volume, out) {
+            Err(e) if windows_walk::unsupported(&e) => out.start("walk")?,
+            result => return result,
+        }
+    }
     let boundary = platform::boundary(root, &fs::metadata(root)?);
     let mut jobs = vec![(0, root.to_path_buf())];
     while let Some((parent, folder)) = jobs.pop() {
@@ -287,11 +296,42 @@ pub async fn space_mount(path: String) -> Result<Mount, String> {
 
 #[cfg(windows)]
 mod platform {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use std::path::{Component, Prefix};
-    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW};
-
     use super::*;
+    use std::{
+        fs::{File, OpenOptions},
+        os::windows::{
+            ffi::{OsStrExt, OsStringExt},
+            fs::OpenOptionsExt,
+            io::AsRawHandle,
+        },
+        path::{Component, Prefix},
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetDriveTypeW, GetFileInformationByHandle, GetVolumePathNameW, BY_HANDLE_FILE_INFORMATION,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+    };
+
+    pub(super) fn open_directory(path: &Path) -> io::Result<File> {
+        OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+    }
+
+    pub(super) fn directory_identity(file: &File) -> io::Result<(u32, u64)> {
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
+            != FILE_ATTRIBUTE_DIRECTORY
+        {
+            return Err(io::Error::other("The directory changed during the scan."));
+        }
+        let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+        Ok((info.dwVolumeSerialNumber, index))
+    }
 
     // Windows marks directory volume mount points, junctions, and symlinks as reparse points.
     #[derive(PartialEq, Eq)]
@@ -300,7 +340,7 @@ mod platform {
         Boundary
     }
 
-    pub(super) fn usage(path: &Path, _: &fs::Metadata) -> (Option<u64>, Option<String>) {
+    pub(super) fn usage(path: &Path, _: &fs::Metadata) -> (Option<u64>, Option<(u64, u128)>) {
         crate::file_attributes::space_usage(path)
     }
 
@@ -385,9 +425,9 @@ mod platform {
         None
     }
 
-    pub(super) fn usage(_: &Path, metadata: &fs::Metadata) -> (Option<u64>, Option<String>) {
+    pub(super) fn usage(_: &Path, metadata: &fs::Metadata) -> (Option<u64>, Option<(u64, u128)>) {
         let id = (metadata.nlink() > 1 && metadata.ino() != 0)
-            .then(|| format!("{}:{}", metadata.dev(), metadata.ino()));
+            .then_some((metadata.dev(), u128::from(metadata.ino())));
         (metadata.blocks().checked_mul(512), id)
     }
 
