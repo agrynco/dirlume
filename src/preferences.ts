@@ -234,6 +234,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   const commands = [left, right];
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
+  if (commands.includes("swap") && (leftScope === "compare" || rightScope === "compare")) return true;
   return (leftScope === "text" || rightScope === "text" || leftScope === "viewer" || rightScope === "viewer") &&
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));
 }

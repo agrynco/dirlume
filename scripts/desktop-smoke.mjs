@@ -1491,6 +1491,7 @@ try {
   await commandLine.waitFor();
   await commandLine.press("Control+o");
   await left.waitFor({ state: "hidden" });
+  assert.ok(await page.getByRole("button", { name: "Swap panes", exact: true }).isDisabled());
   await toggleTerminal.click();
   await commandLine.waitFor();
   await left.waitFor();

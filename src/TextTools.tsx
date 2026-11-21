@@ -581,11 +581,12 @@ function DiffRows({ block, current, split, connectors, ratio }: {
   </div>;
 }
 
-export function CompareDialog({ left, right, previousShortcut, nextShortcut, onClose, onDirtyChange, standalone = false }: {
+export function CompareDialog({ left, right, previousShortcut, nextShortcut, swapShortcut, onClose, onDirtyChange, standalone = false }: {
   left: NamedFile;
   right: NamedFile;
   previousShortcut: readonly string[];
   nextShortcut: readonly string[];
+  swapShortcut: readonly string[];
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   standalone?: boolean;
@@ -596,6 +597,8 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const [whitespace, setWhitespace] = useState(false);
   const [layout, setLayout] = useState<CompareLayout>(() => compareOption(compareLayoutKey, "side-by-side") === "unified"
     ? "unified" : "side-by-side");
+  const [swapped, setSwapped] = useState(false);
+  const [initialEditor, setInitialEditor] = useState<CompareSide>("left");
   const [connectors, setConnectors] = useState(() => compareOption(compareConnectorsKey, "true") === "true");
   const [collapse, setCollapse] = useState(() => compareOption(compareCollapseKey, "false") === "true");
   const [expanded, setExpanded] = useState<number[]>([]);
@@ -613,7 +616,12 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const computed = result && "blocks" in result ? result : null;
   const groups = computed?.groups ?? 0;
   const files = { left, right };
-  const dirty = compareSides.filter((side) => originals && documents && normalized(originals[side].text) !== documents[side]);
+  const order = swapped ? ["right", "left"] as const : compareSides;
+  const [leftFile, rightFile] = order;
+  const dirty = order.filter((side) => originals && documents && normalized(originals[side].text) !== documents[side]);
+  const displayedBlocks = useMemo(() => swapped ? computed?.blocks.map((block) => ({
+    ...block, rows: block.rows.map(({ left, right }) => ({ left: right, right: left })),
+  })) : computed?.blocks, [computed, swapped]);
   const hasChanges = dirty.length > 0;
   const reportDirty = useRef(onDirtyChange);
   reportDirty.current = onDirtyChange;
@@ -740,21 +748,36 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const columns = { "--comparison-columns": `minmax(0, ${ratio}fr) var(--comparison-gutter) minmax(0, ${100 - ratio}fr)` } as CSSProperties;
   const failure = error || (result && "error" in result ? result.error : "");
   return <>
-    <Dialog title={t("Compare files")} helpTopic="compare" wide standalone={standalone} onClose={requestClose} onKeyDown={(event) => {
-      const shortcut = eventShortcut(event);
-      const previous = bindingMatches(previousShortcut, shortcut);
-      if (previous || bindingMatches(nextShortcut, shortcut)) {
+    <Dialog title={t("Compare files")} helpTopic="compare" wide standalone={standalone} onClose={requestClose}
+      onKeyDownCapture={(event) => {
+        if (!split || saving || confirm || event.nativeEvent.isComposing || !bindingMatches(swapShortcut, eventShortcut(event))) return;
         event.preventDefault();
-        jump(previous ? -1 : 1);
-      }
-    }}>
+        event.stopPropagation();
+        if (event.repeat) return;
+        const focused = document.activeElement;
+        setSwapped((current) => !current);
+        if (focused instanceof HTMLElement && focused.closest(".comparison-editors")) {
+          requestAnimationFrame(() => { if (focused.isConnected) focused.focus({ preventScroll: true }); });
+        }
+      }}
+      onKeyDown={(event) => {
+        const shortcut = eventShortcut(event);
+        const previous = bindingMatches(previousShortcut, shortcut);
+        if (previous || bindingMatches(nextShortcut, shortcut)) {
+          event.preventDefault();
+          jump(previous ? -1 : 1);
+        }
+      }}>
       <div className="comparison-toolbar">
         <Button disabled={!groups} shortcut={showShortcut(previousShortcut[0])} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
         <Button disabled={!groups} shortcut={showShortcut(nextShortcut[0])} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
         <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
-        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge("right", "left")}><ArrowLeft /> {t("Apply to left")}</Button>
-        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge("left", "right")}>{t("Apply to right")} <ArrowRight /></Button>
-        <label><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => setEditing(event.target.checked)} /> {t("Edit files")}</label>
+        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge(rightFile, leftFile)}><ArrowLeft /> {t("Apply to left")}</Button>
+        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge(leftFile, rightFile)}>{t("Apply to right")} <ArrowRight /></Button>
+        <label><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
+          setInitialEditor(leftFile);
+          setEditing(event.target.checked);
+        }} /> {t("Edit files")}</label>
         <label className="comparison-layout">{t("Layout")}
           <select aria-label={t("Layout")} value={layout} onChange={(event) => {
             const next = event.target.value as CompareLayout;
@@ -780,11 +803,11 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
       {documents && !result && !failure && <div className="dialog-body" role="status">{t("Comparing…")}</div>}
       {documents && <div className="comparison-editors" hidden={!editing}>
-        {compareSides.map((side) => <section key={side} className="comparison-editor text-window" data-editing="true"
-          aria-label={t(side === "left" ? "Left file" : "Right file")}>
+        {order.map((side) => <section key={side} className="comparison-editor text-window" data-editing="true"
+          aria-label={t(side === leftFile ? "Left file" : "Right file")}>
           <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
-            <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === "left"}
+            <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === initialEditor}
               value={documents[side]} onChange={(text) => {
                 setDocuments((previous) => previous && { ...previous, [side]: text });
                 setCurrent(0);
@@ -795,23 +818,23 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
       {computed && !editing && (
         <div className="comparison" data-layout={layout} style={columns} ref={output} tabIndex={0} aria-label={t("File differences")}>
           <div className={`comparison-head${split ? " comparison-head-split" : ""}`}>
-            <span data-tooltip={left.name}>{left.name}</span>
+            <span data-tooltip={files[leftFile].name}>{files[leftFile].name}</span>
             {split ? <SplitDivider label={t("Comparison divider")} className="comparison-divider" value={ratio} onResize={setRatio} />
               : <span aria-hidden="true">→</span>}
-            <span data-tooltip={right.name}>{right.name}</span>
+            <span data-tooltip={files[rightFile].name}>{files[rightFile].name}</span>
           </div>
-          {computed.blocks.map((block, index) => collapse && block.group === null && block.rows.length > 6 && !expanded.includes(index)
+          {displayedBlocks?.map((block, index) => collapse && block.group === null && block.rows.length > 6 && !expanded.includes(index)
             ? <Button key={index} type="button" className="diff-unchanged" onClick={() => setExpanded((items) => [...items, index])}>
               {t("Show {0} unchanged lines", block.rows.length)}
             </Button>
-            : <DiffRows key={index} block={block} current={current} split={split} connectors={connectors} ratio={ratio} />)}
+            : <DiffRows key={`${index}:${swapped}`} block={block} current={current} split={split} connectors={connectors} ratio={ratio} />)}
         </div>
       )}
     </Dialog>
     {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => { if (!saving) setConfirm(false); }}>
       <div className="dialog-body transfer-body">
         {dirty.map((side) => <fieldset className="comparison-save" key={side} disabled={saving}>
-          <legend>{t(side === "left" ? "Left file" : "Right file")} · {files[side].name}</legend>
+          <legend>{t(side === leftFile ? "Left file" : "Right file")} · {files[side].name}</legend>
           <label className="field">{t("Save changes")}
             <select value={destinations[side] === null ? "original" : "copy"}
               onChange={(event) => setDestinations({ ...destinations, [side]: event.target.value === "original" ? null : "" })}>
