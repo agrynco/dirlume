@@ -187,6 +187,11 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           <input type="checkbox" checked={preferences.showTitlebarScheme}
             onChange={(event) => onChange({ ...preferences, showTitlebarScheme: event.target.checked })} />
         </label>
+        <label className="field-checkbox">
+          <input type="checkbox" checked={preferences.showStatusBar}
+            onChange={(event) => onChange({ ...preferences, showStatusBar: event.target.checked })} />
+          <SettingSearchLabel label="Show status bar" />
+        </label>
         <div className="favorite-schemes">
           <label className="field"><SettingSearchLabel label="Favorite light scheme" />
             <select value={preferences.systemLightScheme} onChange={(event) => onChange({ ...preferences, systemLightScheme: event.target.value })}>

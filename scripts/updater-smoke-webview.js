@@ -44,6 +44,33 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
     }
     pointer("pointerout");
   }
+  async function checkOptionalStatusBar() {
+    const workspace = document.querySelector(".workspace");
+    const app = workspace.closest(".app");
+    const spaceBelowWorkspace = () => app.getBoundingClientRect().bottom - workspace.getBoundingClientRect().bottom;
+    const fullSpace = spaceBelowWorkspace();
+    function apply(showStatusBar) {
+      const oldValue = localStorage.getItem(preferenceKey);
+      const newValue = JSON.stringify({ ...JSON.parse(oldValue ?? "{}"), showStatusBar });
+      localStorage.setItem(preferenceKey, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key: preferenceKey, oldValue, newValue }));
+    }
+    apply(false);
+    const grip = await waitFor("the resize marker in File actions", () => document.querySelector(".actionbar-row > .window-resize-marker"));
+    const hitArea = grip.getBoundingClientRect();
+    const actions = grip.parentElement.querySelector(".actionbar").getBoundingClientRect();
+    const frame = app.getBoundingClientRect();
+    const reclaimed = fullSpace - spaceBelowWorkspace();
+    const overlap = actions.right - hitArea.left;
+    const rightInset = frame.right - hitArea.right;
+    const bottomInset = frame.bottom - hitArea.bottom;
+    if (document.querySelector(".statusbar") || reclaimed < 27 ||
+      overlap > 1 || Math.abs(rightInset) > 2 || Math.abs(bottomInset) > 2) {
+      throw new Error(`Unexpected hidden status bar layout. Reclaimed ${reclaimed}px, action overlap ${overlap}px, resize insets ${rightInset}px and ${bottomInset}px.`);
+    }
+    apply(true);
+    await waitFor("the restored status bar and resize marker", () => document.querySelector(".statusbar > .window-resize-marker"));
+  }
   async function revealMainMenu() {
     const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
     if (bar.hidden) {
@@ -280,6 +307,7 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
         Math.abs(status.right - marker.right) > 2 || Math.abs(status.bottom - marker.bottom) > 2) {
         throw new Error("The main window resize marker was not decorative and flush with the status bar.");
       }
+      await checkOptionalStatusBar();
       const refresh = await waitFor("the pane refresh control", () => document.querySelector('#left-pane button[aria-label="Refresh folder"]:enabled'));
       await checkTooltip(refresh, "Refresh folder");
       const locations = document.querySelector("#left-pane .location-trigger");

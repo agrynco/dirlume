@@ -52,10 +52,11 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  pasteShortcut, pasteOnRightClick, onPasteError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, onClose }: {
+  pasteShortcut, pasteOnRightClick, onPasteError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
+  focusHint?: string;
   theme: Theme;
   scheme: Scheme | null;
   pendingCommands: TerminalCommand[];
@@ -361,6 +362,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}
       </p>}
+      {focusHint !== undefined && <p className="terminal-focus-hint" role="status">{focusHint}</p>}
       <div className="terminal-surface" ref={container} />
     </section>
   );

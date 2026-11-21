@@ -1,6 +1,7 @@
 import { Button } from "./Button";
 import { WindowControls } from "./WindowControls";
 import { WindowResizeMarker } from "./ResizeGrip";
+import { StatusFeedback, type WorkspaceStatus } from "./StatusFeedback";
 import { HistoryField } from "./HistoryField";
 import { SchemeOptions } from "./SchemeOptions";
 import { CommandField } from "./CommandField";
@@ -242,7 +243,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const startupError = portableUpdateError ?? portableSettingsError;
-  const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: startupError ?? "Ready", error: !!startupError });
+  const [status, setStatus] = useState<WorkspaceStatus>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
   const pendingListings = useRef<Partial<Record<Side, { controller: AbortController; background: boolean }>>>({});
@@ -2386,9 +2387,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
+  const showFileActions = !showingGit && !environmentActive && activeDocument === null;
+  const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
+  const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
+
   return (
     <div className={`app${terminalVisible ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
-      data-layout={preferences.layout} style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
+      data-layout={preferences.layout} data-status-bar={preferences.showStatusBar ? undefined : "hidden"}
+      style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
       onFocusCapture={(event) => setTerminalInputFocused(isTerminalInput(event.target))}
       onBlurCapture={(event) => {
@@ -2591,6 +2597,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
             visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
+            focusHint={preferences.showStatusBar ? undefined : terminalFocusHint}
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
             pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onPasteError={(error) => setStatus({ text: describeError(error), error: true })}
@@ -2614,32 +2621,38 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           history={commandTexts} refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
-      <nav ref={actionbar} className="actionbar" hidden={showingGit || environmentActive} data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
-        {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
-          fileActions.map(({ command, label, Icon, disabled }) => (
-          <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
-            aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
-            {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
-            {!preferences.hideActionButtonIcons && <Icon />}<span>{t(label)}</span>
-          </Button>
-        ))}
-        <Button type="button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
-          {!preferences.hideActionButtonIcons && <TerminalIcon />}<span>{t("Terminal")}</span>
-          {keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
-        </Button>
-      </nav>
-      <nav className="document-bar" aria-label={t("Open documents")} aria-hidden={!documents.length}>
-        {documents.length > 0 && <>
-          <Button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> {t("Files")}</Button>
-          {documents.map(({ id, file, editing }) => (
-            <Button key={id} type="button" aria-label={t(editing ? "Edit {0}" : "View {0}", file.name)}
-              tooltip={placePath(file.place)} aria-pressed={activeDocument === id} onClick={() => selectDocument(id)}>
-              {editing ? <Pencil /> : <Eye />}<span>{file.name}</span>
+      <div className="actionbar-row" hidden={!showFileActions}>
+        <nav ref={actionbar} className="actionbar" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
+          {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
+            fileActions.map(({ command, label, Icon, disabled }) => (
+            <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
+              aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
+              {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
+              {!preferences.hideActionButtonIcons && <Icon />}<span>{t(label)}</span>
             </Button>
           ))}
-        </>}
-      </nav>
-      <footer className={`statusbar${status.error ? " danger" : ""}`}>
+          <Button type="button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
+            {!preferences.hideActionButtonIcons && <TerminalIcon />}<span>{t("Terminal")}</span>
+            {keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
+          </Button>
+        </nav>
+        {resizeInFileActions && <WindowResizeMarker />}
+      </div>
+      <div className="document-bar-row" data-populated={documents.length > 0 || undefined}>
+        <nav className="document-bar" aria-label={t("Open documents")} aria-hidden={!documents.length}>
+          {documents.length > 0 && <>
+            <Button type="button" aria-pressed={activeDocument === null} onClick={() => selectDocument(null)}><FolderTree /> {t("Files")}</Button>
+            {documents.map(({ id, file, editing }) => (
+              <Button key={id} type="button" aria-label={t(editing ? "Edit {0}" : "View {0}", file.name)}
+                tooltip={placePath(file.place)} aria-pressed={activeDocument === id} onClick={() => selectDocument(id)}>
+                {editing ? <Pencil /> : <Eye />}<span>{file.name}</span>
+              </Button>
+            ))}
+          </>}
+        </nav>
+        {resizeInDocuments && <WindowResizeMarker />}
+      </div>
+      {preferences.showStatusBar ? <footer className={`statusbar${status.error ? " danger" : ""}`}>
         <span className="statusbar-message" role={status.error ? "alert" : "status"} data-tooltip={errorText(status.text)}>
           {errorText(status.text)}
         </span>
@@ -2650,7 +2663,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           pane.place && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" ? pane.place.address :
             smbHost(pane.place) ?? t("Local file system")}</span>
         <WindowResizeMarker />
-      </footer>
+      </footer> : <>
+        <StatusFeedback status={status} />
+        {!resizeInDocuments && !resizeInFileActions && <WindowResizeMarker />}
+      </>}
       {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences}
         onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={(next) => {
         setLanguage(next.language);

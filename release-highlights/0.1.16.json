@@ -1,0 +1,6 @@
+{
+  "version": "0.1.16",
+  "highlights": [
+    "Hide the main status bar in Options → Appearance → Window to make more room for files and the terminal. The resize grip, copy confirmations, errors, and terminal shortcut hints stay available."
+  ]
+}
