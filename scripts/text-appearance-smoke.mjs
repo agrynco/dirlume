@@ -190,8 +190,8 @@ try {
   assert.equal(await hexZoom.inputValue(), "29");
   assert.equal(await font("Text viewer").inputValue(), "28");
   await font("Viewer").fill("18");
+  await page.waitForFunction(() => document.querySelector('input[aria-label="Text viewer font size"]')?.value === "");
   assert.equal(await hexZoom.inputValue(), "29");
-  assert.equal(await font("Text viewer").inputValue(), "");
   await exactButton(options, "Reset markdown preview font family").click();
   assert.equal(await font("Markdown preview").inputValue(), "21");
   await done();

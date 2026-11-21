@@ -64,6 +64,7 @@ try {
     return root;
   }
   await page.goto("http://dirlume.test/");
+  const swap = await page.evaluate(() => /Mac/i.test(navigator.userAgent) ? "Meta+u" : "Control+u");
   const left = await enter("left", "User variables");
   const leftList = page.locator("#left-environment");
   assert.equal(await left.getByText("private user text").count(), 0);
@@ -154,12 +155,12 @@ try {
   const filter = left.getByRole("searchbox", { name: "Filter variables" });
   await filter.fill("NEW_VALUE");
   await left.getByRole("option", { name: /^NEW_VALUE/ }).click();
-  await filter.press("Control+u");
+  await filter.press(swap);
   const moved = page.locator(".environment-right");
   await moved.getByRole("option", { name: /^NEW_VALUE/, selected: true }).waitFor();
   assert.equal(await moved.getByRole("searchbox", { name: "Filter variables" }).inputValue(), "NEW_VALUE");
   assert.equal(await page.locator("#left-files").isVisible(), true);
-  await moved.getByRole("searchbox", { name: "Filter variables" }).press("Control+u");
+  await moved.getByRole("searchbox", { name: "Filter variables" }).press(swap);
   await filter.fill("");
 
   const right = await enter("right", "System variables");
@@ -167,10 +168,10 @@ try {
   await leftList.press("Insert");
   await left.getByRole("option", { name: /^PATH/ }).click();
   await leftList.press("Insert");
-  await leftList.press("Control+u");
+  await leftList.press(swap);
   await page.locator(".environment-right").getByRole("option", { name: /^PATH/, selected: true }).waitFor();
   await page.locator(".environment-left").getByRole("listbox", { name: "System variables" }).waitFor();
-  await page.locator("#right-environment").press("Control+u");
+  await page.locator("#right-environment").press(swap);
   await leftList.press("F5");
   const copy = dialog("Copy environment variables");
   const path = copy.locator("li").filter({ hasText: "PATH" });
