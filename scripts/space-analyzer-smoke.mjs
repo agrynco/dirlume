@@ -171,6 +171,19 @@ try {
 
   for (const [layout, source, label] of [["twin", "local", "Analyze volume"], ["classic", "unc", "Analyze share"], ["standard", "mounted", "Analyze share"]]) {
     const page = await fixture(browser, layout, source);
+    await page.setViewportSize({ width: 600, height: 500 });
+    const right = pane(page, "right");
+    const rightFiles = right.getByRole("listbox", { name: "right files" });
+    await rightFiles.getByRole("option", { name: /^payload.dat/ }).click();
+    await rightFiles.press("Insert");
+    await right.locator(".pane-marked").getByText(/1 marked/).waitFor();
+    for (const side of ["left", "right"]) {
+      const footer = pane(page, side).locator(".pane-footer");
+      assert.equal(await footer.locator(":scope > .pane-status-line").count(), 1);
+      assert.ok(await footer.locator(".pane-counts").getAttribute("data-tooltip"));
+      assert.equal(await footer.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    }
+    await page.setViewportSize({ width: 1120, height: 760 });
     await pane(page, "right").locator("summary[aria-label='Analysis scope']").click();
     await pane(page, "right").getByRole("button", { name: new RegExp("^" + label) }).click();
     await row(page.getByRole("region", { name: "Space Analyzer" }), "root-only").waitFor();
