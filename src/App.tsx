@@ -23,6 +23,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { canAnalyze, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
+import { useFilePaneTree, usePaneFolderSizes, usePaneTreeRevision } from "./filePaneTree";
 import type { EnvironmentMode } from "./EnvironmentPane";
 import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
@@ -67,7 +68,7 @@ import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
   applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
-  type DeniedSshListing, type ListingAction, type PaneState, type Side, type SortColumn,
+  type DeniedSshListing, type FilePaneView, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
@@ -95,7 +96,7 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
 type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
-type RowRename = { side: Side; place: RenameLocation; name: string };
+type RowRename = { side: Side; place: RenameLocation; name: string; treeKey?: string };
 type DocumentTab = DocumentWindow & {
   position?: MarkdownPosition;
   back?: MarkdownLocation[];
@@ -112,7 +113,7 @@ function sameRenameLocation(current: Place | null, place: RenameLocation) {
 
 type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string }
-  | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[] }
+  | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[]; relativePaths?: string[][] }
 ) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace };
 
 type Modal =
@@ -209,6 +210,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
   const [spaceAnalyzer, setSpaceAnalyzer] = useState<{ side: Side; place: SpacePlace } | null>(null);
   const [fileRevision, setFileRevision] = useState(0);
+  const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
   const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
@@ -308,14 +310,52 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
   const leftCanSort = leftSort.canSort;
   const rightCanSort = rightSort.canSort;
-  const entries = {
-    left: useMemo(() => visibleEntries(panes.left, preferences.hidden, preferences.sortSettings, leftCanSort,
-      leftSort.metadata, leftSort.descriptions, leftSort.pending),
-    [panes.left, preferences.hidden, preferences.sortSettings, leftCanSort, leftSort.metadata, leftSort.descriptions, leftSort.pending]),
-    right: useMemo(() => visibleEntries(panes.right, preferences.hidden, preferences.sortSettings, rightCanSort,
-      rightSort.metadata, rightSort.descriptions, rightSort.pending),
-    [panes.right, preferences.hidden, preferences.sortSettings, rightCanSort, rightSort.metadata, rightSort.descriptions, rightSort.pending]),
+  const leftRoot = !panes.left.search && panes.left.place?.kind === "local" ? panes.left.place : null;
+  const rightRoot = !panes.right.search && panes.right.place?.kind === "local" ? panes.right.place : null;
+  const leftTreeOn = preferences.paneViews.left === "tree";
+  const rightTreeOn = preferences.paneViews.right === "tree";
+  const leftRevision = usePaneTreeRevision(leftRoot?.path, leftTreeOn || folderSizesEnabled.left, fileRevision);
+  const rightRevision = usePaneTreeRevision(rightRoot?.path, rightTreeOn || folderSizesEnabled.right, fileRevision);
+  const leftTree = useFilePaneTree(leftRoot, leftTreeOn, leftRevision);
+  const rightTree = useFilePaneTree(rightRoot, rightTreeOn, rightRevision);
+  const trees = { left: leftTree, right: rightTree };
+  const folderSizes = {
+    left: usePaneFolderSizes(panes.left, folderSizesEnabled.left, leftRevision),
+    right: usePaneFolderSizes(panes.right, folderSizesEnabled.right, rightRevision),
   };
+  const leftRootSizes = useMemo(() => folderSizes.left.measures(panes.left.entries), [folderSizes.left.measures, panes.left.entries]);
+  const rightRootSizes = useMemo(() => folderSizes.right.measures(panes.right.entries), [folderSizes.right.measures, panes.right.entries]);
+  const lists = {
+    left: useMemo(() => visibleEntries(leftRootSizes ? { ...panes.left, backgroundSizes: leftRootSizes } : panes.left,
+      preferences.hidden, preferences.sortSettings, leftCanSort,
+      leftSort.metadata, leftSort.descriptions, leftSort.pending),
+    [leftRootSizes, panes.left, preferences.hidden, preferences.sortSettings, leftCanSort, leftSort.metadata, leftSort.descriptions, leftSort.pending]),
+    right: useMemo(() => visibleEntries(rightRootSizes ? { ...panes.right, backgroundSizes: rightRootSizes } : panes.right,
+      preferences.hidden, preferences.sortSettings, rightCanSort,
+      rightSort.metadata, rightSort.descriptions, rightSort.pending),
+    [rightRootSizes, panes.right, preferences.hidden, preferences.sortSettings, rightCanSort, rightSort.metadata, rightSort.descriptions, rightSort.pending]),
+  };
+  const entries = {
+    left: useMemo(() => leftTree.visible(panes.left, lists.left, preferences.hidden, preferences.sortSettings, leftCanSort, folderSizes.left.measures),
+      [leftTree.visible, panes.left, lists.left, preferences.hidden, preferences.sortSettings, leftCanSort, folderSizes.left.measures]),
+    right: useMemo(() => rightTree.visible(panes.right, lists.right, preferences.hidden, preferences.sortSettings, rightCanSort, folderSizes.right.measures),
+      [rightTree.visible, panes.right, lists.right, preferences.hidden, preferences.sortSettings, rightCanSort, folderSizes.right.measures]),
+  };
+  const paneSizes = {
+    left: useMemo(() => leftTree.enabled ? folderSizes.left.measures(entries.left) : leftRootSizes,
+      [leftTree.enabled, folderSizes.left.measures, entries.left, leftRootSizes]),
+    right: useMemo(() => rightTree.enabled ? folderSizes.right.measures(entries.right) : rightRootSizes,
+      [rightTree.enabled, folderSizes.right.measures, entries.right, rightRootSizes]),
+  };
+  const reconcileTreeMarks = useEffectEvent((side: Side) => {
+    if (!trees[side].enabled) return;
+    updatePane(side, (pane) => {
+      const marked = pane.marked.filter((key) => trees[side].lookup(pane, key) !== null);
+      return marked.length === pane.marked.length ? pane : { ...pane, marked };
+    });
+  });
+  useEffect(() => { reconcileTreeMarks("left"); }, [leftTree.branches]);
+  useEffect(() => { reconcileTreeMarks("right"); }, [rightTree.branches]);
   const sorts = { left: leftSort, right: rightSort };
   const currentRow = entries[active][paneCursorIndex(pane, entries[active])];
   const current = currentRow?.name === ".." ? undefined : currentRow;
@@ -1168,6 +1208,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!item) return;
     const { place, entry: file } = item;
     if (file.directory) {
+      if (entry.tree && !file.link) { toggleTreeBranch(side, entry); return; }
       void load(side, childPlace(place, file.name), "push", selectParent && place.kind === "local" ? ".." : undefined);
     } else if ((isFileServer(place) || place.kind === "archive") && !file.link) {
       openDocument({ place, name: file.name }, false);
@@ -1499,7 +1540,33 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function refresh(side: Side) {
     const { place, loading } = latest.current[side];
-    if (place && !loading) void load(side, place, "refresh");
+    if (place && !loading) {
+      if (trees[side].enabled) setFileRevision((revision) => revision + 1);
+      void load(side, place, "refresh");
+    }
+  }
+
+  function toggleTreeBranch(side: Side, entry: Entry) {
+    if (!entry.tree || !entry.directory || entry.link) return;
+    trees[side].toggle(entry);
+    if (entry.tree.expanded) updatePane(side, (pane) => pane.selected?.startsWith(entry.name + "/")
+      ? { ...pane, selected: entry.name } : pane);
+  }
+
+  async function setFilePaneView(side: Side, view: FilePaneView) {
+    const pane = panes[side];
+    if (pane.loading || pane.search || pane.place?.kind !== "local" || preferences.paneViews[side] === view) return;
+    if (view === "list" && pane.selected?.includes("/")) {
+      const row = trees[side].lookup(pane, pane.selected);
+      const item = paneItem(pane, row ?? undefined);
+      if (item && !await load(side, item.place, "push", item.entry.name)) return;
+    }
+    if (view === "list") updatePane(side, (current) => ({ ...current,
+      selected: current.selected?.includes("/") ? null : current.selected,
+      marked: current.marked.filter((key) => !key.includes("/")),
+    }));
+    setPreferences((before) => ({ ...before, paneViews: { ...before.paneViews, [side]: view } }));
+    requestAnimationFrame(() => focus(side));
   }
 
   function sort(side: Side, column: SortColumn, fromHeading = false) {
@@ -1539,10 +1606,26 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
+  function selectedEntries(side: Side, selected: Entry, useMarks = true, recursive = true) {
+    const state = panes[side];
+    if (useMarks && trees[side].enabled && state.marked.some((key) => trees[side].lookup(state, key) === undefined)) {
+      setStatus({ text: "Wait for the marked folders to finish loading." });
+      return [];
+    }
+    const marks = !useMarks ? [] : trees[side].enabled ? state.marked.flatMap((key) => {
+      const row = trees[side].lookup(state, key);
+      return row ? [row] : [];
+    }) : entries[side].filter(({ name }) => markedNames[side].has(name));
+    const selection = marks.length ? marks : [selected];
+    if (!recursive || !trees[side].enabled) return selection;
+    const folders = new Set(selection.filter(({ directory, link }) => directory && !link).map(({ name }) => name));
+    return selection.filter(({ tree }) => !tree?.segments.some((_, index) =>
+      index > 0 && folders.has(tree.segments.slice(0, index).join("/"))));
+  }
+
   function transferItems(side: Side, selected: Entry, useMarks = true) {
     const state = panes[side];
-    const marks = useMarks ? entries[side].filter(({ name }) => markedNames[side].has(name)) : [];
-    return (marks.length ? marks : [selected]).flatMap((entry) => {
+    return selectedEntries(side, selected, useMarks).flatMap((entry) => {
       const item = paneItem(state, entry);
       return item ? [item] : [];
     });
@@ -1573,13 +1656,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setFileRevision((revision) => revision + 1);
   }
 
-  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace, entries: readonly Entry[]) {
+  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace, entries: readonly Entry[], tree = false) {
+    if (!entries.length) return;
     const remote = place.kind === "ftp" || place.kind === "ssh" ? place : undefined;
     const archive = place.kind === "archive" ? place : undefined;
     setModal({
       kind: remote || archive || smbHost(place) ? "delete" : command,
       path: placePath(place), remote, archive, names: entries.map(({ name }) => name),
       directories: entries.filter(({ directory, link }) => directory && !link).map(({ name }) => name),
+      relativePaths: tree ? entries.map((entry) => [...(entry.tree?.segments ?? [entry.name])]) : undefined,
     });
   }
 
@@ -1728,7 +1813,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       updatePane(side, (pane) => ({ ...pane, selected: entry.name }));
       return;
     }
-    if (rowRename && (rowRename.side !== side || rowRename.name !== entry.name)) setRowRename(null);
+    if (rowRename && (rowRename.side !== side || (rowRename.treeKey ?? rowRename.name) !== entry.name)) setRowRename(null);
     const items = entries[side];
     const index = items.findIndex(({ name }) => name === entry.name);
     const anchorName = selectionAnchor.current[side] ?? panes[side].selected ?? entry.name;
@@ -1771,6 +1856,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (name !== rename.name) {
       await renameItem(rename.place, rename.name, name);
       if (rename.place.kind === "local") setFileRevision((revision) => revision + 1);
+      if (rename.treeKey) {
+        const renamedKey = [...rename.treeKey.split("/").slice(0, -1), name].join("/");
+        updatePane(rename.side, (pane) => ({ ...pane,
+          selected: renamedKey, marked: pane.marked.map((key) => key === rename.treeKey ? renamedKey : key),
+        }));
+      }
       if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
         await load(rename.side, rename.place, "refresh", name);
         refresh(opposite(rename.side));
@@ -1959,8 +2050,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!canCopyItemNames) return;
     const marks = new Set(pane.marked);
     const marked = marks.size ? entries[active].filter(({ name }) => marks.has(name)) : [];
-    const items = marked.length ? marked : current ? [current] : [];
-    const names = items.map(({ name }) => pane.search?.matches.get(name)?.entry.name ?? name);
+    const items = trees[active].enabled && current ? selectedEntries(active, current, true, false) :
+      marked.length ? marked : current ? [current] : [];
+    const names = items.map(({ name, tree }) => pane.search?.matches.get(name)?.entry.name ?? tree?.segments.at(-1) ?? name);
     if (!names.length) return;
     void api.copyText(names.join("\n")).then(() => setStatus({ text: "Item names copied to the clipboard." }),
       (error: unknown) => setStatus({ text: describeError(error), error: true }));
@@ -1975,7 +2067,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   function imagesInPane(side: Side, file: NamedFile) {
     const source = panes[side];
     const place = source.place;
-    if (!source.search && (place?.kind !== file.place.kind || placePath(place) !== placePath(file.place) ||
+    if (!source.search && !trees[side].enabled && (place?.kind !== file.place.kind || placePath(place) !== placePath(file.place) ||
         (place.kind !== "local" && !sameConnection(place, file.place)))) return [];
     return entries[side].flatMap((entry) => {
       if (!imageType(entry.name)) return [];
@@ -2189,6 +2281,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (isRangeCommand(command) || command === "mark") return;
     }
     if (command in rowCommands) {
+      if (trees[active].enabled && currentRow && (command === "leftRow" || command === "rightRow")) {
+        if (command === "rightRow" && currentRow.tree?.expanded) {
+          const next = entries[active][paneCursorIndex(pane, entries[active]) + 1];
+          if (next?.name.startsWith(currentRow.name + "/")) updatePane(active, (pane) => ({ ...pane, selected: next.name }));
+        } else if (command === "rightRow" || currentRow.tree?.expanded) toggleTreeBranch(active, currentRow);
+        else if (currentRow.tree && currentRow.tree.segments.length > 1) {
+          const parent = currentRow.tree.segments.slice(0, -1).join("/");
+          updatePane(active, (pane) => ({ ...pane, selected: parent }));
+        }
+        return;
+      }
       const items = entries[active];
       if (!items.length) return;
       const direction = command === "pageUp" || command === "leftRow" ? -1 :
@@ -2295,9 +2398,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }
         break;
       case "rename": {
-        const place = local ?? ftp;
+        const place = current?.tree && currentItem?.place.kind === "local" ? currentItem.place : local ?? ftp;
         if (place && current && !pane.search && !busy && !pane.loading) {
-          setRowRename({ side: active, place, name: current.name });
+          setRowRename({ side: active, place, name: currentItem?.entry.name ?? current.name, treeKey: current.tree ? current.name : undefined });
         }
         break;
       }
@@ -2311,9 +2414,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "recycle": {
         const writable = local ?? fileServer ?? (archive?.writable ? archive : undefined);
         if (writable && !pane.search && current && !busy && !pane.loading) {
-          const marked = entries[active].filter(({ name }) => markedNames[active].has(name));
-          const selected = marked.length ? marked : [current];
-          confirmDeletion(command, writable, selected);
+          confirmDeletion(command, writable, selectedEntries(active, current), trees[active].enabled);
         }
         break;
       }
@@ -2324,7 +2425,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "view":
       case "edit": {
         if (command === "view" && measureEntries.length) {
-          measure();
+          if (trees[active].enabled) setFolderSizesEnabled((before) => ({ ...before, [active]: true }));
+          else measure();
           break;
         }
         const file = fileFor(active);
@@ -2622,7 +2724,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <Pane key={swappedPanes ? opposite(side) : side} side={side}
             active={active === side} covered={paneCovered(side)}
             layout={preferences.layout} showHidden={preferences.hidden} rightClickSelection={preferences.rightClickSelection}
-            pane={panes[side]} entries={entries[side]} locations={locations}
+            pane={paneSizes[side] ? { ...panes[side], backgroundSizes: paneSizes[side] } : panes[side]}
+            entries={entries[side]} locations={locations}
+            fileView={trees[side].enabled ? "tree" : "list"} onFileView={(view) => void setFilePaneView(side, view)}
+            onTreeBranch={(entry) => toggleTreeBranch(side, entry)} folderSizes={folderSizes[side]}
+            onFolderSizes={() => setFolderSizesEnabled((before) => ({ ...before, [side]: !before[side] }))}
             preserveScroll={showingGit || !!environmentPanels[side] || side === spaceSide}
             onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
@@ -2632,8 +2738,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               groupPageSize.current[side] = capacity;
             }}
             onPage={(capacity, direction) => moveGroupPage(side, capacity, direction)}
-            rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
-              ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
+            rename={rowRename?.side === side && !panes[side].search &&
+              (rowRename.treeKey ? trees[side].enabled : sameRenameLocation(panes[side].place, rowRename.place))
+              ? { name: rowRename.name, rowKey: rowRename.treeKey ?? rowRename.name,
+                onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onRightClickMark={(names, mark) => setRightClickMarks(side, names, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
@@ -3136,7 +3244,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               refresh("right");
             }
           } else if ("names" in modal) {
-            setModal({ kind: "deletion", deletion: { directory: modal.path, names: modal.names, permanent: modal.kind === "delete" } });
+            setModal({ kind: "deletion", deletion: { directory: modal.path, names: modal.names,
+              permanent: modal.kind === "delete", relativePaths: modal.relativePaths } });
             return;
           } else if (operation) {
             if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);

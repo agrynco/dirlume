@@ -580,6 +580,7 @@ pub(crate) async fn delete_selection(
     id: u32,
     directory: String,
     names: Vec<String>,
+    relative_paths: Option<Vec<Vec<String>>>,
     permanent: bool,
     on_progress: Channel<Event>,
     state: State<'_, DeleteJobs>,
@@ -597,12 +598,34 @@ pub(crate) async fn delete_selection(
             fs::canonicalize(local::absolute(&directory).map_err(message)?).map_err(message)?;
         let mut seen = HashSet::new();
         let mut roots = Vec::new();
-        for name in &names {
-            let component = local::name_component(name).map_err(message)?;
-            if seen.insert(component) {
-                roots.push(base.join(component));
+        let paths =
+            relative_paths.unwrap_or_else(|| names.into_iter().map(|name| vec![name]).collect());
+        for segments in paths {
+            if segments.is_empty() {
+                return Err("Choose a file or folder to delete.".into());
+            }
+            let mut path = base.clone();
+            for name in segments {
+                path.push(local::name_component(&name).map_err(message)?);
+            }
+            if seen.insert(path.clone()) {
+                roots.push(path);
             }
         }
+        let directories: HashSet<_> = roots
+            .iter()
+            .filter(|path| {
+                checked_metadata(&base, path)
+                    .is_ok_and(|metadata| metadata.is_dir() && !local::is_link(&metadata))
+            })
+            .cloned()
+            .collect();
+        roots.retain(|path| {
+            !path
+                .ancestors()
+                .skip(1)
+                .any(|parent| directories.contains(parent))
+        });
         Ok(run(&base, roots, permanent, &job, |event| {
             on_progress.send(event).is_ok()
         }))

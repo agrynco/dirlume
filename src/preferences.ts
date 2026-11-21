@@ -304,6 +304,7 @@ export interface Preferences {
   retainedFonts?: RetainedFonts;
   hidden: boolean;
   rightClickSelection: boolean;
+  paneViews: { left: "list" | "tree"; right: "list" | "tree" };
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
   provider: Provider;
@@ -481,6 +482,10 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
   rightClickSelection: { group: "filePanels", portable: true, read: (value) => value === true },
+  paneViews: { group: "filePanels", portable: true, read: (value) => {
+    const saved = value as Partial<Preferences["paneViews"]> | null | undefined;
+    return { left: saved?.left === "tree" ? "tree" : "list", right: saved?.right === "tree" ? "tree" : "list" };
+  } },
   refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value === true },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
