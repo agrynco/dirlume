@@ -2020,6 +2020,8 @@ pub fn run() {
         open_tool_window,
         set_appearance_picker,
         crate::updates::check_for_update,
+        crate::updates::highlights::installed_release,
+        crate::updates::highlights::acknowledge_release,
         crate::updates::read_portable_state,
         crate::updates::save_portable_preferences,
         crate::updates::install_update,

@@ -1,4 +1,5 @@
-async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScreenColor, fixtureDirectory) => {
+async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkScreenColor, fixtureDirectory,
+  version, highlights, restartCheck, offlineLaunch, debian }) => {
   const invoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
   const report = (error) => invoke("updater_fixture_result", { error });
   const record = (phase) => invoke("updater_fixture_phase", { phase });
@@ -199,8 +200,74 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       else root.setAttribute("data-theme", theme);
     }
   }
+  const currentDialog = (title) => [...document.querySelectorAll("dialog[open]")]
+    .find((dialog) => dialog.querySelector("h2")?.textContent === title);
+  const dialogButton = (dialog, label) => [...dialog.querySelectorAll("button")].find((button) => button.textContent.trim() === label);
+  function verifyNotes(dialog, expectedVersion, notes) {
+    const section = dialog.querySelector(".release-notes");
+    const link = section?.querySelector("a");
+    const actual = [...(section?.querySelectorAll("li") ?? [])].map((line) => line.textContent);
+    if (link?.href !== `https://github.com/agrynco/dirlume/releases/tag/v${expectedVersion}` ||
+        JSON.stringify(actual) !== JSON.stringify(notes ?? [])) {
+      throw new Error(`Wrong release notes in ${dialog.querySelector("h2")?.textContent} for ${expectedVersion}.`);
+    }
+  }
+  async function openMenuItem(group, label) {
+    const bar = await revealMainMenu();
+    const item = await waitFor(label, () => {
+      const groupButton = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === group);
+      if (groupButton?.getAttribute("aria-expanded") === "false") groupButton.click();
+      return [...bar.querySelectorAll("[data-menu-item]")].find((button) => button.textContent === label);
+    });
+    item.click();
+  }
+  async function closeDialog(dialog, label = "Close") {
+    dialogButton(dialog, label).click();
+    await waitFor("dismissal of the release dialog", () => !dialog.open);
+  }
+  async function confirmInstalledHighlights() {
+    const first = await waitFor("offline What's new after upgrading", () => currentDialog("What's new"));
+    verifyNotes(first, version, highlights);
+    await closeDialog(first);
+    if ((await invoke("installed_release")).showOnStartup) throw new Error("What's new was not acknowledged.");
+  }
+  async function reopenHighlights(expectedVersion, notes) {
+    await openMenuItem("Help", "What's new");
+    const reopened = await waitFor("What's new from Help", () => currentDialog("What's new"));
+    verifyNotes(reopened, expectedVersion, notes);
+    await closeDialog(reopened);
+  }
   try {
+    if (offlineLaunch) {
+      await confirmInstalledHighlights();
+      await report(null);
+      return;
+    }
+    if (restartCheck) {
+      await waitFor("the restarted file panes", () => document.querySelector("#left-pane"));
+      const release = await invoke("installed_release");
+      if (release.showOnStartup || currentDialog("What's new")) throw new Error("What's new repeated on restart.");
+      await reopenHighlights(version, highlights);
+      await report(null);
+      return;
+    }
+    if (debian) {
+      if (upgraded) {
+        await confirmInstalledHighlights();
+      } else {
+        const offer = await waitFor("the Debian download offer", () => currentDialog("Update available"));
+        verifyNotes(offer, version, highlights);
+        if (!dialogButton(offer, "Download Debian package") || !offer.querySelector("code")?.textContent.startsWith("sudo apt install ./")) {
+          throw new Error("The Debian update lost its download action or installation command.");
+        }
+        await closeDialog(offer, "Later");
+      }
+      await report(null);
+      return;
+    }
     if (upgraded) {
+      await confirmInstalledHighlights();
+      await reopenHighlights(version, highlights);
       await waitFor("the saved pane font size", () => document.querySelector("#left-pane")?.style.getPropertyValue("--view-font-size") === "23px");
       await waitFor("the migrated menu position", () => document.querySelector('.topbar[data-menu-position="right"]') &&
         JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").mainMenuAlignment === "right");
@@ -228,13 +295,7 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();
       await invoke("updater_fixture_options_window");
-      const bar = await revealMainMenu();
-      const updates = await waitFor("the manual update command", () => {
-        const commands = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === "Commands");
-        if (commands?.getAttribute("aria-expanded") === "false") commands.click();
-        return [...bar.querySelectorAll("[data-menu-item]")].find((button) => button.textContent === "Check for updates");
-      });
-      updates.click();
+      await openMenuItem("Commands", "Check for updates");
       await waitFor("the up-to-date message", () => [...document.querySelectorAll("dialog[open] p")].some((text) => text.textContent === "Dirlume is up to date."));
       await record("the shared alert colors");
       checkAlertColors();
@@ -253,15 +314,24 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       return;
     }
     const portableFailure = "The portable update failed. Your previous copy and settings are still available.";
-    const install = await waitFor("the install or rollback screen", () => {
+    const offer = await waitFor("the install or rollback screen", () => {
       if (replacementFailure && document.querySelector(".statusbar [role=alert]")?.textContent === portableFailure) return portableFailure;
-      return [...document.querySelectorAll("dialog[open] button")].find((button) => button.textContent === "Install and restart");
+      return currentDialog("Update available");
     });
-    if (install === portableFailure) {
+    if (offer === portableFailure) {
+      if ((await invoke("installed_release")).showOnStartup) throw new Error("A rollback queued What's new.");
       if (JSON.parse(localStorage.getItem(preferenceKey) ?? "{}").viewFontSizes?.left !== 23) throw new Error("The portable rollback lost preferences.");
       await report(null);
       return;
     }
+    verifyNotes(offer, version, highlights);
+    await closeDialog(offer, "Later");
+    const installed = await invoke("installed_release");
+    await reopenHighlights(installed.version, installed.highlights);
+    await openMenuItem("Commands", "Check for updates");
+    const manualOffer = await waitFor("the manual update offer", () => currentDialog("Update available"));
+    verifyNotes(manualOffer, version, highlights);
+    const install = dialogButton(manualOffer, "Install and restart");
     const preferences = JSON.parse(localStorage.getItem(preferenceKey) ?? "{}");
     preferences.viewFontSizes = { ...preferences.viewFontSizes, left: 23 };
     delete preferences.mainMenuAlignment;

@@ -36,6 +36,9 @@ const product = "Dirlume Updater Smoke";
 const identifier = "io.github.agrynco.dirlume.updater-smoke";
 const installedVersion = "0.0.1";
 const nextVersion = "0.0.2";
+const nextHighlights = ["A new feature in the destination version.", "A fix in the destination version."];
+const nextNotes = ["## What's new", "", ...nextHighlights.map((line) => "- " + line)].join("\n");
+const testDebian = linux && process.env.DIRLUME_TEST_DEBIAN_UPGRADE === "1";
 const scratch = await realpath(tmpdir());
 const work = await mkdtemp(join(scratch, "dirlume-updater-"));
 const install = join(work, "installed");
@@ -55,6 +58,7 @@ let server;
 let child;
 let macPainter;
 let macInput;
+let debianPackage;
 
 function run(file, args, options = {}) {
   const result = spawnSync(file, args, { stdio: "inherit", ...options });
@@ -68,10 +72,13 @@ async function build(version, publicKey, privateKey) {
     bundle: { createUpdaterArtifacts: true },
     plugins: { updater: { pubkey: publicKey, requireSignedVersion: true, windows: { installMode: "quiet" } } },
   }));
-  run(process.execPath, [cli, "build", "--ci", "--bundles", bundle, "--features", "ui-automation", "--config", configFile, "--", "--locked"], {
+  const highlights = join(work, `highlights-${version}.json`);
+  await writeFile(highlights, version === nextVersion ? JSON.stringify({ version, highlights: nextHighlights }) : "null");
+  run(process.execPath, [cli, "build", "--ci", "--bundles", testDebian ? "appimage,deb" : bundle, "--features", "ui-automation", "--config", configFile, "--", "--locked"], {
     env: {
       ...process.env, CARGO_TARGET_DIR: cargoTarget,
       TAURI_SIGNING_PRIVATE_KEY: privateKey, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "",
+      DIRLUME_UPDATER_HIGHLIGHTS_FIXTURE: highlights,
     },
   });
   const output = join(cargoTarget, "release", "bundle", bundle === "app" ? "macos" : bundle);
@@ -82,7 +89,17 @@ async function build(version, publicKey, privateKey) {
   const path = join(work, `update-${version}${extension}`);
   await copyFile(source, path);
   const signature = (await readFile(`${source}.sig`, "utf8")).trim();
-  if (!windows) return { path, signature };
+  if (!windows) {
+    let debian;
+    if (testDebian) {
+      const directory = join(cargoTarget, "release", "bundle", "deb");
+      const packages = (await readdir(directory)).filter((name) => name.startsWith(product) && name.includes(`_${version}_`) && name.endsWith(".deb"));
+      assert.equal(packages.length, 1, `Expected one Debian package for ${version}.`);
+      debian = join(work, `Dirlume-${version}-build.1-linux-x64.deb`);
+      await copyFile(join(directory, packages[0]), debian);
+    }
+    return { path, signature, debian };
+  }
   const directory = join(work, `portable-${version}`);
   const executable = join(directory, "Dirlume.exe");
   const zip = join(work, `portable-${version}.zip`);
@@ -216,7 +233,7 @@ try {
   const url = `http://127.0.0.1:${server.address().port}/package`;
   async function exercise(executable, target, signature, { tampered = false, replacementFailure = false } = {}) {
     reject = tampered;
-    const metadata = { version: nextVersion, platforms: { [target]: { url, signature } } };
+    const metadata = { version: nextVersion, ...(!tampered ? { notes: nextNotes } : {}), platforms: { [target]: { url, signature } } };
     const previousDownloads = downloads;
     await rm(phaseFile, { force: true });
     await writeFile(documentFile, "Document mode fixture");
@@ -242,8 +259,24 @@ try {
       : `Installed ${nextVersion} over ${installedVersion} and restored saved pane settings on ${target}.`);
     if (macInput && !reject) console.log("Verified macOS screen color sampling from another app and Escape cancellation.");
   }
+  async function checkLaunch(executable, extra, expected) {
+    const previousDownloads = downloads;
+    await rm(phaseFile, { force: true });
+    await writeFile(fixtureFile, JSON.stringify({
+      result: resultFile, phase: phaseFile, expected: nextVersion, reject: false,
+      metadata: { version: nextVersion, notes: nextNotes },
+      ...extra,
+    }));
+    child = startApp(executable);
+    const version = await Promise.race([reportedVersion(), new Promise((_, failed) => child.once("error", failed))]);
+    assert.equal(version, expected);
+    assert.equal(downloads, previousDownloads, "Opening release notes must not download a package.");
+    await rm(resultFile);
+    if (child.exitCode === null) await Promise.race([once(child, "exit"), delay(5000)]);
+  }
   await exercise(executable, target, after.signature, { tampered: true });
   await exercise(executable, target, after.signature);
+  await checkLaunch(executable, { restart_check: true }, nextVersion);
 
   if (windows) {
     const portableTarget = target + "-portable";
@@ -267,14 +300,36 @@ try {
     assert.deepEqual(await portablePreferences(moved), relocated);
     await rmdir(join(moved, "LICENSE"));
     await exercise(portableExecutable, portableTarget, after.portable.signature);
+    await checkLaunch(portableExecutable, { restart_check: true }, nextVersion);
+    const another = join(work, "second-updated-portable");
+    await mkdir(another);
+    for (const name of ["Dirlume.exe", ".dirlume-portable", settings]) await copyFile(join(moved, name), join(another, name));
+    const independentCopy = join(another, "Dirlume.exe");
+    await checkLaunch(independentCopy, { offline_launch: true }, nextVersion);
+    console.log("Verified that a separate Windows Portable copy shows its own offline release highlights.");
     assert.equal(await readFile(join(moved, "LICENSE"), "utf8"), nextVersion);
     assert.equal((await portablePreferences(moved)).mainMenuAlignment, "right");
     assert.equal((await portablePreferences(moved)).terminalResizeRows, 4);
     assert.deepEqual(await portablePreferences(first), previous);
     assert.equal(await readFile(join(first, "LICENSE"), "utf8"), installedVersion);
   }
+  if (testDebian) {
+    const packageName = spawnSync("dpkg-deb", ["--field", before.debian, "Package"], { encoding: "utf8" });
+    assert.equal(packageName.status, 0, packageName.stderr);
+    assert.equal(packageName.stdout.trim(), "dirlume-updater-smoke");
+    debianPackage = packageName.stdout.trim();
+    run("sudo", ["dpkg", "--install", before.debian]);
+    const executable = "/usr/bin/dirlume";
+    const debianUrl = `https://github.com/agrynco/dirlume/releases/download/v${nextVersion}/${basename(after.debian)}`;
+    await checkLaunch(executable, { debian_url: debianUrl }, installedVersion);
+    run("sudo", ["dpkg", "--install", after.debian]);
+    await checkLaunch(executable, { debian_url: debianUrl }, nextVersion);
+    await checkLaunch(executable, { debian_url: debianUrl, restart_check: true }, nextVersion);
+    console.log("Verified the manual Debian upgrade, offline highlights, and acknowledgment across restarts.");
+  }
 } finally {
   child?.kill();
+  if (debianPackage) run("sudo", ["dpkg", "--remove", debianPackage]);
   if (macPainter?.exitCode === null && macPainter.pid) {
     const stopped = once(macPainter, "exit");
     macPainter.kill();

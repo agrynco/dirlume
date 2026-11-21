@@ -74,6 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'closed' }}
+          CHECK_NEXT_RELEASE_HIGHLIGHTS: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'prerelease' }}
         run: node scripts/build-version.mjs resolve
 
   build:

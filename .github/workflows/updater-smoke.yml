@@ -48,5 +48,7 @@ jobs:
             ~/.cargo/git
           key: updater-cargo-${{ matrix.runner }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
       - run: npm ci
-      - name: Test install, signature rejection, and saved preferences
+      - name: Test install, signature rejection, saved preferences, and release highlights
+        env:
+          DIRLUME_TEST_DEBIAN_UPGRADE: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: node scripts/updater-smoke.mjs

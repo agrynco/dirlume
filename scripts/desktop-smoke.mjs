@@ -2004,6 +2004,10 @@ try {
   await closeToolWindow(optionsPage, () => shortcutOptions.getByRole("button", { name: "Done", exact: true }).click());
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);
+  await showOptions();
+  await optionsDialog.getByRole("button", { name: "Add shortcut for Help", exact: true }).click();
+  await optionsDialog.getByRole("textbox", { name: "New shortcut for Help", exact: true }).press("F1");
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
   const menubar = page.getByRole("menubar", { name: "Main menu" });
   const group = (name) => menubar.getByRole("menuitem", { name, exact: true });
@@ -2017,7 +2021,7 @@ try {
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowDown");
   const helpItems = menu("Help").getByRole("menuitem");
-  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About", "Open error log"]);
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log"]);
   const errorLogAction = helpItems.filter({ hasText: "Open error log" });
   assert.equal(await errorLogAction.evaluate((item) => item.previousElementSibling?.getAttribute("role")), "separator");
   await page.keyboard.press("Enter");
