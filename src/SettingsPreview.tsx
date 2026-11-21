@@ -1,12 +1,12 @@
 import { t } from "./i18n";
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { File, Folder, FolderTree } from "lucide-react";
-import { applyAppearance, fileColor, resolveAppearance, useSystemTheme } from "./appearance";
+import { applyAppearance, colorKeysForSurface, fileColor, fontGroups, resolveAppearance, useSystemTheme, type Surface } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { shortcutBindings, showShortcut, type Preferences } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
-import { featureOptions, type FeaturePage } from "./featureOptions";
-import { pickLabel, type AppearancePick } from "./appearancePick";
+import { optionSurfaces, type FeaturePage } from "./featureOptions";
+import { pickedSurface, pickLabel, type AppearancePick } from "./appearancePick";
 
 type PreviewPage = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 
@@ -33,11 +33,31 @@ function Samples({ hidden, all }: { hidden: boolean; all: boolean }) {
   );
 }
 
-function CodeSample() {
-  return <pre className="preview-code"><span className="syntax-comment">// {t("Preview settings")}</span>{"\n"}
+function CodeSample({ style, surface }: { style?: CSSProperties; surface?: Surface } = {}) {
+  return <pre className="preview-code" data-text-surface={surface} style={style}><span className="syntax-comment">// {t("Preview settings")}</span>{"\n"}
     <span className="syntax-keyword">const</span> options = {"{"}{"\n  "}
     <span className="syntax-property">name</span>: <span className="syntax-string">"Dirlume"</span>,{"\n  "}
     <span className="syntax-property">zoom</span>: <span className="syntax-number">100</span>{"\n}"};</pre>;
+}
+
+function SurfacePreview({ surface, preferences }: { surface: Surface; preferences: Preferences }) {
+  const [background, ink] = colorKeysForSurface(surface);
+  const view = viewFontKeys.find((key) => viewFonts[key].group === surface);
+  const style = {
+    background: `var(--${background})`, color: `var(--${ink})`,
+    fontFamily: `var(--${surface}-font)`, fontSize: (view && preferences.viewFontSizes[view]) ?? `var(--${surface}-size)`,
+  };
+  const sample = view ? viewFonts[view].sample : surface === "compare" ? "README.txt" : "$ dirlume";
+  return <div className="surface-preview">
+    <div className="surface-preview-label">{t(fontGroups[surface].label)}</div>
+    {surface === "viewer" || surface === "editor" ? <CodeSample surface={surface} style={style} /> :
+      <pre className="preview-code" style={style}>
+        {surface === "compare" ? <><span style={{ background: "var(--compare-removed)" }}>− dirlume.txt</span>{"\n"}
+          <span style={{ background: "var(--compare-added)" }}>+ README.txt</span></> :
+          surface === "markdown" ? <><span style={{ color: "var(--markdown-link)", textDecoration: "underline" }}>{t(sample)}</span>{" "}
+            <span style={{ background: "var(--markdown-search)", color: "var(--markdown-search-ink)" }}>Dirlume</span></> : t(sample)}
+      </pre>}
+  </div>;
 }
 
 function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences: Preferences }) {
@@ -62,7 +82,9 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
   const preview = useRef<HTMLDivElement>(null);
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const shortcuts = shortcutBindings(preferences);
-  const fontViews = page === "viewFonts" ? viewFontKeys : page === "viewer" || page === "editor" ? featureOptions[page].views : null;
+  const fontViews = page === "viewFonts" ? viewFontKeys : null;
+  const surface = pick && pickedSurface(pick);
+  const surfaces = page === "viewer" || page === "editor" || page === "terminal" || page === "text" ? optionSurfaces[page] : [];
   useLayoutEffect(() => {
     if (preview.current) applyAppearance(theme, scheme, preview.current);
   }, [theme, scheme]);
@@ -71,7 +93,7 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
     <section className="settings-preview" aria-label={t("Settings preview")}>
       <h3>{t("Preview")}</h3>
       <div className="preview-frame" ref={preview}>
-        {pick ? <PickPreview pick={pick} preferences={preferences} /> : page === "dialogs" ? (
+        {pick ? surface ? <SurfacePreview surface={surface} preferences={preferences} /> : <PickPreview pick={pick} preferences={preferences} /> : page === "dialogs" ? (
           <div className="preview-dialog">
             <strong>{t("Copy report.pdf")}</strong>
             <div className="preview-field">{t("Downloads")}</div>
@@ -87,9 +109,12 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
               </div>;
             })}
           </dl>
-        ) : page === "terminal" ? (
-          <pre className="preview-code" style={{ fontFamily: "var(--terminal-font)", fontSize: "var(--terminal-size)" }}>$ dirlume</pre>
-        ) : page === "text" ? <CodeSample /> :
+        ) : surfaces.length ? (
+          <>
+            {surfaces.map((surface) => <SurfacePreview key={surface} surface={surface} preferences={preferences} />)}
+            {page === "text" && <CodeSample />}
+          </>
+        ) :
           page === "files" ? <Samples hidden={preferences.hidden} all /> :
           page === "shortcuts" ? (
             <div className="preview-shortcuts">

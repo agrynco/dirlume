@@ -38,15 +38,15 @@ function isLightBackground(hex: string) {
 function terminalAppearance(): ITerminalOptions {
   const root = getComputedStyle(document.documentElement);
   const value = (name: string) => root.getPropertyValue(name).trim();
-  const background = value("--text-bg");
+  const background = value("--terminal-bg");
   return {
     fontFamily: value("--terminal-font"),
     fontSize: Number.parseFloat(value("--terminal-size")),
     minimumContrastRatio: 4.5,
     theme: {
       ...(isLightBackground(background) ? lightAnsi : darkAnsi),
-      background, foreground: value("--text-ink"),
-      cursor: value("--accent"), cursorAccent: background, selectionBackground: value("--panel-selection"),
+      background, foreground: value("--terminal-ink"),
+      cursor: value("--terminal-cursor"), cursorAccent: background, selectionBackground: value("--terminal-selection"),
     },
   };
 }

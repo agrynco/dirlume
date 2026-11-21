@@ -103,7 +103,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       new TextEncoder().encode(text).length + (encoding === "utf8_bom" ? 3 : 0);
   }, [document]);
   const fileSize = hex ? hexSize ?? byteSize : byteSize;
-  const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
+  const fontView = hex ? "hex" : preview ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];
   useFontZoom(section, shortcuts.zoomFont, fontView, onZoom);
   const light = isLightTheme(theme);
@@ -345,7 +345,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
 
   return (
     <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
-      hidden={!active} className="text-window" data-help-topic={editing ? "editor" : "viewer"} data-editing={editing} data-reading={!editing || preview}
+      hidden={!active} className="text-window" data-text-surface={fontView}
+      data-help-topic={editing ? "editor" : "viewer"} data-editing={editing} data-reading={!editing || preview}
       aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);

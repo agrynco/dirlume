@@ -11,7 +11,7 @@ import { persistPreferences, preferenceKey, readPreferences, shortcutBindings, t
 import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
-import { pickFromDesktop } from "./AppearancePicker";
+import { NativeAppearancePicker, pickFromDesktop } from "./AppearancePicker";
 import { windowsClient, type NamedFile } from "./api";
 
 export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
@@ -75,9 +75,10 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
     else void windowHandle.close();
   };
   return <>
-    {comparison ? <CompareDialog {...comparison} standalone
+    {comparison ? <><CompareDialog {...comparison} standalone
       previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange}
-      onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} /> :
+      onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} />
+      <NativeAppearancePicker /></> :
       <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {
       const next = readPreferences();
       for (const key of Object.keys(draft) as (keyof Preferences)[]) {

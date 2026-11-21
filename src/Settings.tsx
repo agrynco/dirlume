@@ -9,7 +9,7 @@ import { HistoryField } from "./HistoryField";
 import { SettingsPreview } from "./SettingsPreview";
 import { SettingsArchiveDialog, type SettingsArchiveAction } from "./SettingsArchiveDialog";
 import { parseSettingsArchive } from "./settingsArchive";
-import { builtInThemes, colorGroups, fontGroups, mermaidColors, viewerColors } from "./appearance";
+import { builtInThemes, colorGroups, colorKeysForSurface, colorLabels, fontGroups, mermaidColors, viewerColors, type Surface } from "./appearance";
 import { MenuAlignmentSetting, menuAlignmentTerms } from "./MenuAlignmentSetting";
 import { matchesSettings, SettingSearchLabel, SettingsSearchTerms } from "./SettingSearchLabel";
 import { api, describeError, windowsClient } from "./api";
@@ -19,7 +19,7 @@ import {
   type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
-import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
+import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
 import type { HelpTopic } from "./helpContent";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
@@ -34,11 +34,15 @@ type ShortcutCapture = { command: Command; replacing?: string };
 type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
 const optionsLocationKey = "dirlume.options-location";
 const featurePages = Object.keys(featureOptions) as FeaturePage[];
+const surfaceTerms = (surfaces: readonly Surface[]) => surfaces.flatMap((surface) =>
+  [fontGroups[surface].label, "Font family", "Font size", ...colorKeysForSurface(surface).map((color) => colorLabels[color])]);
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
-    id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors),
+    id: id as AppearanceSection, label: group.label,
+    terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : [])],
   })),
-  { id: "fonts" as const, label: "Fonts", terms: [...Object.values(fontGroups).map(({ label }) => label), "family size installed"] },
+  { id: "fonts" as const, label: "Fonts", terms: [fontGroups.ui.label, fontGroups.panel.label,
+    fontGroups.dialog.label, fontGroups.mono.label, "family size installed"] },
   { id: "viewFonts" as const, label: "View font sizes", terms: [...Object.values(viewFonts).map(({ label }) => label), "zoom wheel"] },
 ];
 
@@ -125,7 +129,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
       feature === "terminal" ? ["Resize step (rows)", "Paste on right-click", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Installed fonts", "Size (px)", "font size",
-      ...(views.length ? ["zoom", "wheel"] : []), ...views.map((view) => viewFonts[view].label), ...terms);
+      ...(views.length ? ["zoom", "wheel"] : []), ...views.map((view) => viewFonts[view].label), ...terms,
+      ...surfaceTerms(feature === "filePanels" ? [] : optionSurfaces[feature]));
   });
   const appearanceMatches = appearancePages.filter(({ id, label, terms }) => matches("Appearance", label, ...terms,
     ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",

@@ -3,7 +3,7 @@ import {
   api, connectFtpLocation, placePath, readPlaceText, savePlaceText, textEncodingLabels, windowsClient,
   type Entry, type FileLocation, type Listing, type NamedFile, type Place, type RemotePlace, type TextDocument, type TextEncoding, type TransferEvent,
 } from "./api";
-import { baseThemes, builtInThemes, colorGroups, isHexColor, maxSchemeNameLength, type Palette } from "./appearance";
+import { baseThemes, builtInThemes, colorLabels, isHexColor, maxSchemeNameLength, type Palette } from "./appearance";
 import { sameFolderShortcut, shortcutFromPlace, type FolderShortcuts } from "./folderShortcuts";
 import { filesystemPlace, readPlace, type PaneState, type Side } from "./panes";
 import type { Preferences } from "./preferences";
@@ -26,7 +26,7 @@ export interface McpContext {
   setShortcuts: (shortcuts: FolderShortcuts) => void;
 }
 
-const allowedColors = new Set(Object.values(colorGroups).flatMap(({ colors }) => Object.keys(colors)));
+const allowedColors = new Set(Object.keys(colorLabels));
 export type McpRevisions = Map<string, { file: NamedFile; contents: TextDocument }>;
 
 function sameFile(a: NamedFile, b: NamedFile) {

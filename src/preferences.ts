@@ -1,5 +1,5 @@
 import { readSchemes, readSystemScheme, readTheme, type Scheme, type Theme } from "./appearance";
-import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
+import { migrateSharedViewerZoom, validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
 import { isTauri } from "@tauri-apps/api/core";
@@ -486,7 +486,9 @@ export function normalizePreferences(value: unknown): Preferences {
 
 export function readPreferences(): Preferences {
   try {
-    return normalizePreferences(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
+    const saved = preferenceValues(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
+    return normalizePreferences(saved.independentViewerZoom === true ? saved :
+      { ...saved, viewFontSizes: migrateSharedViewerZoom(saved.viewFontSizes) });
   } catch (error) {
     reportFrontendError("load_preferences", error);
     return normalizePreferences(null);
@@ -521,6 +523,7 @@ export function flushPortablePreferences() {
 export function persistPreferences(preferences: Preferences) {
   const settings = Object.fromEntries(preferenceKeys.map((key) => [key, preferences[key]]));
   settings.bindingDefaults = preferenceBindingVersion;
+  Object.assign(settings, { independentViewerZoom: true });
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;

@@ -4,9 +4,10 @@ import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  basePalette, baseThemes, builtInThemes, colorGroups, fontGroups, inheritedFont, isHexColor,
+  basePalette, baseThemes, builtInThemes, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
+  isAvailableFont, isHexColor, surfaceColors,
   maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, useSystemTheme, viewerColors,
-  type Color, type Font, type FontGroup, type Palette, type Scheme,
+  type Color, type Font, type FontGroup, type Palette, type Scheme, type Surface,
 } from "./appearance";
 import { maxViewerContentWidth, minViewerContentWidth, type Preferences } from "./preferences";
 import { api, describeError } from "./api";
@@ -14,10 +15,10 @@ import { ColorPicker } from "./ColorPicker";
 import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
 import { SchemeOptions } from "./SchemeOptions";
 import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFont } from "./viewFonts";
-import { featureOptions } from "./featureOptions";
+import { featureOptions, optionSurfaces } from "./featureOptions";
 import { MenuAlignmentSetting } from "./MenuAlignmentSetting";
 import { SettingSearchLabel } from "./SettingSearchLabel";
-import { colorLabels, type AppearancePick } from "./appearancePick";
+import { pickedSurface, type AppearancePick } from "./appearancePick";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
 const sharedFonts = ["ui", "panel", "dialog", "mono"] as const;
@@ -31,7 +32,7 @@ export function ViewFontSettings({ preferences, onChange, views }: {
   function fields(keys: readonly ViewFont[]) {
     return keys.map((view) => {
       const { label, group } = viewFonts[view];
-      const fallback = scheme?.fonts[group]?.size ?? inheritedFont(scheme, group).size;
+      const fallback = effectiveFontSize(scheme?.fonts, group);
       return <label className="view-font-setting" key={view}>
         <SettingSearchLabel label={label} aliases={["zoom", "wheel", "font size"]} />
         <FontSizeInput label={label} size={preferences.viewFontSizes[view]} fallback={fallback}
@@ -66,14 +67,19 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   const [deleting, setDeleting] = useState(false);
   const system = useSystemTheme();
   const [palette, setPalette] = useState<Palette>({});
-  const [picker, setPicker] = useState<{ color: Color; label: string; initial: string; previous: Preferences } | null>(null);
+  const [picker, setPicker] = useState<{ color: Color; label: string; initial: string; previous: Preferences; surface?: Surface } | null>(null);
   const [installed, setInstalled] = useState<InstalledFonts>(null);
   const active = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
   const { scheme: applied, theme } = resolveAppearance(preferences, system);
   const base = theme;
   const overrides = applied?.colors;
-  const groups = selection ? selection.font ? [selection.font] : [] : fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : [];
-  const showingFonts = groups.length > 0;
+  const picked = selection && pickedSurface(selection);
+  const surfaces: readonly Surface[] = selection ? picked ? [picked] : [] :
+    fontGroup === "viewer" || fontGroup === "editor" || fontGroup === "terminal" ? optionSurfaces[fontGroup] :
+      section === "text" ? optionSurfaces.text : [];
+  const groups = surfaces.length ? [] : selection ? selection.font ? [selection.font] : [] :
+    fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : [];
+  const showingFonts = groups.length > 0 || surfaces.length > 0;
   const colorSections = selection || section === "fonts" ? [] : section === "panels" && fontGroup === "panel" ? ["panels", "files"] as const : [section];
 
   useLayoutEffect(() => setPalette(basePalette(base, overrides)), [base, overrides]);
@@ -114,19 +120,18 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   function setFont(group: FontGroup, font?: Font) {
     const fonts = { ...applied?.fonts, [group]: font };
     const viewFontSizes = { ...preferences.viewFontSizes };
-    if (font?.size !== applied?.fonts[group]?.size) {
-      for (const view of viewFontKeys) {
-        const viewGroup = viewFonts[view].group;
-        const inheritsMono = viewGroup !== "panel" && applied?.fonts[viewGroup]?.size === undefined;
-        if (viewGroup === group || (group === "mono" && inheritsMono)) delete viewFontSizes[view];
-      }
+    for (const view of viewFontKeys) {
+      const viewGroup = viewFonts[view].group;
+      if (effectiveFontSize(applied?.fonts, viewGroup) !== effectiveFontSize(fonts, viewGroup)) delete viewFontSizes[view];
     }
-    if (active) update({ ...active, fonts }, viewFontSizes);
+    const scheme = Object.hasOwn(surfaceColors, group) ? applied : active;
+    if (scheme) update({ ...scheme, fonts }, viewFontSizes);
     else create(fonts, applied?.colors, viewFontSizes);
   }
 
-  function setColor(color: Color, value?: string) {
-    if (active) update({ ...active, colors: { ...active.colors, [color]: value } });
+  function setColor(color: Color, value?: string, surface?: Surface) {
+    const scheme = surface ? applied : active;
+    if (scheme) update({ ...scheme, colors: { ...scheme.colors, [color]: value } });
     else if (value) create(applied?.fonts, { ...applied?.colors, [color]: value });
   }
 
@@ -141,19 +146,19 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     setDeleting(false);
   }
 
-  function colorFields(fields: Partial<Record<Color, string>>) {
-    return Object.entries(fields).map(([key, label]) => {
-      const color = key as Color;
-      const value = palette[color] ?? "#000000";
-      return <ColorField key={color} label={label} value={value}
-        custom={Boolean(active?.colors[color])} onChange={(value) => setColor(color, value)}
-        onOpen={() => setPicker({ color, label, initial: value, previous: preferences })} />;
+  function colorFields(keys: readonly Color[], surface?: Surface) {
+    return keys.map((color) => {
+      const label = colorLabels[color];
+      const value = palette[color] ?? (color === "editor-active-line" ? "" : "#000000");
+      return <ColorField key={color} label={label} value={value} surface={surface}
+        custom={Boolean((surface ? applied : active)?.colors[color])} onChange={(value) => setColor(color, value, surface)}
+        onOpen={() => setPicker({ color, label, initial: value || "#000000", previous: preferences, surface })} />;
     });
   }
 
   return (
     <div className="dialog-body appearance-settings">
-      {selection && <p className="appearance-hint">{t("Color and font settings on this page also affect elements that share them.")}</p>}
+      {selection && !picked && <p className="appearance-hint">{t("Color and font settings on this page also affect elements that share them.")}</p>}
       {!selection && section === "window" && <>
         <div className="appearance-header">
           <label className="field"><SettingSearchLabel label="Color scheme" aliases={Object.values(builtInThemes)} />
@@ -203,25 +208,36 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           <Button type="button" className="negative" onClick={() => remove(active)}>{t("Delete scheme")}</Button>
         </div>}
       </>}
-      {!active && <p className="appearance-hint">{showingFonts ? t("Changing a font creates a custom scheme.") :
+      {!(surfaces.length ? applied : active) && <p className="appearance-hint">{showingFonts ? t("Changing a font creates a custom scheme.") :
         t("Editing a color creates a custom scheme.")}</p>}
+      {surfaces.map((surface) => {
+        const surfaceViews = (selection ? selection.view ? [selection.view] : [] : views ?? []).filter((view) => viewFonts[view].group === surface);
+        return <FontFields key={surface} group={surface} surface
+          font={applied?.fonts[surface]} inherited={inheritedFont(applied, surface, installed?.error ? undefined : installed?.families)}
+          installed={installed} disabled={!applied} onChange={(font) => setFont(surface, font)}>
+          <div className="color-settings">{colorFields(colorKeysForSurface(surface), surface)}</div>
+          {surfaceViews.length > 0 && <ViewFontSettings views={surfaceViews} preferences={preferences} onChange={onChange} />}
+        </FontFields>;
+      })}
       {showingFonts && (
         <div className="font-settings">
           {groups.map((group) => <FontFields key={group} group={group}
             font={applied?.fonts[group]} inherited={inheritedFont(applied, group)} installed={installed} disabled={!active}
             onChange={(font) => setFont(group, font)}>
-            {!!views?.length && <ViewFontSettings views={views} preferences={preferences} onChange={onChange} />}
+            {!!(selection?.view || views?.length) && <ViewFontSettings views={selection?.view ? [selection.view] : views}
+              preferences={preferences} onChange={onChange} />}
           </FontFields>)}
         </div>
       )}
       {colorSections.map((colorSection) => (
         <div className="color-settings" key={colorSection}>
           {colorSections.length > 1 && <h4>{t(colorGroups[colorSection].label)}</h4>}
-          {colorFields(colorGroups[colorSection].colors)}
+          {colorSections.length === 1 && colorSection === "text" && <h4>{t("Shared text colors")}</h4>}
+          {colorFields(Object.keys(colorGroups[colorSection].colors) as Color[])}
         </div>
       ))}
-      {selection && <div className="color-settings">
-        {colorFields(Object.fromEntries(selection.colors.map((color) => [color, colorLabels[color]])))}
+      {selection && !picked && <div className="color-settings">
+        {colorFields(selection.colors)}
       </div>}
       {!selection && fontGroup === "viewer" && <>
         <fieldset className="view-font-group reading-area-settings">
@@ -231,23 +247,24 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
               min={minViewerContentWidth} max={maxViewerContentWidth}
               onChange={(viewerContentWidth) => onChange({ ...preferences, viewerContentWidth })} />
           </label>
-          {colorFields(viewerColors)}
+          {colorFields(Object.keys(viewerColors) as Color[])}
         </fieldset>
         <fieldset className="view-font-group">
           <legend><SettingSearchLabel label="Mermaid diagrams" /></legend>
-          {colorFields(mermaidColors)}
+          {colorFields(Object.keys(mermaidColors) as Color[])}
         </fieldset>
       </>}
       {picker && <ColorPicker label={picker.label} initial={picker.initial}
-        onChange={(value) => setColor(picker.color, value)} onCommit={() => setPicker(null)}
+        onChange={(value) => setColor(picker.color, value, picker.surface)} onCommit={() => setPicker(null)}
         onCancel={() => { onChange(picker.previous); setPicker(null); }} />}
     </div>
   );
 }
-function ColorField({ label, value, custom, onChange, onOpen }: {
+function ColorField({ label, value, custom, surface, onChange, onOpen }: {
   label: string;
   value: string;
   custom: boolean;
+  surface?: Surface;
   onChange: (value?: string) => void;
   onOpen: () => void;
 }) {
@@ -256,10 +273,13 @@ function ColorField({ label, value, custom, onChange, onOpen }: {
 
   return (
     <div className="color-setting">
-      <SettingSearchLabel label={label} />
+      <span><SettingSearchLabel label={label} aliases={surface ? [fontGroups[surface].label] : []} />
+        {surface && <small className="appearance-value">{t(custom ? "Customized" : "Inherited")}</small>}
+      </span>
       <Button type="button" className="color-swatch" aria-label={t("{0} color", t(label))} aria-haspopup="dialog"
-        style={{ "--swatch": value } as CSSProperties} onClick={onOpen} />
+        style={{ "--swatch": value || "transparent" } as CSSProperties} onClick={onOpen} />
       <HistoryField historyKey="appearance-hex" type="text" aria-label={t("{0} hex", t(label))} value={hex} maxLength={7} spellCheck={false}
+        placeholder={value ? undefined : t("No highlight")}
         onBlur={() => setHex(value)} onValueChange={(change) => {
           setHex(change);
           if (isHexColor(change)) onChange(change.toLowerCase());
@@ -270,30 +290,45 @@ function ColorField({ label, value, custom, onChange, onOpen }: {
   );
 }
 
-function FontFields({ group, font, inherited, installed, disabled, onChange, children }: {
+function FontFields({ group, font, inherited, installed, disabled, surface, onChange, children }: {
   group: FontGroup;
   font: Font | undefined;
   inherited: Required<Font>;
   installed: InstalledFonts;
   disabled: boolean;
+  surface?: boolean;
   onChange: (value?: Font) => void;
   children?: ReactNode;
 }) {
   const label = fontGroups[group].label;
+  const unavailable = installed && !installed.error && Boolean(font?.family?.trim()) &&
+    !isAvailableFont(font?.family?.trim(), installed.families);
 
   return (
-    <fieldset className="font-setting">
+    <fieldset className={surface ? "font-setting text-surface-settings" : "font-setting"}>
       <legend><SettingSearchLabel label={label} /></legend>
-      <FontFamilyField label={label} value={font?.family ?? ""} fallback={inherited.family} installed={installed} builtIn={disabled}
-        onChange={(family) => onChange({ ...font, family: family || undefined })} />
+      <div className={surface ? "surface-font-family" : undefined}>
+        <FontFamilyField label={label} value={font?.family ?? ""} fallback={t(inherited.family)} installed={installed} builtIn={disabled}
+          onChange={(family) => onChange({ ...font, family: family || undefined })} />
+        {surface && <>
+          <Button type="button" className="icon-button" aria-label={t("Reset {0} font family", t(label).toLocaleLowerCase())}
+            disabled={!font?.family} onClick={() => onChange({ ...font, family: undefined })}><RotateCcw /></Button>
+          <small className="appearance-value">
+            {unavailable ? t("Unavailable. Using {0}.", t(inherited.family)) : t(font?.family ? "Customized" : "Inherited")}
+          </small>
+        </>}
+      </div>
       <div className="font-size-controls">
-        <label className="field font-size-field"><SettingSearchLabel label="Size (px)" aliases={["Font size"]} />
+          <label className="field font-size-field"><SettingSearchLabel label="Size (px)" aliases={["Font size", label]} />
           <FontSizeInput label={label} size={font?.size} fallback={inherited.size} min={minFontSize} max={maxFontSize}
             onChange={(size) => onChange({ ...font, size })} />
+          {surface && <small className="appearance-value">{t(font?.size === undefined ? "Inherited" : "Customized")}</small>}
         </label>
-        <Button type="button" className="icon-button" aria-label={t("Reset {0} font", t(label).toLocaleLowerCase())}
+        {surface ? <Button type="button" className="icon-button" aria-label={t("Reset {0} font size", t(label).toLocaleLowerCase())}
+          disabled={font?.size === undefined} onClick={() => onChange({ ...font, size: undefined })}><RotateCcw /></Button> :
+          <Button type="button" className="icon-button" aria-label={t("Reset {0} font", t(label).toLocaleLowerCase())}
           tooltip={t("Reset font")} disabled={disabled || (!font?.family && !font?.size)}
-          onClick={() => onChange()}><RotateCcw /></Button>
+          onClick={() => onChange()}><RotateCcw /></Button>}
       </div>
       {children}
     </fieldset>
