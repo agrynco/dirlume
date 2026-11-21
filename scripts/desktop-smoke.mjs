@@ -2290,7 +2290,7 @@ try {
   await testSystemTheme(page);
   await testScreenColor(page);
   page = await testFileSort({ page, startDesktop, exitDesktop, root: temp });
-  await testNativeQuickView(page, temp);
+  await testNativeQuickView(page, temp, diagnosticsFile);
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);

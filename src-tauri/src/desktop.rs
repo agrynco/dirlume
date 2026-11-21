@@ -21,7 +21,8 @@ use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    diagnostics, ftp, kswitcher, local, local_transfer,
+    diagnostics::{self, ReadCause, ReadReason, ReadStage, ReadSurface},
+    ftp, kswitcher, local, local_transfer,
     protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
     remote_transfer, ssh, terminal, watch,
 };
@@ -1392,12 +1393,62 @@ pub(crate) struct TextDocument {
     pub(crate) revision: Option<String>,
 }
 
-fn open_regular_file(path: &Path) -> Result<fs::File> {
-    let metadata = fs::symlink_metadata(path).map_err(message)?;
-    if !metadata.is_file() || local::is_link(&metadata) {
-        return Err("Choose a regular file.".to_owned());
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextReadFailure {
+    message: String,
+    read_cause: ReadCause,
+}
+
+impl TextReadFailure {
+    fn new(stage: ReadStage, reason: ReadReason, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            read_cause: ReadCause {
+                stage,
+                reason,
+                os_code: None,
+            },
+        }
     }
-    fs::File::open(path).map_err(message)
+
+    fn io(stage: ReadStage, error: io::Error) -> Self {
+        let os_code = error.raw_os_error();
+        let reason = if cfg!(windows) && matches!(os_code, Some(32 | 33)) {
+            ReadReason::SharingViolation
+        } else {
+            match error.kind() {
+                io::ErrorKind::NotFound => ReadReason::MissingFile,
+                io::ErrorKind::PermissionDenied => ReadReason::AccessDenied,
+                _ => ReadReason::Io,
+            }
+        };
+        Self {
+            message: message(error),
+            read_cause: ReadCause {
+                stage,
+                reason,
+                os_code,
+            },
+        }
+    }
+}
+
+fn read_regular_file(path: &Path) -> std::result::Result<fs::File, TextReadFailure> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| TextReadFailure::io(ReadStage::Open, error))?;
+    if !metadata.is_file() || local::is_link(&metadata) {
+        return Err(TextReadFailure::new(
+            ReadStage::Open,
+            ReadReason::NonRegularFile,
+            "Choose a regular file.",
+        ));
+    }
+    fs::File::open(path).map_err(|error| TextReadFailure::io(ReadStage::Open, error))
+}
+
+fn open_regular_file(path: &Path) -> Result<fs::File> {
+    read_regular_file(path).map_err(|error| error.message)
 }
 
 fn load_text(path: &Path) -> Result<TextDocument> {
@@ -1405,24 +1456,37 @@ fn load_text(path: &Path) -> Result<TextDocument> {
 }
 
 pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
+    decode_local_text(reader).map_err(|error| error.message)
+}
+
+fn decode_local_text(reader: impl Read) -> std::result::Result<TextDocument, TextReadFailure> {
+    let unsupported = |message: String| {
+        TextReadFailure::new(ReadStage::Decode, ReadReason::UnsupportedEncoding, message)
+    };
     let mut bytes = Vec::new();
     reader
         .take(TEXT_LIMIT + 1)
         .read_to_end(&mut bytes)
-        .map_err(message)?;
+        .map_err(|error| TextReadFailure::io(ReadStage::Read, error))?;
     if bytes.len() as u64 > TEXT_LIMIT {
-        return Err("Text files can be at most 8 MiB.".into());
+        return Err(TextReadFailure::new(
+            ReadStage::Read,
+            ReadReason::SizeLimit,
+            "Text files can be at most 8 MiB.",
+        ));
     }
     let (text, encoding) = if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
         (
-            String::from_utf8(bytes.to_vec()).map_err(message)?,
+            String::from_utf8(bytes.to_vec()).map_err(|error| unsupported(message(error)))?,
             Encoding::Utf8Bom,
         )
     } else if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
         let little = bytes[0] == 0xff;
         let (chunks, remainder) = bytes[2..].as_chunks::<2>();
         if !remainder.is_empty() {
-            return Err("The UTF-16 file ends with an incomplete character.".to_owned());
+            return Err(unsupported(
+                "The UTF-16 file ends with an incomplete character.".to_owned(),
+            ));
         }
         let words: Vec<_> = chunks
             .iter()
@@ -1435,7 +1499,7 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
             })
             .collect();
         (
-            String::from_utf16(&words).map_err(message)?,
+            String::from_utf16(&words).map_err(|error| unsupported(message(error)))?,
             if little {
                 Encoding::Utf16Le
             } else {
@@ -1445,13 +1509,19 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
     } else {
         (
             String::from_utf8(bytes).map_err(|_| {
-                "The file is outside the supported UTF-8 and UTF-16 text formats.".to_owned()
+                unsupported(
+                    "The file is outside the supported UTF-8 and UTF-16 text formats.".to_owned(),
+                )
             })?,
             Encoding::Utf8,
         )
     };
     if text.contains('\0') {
-        return Err("The file contains binary data.".to_owned());
+        return Err(TextReadFailure::new(
+            ReadStage::Decode,
+            ReadReason::BinaryContent,
+            "The file contains binary data.",
+        ));
     }
     Ok(TextDocument {
         text,
@@ -1460,12 +1530,202 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
     })
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
+enum LocalTextRead {
+    Text(TextDocument),
+    Binary { page: BytePage },
+}
+
+fn byte_page_looks_binary(data: &[u8]) -> bool {
+    !data.starts_with(&[0xff, 0xfe])
+        && !data.starts_with(&[0xfe, 0xff])
+        && (data.contains(&0)
+            || std::str::from_utf8(data).is_err_and(|error| error.error_len().is_some()))
+}
+
+fn finish_local_text_read(
+    result: std::result::Result<TextDocument, TextReadFailure>,
+    surface: Option<ReadSurface>,
+    read_page: impl FnOnce() -> std::result::Result<BytePage, TextReadFailure>,
+) -> std::result::Result<LocalTextRead, TextReadFailure> {
+    let failure = match result {
+        Ok(document) => return Ok(LocalTextRead::Text(document)),
+        Err(error) => error,
+    };
+    let cause = failure.read_cause;
+    let undecodable = matches!(
+        cause.reason,
+        ReadReason::BinaryContent | ReadReason::UnsupportedEncoding
+    );
+    if surface == Some(ReadSurface::QuickView)
+        && (undecodable || cause.reason == ReadReason::SizeLimit)
+    {
+        match read_page() {
+            Ok(page) if page.length == 0 => {
+                diagnostics::file_read(surface, cause, None, true);
+                return Ok(LocalTextRead::Text(TextDocument {
+                    text: String::new(),
+                    encoding: Encoding::Utf8,
+                    revision: None,
+                }));
+            }
+            Ok(page) if undecodable || byte_page_looks_binary(&page.data) => {
+                diagnostics::file_read(surface, cause, None, true);
+                return Ok(LocalTextRead::Binary { page });
+            }
+            Ok(_) => {
+                let fallback = ReadCause {
+                    stage: ReadStage::ByteProbe,
+                    reason: ReadReason::NotBinary,
+                    os_code: None,
+                };
+                diagnostics::file_read(surface, cause, Some(fallback), false);
+                return Err(failure);
+            }
+            Err(error) => {
+                diagnostics::file_read(surface, cause, Some(error.read_cause), false);
+                return Err(error);
+            }
+        }
+    }
+    diagnostics::file_read(surface, cause, None, false);
+    Err(failure)
+}
+
 #[tauri::command]
-async fn read_text(directory: String, name: String) -> Result<TextDocument> {
-    blocking_for("read_text", move || {
-        load_text(&selected(&directory, &name).map_err(message)?)
+async fn read_text(
+    directory: String,
+    name: String,
+    surface: Option<ReadSurface>,
+) -> std::result::Result<LocalTextRead, TextReadFailure> {
+    let result = blocking_for("read_text", move || {
+        let path = match selected(&directory, &name) {
+            Ok(path) => path,
+            Err(error) => {
+                let error = TextReadFailure::io(ReadStage::Select, error);
+                diagnostics::file_read(surface, error.read_cause, None, false);
+                return Ok(Err(error));
+            }
+        };
+        let result = read_regular_file(&path).and_then(decode_local_text);
+        Ok(finish_local_text_read(result, surface, || {
+            local::read_byte_page(read_regular_file(&path)?, 0)
+                .map_err(|error| TextReadFailure::io(ReadStage::Read, error))
+        }))
     })
-    .await
+    .await;
+    result.map_err(|message| {
+        let panicked = message == diagnostics::PANIC_REJECTION;
+        let error = TextReadFailure::new(ReadStage::Unknown, ReadReason::Unknown, message);
+        if !panicked {
+            diagnostics::file_read(surface, error.read_cause, None, false);
+        }
+        error
+    })?
+}
+
+#[cfg(test)]
+mod text_read_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_file_selection_open_and_decoding_failures() {
+        let folder = tempfile::tempdir().unwrap();
+        let missing = read_regular_file(&folder.path().join("missing.txt")).unwrap_err();
+        assert_eq!(missing.read_cause.reason, ReadReason::MissingFile);
+        assert!(missing.read_cause.os_code.is_some());
+        let directory = read_regular_file(folder.path()).unwrap_err();
+        assert_eq!(directory.read_cause.reason, ReadReason::NonRegularFile);
+
+        let denied = io::Error::from_raw_os_error(if cfg!(windows) { 5 } else { 13 });
+        let denied = TextReadFailure::io(ReadStage::Open, denied).read_cause;
+        assert_eq!(denied.reason, ReadReason::AccessDenied);
+        assert_eq!(denied.stage, ReadStage::Open);
+        assert_eq!(denied.os_code, Some(if cfg!(windows) { 5 } else { 13 }));
+        let io_error = io::Error::from_raw_os_error(if cfg!(windows) { 1117 } else { 5 });
+        assert_eq!(
+            TextReadFailure::io(ReadStage::Read, io_error)
+                .read_cause
+                .reason,
+            ReadReason::Io
+        );
+
+        for (bytes, reason) in [
+            (&[0, 65][..], ReadReason::BinaryContent),
+            (&[0xff][..], ReadReason::UnsupportedEncoding),
+            (&[0xff, 0xfe, 0][..], ReadReason::UnsupportedEncoding),
+        ] {
+            assert_eq!(
+                decode_local_text(bytes).err().unwrap().read_cause.reason,
+                reason
+            );
+        }
+        assert_eq!(
+            decode_local_text(&b"readable"[..]).unwrap().text,
+            "readable"
+        );
+        let oversized = decode_local_text(io::repeat(b'a').take(TEXT_LIMIT + 1))
+            .err()
+            .unwrap();
+        assert_eq!(oversized.read_cause.reason, ReadReason::SizeLimit);
+        assert!(
+            TextReadFailure::new(ReadStage::Unknown, ReadReason::Unknown, "other")
+                .read_cause
+                .os_code
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn quick_view_uses_binary_fallback_and_preserves_a_failed_probe() {
+        let primary = || decode_local_text(&[0, 65][..]);
+        let surface = Some(ReadSurface::QuickView);
+        let recovered = finish_local_text_read(primary(), surface, || {
+            Ok(BytePage {
+                length: 2,
+                data: vec![0, 65],
+            })
+        })
+        .unwrap();
+        assert!(matches!(recovered, LocalTextRead::Binary { page } if page.data == [0, 65]));
+        let failed = finish_local_text_read(primary(), surface, || {
+            Err(TextReadFailure::io(
+                ReadStage::Open,
+                io::ErrorKind::NotFound.into(),
+            ))
+        })
+        .err()
+        .unwrap();
+        assert_eq!(failed.read_cause.reason, ReadReason::MissingFile);
+        let editor = finish_local_text_read(primary(), Some(ReadSurface::Editor), || {
+            panic!("unexpected fallback")
+        });
+        assert_eq!(
+            editor.err().unwrap().read_cause.reason,
+            ReadReason::BinaryContent
+        );
+        assert!(!byte_page_looks_binary(&[b'a', 0xe2, 0x82]));
+        assert!(byte_page_looks_binary(&[b'a', 0xff]));
+        assert!(!byte_page_looks_binary(&[0xff, 0xfe, 0]));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preserves_windows_sharing_violation_code() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("locked.txt");
+        let _lock = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let failure = read_regular_file(&path).unwrap_err();
+        assert_eq!(failure.read_cause.reason, ReadReason::SharingViolation);
+        assert_eq!(failure.read_cause.os_code, Some(32));
+    }
 }
 
 #[derive(Serialize)]

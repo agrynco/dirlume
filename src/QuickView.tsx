@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Maximize, RotateCcw, RotateCw, ScanEye, ZoomIn, ZoomOut } from "lucide-react";
-import { describeError, readPlaceBytes, readPlacePreviewImage, readPlaceText, type BytePage, type NamedFile } from "./api";
+import { describeError, readPlaceBytes, readPlacePreviewImage, readPlacePreviewText, type BytePage, type NamedFile } from "./api";
 import { BinaryPreview, looksBinary } from "./BinaryPreview";
 import { ImageViewport, imageType, useImageViewport } from "./ImageViewport";
 import { Button } from "./Button";
@@ -94,15 +94,15 @@ function PreviewFile({ file, source, light, onFocusFiles }: {
           url = URL.createObjectURL(new Blob([bytes], { type }));
           setContent({ kind: "image", url });
         } else {
-          const { text } = await readPlaceText(target);
-          if (!disposed) setContent({ kind: "text", text });
+          const preview = await readPlacePreviewText(target);
+          if (!disposed) setContent("page" in preview ? { kind: "binary", page: preview.page } : { kind: "text", text: preview.text });
         }
       } catch (failure) {
         if (disposed) return;
         let message = describeError(failure);
         const undecodable = message === "The file contains binary data." ||
           message === "The file is outside the supported UTF-8 and UTF-16 text formats.";
-        if (!type && (undecodable || message === "Text files can be at most 8 MiB.")) {
+        if (!type && target.place.kind !== "local" && (undecodable || message === "Text files can be at most 8 MiB.")) {
           try {
             const page = await readPlaceBytes(target, 0);
             if (disposed) return;

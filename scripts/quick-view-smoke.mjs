@@ -435,7 +435,7 @@ async function checkNativeImageEdits(page, directory) {
   console.log("Verified image crop, rotation, draft mode switches, save collisions and external changes in the Windows editor.");
 }
 
-export async function testNativeQuickView(page, root) {
+export async function testNativeQuickView(page, root, diagnosticsFile) {
   const left = join(root, "quick-view-left");
   const right = join(root, "quick-view-right");
   await mkdir(left);
@@ -474,7 +474,30 @@ export async function testNativeQuickView(page, root) {
     const sort = await page.evaluate((side) => JSON.parse(localStorage.getItem("dirlume.workspace.v1")).panels[side].sort, side);
     if (sort.column !== "name" || !sort.asc) await list(page, side).press("Control+F3");
   }
+  const logLines = async () => (await readFile(diagnosticsFile, "utf8").catch(() => "")).trim().split("\n").filter(Boolean);
+  const logStart = diagnosticsFile ? (await logLines()).length : 0;
   await checkViews(page);
+  if (diagnosticsFile) {
+    const failure = await page.evaluate(async (directory) => {
+      try {
+        await window.__TAURI_INTERNALS__.invoke("read_text", { directory, name: "private-missing.txt", surface: "viewer" });
+        throw new Error("Expected a failed read.");
+      } catch (error) { return error; }
+    }, left);
+    assert.equal(failure.readCause.reason, "missing_file");
+    const newLines = (await logLines()).slice(logStart);
+    const reads = newLines.map(JSON.parse).filter(({ operation }) => operation === "read_text");
+    assert.ok(reads.some(({ code, fileRead }) => code === "preview_fallback" &&
+      fileRead.surface === "quick_view" && fileRead.reason === "unsupported_encoding" && fileRead.outcome === "recovered"),
+    "The binary fixture contains an invalid UTF-8 byte and appears as a recovered preview.");
+    assert.ok(reads.some(({ code, fileRead }) => code === "native_error" && fileRead.outcome === "failed" &&
+      fileRead.reason === "size_limit" && fileRead.fallback?.stage === "byte_probe" && fileRead.fallback.reason === "not_binary"));
+    const missing = reads.filter(({ fileRead }) => fileRead.reason === "missing_file");
+    assert.equal(missing.length, 1);
+    assert.equal(missing[0].fileRead.surface, "viewer");
+    assert.equal(missing[0].osCode, failure.readCause.osCode);
+    assert.doesNotMatch(newLines.join("\n"), /06-binary\.bin|11-large-text\.txt|private-missing\.txt|quick-view-left/);
+  }
   await checkImageDocuments(page);
   assert.deepEqual(await readFile(image), png);
   await checkNativeImageEdits(page, left);
@@ -514,6 +537,12 @@ export async function testBrowserQuickView(userAgent) {
               ...(window.useEditorFixture ? { "image-edit.png": null } : {}) } : back).map(file),
           };
           if (command === "read_text") {
+            if (args.surface === "quick_view" && args.name === "06-binary.bin") {
+              return { page: { length: binaryHeader.length, data: binaryHeader } };
+            }
+            if (args.surface === "quick_view" && args.name === "09-large.exe") {
+              return { page: { length: largeBytes, data: Array.from({ length: 1024 }, (_, index) => binaryHeader[index] ?? 0) } };
+            }
             if (args.name === "06-binary.bin") throw "The file contains binary data.";
             if (args.name === "09-large.exe" || args.name === "11-large-text.txt") throw "Text files can be at most 8 MiB.";
             if (args.name === "08-unreadable.txt") throw "Permission denied";

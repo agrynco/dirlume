@@ -447,8 +447,8 @@ export const api = {
     invoke<TextDocument>("save_ssh_text", { id, segments, revision, text, sudoPassword }),
   listServer: (id: number, segments: string[]) =>
     invoke<Listing>("list_server", { id, segments }),
-  readText: (directory: string, name: string) =>
-    invoke<TextDocument>("read_text", { directory, name }),
+  readText: (directory: string, name: string, surface?: TextReadSurface) =>
+    invoke<TextDocument>("read_text", { directory, name, surface }),
   resolveTextLink: (directory: string, destination: string) =>
     invoke<{ directory: string; name: string }>("resolve_text_link", { directory, destination }),
   openWebLink: (href: string) => invoke<void>("open_web_link", { href }),
@@ -535,13 +535,21 @@ export async function connectFtpLocation(profileId: string, segments?: string[])
   return { place, listing };
 }
 
-export function readPlaceText(file: NamedFile, sudoPassword?: string) {
+type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp";
+
+export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: TextReadSurface) {
   const { place, name } = file;
-  if (place.kind === "local") return api.readText(place.path, name);
+  if (place.kind === "local") return api.readText(place.path, name, surface);
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.readArchiveText(place.id, segments);
   if (place.kind === "ssh") return api.readSshText(place.id, segments, sudoPassword);
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
+}
+
+export function readPlacePreviewText({ place, name }: NamedFile) {
+  return place.kind === "local" ? invoke<TextDocument | { page: BytePage }>("read_text", {
+    directory: place.path, name, surface: "quick_view",
+  }) : readPlaceText({ place, name });
 }
 
 export function readPlacePreviewImage({ place, name }: NamedFile) {

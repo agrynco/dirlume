@@ -163,7 +163,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       const operation = diskOperation.current;
       reading = true;
       try {
-        const value = await readPlaceText(file);
+        const value = await readPlaceText(file, undefined, editing ? "editor" : "viewer");
         if (!stopped && operation === diskOperation.current) observeDisk(value);
       } catch (error) {
         if (!stopped && operation === diskOperation.current) {
@@ -208,7 +208,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     setReloadingDisk(true);
     setReloadError("");
     try {
-      replaceDocument(await readPlaceText(file));
+      replaceDocument(await readPlaceText(file, undefined, editing ? "editor" : "viewer"));
       setSourceRevision((revision) => revision + 1);
       setSourceStatus({ line: 1, column: 1, canUndo: false, canRedo: false });
     } catch (error) {
@@ -464,7 +464,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         path={path} onClose={() => setSudoAction(null)}
         onConfirm={async (password) => {
           if (sudoAction === "read") {
-            replaceDocument(await readPlaceText(file, password));
+            replaceDocument(await readPlaceText(file, password, editing ? "editor" : "viewer"));
           } else if (editing) await save(password);
           else if (deniedWrite !== null) await write(deniedWrite, password);
         }} />}
@@ -632,7 +632,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
     setDocuments(null);
     setOriginals(null);
     setCurrent(0);
-    Promise.all([readPlaceText(left), readPlaceText(right)])
+    Promise.all([readPlaceText(left, undefined, "compare"), readPlaceText(right, undefined, "compare")])
       .then(([left, right]) => {
         if (cancelled) return;
         setOriginals({ left, right });
