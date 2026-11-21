@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
+const markModifier = process.platform === "darwin" ? "Meta" : "Control";
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 960, height: 720 },
@@ -99,8 +100,8 @@ try {
   await row("B/report.txt").waitFor();
   await pane("left").getByRole("combobox", { name: "Size metric" }).selectOption("allocated");
   await size("B").getByText("4 KiB", { exact: true }).waitFor();
-  await row("A/report.txt").click({ modifiers: ["Control"] });
-  await row("B/report.txt").click({ modifiers: ["Control"] });
+  await row("A/report.txt").click({ modifiers: [markModifier] });
+  await row("B/report.txt").click({ modifiers: [markModifier] });
   await files().press("Control+c");
   await page.waitForFunction(() => window.treeCalls.some(([name]) => name === "copy_file_references"));
   assert.deepEqual(await page.evaluate(() => window.treeCalls.find(([name]) => name === "copy_file_references")[1]),
@@ -122,7 +123,7 @@ try {
     .map(([, source]) => [source.directory, source.name])), [["/fixture/A", "report.txt"], ["/fixture/B", "report.txt"]]);
   await row("A/report.txt").waitFor();
   await row("B/report.txt").waitFor();
-  await row("A").click({ modifiers: ["Control"] });
+  await row("A").click({ modifiers: [markModifier] });
   await files().press("F5");
   await copy.getByText(/2 selected items/).waitFor();
   await button(copy, "Cancel").click();
