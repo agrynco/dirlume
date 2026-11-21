@@ -13,6 +13,8 @@ mod diagnostics;
 #[cfg(feature = "desktop")]
 mod disk_space;
 #[cfg(feature = "desktop")]
+pub mod environment;
+#[cfg(feature = "desktop")]
 mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;

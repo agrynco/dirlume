@@ -72,6 +72,7 @@ interface PaneProps {
   onProcesses: (visible: boolean) => void;
   onContext: (x: number, y: number, entry?: Entry) => void;
   onAnalyze: (place: SpacePlace) => void;
+  spaceDisabled: boolean;
 }
 
 function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["rename"]>) {
@@ -115,7 +116,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze }: PaneProps) {
+  onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
@@ -216,7 +217,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   }, [localFolder, pane.loading, pane.entries]);
   const free = localFolder && space?.folder === localFolder ? space.value : null;
   const spaceControl = !pane.loading && !processView && canAnalyze(pane.place)
-    ? <SpaceControl place={pane.place} free={free} onAnalyze={onAnalyze} /> : null;
+    ? <SpaceControl place={pane.place} free={free} onAnalyze={onAnalyze} disabled={spaceDisabled} /> : null;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
   useLayoutEffect(() => {

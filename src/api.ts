@@ -212,6 +212,37 @@ export interface GitDetails {
   changes: { status: string; path: string; previousPath: string | null }[];
 }
 
+export type EnvironmentScope = "user" | "system" | "process";
+export type EnvironmentKind = "literal" | "expandable";
+export interface EnvironmentRow {
+  name: string;
+  source: string;
+  overriddenBy: string | null;
+}
+export interface EnvironmentValue extends EnvironmentRow {
+  value: string;
+  kind: EnvironmentKind;
+}
+export interface EnvironmentInfo {
+  target: string;
+  activation: string;
+  startupFile: string | null;
+  integrationEnabled: boolean;
+  expandable: boolean;
+}
+export interface EnvironmentEdit {
+  name: string;
+  value: string;
+  kind: EnvironmentKind;
+  expected: EnvironmentValue | null;
+  replacePath: boolean;
+}
+export type EnvironmentOutcome = "saved" | "conflict" | "invalid" | "denied" | "failed";
+export interface EnvironmentSave {
+  outcomes: { name: string; result: EnvironmentOutcome }[];
+  integration: EnvironmentOutcome | null;
+}
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
@@ -308,6 +339,10 @@ export const api = {
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
+  environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
+  environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
+  saveEnvironment: (scope: EnvironmentScope, edits: EnvironmentEdit[], integrate = false) =>
+    invoke<EnvironmentSave>("save_environment", { scope, edits, integrate }),
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
   processIcons: (ids: ProcessId[]) => invoke<(string | null)[]>("process_icons", { ids }),

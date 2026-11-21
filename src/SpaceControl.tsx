@@ -6,10 +6,11 @@ import { formatSize } from "./panes";
 import { containingScope, spacePath, type Scope, type SpacePlace } from "./spaceScan";
 import type { DiskSpace } from "./api";
 
-export function SpaceControl({ place, free, onAnalyze }: {
+export function SpaceControl({ place, free, onAnalyze, disabled }: {
   place: SpacePlace;
   free: DiskSpace | null;
   onAnalyze: (place: SpacePlace) => void;
+  disabled: boolean;
 }) {
   const [scope, setScope] = useState<Scope | null>(null);
   const details = useRef<HTMLDetailsElement>(null);
@@ -27,14 +28,14 @@ export function SpaceControl({ place, free, onAnalyze }: {
   const used = free && free.total > 0 ? Math.max(0, Math.min(100, 100 * (1 - free.available / free.total))) : 0;
   return <div className="space-control">
     <Button className="space-control-main" aria-label={t("Analyze space")} tooltip={capacity || t("Analyze space")}
-      onClick={() => onAnalyze(place)}>
+      onClick={() => onAnalyze(place)} disabled={disabled}>
       {free ? <>
         <span className="pane-free-full">{capacity}</span>
         <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
         <span className="space-meter" aria-hidden="true"><span style={{ width: used + "%" }} /></span>
       </> : t("Analyze space")}
     </Button>
-    {scope && <details ref={details} onBlur={(event) => {
+    {scope && !disabled && <details ref={details} onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
     }} onKeyDown={(event) => {
       if (event.key !== "Escape" || !event.currentTarget.open) return;
