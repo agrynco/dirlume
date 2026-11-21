@@ -624,9 +624,16 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-columns svg { width: 11px; height: 11px; }
 .file-column:not(.col-name)::before { content: ""; position: absolute; inset: 4px auto 4px 0; width: 1px; background: var(--line); pointer-events: none; }
 .file-column-probes { position: absolute; block-size: 0; inline-size: 0; overflow: hidden; visibility: hidden; }
-.file-column-probes > div { display: grid; inline-size: max-content; font-size: .88em; white-space: nowrap; }
-.file-column-probes span:first-child { padding-inline: 9px 22px; }
-.file-column-probes span:last-child { padding-inline: 9px; font-variant-numeric: tabular-nums; }
+.file-column-probes > div { display: grid; inline-size: max-content; white-space: nowrap; }
+.file-column-probes span { grid-area: 1 / 1; }
+.file-column-probe-heading {
+  padding-inline: 9px 22px;
+  font: 600 .78em/1.45 var(--ui-font);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.file-column-probe-value { font-size: .88em; padding-inline: 6px; font-variant-numeric: tabular-nums; }
+.pane[data-layout="classic"] .file-column-probe-value { font-weight: 700; }
 .file-columns, .file-list { scrollbar-width: thin; scrollbar-gutter: stable; }
 .file-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 5px; }
 .file-list[data-paged] { overflow-y: hidden; }

@@ -42,6 +42,8 @@ In Brief and Medium, **Up** and **Down** follow the sort order from the bottom o
 
 In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
 
+The built-in **Full** mode uses automatic Size and Date widths. These widths follow measured folder sizes and system-formatted dates in the current pane font. For a saved layout with fixed widths, set Size, Size in bytes, or Date to **0** to enable that behavior.
+
 Open **Sort by** with **Ctrl+F12** or **Sort modes** in the **Left** or **Right** menu. Use the menu to sort by name, extension, size, timestamps, or other metadata supplied by the source. Choose **Unsorted** to keep listing order within each priority group. Press **+** for ascending, **−** for descending, or **\*** to reverse the direction. Press **F4** in the menu to edit tie-breakers.
 
 Use **Show selected first** to sort marked items ahead of unmarked items. **Show directories first** keeps folders together. **Options → Sort groups** lets you order filename masks before or after unmatched items. Enable **Use sort groups** for Name, Name only, and Extension. The pane remembers its sort and priorities when you switch folders, change its panel mode, or restart.

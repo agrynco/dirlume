@@ -2,7 +2,7 @@ import { HistoryField } from "./HistoryField";
 import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
@@ -16,12 +16,17 @@ import { showShortcut, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
-import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColumnLayout, saveColumnLayout } from "./FileColumns";
+import { columnGroupTrack, fieldClass, FileColumns, measuredColumnFields, panelColumnTracks, readColumnLayout, saveColumnLayout, type MeasuredColumnField } from "./FileColumns";
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
 import { SpaceControl } from "./SpaceControl";
 import { canAnalyze, type SpacePlace } from "./spaceScan";
+
+function sizeLabel(bytes: number, incomplete?: boolean, formatter?: Intl.NumberFormat) {
+  const value = formatter ? formatter.format(bytes) : formatSize(bytes);
+  return incomplete ? `≥ ${value}` : value;
+}
 
 interface PaneProps {
   side: Side;
@@ -163,7 +168,31 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   });
   const indices = renderedGroups.flatMap(({ indices }) => indices);
   const statusColumns = catalog ? [] : mode.status;
-  const displayedFields = [...columns, ...statusColumns].map(({ field }) => field);
+  const displayedColumns = [...columns, ...statusColumns];
+  const displayedFields = displayedColumns.map(({ field }) => field);
+  const automatic = measuredColumnFields.filter((field) => displayedColumns.some((column) => column.field === field && column.width === "0"));
+  const autoSize = automatic.includes("size");
+  const autoBytes = automatic.includes("bytes");
+  const language = locale();
+  const bytesFormat = useMemo(() => new Intl.NumberFormat(language), [language]);
+  const measuredSizes = useMemo(() => {
+    const size = new Map<string, string>();
+    const bytes = new Map<string, string>();
+    if (!search && (autoSize || autoBytes)) {
+      for (const result of pane.sizes.values()) {
+        // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
+        if (autoSize) {
+          const sample = sizeLabel(result.bytes, result.incomplete);
+          size.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
+        }
+        if (autoBytes) {
+          const sample = sizeLabel(result.bytes, result.incomplete, bytesFormat);
+          bytes.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
+        }
+      }
+    }
+    return { size: [...size.values()], bytes: [...bytes.values()] };
+  }, [search, autoSize, autoBytes, pane.sizes, bytesFormat]);
   const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
   const dateLabel = useTimestamps(displayedFields.includes("date") ? visibleTimestamps : [], "date");
   const timeLabel = useTimestamps(displayedFields.includes("time") ? visibleTimestamps : [], "time");
@@ -301,8 +330,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         const size = folderMeasurement(pane, entry);
         const count = size?.bytes ?? (entry.directory ? null : entry.size);
         if (count === null) return missing;
-        const value = field === "bytes" ? count.toLocaleString(locale()) : formatSize(count);
-        return size?.incomplete ? `≥ ${value}` : value;
+        return sizeLabel(count, size?.incomplete, field === "bytes" ? bytesFormat : undefined);
       }
       case "date": return entry.modified === null ? missing : dateLabel(entry.modified) ?? formatDate(entry.modified, "date");
       case "time": return entry.modified === null ? missing : timeLabel(entry.modified) ?? formatDate(entry.modified, "time");
@@ -318,6 +346,13 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         return prefix.normalize("NFC") + display;
       }
     }
+  }
+
+  const widthSamples: Partial<Record<MeasuredColumnField, string[]>> = {};
+  for (const field of automatic) {
+    const samples = new Set(field === "size" || field === "bytes" ? measuredSizes[field] : []);
+    for (const index of indices) samples.add(itemValue(entries[index], field));
+    widthSamples[field] = [...samples];
   }
 
   function renderName(entry: Entry, field: PanelField, listing: boolean) {
@@ -420,7 +455,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <Button className="icon-button" aria-label={t("Close filter")} onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
-      <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks}
+      <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples}
         visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
         onVisibility={(column, visible) => {
           const next = { ...visibility, [column]: visible };
