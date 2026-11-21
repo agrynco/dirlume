@@ -112,7 +112,12 @@ try {
         for (const target of [side, opposite(side)]) {
           await page.keyboard.press(sourceKey(target));
           await sources(target).waitFor();
-          await page.waitForFunction((popup) => popup.contains(document.activeElement), await sources(target).elementHandle());
+          const heading = target === "left" ? "Left pane sources" : "Right pane sources";
+          await page.waitForFunction((label) => [...document.querySelectorAll(".location-popup")].some((menu) =>
+            menu.getAttribute("aria-label") === label && menu.contains(document.activeElement)), heading).catch(async (error) => {
+            const focused = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+            throw new Error(`${client} ${side} ${view} to ${target} sources left focus on ${focused}`, { cause: error });
+          });
           await page.keyboard.press("Escape");
           await sources(target).waitFor({ state: "hidden" });
           await page.waitForFunction((node) => node === document.activeElement, await origin.elementHandle());
