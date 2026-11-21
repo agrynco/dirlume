@@ -55,6 +55,7 @@ try {
     };
   });
   await page.goto("http://dirlume.test/");
+  const swapKey = await page.evaluate(() => /Mac/i.test(navigator.userAgent) ? "Meta+u" : "Control+u");
   const button = (scope, name) => scope.getByRole("button", { name, exact: true });
   const right = page.locator("#right-files");
   const git = button(page, "Git View");
@@ -76,12 +77,12 @@ try {
   await history.getByRole("button", { name: /Old commit/ }).waitFor();
   const filter = branches.getByRole("searchbox", { name: "Filter branches" });
   await filter.fill("mai");
-  await filter.press("Control+u");
+  await filter.press(swapKey);
   await branches.and(page.locator(".git-pane-left")).waitFor();
   assert.equal(await filter.inputValue(), "mai");
   assert.ok(await filter.evaluate((field) => document.activeElement === field));
   await history.getByText("Full commit body").waitFor();
-  await history.getByRole("button", { name: /Old commit/ }).press("Control+u");
+  await history.getByRole("button", { name: /Old commit/ }).press(swapKey);
   await branches.and(page.locator(".git-pane-right")).waitFor();
   await button(page, "Swap panes").click();
   await branches.and(page.locator(".git-pane-left")).waitFor();
@@ -100,7 +101,7 @@ try {
   assert.equal(await history.getByText("Stale local topic").count(), 0);
   await page.keyboard.press("F5");
   assert.equal(await page.getByRole("dialog", { name: "Copy" }).count(), 0);
-  await filter.press("Control+u");
+  await filter.press(swapKey);
   await branches.and(page.locator(".git-pane-left")).waitFor();
   await button(branches, "Close Git View").click();
   await page.waitForFunction(() => document.activeElement?.id === "right-files");
@@ -138,7 +139,7 @@ try {
     await right.getByRole("option", { name: /^note\.txt/ }).click();
     await git.click();
     await branches.and(page.locator(".git-pane-right")).waitFor();
-    await filter.press("Control+u");
+    await filter.press(swapKey);
     assert.equal(await branches.and(page.locator(".git-pane-right")).count(), 1);
     await filter.press("Control+Alt+j");
     assert.equal(await branches.and(page.locator(binding.length ? ".git-pane-left" : ".git-pane-right")).count(), 1);

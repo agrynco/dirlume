@@ -42,7 +42,10 @@ export async function testDocumentMode(page, root) {
   const editBinding = async (change) => {
     const tool = await openOptionsWindow(page);
     const options = tool.getByRole("dialog", { name: "Options", exact: true });
-    await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+    const search = options.getByRole("searchbox", { name: "Search settings", exact: true });
+    await search.fill(label);
+    await search.press("Enter");
+    await options.getByRole("heading", { name: "Keyboard shortcuts", exact: true }).waitFor();
     await change(options);
     await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
   };

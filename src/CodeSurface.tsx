@@ -137,8 +137,10 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   }, [active, fontSize, readingWidth]);
 
   useEffect(() => {
-    if (active && editing) editor.current?.focus();
-    else if (active) editor.current?.scrollDOM.focus({ preventScroll: true });
+    const view = editor.current;
+    if (!active || !view) return;
+    if (editing) view.focus();
+    else if (document.activeElement === view.dom.closest(".text-window")) view.scrollDOM.focus({ preventScroll: true });
   }, [active, editing]);
 
   useEffect(() => {
