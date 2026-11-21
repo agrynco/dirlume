@@ -1079,4 +1079,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Compare files selection": ["Виділення під час порівняння файлів", "Выделение при сравнении файлов"],
   "Compare files added lines": ["Додані рядки в порівнянні", "Добавленные строки в сравнении"],
   "Compare files removed lines": ["Видалені рядки в порівнянні", "Удалённые строки в сравнении"],
+  "What's new": ["Що нового", "Что нового"],
+  "Release highlights": ["Основні зміни випуску", "Основные изменения выпуска"],
+  "Full release notes for {0}": ["Повний опис випуску {0}", "Полное описание выпуска {0}"],
+  "Could not save your What's new preference.": ["Не вдалося зберегти налаштування «Що нового».", "Не удалось сохранить настройку «Что нового»."],
 };

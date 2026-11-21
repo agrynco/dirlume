@@ -21,8 +21,9 @@ import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLo
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { canAnalyze, type SpacePlace } from "./spaceScan";
 import type { EnvironmentMode } from "./EnvironmentPane";
-import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
+import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { reportFrontendError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
@@ -121,6 +122,7 @@ type Modal =
   | { kind: "about" | "commandHistory" | "mcp" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
+  | { kind: "whatsNew" }
   | { kind: "upToDate" }
   | { kind: "installUpdate"; version: string }
   | ActionModal;
@@ -199,6 +201,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
+  const [installedRelease, setInstalledRelease] = useState<InstalledRelease | null | undefined>(undefined);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const checkingUpdates = useRef(false);
   const manualUpdateCheck = useRef(false);
@@ -311,10 +314,28 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, [checkUpdates, portableUpdateError]);
 
   useEffect(() => {
-    if (!updateNotice || modal || helpTopic) return;
+    if (!isTauri()) return;
+    let current = true;
+    void api.installedRelease().then((release) => {
+      if (current) setInstalledRelease(release);
+    }, (error: unknown) => {
+      if (current) setInstalledRelease(null);
+      reportFrontendError("installed_release", error);
+    });
+    return () => { current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (modal || helpTopic || installedRelease === undefined) return;
+    if (installedRelease?.showOnStartup) {
+      setInstalledRelease({ ...installedRelease, showOnStartup: false });
+      setModal({ kind: "whatsNew" });
+      return;
+    }
+    if (!updateNotice) return;
     setModal(updateNotice);
     setUpdateNotice(null);
-  }, [updateNotice, modal, helpTopic]);
+  }, [updateNotice, installedRelease, modal, helpTopic]);
 
   useEffect(() => {
     if (!shortcuts.menuAlternate.includes("Alt")) return;
@@ -695,6 +716,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       setModal(null);
       setStatus({ text: describeError(error), error: true });
     });
+  }
+
+  function dismissWhatsNew() {
+    void api.acknowledgeRelease().catch((error: unknown) => {
+      setStatus({ text: describeError(error), error: true });
+    }).finally(() => setModal((current) => current?.kind === "whatsNew" ? null : current));
   }
 
   function focus(side: Side) {
@@ -2195,7 +2222,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     ] },
     { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
     paneMenu("right"),
-    { label: "Help", items: [menuCommand("help"), { label: "About", run: () => setModal({ kind: "about" }) },
+    { label: "Help", items: [menuCommand("help"),
+      ...(installedRelease ? [{ label: "What's new", run: () => setModal({ kind: "whatsNew" }) }] : []),
+      { label: "About", run: () => setModal({ kind: "about" }) },
       { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
@@ -2500,6 +2529,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <Dialog title={t("Update available")} onClose={() => setModal(null)}>
           <div className="dialog-body transfer-body">
             <p>{t("Dirlume {0} is available.", modal.update.version)}</p>
+            <ReleaseNotes release={modal.update} onError={(text) => setStatus({ text, error: true })} />
             {modal.update.kind === "debian" && <>
               <p>{t("Download the Debian package and run this command in the download folder.")}</p>
               <code>sudo apt install ./{modal.update.url.split("/").at(-1)}</code>
@@ -2512,6 +2542,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else installUpdate(modal.update);
             }}>{t(modal.update.kind === "debian" ? "Download Debian package" : "Install and restart")}</Button>
           </footer>
+        </Dialog>
+      )}
+      {modal?.kind === "whatsNew" && installedRelease && (
+        <Dialog title={t("What's new")} onClose={dismissWhatsNew}
+          footer={<Button type="button" data-initial-focus onClick={dismissWhatsNew}>{t("Close")}</Button>}>
+          <div className="dialog-body transfer-body">
+            <p>{t("Dirlume {0}", installedRelease.version)}</p>
+            <ReleaseNotes release={installedRelease} onError={(text) => setStatus({ text, error: true })} />
+          </div>
         </Dialog>
       )}
       {modal?.kind === "upToDate" && (

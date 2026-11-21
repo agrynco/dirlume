@@ -310,7 +310,9 @@ export interface ProcessInfo extends ProcessId {
 
 export type McpConnection = { endpoint: string; token: string };
 
-export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
+export type ReleaseHighlights = { version: string; highlights: string[] };
+export type InstalledRelease = ReleaseHighlights & { showOnStartup: boolean };
+export type AppUpdate = ReleaseHighlights & ({ kind: "install" } | { kind: "debian"; url: string });
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {
@@ -326,6 +328,8 @@ export const api = {
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
   checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
+  installedRelease: () => invoke<InstalledRelease>("installed_release"),
+  acknowledgeRelease: () => invoke<void>("acknowledge_release"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },
     initialPage?: import("./featureOptions").FeaturePage) =>
     invoke<void>("open_tool_window", { title, ...size, comparison, initialPage }),

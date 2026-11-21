@@ -245,6 +245,8 @@ The sync workflow uses the `DIRLUME_PROJECT_TOKEN` Actions secret. Use a GitHub 
 
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers and portable copies, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
+The update dialog shows the offered version’s highlights and links to its full release notes. After installation, **What’s new** shows the installed version’s highlights offline. Dismiss the dialog once for that product version. It also appears on a clean installation when highlights are available. Use **Help → What’s new** to reopen it. Each Windows Portable folder keeps its own acknowledgment.
+
 Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
 
 [GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64, Ubuntu x64, macOS Apple Silicon, and macOS Intel. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
@@ -259,6 +261,8 @@ Invoke [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md)
 
 After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
 
+Prepare one to eight short English highlights in `release-highlights/X.Y.Z.json` for the next stable version before opening its promotion pull request. Set `version` to that product version and list the sentences in `highlights`. The same summary goes into the desktop packages, the updater manifest, and the GitHub Release.
+
 To publish manually, open **Actions → CI and releases → Run workflow** and select `main`. A manual release runs the full build and test suite before publishing.
 
 For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
@@ -269,4 +273,4 @@ Windows Portable uses **Install and restart** to update its current folder. Extr
 
 The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 
-The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks that a modified package is rejected and that the original signed package installs, restarts, and restores a saved pane font setting.
+The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks signature rejection, installation, restored pane settings, and release highlights before and after install. The Ubuntu job also checks the manual Debian upgrade path.

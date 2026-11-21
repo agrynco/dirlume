@@ -34,8 +34,15 @@ test("release metadata pairs the signed packages with their platform and exact v
         DIRLUME_PRODUCT_VERSION: product, DIRLUME_BUILD_NUMBER: "66001", TAG: tag, GITHUB_REPOSITORY: "agrynco/dirlume" },
     });
     assert.notEqual(run("v2.1.4").status, 0);
+    assert.notEqual(run(`v${product}`).status, 0, "Stable packages require highlights.");
+    await mkdir(join(directory, "release-highlights"));
+    const summary = join(directory, "release-highlights", `${product}.json`);
+    await writeFile(summary, JSON.stringify({ version: "2.1.4", highlights: ["The wrong version."] }));
+    assert.notEqual(run(`v${product}`).status, 0);
+    await writeFile(summary, JSON.stringify({ version: product, highlights: ["A fixture change."] }));
     const result = run(`v${product}`);
     assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^## What's new\n\n- A fixture change\./);
     for (const [platform, extensions] of Object.entries(formats)) {
       for (const suffix of [`.${extensions[0]}`, "-portable.zip"]) {
         assert.ok(result.stdout.includes(`https://github.com/agrynco/dirlume/releases/download/v${product}/Dirlume-${label}-${platform}${suffix}`));
@@ -43,6 +50,7 @@ test("release metadata pairs the signed packages with their platform and exact v
     }
     const manifest = JSON.parse(await readFile(join(release, "latest.json"), "utf8"));
     assert.equal(manifest.version, product);
+    assert.equal(manifest.notes, "## What's new\n\n- A fixture change.");
     const packages = {
       "windows-x86_64": `Dirlume-${label}-windows-x64.setup.exe`,
       "windows-x86_64-portable": `Dirlume-${label}-windows-x64-portable.zip`,

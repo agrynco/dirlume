@@ -1,4 +1,5 @@
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { releaseNotes } from "./release-highlights.mjs";
 
 const product = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 const positiveInteger = /^[1-9]\d*$/;
@@ -125,13 +126,21 @@ async function prepare(version) {
 }
 
 if (import.meta.main) {
-  const { GITHUB_RUN_NUMBER, GITHUB_RUN_ATTEMPT, GITHUB_REF_TYPE, GITHUB_REF_NAME, GITHUB_OUTPUT, PUBLISH_RELEASE } = process.env;
+  const { GITHUB_RUN_NUMBER, GITHUB_RUN_ATTEMPT, GITHUB_REF_TYPE, GITHUB_REF_NAME, GITHUB_OUTPUT, PUBLISH_RELEASE, CHECK_NEXT_RELEASE_HIGHLIGHTS } = process.env;
   switch (process.argv[2]) {
     case "resolve": {
-      const build = resolveBuild(await manifestVersion(), await latestPublishedVersion(), {
+      const manifest = await manifestVersion();
+      const latest = await latestPublishedVersion();
+      const options = {
         runNumber: GITHUB_RUN_NUMBER, runAttempt: GITHUB_RUN_ATTEMPT,
         refType: GITHUB_REF_TYPE, refName: GITHUB_REF_NAME, publishRequested: PUBLISH_RELEASE === "true",
-      });
+      };
+      const build = resolveBuild(manifest, latest, options);
+      if (build.publish) await releaseNotes(build.version);
+      else if (CHECK_NEXT_RELEASE_HIGHLIGHTS === "true") {
+        const candidate = resolveBuild(manifest, latest, { ...options, refType: "branch", refName: "main", publishRequested: true });
+        await releaseNotes(candidate.version);
+      }
       await appendFile(GITHUB_OUTPUT, `product-version=${build.version}\nbuild-number=${build.number}\npublish=${build.publish}\n`);
       break;
     }

@@ -1033,6 +1033,10 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .dialog-form { display: flex; flex-direction: column; min-height: 0; }
 .dialog-body { padding: 16px; overflow: auto; }
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
+.release-notes { display: grid; gap: 10px; overflow-wrap: anywhere; }
+.release-notes ul { margin: 0; padding-inline-start: 1.4em; }
+.release-notes li + li { margin-top: 4px; }
+.release-notes a { color: var(--accent); justify-self: start; }
 .dialog-body .dialog-error { margin: 12px 0 0; }
 .attributes-body { display: grid; gap: 12px; overflow-wrap: anywhere; }
 .attributes-body fieldset { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); }
