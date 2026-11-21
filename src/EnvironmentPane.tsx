@@ -8,7 +8,8 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { t } from "./i18n";
 import type { Side } from "./panes";
-import { bindingMatches, eventShortcut, type Bindings, type Command } from "./preferences";
+import { bindingMatches, eventShortcut, quickSearchSeed, type Bindings, type Command } from "./preferences";
+import { QuickSearch } from "./QuickSearch";
 
 export type EnvironmentMode = "root" | EnvironmentScope;
 const scopes: Readonly<Record<EnvironmentScope, string>> = {
@@ -309,6 +310,7 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
   const [listing, setListing] = useState<ScopeListing | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [filter, setFilter] = useState("");
+  const [quickSearch, setQuickSearch] = useState<string | null>(null);
   const [selected, setSelected] = useState("");
   const [rootSelection, setRootSelection] = useState<EnvironmentScope>("user");
   const [marked, setMarked] = useState<string[]>([]);
@@ -335,6 +337,7 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
   function navigate(mode: EnvironmentMode) {
     setListing(null);
     setFilter("");
+    setQuickSearch(null);
     setSelected("");
     setMarked([]);
     setError("");
@@ -349,6 +352,15 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
   function copy() {
     const names = marked.length ? marked : chosen ? [chosen.name] : [];
     if (copyTo && names.length) setDialog({ kind: "copy", names, to: copyTo });
+  }
+
+  function selectVariable(name: string) {
+    setSelected(name);
+    list.current?.querySelector(`[data-variable="${CSS.escape(name)}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function focusList() {
+    list.current?.focus({ preventScroll: true });
   }
 
   function keyDown(event: KeyboardEvent) {
@@ -375,12 +387,14 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
     else if (chosen && matches("mark") && scope !== "process") {
       setMarked((marked) => marked.includes(chosen.name) ? marked.filter((name) => name !== chosen.name) : [...marked, chosen.name]);
     } else {
-      const next = matches("upRow") ? index - 1 : matches("downRow") ? index + 1 :
-        matches("firstRow") ? 0 : matches("lastRow") ? rows.length - 1 : null;
-      if (next === null || !rows.length) return;
-      const target = Math.min(rows.length - 1, Math.max(0, next));
-      setSelected(rows[target].name);
-      list.current?.querySelectorAll("[data-variable]")[target]?.scrollIntoView({ block: "nearest" });
+      const seed = event.target === list.current && listing && !error ? quickSearchSeed(event.nativeEvent, shortcuts.quickSearch, true) : null;
+      if (seed !== null) setQuickSearch(seed);
+      else {
+        const next = matches("upRow") ? index - 1 : matches("downRow") ? index + 1 :
+          matches("firstRow") ? 0 : matches("lastRow") ? rows.length - 1 : null;
+        if (next === null || !rows.length) return;
+        selectVariable(rows[Math.min(rows.length - 1, Math.max(0, next))].name);
+      }
     }
     event.preventDefault();
     event.stopPropagation();
@@ -394,21 +408,34 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
     </header>
     {scope && <input className="environment-filter" type="search" aria-label={t("Filter variables")} placeholder={t("Filter variables")}
       value={filter} onChange={(event) => setFilter(event.target.value)} />}
-    <div className="environment-list" id={side + "-environment"} tabIndex={0} ref={list}>
+    <div className="environment-list" id={side + "-environment"} tabIndex={0} ref={list}
+      role={scope ? "listbox" : undefined} aria-label={scope ? scopeName(scope) : undefined}
+      aria-activedescendant={chosen && !error ? `${title}-variable-${rows.indexOf(chosen)}` : undefined}>
       {!scope ? scopeModes.map((scope) => <Button key={scope} aria-pressed={scope === rootSelection}
         onFocus={() => setRootSelection(scope)} onClick={() => navigate(scope)}>{scopeName(scope)}</Button>) :
         error ? <p className="pane-empty" role="alert">{error}</p> :
-          listing ? rows.length ? <div role="listbox" aria-label={scopeName(scope)}>
-            {rows.map((row) => <Button key={row.name} role="option" aria-selected={chosen === row}
-              data-variable={row.name} data-marked={marked.includes(row.name) || undefined} tabIndex={-1}
-              onClick={() => { setSelected(row.name); list.current?.focus({ preventScroll: true }); }}
-              onDoubleClick={() => inspect("inspect", row)}>
-              <strong>{row.name}</strong><span>{row.source}
-                {row.overriddenBy && <> · {t("Overridden by")} {row.overriddenBy}</>}</span>
-            </Button>)}
-          </div> : <p className="pane-empty">{t(filter ? "No matching variables." : "No variables in this scope.")}</p> :
+          listing ? <>
+            <div className="environment-columns" aria-hidden="true">
+              <span>{t("Variable name")}</span><span>{t("Definition source")}</span>
+            </div>
+            {rows.length ? <div role="presentation">
+              {rows.map((row, index) => {
+                const source = row.overriddenBy ? `${row.source} · ${t("Overridden by")} ${row.overriddenBy}` : row.source;
+                return <Button key={row.name} className="environment-row" role="option"
+                  id={`${title}-variable-${index}`} aria-selected={chosen === row}
+                  data-variable={row.name} data-marked={marked.includes(row.name) || undefined} tabIndex={-1}
+                  onClick={() => { setSelected(row.name); focusList(); }} onDoubleClick={() => inspect("inspect", row)}>
+                  <strong data-tooltip={row.name}>{row.name}</strong><span data-tooltip={source}>{source}</span>
+                </Button>;
+              })}
+            </div> : <p className="pane-empty">{t(filter ? "No matching variables." : "No variables in this scope.")}</p>}
+          </> :
             <p className="pane-empty" role="status">{t("Loading environment variables…")}</p>}
     </div>
+    {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={chosen?.name}
+      items={rows.map(({ name }) => ({ id: name, name }))} onChange={setQuickSearch} onMatch={selectVariable}
+      onAccept={(name) => { const row = rows.find((row) => row.name === name); if (row) inspect("inspect", row); }}
+      onClose={() => setQuickSearch(null)} focusList={focusList} />}
     {scope && <div className="environment-actions">
       <Button onClick={() => setRefresh((value) => value + 1)}>{t("Refresh")}</Button>
       <Button disabled={!chosen} onClick={() => chosen && inspect("inspect", chosen)}>{t("Inspect")}</Button>
