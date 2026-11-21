@@ -618,7 +618,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       labels.disconnect();
       document.fonts.removeEventListener("loadingdone", fitButtons);
     };
-  }, [scheme, theme]);
+  }, [scheme, theme, preferences.actionButtonWidth, preferences.hideActionButtonIcons, preferences.layout]);
 
   useEffect(() => {
     function preventWorkspaceSelectAll(event: globalThis.KeyboardEvent) {
@@ -2437,11 +2437,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
             aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
             {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
-            <Icon /><span>{t(label)}</span>
+            {!preferences.hideActionButtonIcons && <Icon />}<span>{t(label)}</span>
           </Button>
         ))}
         <Button type="button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
-          <TerminalIcon /><span>{t("Terminal")}</span>{keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
+          {!preferences.hideActionButtonIcons && <TerminalIcon />}<span>{t("Terminal")}</span>
+          {keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
         </Button>
       </nav>
       <nav className="document-bar" aria-label={t("Open documents")} aria-hidden={!documents.length}>

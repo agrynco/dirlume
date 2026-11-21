@@ -1,5 +1,6 @@
 // English message keys also serve as the default text. The translations are Ukrainian and Russian.
 export const translations: Readonly<Record<string, readonly [uk: string, ru: string]>> = {
+  "Hide action button icons": ["Приховати піктограми кнопок дій", "Скрыть значки кнопок действий"],
   "Environment variables": ["Змінні середовища", "Переменные среды"],
   "User variables": ["Змінні користувача", "Переменные пользователя"],
   "System variables": ["Системні змінні", "Системные переменные"],

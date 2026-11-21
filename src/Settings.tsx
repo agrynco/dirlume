@@ -118,7 +118,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
     const terms = feature === "filePanels" ? [
-      "Show hidden files", "Panel layout", "Action button width",
+      "Show hidden files", "Panel layout", "Action button width", "Hide action button icons",
       ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
     ] :
       feature === "viewer" ? ["Reading area", "Max width (px)", "Maximum content width (px)", "Full width", "Mermaid diagrams",
@@ -492,6 +492,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 onChange={(event) => onChange({ ...preferences, actionButtonWidth: event.target.value as ActionButtonWidth })}>
                 {Object.entries(actionButtonWidths).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
               </select>
+            </label>
+            <label className="field-checkbox"><SettingSearchLabel label="Hide action button icons" />
+              <input type="checkbox" checked={preferences.hideActionButtonIcons}
+                onChange={(event) => onChange({ ...preferences, hideActionButtonIcons: event.target.checked })} />
             </label>
           </div>}
           <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}

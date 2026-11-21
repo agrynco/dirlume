@@ -274,6 +274,7 @@ export interface Preferences {
   sortSettings: SortSettings;
   selectedPanelModes: Record<"left" | "right", PanelModeId>;
   actionButtonWidth: ActionButtonWidth;
+  hideActionButtonIcons: boolean;
   mainMenuAlignment: MenuPosition;
   systemLightScheme: string;
   systemDarkScheme: string;
@@ -436,6 +437,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
     return { left: isPanelMode(left) ? left : "full", right: isPanelMode(right) ? right : "full" };
   } },
   actionButtonWidth: { group: "filePanels", portable: true, read: (value) => value === "full" ? "full" : "compact" },
+  hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
   refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
