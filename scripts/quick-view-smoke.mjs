@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
@@ -12,7 +12,15 @@ const front = {
     '<img src="https://external.invalid/pixel"><script>document.querySelector("h1").textContent = "Script ran";</script>',
   "05-image.png": null,
   "06-binary.bin": null,
+  "09-large.exe": null,
+  "10-utf16.txt": "UTF-16 file remains readable.",
+  "11-large-text.txt": null,
 };
+const binaryHeader = [0x4d, 0x5a, 0, 1, 9, 13, 10, 0xb3, 46, 116, 101, 120, 116];
+const largeBytes = 9 * 1024 * 1024 + 3;
+const middleByte = 16389;
+const middleMarker = "MID";
+const endMarker = "END";
 const back = {
   "01-another.txt": "First file on the right.",
   "02-remember.txt": "Selected file on the right.",
@@ -150,7 +158,36 @@ async function checkViews(page) {
   await right.getByText("Folders cannot be previewed.", { exact: true }).waitFor();
   assert.equal(await image.count(), 0);
   await row(page, "left", "06-binary.bin").click();
-  await right.getByText("This file type cannot be previewed.", { exact: true }).waitFor();
+  const dump = right.getByLabel("Binary contents", { exact: true });
+  const firstRow = dump.locator('[data-byte-offset="0"]');
+  await firstRow.waitFor();
+  assert.deepEqual(await firstRow.locator("span").allTextContents(), ["M", "Z", " ", "☺", "○", "♪", "◙", "│", ".", "t", "e", "x", "t"]);
+  assert.equal(await list(page, "left").evaluate((node) => node === document.activeElement), true);
+  await row(page, "left", "09-large.exe").click();
+  await firstRow.getByText("M", { exact: true }).waitFor();
+  await dump.evaluate((element, { size, position }) => {
+    const row = element.querySelector(".binary-preview-row");
+    const rows = Math.ceil(size / row.children.length);
+    const rowHeight = row.getBoundingClientRect().height;
+    const logical = Math.floor(position / row.children.length) * rowHeight;
+    element.scrollTop = logical / (rows * rowHeight - element.clientHeight) * (element.scrollHeight - element.clientHeight);
+  }, { size: largeBytes, position: middleByte });
+  const readAt = (start, text) => page.waitForFunction(({ start, text }) => {
+    const cells = [...document.querySelectorAll(".binary-preview-row")].flatMap((row) => {
+      const first = Number(row.dataset.byteOffset);
+      return [...row.children].map((span, index) => [first + index, span.textContent]);
+    });
+    return cells.filter(([offset]) => offset >= start && offset < start + text.length).map(([, value]) => value).join("") === text;
+  }, { start, text });
+  await readAt(middleByte, middleMarker);
+  await dump.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await readAt(largeBytes - endMarker.length, endMarker);
+  await row(page, "left", "10-utf16.txt").click();
+  await right.getByText(front["10-utf16.txt"], { exact: true }).waitFor();
+  await dump.waitFor({ state: "hidden" });
+  await row(page, "left", "11-large-text.txt").click();
+  await right.getByText("Could not read this file: Text files can be at most 8 MiB.", { exact: true }).waitFor();
+  assert.equal(await dump.count(), 0);
   await page.keyboard.press("Control+q");
   await right.waitFor({ state: "hidden" });
 }
@@ -164,7 +201,23 @@ export async function testNativeQuickView(page, root) {
   const png = await pngFixture(page);
   const image = join(left, "05-image.png");
   for (const [name, text] of Object.entries(front)) {
-    await writeFile(join(left, name), name === "05-image.png" ? png : text ?? Buffer.from([0, 1, 2]));
+    const path = join(left, name);
+    if (name === "11-large-text.txt") {
+      await writeFile(path, Buffer.alloc(largeBytes, 65));
+      continue;
+    }
+    if (name === "09-large.exe") {
+      const file = await open(path, "w");
+      try {
+        await file.truncate(largeBytes);
+        await file.write(Buffer.from(binaryHeader), 0, binaryHeader.length, 0);
+        await file.write(middleMarker, middleByte);
+        await file.write(endMarker, largeBytes - endMarker.length);
+      } finally { await file.close(); }
+      continue;
+    }
+    await writeFile(path, name === "05-image.png" ? png : name === "10-utf16.txt" ? Buffer.from("\ufeff" + text, "utf16le") :
+      text ?? Buffer.from(binaryHeader));
   }
   for (const [name, text] of Object.entries(back)) await writeFile(join(right, name), text);
   for (const [side, path] of [["left", left], ["right", right]]) {
@@ -193,7 +246,7 @@ export async function testBrowserQuickView(userAgent) {
       const path = new URL(route.request().url()).pathname;
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
-    await page.addInitScript(({ front, back, png }) => {
+    await page.addInitScript(({ front, back, png, binaryHeader, largeBytes, middleByte, middleMarker, endMarker }) => {
       if (location.hostname !== "dirlume.test") return;
       const path = /Windows/i.test(navigator.userAgent) ? "C:\\fixture\\" : "/fixture/";
       const panel = (name) => ({ place: { kind: "local", path: path + name, parent: null } });
@@ -211,6 +264,7 @@ export async function testBrowserQuickView(userAgent) {
           };
           if (command === "read_text") {
             if (args.name === "06-binary.bin") throw "The file contains binary data.";
+            if (args.name === "09-large.exe" || args.name === "11-large-text.txt") throw "Text files can be at most 8 MiB.";
             if (args.name === "08-unreadable.txt") throw "Permission denied";
             if (args.name === "07-slow.txt") {
               await new Promise((wait) => { window.finishOldRead = wait; });
@@ -218,12 +272,23 @@ export async function testBrowserQuickView(userAgent) {
             }
             return { text: (args.directory.endsWith("left") ? front : back)[args.name], encoding: "utf8" };
           }
+          if (command === "read_bytes") {
+            if (args.name === "06-binary.bin") return { length: binaryHeader.length, data: binaryHeader };
+            if (args.name === "11-large-text.txt") return { length: largeBytes, data: Array(1024).fill(65) };
+            const blocks = [[0, binaryHeader], [middleByte, [...middleMarker].map((char) => char.charCodeAt(0))],
+              [largeBytes - endMarker.length, [...endMarker].map((char) => char.charCodeAt(0))]];
+            return { length: largeBytes, data: Array.from({ length: Math.min(1024, largeBytes - args.offset) }, (_, index) => {
+              const offset = args.offset + index;
+              const block = blocks.find(([start, bytes]) => offset >= start && offset < start + bytes.length);
+              return block ? block[1][offset - block[0]] : 0;
+            }) };
+          }
           if (command === "read_preview_image") return new Uint8Array(png).buffer;
           if (command === "file_icons") return [];
           return null;
         },
       };
-    }, { front, back, png });
+    }, { front, back, png, binaryHeader, largeBytes, middleByte, middleMarker, endMarker });
     await page.goto("http://dirlume.test/");
     await checkViews(page);
     assert.equal(externalRequests, 0);

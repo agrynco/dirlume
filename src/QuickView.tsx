@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Maximize, RotateCcw, RotateCw, ScanEye, ZoomIn, ZoomOut } from "lucide-react";
-import { describeError, readPlacePreviewImage, readPlaceText, type NamedFile } from "./api";
+import { describeError, readPlaceBytes, readPlacePreviewImage, readPlaceText, type BytePage, type NamedFile } from "./api";
+import { BinaryPreview, looksBinary } from "./BinaryPreview";
 import { Button } from "./Button";
 import { errorText, t } from "./i18n";
 import { isMarkdownFile } from "./markdown";
@@ -11,7 +12,8 @@ const imageTypes: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp",
 };
 
-type PreviewContent = { kind: "image"; url: string } | { kind: "text"; text: string } | { kind: "error"; message: string };
+type PreviewContent = { kind: "image"; url: string } | { kind: "text"; text: string } |
+  { kind: "binary"; page: BytePage } | { kind: "error"; message: string };
 type Size = { width: number; height: number };
 
 function renderedHtml(source: string, light: boolean) {
@@ -136,10 +138,20 @@ function PreviewFile({ file, source, light, onFocusFiles }: {
         }
       } catch (failure) {
         if (disposed) return;
-        const message = describeError(failure);
-        setContent({ kind: "error", message: message === "The file contains binary data." ||
-          message === "The file is outside the supported UTF-8 and UTF-16 text formats."
-          ? t("This file type cannot be previewed.") : t("Could not read this file: {0}", errorText(message)) });
+        let message = describeError(failure);
+        const undecodable = message === "The file contains binary data." ||
+          message === "The file is outside the supported UTF-8 and UTF-16 text formats.";
+        if (!type && (undecodable || message === "Text files can be at most 8 MiB.")) {
+          try {
+            const page = await readPlaceBytes(target, 0);
+            if (disposed) return;
+            if (!page.length) { setContent({ kind: "text", text: "" }); return; }
+            if (undecodable || looksBinary(page)) { setContent({ kind: "binary", page }); return; }
+          } catch (readError) {
+            message = describeError(readError);
+          }
+        }
+        if (!disposed) setContent({ kind: "error", message: t("Could not read this file: {0}", errorText(message)) });
       }
     }, 80);
     return () => {
@@ -152,6 +164,7 @@ function PreviewFile({ file, source, light, onFocusFiles }: {
   if (!content) return <p className="pane-empty" role="status">{t("Loading preview…")}</p>;
   if (content.kind === "error") return <p className="pane-empty" role="status">{content.message}</p>;
   if (content.kind === "image") return <ImagePreview name={target.name} url={content.url} />;
+  if (content.kind === "binary") return <BinaryPreview file={target} initial={content.page} />;
   if (!source && isMarkdownFile(target.name)) return <ReadOnlyMarkdown source={content.text} light={light} />;
   if (!source && /\.html?$/i.test(target.name)) return <HtmlPreview name={target.name}
     text={content.text} light={light} onFocusFiles={onFocusFiles} />;

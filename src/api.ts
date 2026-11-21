@@ -303,6 +303,7 @@ export interface BytePage {
   length: number;
   data: number[];
 }
+export const fileBytePageSize = 1024;
 
 export interface ProcessId {
   pid: number;

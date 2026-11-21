@@ -395,6 +395,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Byte offset": ["Зміщення в байтах", "Смещение в байтах"],
   "Go to offset": ["Перейти до зміщення", "Перейти к смещению"],
   "Reading bytes…": ["Читання байтів…", "Чтение байтов…"],
+  "Binary contents": ["Двійковий вміст", "Двоичное содержимое"],
   "Hexadecimal contents": ["Шістнадцятковий вміст", "Шестнадцатеричное содержимое"],
   "Rendering diagram…": ["Відображення діаграми…", "Отображение диаграммы…"],
   "Mermaid diagram": ["Діаграма Mermaid", "Диаграмма Mermaid"],

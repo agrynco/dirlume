@@ -128,6 +128,8 @@ Open the syntax control in the Viewer or Editor header or choose **Syntax → Ch
 
 Press **Ctrl+Q** or select **Quick View** in the main toolbar to preview the current file in the opposite pane while browsing. Toggle it again to restore that pane. **Ctrl+Left** and **Ctrl+Right** move the divider. Use **Rendered** and **Source** in the toolbar for Markdown and HTML. Rendered HTML runs no scripts and loads no external resources. For PNG, JPEG, GIF, WebP, and BMP images up to 16 MiB, use the buttons to zoom, fit, or rotate the preview.
 
+Quick View shows binary files as scrollable single-cell characters in file order. Each byte uses the DOS CP437 glyph mapping, and zero bytes appear as blank cells. Rows wrap to fit the pane.
+
 With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Git View works offline with locally available objects and leaves the working tree and index intact. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
 
 ### Environment variables
