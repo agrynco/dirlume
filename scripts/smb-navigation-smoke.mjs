@@ -43,8 +43,20 @@ export async function testSmbNavigation() {
               if (args.approval.fingerprint !== sshVerification.fingerprint) throw new Error("Unapproved SSH host key");
               return { kind: "connected", id: 17, address: sshVerification.host, origin: "sftp://fixture.example",
                 segments: ["home"], listing: sshListing };
-            case "list_ssh": return { ...sshListing, elevated: false };
-            case "open_terminal": return false;
+            case "list_ssh":
+              window.lastSshRead = { id: args.id, segments: args.segments };
+              return { ...sshListing, elevated: false };
+            case "open_terminal": {
+              const { promptToken, ssh } = args.request;
+              if (!ssh) return false;
+              window.terminalWrites = [];
+              window.sshPrompt = (path) => {
+                const encode = (value) => btoa(String.fromCharCode(...new TextEncoder().encode(value)));
+                args.output.onmessage({ event: "data", data: encode(`\x1b]2;${promptToken}:0:${encode(path)}\x07`) });
+              };
+              return true;
+            }
+            case "write_terminal": window.terminalWrites?.push(args.data); return null;
             case "read_text":
               if (args.directory !== documents || args.name !== file.name) throw new Error("Unexpected SMB file");
               return { text: "Fixture", encoding: "utf8" };
@@ -162,6 +174,23 @@ export async function testSmbNavigation() {
     const terminalHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
     await sshTerminal.waitFor();
     await terminalHint.waitFor();
+    await page.waitForFunction(() => typeof window.sshPrompt === "function");
+    await page.evaluate(() => window.sshPrompt("/home"));
+    await page.evaluate(() => window.sshPrompt("/srv/дані"));
+    await pathIs("right", "/srv/дані");
+    await pathIs("left", projects);
+    assert.deepEqual(await page.evaluate(() => window.lastSshRead), { id: 17, segments: ["srv", "дані"] });
+    assert.deepEqual(await page.evaluate(() => window.terminalWrites), []);
+    const sshAddress = await editPaneAddress(page, "right");
+    await sshAddress.fill("/var/log");
+    await sshAddress.press("Enter");
+    await pathIs("right", "/var/log");
+    await page.waitForFunction(() => window.terminalWrites.some((command) => command.includes("cd -- '/var/log'")));
+    await page.evaluate(() => window.sshPrompt("/var/log"));
+    await sshTerminal.locator("header span").filter({ hasText: "/var/log" }).waitFor();
+    await pathIs("right", "/var/log");
+    assert.equal(await page.evaluate(() => window.terminalWrites.length), 1);
+    await sshTerminal.locator(".xterm-helper-textarea").focus();
     await right.focus();
     await terminalHint.waitFor({ state: "hidden" });
     assert.equal(await sshTerminal.isVisible(), true);
