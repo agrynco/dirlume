@@ -102,7 +102,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+Insert in a file list | Copy the marked item names, one per line in pane order. With no marks, copy the name under the cursor. |
-| Ctrl+V in the terminal | Paste text into the active local or SSH session. **Options → Terminal** also enables right-click paste by default. |
+| Ctrl+V in the terminal | Paste text into the active local or SSH session. |
 | Ctrl+Shift+C (⌘⇧C on macOS) in a file list | Copy the current file or folder's full path as text. Also available under Commands → Copy full path. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
@@ -115,6 +115,8 @@ In **New folder**, enable **Process multiple names** to separate names with comm
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
 
 The shell receives keystrokes while its input has focus. A hint in the status bar, or beside the close button in the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Use the question-mark button to open offline Help and return to your command when you close it. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
+
+Right-click terminal output to open **Copy**, **Paste**, and **Select All**. On macOS, Control-click also opens the menu. **Copy** is available when text is selected. You can enable **Paste on right-click** in **Options → Terminal** to paste directly instead.
 
 At a supported PowerShell, Bash, or Zsh prompt, the terminal shows suggestions next to the caret as you edit a single-line command. Use **↑/↓** to select, **Tab** to insert the selected or first suggestion, or **Esc** to dismiss. Click a suggestion or press **Enter** with one selected to insert it. **Enter** submits the command when the list has no selection. Dirlume SSH terminals use the remote working directory and search path. If you run `ssh` yourself, the parent terminal suspends suggestions until it recognizes its prompt again.
 

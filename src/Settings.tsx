@@ -510,9 +510,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 onChange={(rows) => onChange({ ...preferences, terminalResizeRows: rows ?? 1 })} />
             </label>
             <label className="field-checkbox"><SettingSearchLabel label="Paste on right-click" />
-              <input type="checkbox" checked={preferences.terminalPasteOnRightClick}
+              <input type="checkbox" checked={preferences.terminalPasteOnRightClick} aria-describedby="terminal-right-click-note"
                 onChange={(event) => onChange({ ...preferences, terminalPasteOnRightClick: event.target.checked })} />
             </label>
+            <p id="terminal-right-click-note">{t("When off, right-click opens the terminal menu with Copy, Paste, and Select All.")}</p>
             {windowsClient && <label className="field-checkbox"><SettingSearchLabel label="Automatically refresh environment variables" />
               <input type="checkbox" checked={preferences.refreshEnvironment}
                 onChange={(event) => onChange({ ...preferences, refreshEnvironment: event.target.checked })} />

@@ -25,7 +25,7 @@ import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
-import { testTerminalPaste } from "./terminal-paste-smoke.mjs";
+import { testNativeTerminalMenu, testTerminalPaste } from "./terminal-paste-smoke.mjs";
 import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-picker-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
@@ -199,6 +199,7 @@ try {
   await testHeaderMenus(page, true);
   await testCommandIcons(page, true);
   await testNativeOptionalStatusBar(page);
+  await testNativeTerminalMenu(page);
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
   async function dragHorizontally(handle, delta) {
     const bounds = await handle.boundingBox();

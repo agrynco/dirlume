@@ -2,6 +2,78 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
+async function checkTerminalMenu(page, terminal, mac, native = false) {
+  const input = terminal.locator(".xterm-helper-textarea");
+  const surface = terminal.locator(".terminal-surface");
+  const menu = page.getByRole("menu", { name: "Terminal actions", exact: true });
+  const item = (name) => menu.getByRole("menuitem", { name, exact: true });
+  const isFocused = (node) => node.evaluate((element) => element === document.activeElement);
+  const secondaryClick = () => surface.click(mac ? { modifiers: ["Control"] } : { button: "right" });
+  const focused = () => page.waitForFunction(() => document.activeElement?.matches(".xterm-helper-textarea"));
+  await page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.includes("selection second"));
+  await secondaryClick();
+  assert.equal(await item("Copy").isDisabled(), true);
+  assert.equal(await isFocused(item("Paste")), true);
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await isFocused(item("Select All")), true);
+  await page.keyboard.press("Enter");
+  await menu.waitFor({ state: "hidden" });
+  await focused();
+  await secondaryClick();
+  assert.equal(await item("Copy").isEnabled(), true);
+  assert.equal(await isFocused(item("Copy")), true);
+  if (native) {
+    if (process.env.DIRLUME_TERMINAL_MENU_CAPTURE) await menu.screenshot({ path: process.env.DIRLUME_TERMINAL_MENU_CAPTURE });
+    await page.keyboard.press("Escape");
+    await focused();
+    return;
+  }
+  await page.keyboard.press("Enter");
+  await menu.waitFor({ state: "hidden" });
+  await focused();
+  await page.waitForFunction(() => window.terminalPaste.copies.at(-1)?.replaceAll("\r\n", "\n").includes("selection first\nselection second"));
+  const writes = () => page.evaluate(() => window.terminalPaste.writes.slice());
+  const baseline = await writes();
+  await secondaryClick();
+  await page.keyboard.press("Escape");
+  await focused();
+  await secondaryClick();
+  await page.getByRole("listbox", { name: "left files", exact: true }).click();
+  await menu.waitFor({ state: "hidden" });
+  assert.deepEqual(await writes(), baseline);
+
+  await page.evaluate(() => { window.terminalPaste.testMenuPaste = true; });
+  await secondaryClick();
+  await item("Paste").click();
+  await focused();
+  assert.deepEqual(await writes(), baseline);
+  await page.evaluate(() => { window.terminalPaste.clipboardError = true; });
+  await secondaryClick();
+  await item("Paste").click();
+  await page.locator(".statusbar").getByRole("alert").filter({ hasText: "Fixture clipboard unavailable." }).waitFor();
+  assert.deepEqual(await writes(), baseline);
+  await page.evaluate(() => { window.terminalPaste.clipboardError = false; window.terminalPaste.menuText = "clipboard from menu"; });
+  await secondaryClick();
+  await item("Paste").click();
+  await page.waitForFunction(() => window.terminalPaste.writes.filter((text) => text === "clipboard from menu").length === 1);
+  await page.evaluate(() => { window.terminalPaste.testMenuPaste = false; window.terminalPaste.menuText = ""; });
+  assert.equal(await isFocused(input), true);
+}
+
+export async function testNativeTerminalMenu(page) {
+  const list = page.getByRole("listbox", { name: "left files", exact: true });
+  await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path &&
+    document.getElementById("left-files")?.getAttribute("aria-busy") === "false");
+  await list.press("F12");
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  const input = terminal.locator(".xterm-helper-textarea");
+  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent.includes("PS "));
+  await input.pressSequentially("Write-Output 'selection first' 'selection second'");
+  await input.press("Enter");
+  await checkTerminalMenu(page, terminal, false, true);
+  await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+}
+
 export async function testTerminalPaste() {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
@@ -16,16 +88,25 @@ export async function testTerminalPaste() {
       await page.addInitScript(() => {
         const path = "/fixture";
         const file = { name: "fixture.txt", directory: false, link: false, hidden: false, size: 7, modified: null };
-        window.terminalPaste = { writes: [], reads: 0, filePastes: 0 };
+        window.terminalPaste = { writes: [], copies: [], reads: 0, filePastes: 0 };
         window.__TAURI_INTERNALS__ = {
           transformCallback: () => 1,
           invoke: async (command, args) => {
             if (command === "locations") return [{ label: "Home", path }];
             if (command === "list_directory") return { path, parent: null, entries: [file], omitted: 0 };
             if (command === "file_icons") return args.items.map(() => null);
-            if (command === "open_terminal") return false;
+            if (command === "ssh_profiles") return [{ id: "ssh", label: "SSH fixture", host: "fixture", port: 22 }];
+            if (command === "connect_ssh") return { kind: "connected", id: 17, address: "fixture", origin: "sftp://fixture",
+              segments: ["home"], listing: { entries: [file], omitted: 0, elevated: false } };
+            if (command === "open_terminal") {
+              if (args.request.ssh) window.terminalPaste.remoteTerminal = true;
+              args.output.onmessage({ event: "data", data: btoa("selection first\r\nselection second\r\n") });
+              return false;
+            }
+            if (command === "copy_path") { window.terminalPaste.copies.push(args.path); return null; }
             if (command === "clipboard_text") {
               if (window.terminalPaste.clipboardError) throw new Error("Fixture clipboard unavailable.");
+              if (window.terminalPaste.testMenuPaste) return window.terminalPaste.menuText ?? "";
               return "clipboard fixture " + ++window.terminalPaste.reads;
             }
             if (command === "clipboard_files") { window.terminalPaste.filePastes++; return []; }
@@ -63,10 +144,22 @@ export async function testTerminalPaste() {
         return JSON.stringify(actual) === JSON.stringify(values);
       }, values);
       await showTerminal();
+      await status.getByText("Ready", { exact: true }).waitFor();
+      await checkTerminalMenu(page, terminal, platform.startsWith("Macintosh"));
+      const options = page.getByRole("dialog", { name: "Options", exact: true });
+      const rightClick = options.getByRole("checkbox", { name: "Paste on right-click", exact: true });
+      const openTerminalSettings = async () => {
+        await page.getByRole("button", { name: "Options", exact: true }).click();
+        await options.getByRole("button", { name: "Terminal", exact: true }).click();
+      };
+      await openTerminalSettings();
+      assert.equal(await rightClick.isChecked(), false);
+      await rightClick.check();
+      await options.getByRole("button", { name: "Done", exact: true }).click();
+      await input.focus();
       await paneHint.waitFor();
       assert.equal(await paneHint.getAttribute("aria-live"), "polite");
       assert.equal(await paneHint.getAttribute("tabindex"), null);
-      await status.getByText("Ready", { exact: true }).waitFor();
       const copyDialog = page.getByRole("dialog", { name: "Copy", exact: true });
       await input.press("F5");
       assert.equal(await copyDialog.isVisible(), false);
@@ -99,11 +192,7 @@ export async function testTerminalPaste() {
       await paneHint.waitFor();
       await page.evaluate(() => { window.terminalPaste.clipboardError = false; });
       if (platform.startsWith("Windows")) {
-        const options = page.getByRole("dialog", { name: "Options", exact: true });
-        const openOptions = () => page.getByRole("button", { name: "Options", exact: true }).click();
-        await openOptions();
-        await options.getByRole("button", { name: "Terminal", exact: true }).click();
-        const rightClick = options.getByRole("checkbox", { name: "Paste on right-click", exact: true });
+        await openTerminalSettings();
         assert.equal(await rightClick.isChecked(), true);
         await rightClick.uncheck();
         await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
@@ -118,6 +207,8 @@ export async function testTerminalPaste() {
         await options.getByRole("textbox", { name: "New shortcut for Show or hide file panels" }).press("Control+Alt+o");
         await options.getByRole("button", { name: "Done", exact: true }).click();
         await surface.click({ button: "right" });
+        await page.getByRole("menu", { name: "Terminal actions", exact: true }).waitFor();
+        await page.keyboard.press("Escape");
         await input.press("Control+v");
         assert.equal(await page.evaluate(() => window.terminalPaste.reads), 2);
         await input.press("Control+Shift+v");
@@ -135,13 +226,28 @@ export async function testTerminalPaste() {
         await list.press("Control+v");
         await page.waitForFunction(() => window.terminalPaste.filePastes === 1);
         await page.reload();
-        await openOptions();
-        await options.getByRole("button", { name: "Terminal", exact: true }).click();
+        await openTerminalSettings();
         assert.equal(await rightClick.isChecked(), false);
+        await options.getByRole("button", { name: "Done", exact: true }).click();
+      } else {
+        await page.reload();
+        await openTerminalSettings();
+        assert.equal(await rightClick.isChecked(), true);
+        await rightClick.uncheck();
+        await options.getByRole("button", { name: "Done", exact: true }).click();
       }
+      const right = page.getByRole("listbox", { name: "right files", exact: true });
+      await right.press("Alt+F2");
+      await page.locator("#right-pane .location-popup").getByRole("button", { name: "SSH", exact: true }).click();
+      await right.getByRole("option", { name: /SSH fixture/ }).dblclick();
+      await right.getByRole("option", { name: /^fixture\.txt/ }).waitFor();
+      await page.getByRole("button", { name: "Toggle terminal", exact: true }).click();
+      await terminal.getByRole("heading", { name: "SSH terminal", exact: true }).waitFor();
+      await checkTerminalMenu(page, terminal, platform.startsWith("Macintosh"));
+      assert.equal(await page.evaluate(() => window.terminalPaste.remoteTerminal), true);
       await page.close();
     }
-    console.log("Verified terminal focus hints, shortcut routing, and clipboard paste with Windows, Linux, and macOS client settings.");
+    console.log("Verified terminal focus, context menu and direct paste in local and SSH sessions with Windows, Linux and macOS client settings.");
   } finally {
     await browser.close();
   }

@@ -480,7 +480,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
   refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
-  terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
+  terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value === true },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
   viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
   viewerMarkdownContentWidth: { group: "viewer", portable: true, read: (value) => value === "full" ? "full" :
