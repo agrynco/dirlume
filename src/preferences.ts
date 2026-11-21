@@ -290,6 +290,7 @@ export interface Preferences {
   shortcutSchemes: ShortcutScheme[];
   viewFontSizes: ViewFontSizes;
   viewerContentWidth?: number;
+  viewerMarkdownContentWidth?: number | "full";
   terminalResizeRows: number;
 }
 
@@ -443,6 +444,8 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
   viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
+  viewerMarkdownContentWidth: { group: "viewer", portable: true, read: (value) => value === "full" ? "full" :
+    readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
 };
 
 export const preferenceKeys = Object.keys(preferenceDefinitions) as (keyof Preferences)[];

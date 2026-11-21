@@ -2431,7 +2431,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {documents.map(({ id, file, editing, position, back, forward }) => (
           <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
-            viewerContentWidth={preferences.viewerContentWidth} colors={scheme?.colors}
+            viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
+            colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}

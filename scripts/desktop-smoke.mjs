@@ -9,7 +9,7 @@ import { testFtp } from "./ftp-smoke.mjs";
 import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testSystemTheme } from "./system-theme-smoke.mjs";
-import { testMarkdown } from "./markdown-smoke.mjs";
+import { testMarkdown, testViewerReadingArea } from "./markdown-smoke.mjs";
 import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
@@ -2258,6 +2258,7 @@ try {
   await testNativeQuickView(page, temp);
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
+  await testViewerReadingArea(page, attributes);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
