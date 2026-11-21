@@ -91,6 +91,57 @@ export async function testHeaderMenus(page, windows = false) {
     (windows ? ", including Windows title bar maximize and restore." : "."));
 }
 
+export async function testCommandIcons(page, native = false) {
+  const files = page.getByRole("listbox", { name: "left files", exact: true });
+  await files.focus();
+  const commands = await openMainMenu(page, "Commands");
+  const rows = await commands.locator("[data-menu-item]").evaluateAll((items) => items.map((item) => {
+    const icon = item.querySelector(".main-menu-action-icon");
+    return {
+      hidden: icon?.getAttribute("aria-hidden"), focusable: icon?.getAttribute("focusable"),
+      iconX: icon?.getBoundingClientRect().left,
+      labelX: item.querySelector(".main-menu-action-label")?.getBoundingClientRect().left,
+      shortcutX: item.querySelector("kbd")?.getBoundingClientRect().left,
+      fits: item.scrollWidth <= item.clientWidth,
+    };
+  }));
+  assert.equal(rows.length, native ? 15 : 13);
+  assert.ok(rows.every((row) => row.hidden === "true" && row.focusable === "false" && row.fits));
+  assert.equal(new Set(rows.map(({ iconX }) => iconX)).size, 1);
+  assert.equal(new Set(rows.map(({ labelX }) => labelX)).size, 1);
+  assert.equal(new Set(rows.map(({ shortcutX }) => shortcutX).filter((x) => x !== undefined)).size, 1);
+  if (native) {
+    await commands.getByRole("menuitem", { name: "MCP server", exact: true }).locator(".main-menu-action-icon").waitFor();
+    await commands.getByRole("menuitem", { name: "Check for updates", exact: true }).locator(".main-menu-action-icon").waitFor();
+  }
+  const git = commands.getByRole("menuitemradio", { name: "Git View", exact: true });
+  await page.keyboard.press("ArrowDown");
+  assert.ok(await git.evaluate((item) => item.matches(":focus-visible")));
+  const environment = commands.getByRole("menuitemradio", { name: "Environment variables", exact: true });
+  await environment.press("Enter");
+  await commands.waitFor({ state: "hidden" });
+  const variables = page.getByRole("region", { name: "Environment variables", exact: true });
+  await variables.locator(".environment-list").focus();
+  await openMainMenu(page, "Commands");
+  assert.equal(await environment.getAttribute("aria-checked"), "true");
+  assert.equal(await environment.locator(".main-menu-action-icon").count(), 1);
+  assert.equal(await environment.locator(".main-menu-action-check").getAttribute("aria-hidden"), "true");
+  assert.equal(await git.getAttribute("aria-disabled"), "true");
+  assert.ok(await git.evaluate((item) => {
+    const style = getComputedStyle(item);
+    return Number(style.opacity) < 1 && style.color === getComputedStyle(item.querySelector("svg")).color;
+  }));
+  await git.press("Enter");
+  assert.ok(await commands.isVisible());
+  await environment.click();
+  await files.waitFor();
+  assert.equal(await commands.isVisible(), false);
+  await files.focus();
+  const other = await openMainMenu(page, "Options");
+  assert.equal(await other.locator(".main-menu-action-icon").count(), 0);
+  await page.keyboard.press("Escape");
+}
+
 async function checkMenuBindings(page) {
   const bar = mainMenu(page);
   const focus = () => page.getByRole("listbox", { name: "left files", exact: true }).focus();
@@ -194,6 +245,11 @@ export async function testBrowserHeader(userAgent) {
     });
     await page.goto("http://dirlume.test/");
     await testHeaderMenus(page);
+    await testCommandIcons(page);
+    await page.setViewportSize({ width: 630, height: 600 });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await testCommandIcons(page);
+    await page.setViewportSize({ width: 1120, height: 730 });
     await page.locator('#left-files [data-tooltip="note.txt"]').click();
     await page.keyboard.press("F3");
     await page.getByRole("menubar", { name: "Document menu", exact: true }).waitFor();

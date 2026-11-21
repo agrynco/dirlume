@@ -1,4 +1,4 @@
 interface:
   display_name: "Dirlume Backlog Runner"
-  short_description: "Process Dirlume issues created by agrynco and release them"
-  default_prompt: "Use $dirlume-backlog-runner to process open Dirlume issues I created in order, merge each task into prerelease, and release the completed batch."
+  short_description: "Process Dirlume issues from Ready through release"
+  default_prompt: "Use $dirlume-backlog-runner to process the Dirlume project's Ready column in order and release the completed batch."

@@ -28,11 +28,11 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
 
   useLayoutEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => applyAppearance(theme, scheme);
+    const apply = () => applyAppearance(theme, scheme, document.documentElement, preferences.retainedFonts);
     apply();
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [theme, scheme]);
+  }, [theme, scheme, preferences.retainedFonts]);
 
   useEffect(() => {
     // Forcing a native Windows theme also overrides the system color query in WebView2.

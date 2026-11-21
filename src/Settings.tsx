@@ -1,5 +1,5 @@
 import { Button } from "./Button";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronDown, ChevronRight, Crosshair, Pencil, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { Dialog } from "./Dialog";
@@ -9,7 +9,7 @@ import { HistoryField } from "./HistoryField";
 import { SettingsPreview } from "./SettingsPreview";
 import { SettingsArchiveDialog, type SettingsArchiveAction } from "./SettingsArchiveDialog";
 import { parseSettingsArchive } from "./settingsArchive";
-import { builtInThemes, colorGroups, colorKeysForSurface, colorLabels, fontGroups, mermaidColors, viewerColors, type Surface } from "./appearance";
+import { builtInThemes, colorGroups, colorKeysForSurface, colorLabels, fontGroups, maxSchemeNameLength, mermaidColors, viewerColors, type Surface } from "./appearance";
 import { MenuAlignmentSetting, menuAlignmentTerms } from "./MenuAlignmentSetting";
 import { matchesSettings, SettingSearchLabel, SettingsSearchTerms } from "./SettingSearchLabel";
 import { api, describeError, windowsClient } from "./api";
@@ -110,6 +110,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [loadingArchive, setLoadingArchive] = useState(false);
   const [archiveError, setArchiveError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [schemeNaming, setSchemeNaming] = useState<{ id: string; closeAfter: boolean } | null>(null);
   const [buildVersion, setBuildVersion] = useState("");
   const { shortcutSchemes, activeShortcutScheme } = preferences;
   const activeScheme = shortcutSchemes.find(({ id }) => id === activeShortcutScheme);
@@ -135,7 +136,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       ...surfaceTerms(feature === "filePanels" ? [] : optionSurfaces[feature]));
   });
   const appearanceMatches = appearancePages.filter(({ id, label, terms }) => matches("Appearance", label, ...terms,
-    ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",
+    ...(id === "window" ? ["Color scheme", "Keep current fonts", "New scheme", "Scheme name", "Base theme", "Delete scheme",
+      "Manage custom color schemes", "Scheme to manage", ...preferences.schemes.map(({ name }) => name),
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar",
       "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const modesMatch = panelModeIds.filter((id) => matches("Panel modes", panelModeNames[id],
@@ -202,17 +204,36 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     }
   }
 
-  function apply() {
-    if (invalidModes.length || invalidSettings) return false;
-    if (!hasChanges) return true;
+  function apply(closeAfter: boolean, draft = preferences) {
+    if (invalidModes.length || invalidSettings) return;
+    if (JSON.stringify(draft) === JSON.stringify(saved)) {
+      if (closeAfter) close();
+      return;
+    }
+    const unnamed = draft.schemes.find(({ id, name, suggestedName }) => name === suggestedName &&
+      !saved.schemes.some((scheme) => scheme.id === id));
+    if (unnamed) {
+      setSchemeNaming({ id: unnamed.id, closeAfter });
+      return;
+    }
     try {
-      onChange(applyPreferences(preferences));
+      const schemes = draft.schemes.map(({ suggestedName, ...scheme }) => scheme);
+      onChange(applyPreferences({ ...draft, schemes }));
       setSaveError("");
-      return true;
+      if (closeAfter) close();
     } catch (error) {
       setSaveError(errorText(describeError(error)));
-      return false;
     }
+  }
+
+  const schemeToName = schemeNaming && preferences.schemes.find(({ id }) => id === schemeNaming.id);
+  function nameAndApply(name: string) {
+    if (!schemeNaming) return;
+    const draft = { ...preferences, schemes: preferences.schemes.map((scheme) =>
+      scheme.id === schemeNaming.id ? { ...scheme, name, suggestedName: undefined } : scheme) };
+    setSchemeNaming(null);
+    onChange(draft);
+    apply(schemeNaming.closeAfter, draft);
   }
 
   async function startImport() {
@@ -351,8 +372,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         ...preferences, panelModes: { ...preferences.panelModes, [modePage]: defaultPanelModes[modePage] },
       })}><RotateCcw /> {t("Reset")}</Button>}
       {(standalone || modePage) && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
-      <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={apply}>{t("Apply")}</Button>
-      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => { if (apply()) close(); }}>{t("Done")}</Button>
+      <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={() => apply(false)}>{t("Apply")}</Button>
+      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => apply(true)}>{t("Done")}</Button>
     </>}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
@@ -472,7 +493,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             </select>
           </label>
           {preferences.provider === "kswitcher" && (
-            <div className="field">
+            <div className="settings-path-field">
               <label htmlFor="kswitcher-folder"><SettingSearchLabel label="KSwitcher installation folder" /></label>
               <PathField id="kswitcher-folder" label={t("KSwitcher installation folder")} value={preferences.kswitcher}
                 browse="folder" showHidden={preferences.hidden} onChange={(path) => onChange({ ...preferences, kswitcher: path })} />
@@ -483,7 +504,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       ) : isFeaturePage(page) ? (
         <>
           {page === "terminal" && <div className="dialog-body settings-general">
-            <label className="view-font-setting unit-setting"><SettingSearchLabel label="Resize step (rows)" />
+            <label className="view-font-setting"><SettingSearchLabel label="Resize step (rows)" />
               <OptionalNumberInput label={t("Resize step (rows)")} size={preferences.terminalResizeRows === 1 ? undefined : preferences.terminalResizeRows}
                 fallback="1" min={1} max={maxTerminalResizeRows}
                 onChange={(rows) => onChange({ ...preferences, terminalResizeRows: rows ?? 1 })} />
@@ -577,6 +598,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </div>
       </div>
     </Dialog>
+    {schemeToName && <NameColorSchemeDialog key={schemeToName.id} proposed={schemeToName.name}
+      onConfirm={nameAndApply} onClose={() => setSchemeNaming(null)} />}
     {settingsArchive && <SettingsArchiveDialog action={settingsArchive} preferences={saved}
       onImport={applyImport} onClose={() => setSettingsArchive(null)} />}
     {archiveError && <Dialog title={t("Could not import settings")} onClose={() => setArchiveError("")} footer={
@@ -629,4 +652,29 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       </div>
     </Dialog>}
   </SettingsSearchTerms>;
+}
+
+function NameColorSchemeDialog({ proposed, onConfirm, onClose }: {
+  proposed: string;
+  onConfirm: (name: string) => void;
+  onClose: () => void;
+}) {
+  const form = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState(proposed);
+  useLayoutEffect(() => { input.current?.select(); }, []);
+  return <Dialog title={t("Name color scheme")} onClose={onClose} footer={<>
+    <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
+    <Button type="submit" form={form} className="primary" disabled={!name.trim()}>{t("Save scheme")}</Button>
+  </>}>
+    <form id={form} className="dialog-body" onSubmit={(event) => {
+      event.preventDefault();
+      if (name.trim()) onConfirm(name.trim());
+    }}>
+      <label className="field">{t("Scheme name")}
+        <input ref={input} data-initial-focus value={name} maxLength={maxSchemeNameLength}
+          onChange={(event) => setName(event.target.value)} />
+      </label>
+    </form>
+  </Dialog>;
 }

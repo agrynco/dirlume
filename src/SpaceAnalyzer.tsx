@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, File, Folder, HardDrive } from "lucide-react";
+import { ReadOnlyAddressBreadcrumbs } from "./AddressField";
 import { Button } from "./Button";
 import { describeError } from "./api";
 import { errorText, locale, t } from "./i18n";
@@ -219,7 +220,6 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
   const incomplete = result.phase === "partial" || unavailable(result.root, metric) > 0;
   const folder = result.nodes.get(zoom) ?? result.root;
   const entry = result.nodes.get(selected) ?? result.root;
-  const path = spacePath(place);
 
   useLayoutEffect(() => { closeButton.current?.focus(); }, []);
   useEffect(() => {
@@ -267,7 +267,7 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
     }
   }
 
-  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="files"
+  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="files" data-pane-side={side}
     onKeyDown={(event) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
@@ -279,7 +279,7 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
       <span className="pane-title"><HardDrive aria-hidden="true" />{t("Space Analyzer")}</span>
       <Button ref={closeButton} onClick={onClose}>{t("Close")}</Button>
     </header>
-    <div className="space-target" title={path}>{path}</div>
+    <div className="space-target"><ReadOnlyAddressBreadcrumbs place={place} path={spacePath(place)} /></div>
     <div className="space-toolbar">
       <div className="space-view-modes" role="group" aria-label={t("View")}>
         <Button aria-pressed={view === "tree"} onClick={() => setView("tree")}>{t("Tree")}</Button>
