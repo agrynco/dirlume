@@ -1,5 +1,5 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
-import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
+import { closeToolWindow, openOptionsWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -60,6 +60,14 @@ export async function testCompareLayouts(page, root) {
   await window.keyboard.press("Escape");
   await help.waitFor({ state: "hidden" });
   assert.equal(await layout().evaluate((element) => element === document.activeElement), true);
+  const options = await openOptionsWindow(page);
+  const settings = options.getByRole("dialog", { name: "Options", exact: true });
+  await settings.getByRole("button", { name: "Pick an element", exact: true }).click();
+  await window.locator(".appearance-picker").waitFor();
+  await list.getByText("switch = 100;", { exact: true }).click();
+  await settings.getByRole("heading", { name: "Compare files", exact: true }).waitFor();
+  await settings.getByLabel("Compare files text hex", { exact: true }).waitFor();
+  await closeToolWindow(options);
   await layout().selectOption("side-by-side");
   await connectors.check();
   await whitespace.check();

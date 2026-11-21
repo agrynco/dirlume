@@ -1225,6 +1225,7 @@ try {
   assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
     parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
   assert.equal(await editor.getByRole("button", { name: "Save", exact: true }).count(), 0);
+  await editor.locator(".document-modified").waitFor({ state: "hidden" });
   await page.keyboard.press("F10");
   await editor.waitFor({ state: "hidden" });
   assert.equal(await readFile(join(src, "draft.md"), "utf8"), "# Draft");
