@@ -41,6 +41,8 @@ mod screen_color;
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "desktop")]
+mod space_analyzer;
+#[cfg(feature = "desktop")]
 mod ssh;
 #[cfg(feature = "desktop")]
 mod terminal;

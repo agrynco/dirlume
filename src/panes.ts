@@ -31,6 +31,7 @@ export interface PaneState {
   place: Place | null;
   entries: Entry[];
   selected: string | null;
+  revealedHidden?: string;
   marked: string[];
   sizes: ReadonlyMap<string, SizeResult>;
   measuring: string[];
@@ -76,7 +77,8 @@ export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortS
     ? Array.from(pane.search.matches.values(), ({ entry, relativePath }) => ({ ...entry, name: relativePath }))
     : pane.entries;
   const visible = compareFileEntries(
-    entries.filter((entry) => (hidden || !entry.hidden) && (!filter || entry.name.toLocaleLowerCase().includes(filter))),
+    entries.filter((entry) => (hidden || !entry.hidden || entry.name === pane.revealedHidden && entry.name === pane.selected) &&
+      (!filter || entry.name.toLocaleLowerCase().includes(filter))),
     sort, available ? chosen : "name", settings, pane.marked,
     (entry) => pane.search?.matches.get(entry.name)?.entry.name ?? entry.name,
     (entry, field) => {
@@ -250,6 +252,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     omitted: listing.omitted,
     selected: samePlace && pane.selected &&
       (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
+    revealedHidden: samePlace && pane.revealedHidden && current.has(pane.revealedHidden) ? pane.revealedHidden : undefined,
     marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
     sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
     measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),

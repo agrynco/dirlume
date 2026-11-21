@@ -139,6 +139,9 @@ jobs:
       - name: Verify contextual offline Help
         if: github.event.action != 'closed'
         run: node scripts/contextual-help-smoke.mjs
+      - name: Verify Space Analyzer controls and provider scopes
+        if: github.event.action != 'closed'
+        run: node scripts/space-analyzer-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

@@ -122,6 +122,12 @@ fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
             omitted += 1;
             continue;
         };
+        #[cfg(windows)]
+        let link = metadata.is_symlink()
+            || metadata.file_attributes()
+                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                != 0;
+        #[cfg(not(windows))]
         let link = metadata.is_symlink();
         let file = metadata.is_file();
         if !(metadata.is_dir() || file || link) || local::name_component(&name).is_err() {
@@ -165,6 +171,9 @@ fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
                     .saturating_add(metadata.ctime_nsec() / 100),
             );
             item.allocated = metadata.blocks().checked_mul(512);
+            if file && !link && metadata.nlink() > 1 && metadata.ino() != 0 {
+                item.allocation_id = Some(format!("{}:{}", metadata.dev(), metadata.ino()));
+            }
         }
         entries.push(item);
     }

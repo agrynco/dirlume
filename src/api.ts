@@ -11,6 +11,7 @@ export interface Entry extends Partial<PanelMetadata> {
   modified: number | null;
   connection?: SavedConnection;
   description?: string | null;
+  allocationId?: string;
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -268,6 +269,8 @@ export const api = {
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
+  spaceMount: (path: string) => invoke<{ path: string; share: boolean }>("space_mount", { path }),
+  listSpaceDirectory: (root: string, segments: string[]) => invoke<Listing>("list_space_directory", { root, segments }),
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
   processIcons: (ids: ProcessId[]) => invoke<(string | null)[]>("process_icons", { ids }),

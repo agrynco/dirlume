@@ -19,6 +19,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
+import { canAnalyze, type SpacePlace } from "./spaceScan";
 import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
 import { reportFrontendError } from "./diagnostics";
@@ -66,6 +67,7 @@ import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const QuickView = lazy(() => import("./QuickView"));
+const SpaceAnalyzer = lazy(() => import("./SpaceAnalyzer"));
 const previousTerminalHeights = [28, 28, 38, 48, 58];
 const noCommands: TerminalCommand[] = [];
 
@@ -175,7 +177,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [focusedSide, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
-  const active = quickViewSource ?? focusedSide;
+  const [spaceAnalyzer, setSpaceAnalyzer] = useState<{ side: Side; place: SpacePlace } | null>(null);
+  const spaceSide = spaceAnalyzer?.side;
+  const active = quickViewSource ?? (spaceSide === focusedSide ? opposite(focusedSide) : focusedSide);
   const previewSide = quickViewSource === null ? null : opposite(quickViewSource);
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
@@ -237,7 +241,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const pane = panes[active];
   const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
-  const canSwapPanes = !previewSide && !panes.left.loading && !panes.right.loading && !busy;
+  const canSwapPanes = !previewSide && !spaceSide && !panes.left.loading && !panes.right.loading && !busy;
   const showingSortMenu = modal?.kind === "sortMenu" ? modal.side : undefined;
   const leftSort = useFileSortMetadata(panes.left, preferences.sortSettings, showingSortMenu === "left");
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
@@ -388,13 +392,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean) => {
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
-      const found = reveal === ".." ? hasParentRow(openedPlace) :
-        reveal !== undefined && openedListing.entries.some((entry) => entry.name === reveal);
+      const revealed = reveal !== undefined ? openedListing.entries.find((entry) => entry.name === reveal) : undefined;
+      const found = reveal === ".." ? hasParentRow(openedPlace) : !!revealed;
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
-        return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
+        return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
       });
       return true;
     };
@@ -510,7 +514,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       let timer: number | undefined;
       const refreshWatchedFolder = () => {
         const current = latest.current[side];
-        if (stopped || current.place?.kind !== "local" || current.place.path !== path) return;
+        if (stopped || side === spaceSide || current.place?.kind !== "local" || current.place.path !== path) return;
         if (pendingListings.current[side]) timer = window.setTimeout(refreshWatchedFolder, 150);
         else void load(side, current.place, "background");
       };
@@ -526,7 +530,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       };
     });
     return () => stopWatching.forEach((stop) => stop());
-  }, [leftPath, rightPath, load]);
+  }, [leftPath, rightPath, load, spaceSide]);
 
   const leftRemote = panes.left.place?.kind !== "local" ? panes.left.place : null;
   const rightRemote = panes.right.place?.kind !== "local" ? panes.right.place : null;
@@ -534,12 +538,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!leftRemote && !rightRemote) return;
     const timer = window.setInterval(() => {
       for (const side of ["left", "right"] as const) {
+        if (side === spaceSide) continue;
         const { place } = latest.current[side];
         if (place && place.kind !== "local" && place.kind !== "connections") void load(side, place, "background");
       }
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [leftRemote, rightRemote, load]);
+  }, [leftRemote, rightRemote, load, spaceSide]);
 
   useEffect(() => {
     persistPreferences(preferences);
@@ -836,7 +841,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function routeLocation(side: Side, place: Place, listing: Listing) {
+  function routeLocation(side: Side, place: Place, listing: Listing, reveal?: string) {
     showProcesses(side, false);
     cancelScan(side);
     invalidateListing(side);
@@ -853,8 +858,55 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         return applyListing(pane, place, listing, "refresh");
       }
       const history = pane.history.slice(0, pane.position + 1).filter((location) => location.kind === "local");
-      return applyListing({ ...pane, history, position: history.length - 1 }, place, listing, "push");
+      const opened = applyListing({ ...pane, history, position: history.length - 1 }, place, listing, "push");
+      const revealed = reveal === undefined ? undefined : listing.entries.find((entry) => entry.name === reveal);
+      return revealed ? { ...opened, selected: revealed.name, revealedHidden: revealed.hidden ? revealed.name : undefined, marked: [], filter: "" } : opened;
     });
+  }
+
+  const resolveSpacePlace = useCallback((place: SpacePlace): SpacePlace => {
+    if (place.kind !== "server" && !isFileServer(place)) return place;
+    const connections = Object.values(connected.current);
+    if (connections.some((connection) => sameConnection(connection, place))) return place;
+    const shared = connections.find((connection) => connection?.kind === place.kind &&
+      (connection.kind === "server" ? place.kind === "server" && connection.origin === place.origin && connection.share === place.share
+        : isFileServer(place) && connection.profileId === place.profileId));
+    return shared ? { ...place, id: shared.id } : place;
+  }, []);
+
+  function openSpaceAnalyzer(side: Side, place: SpacePlace) {
+    if (pendingListings.current[side]) invalidateListing(side);
+    setQuickViewSource(null);
+    setSpaceAnalyzer({ side, place });
+    setActive(opposite(side));
+  }
+
+  function closeSpaceAnalyzer() {
+    if (!spaceSide) return;
+    setSpaceAnalyzer(null);
+    setActive(spaceSide);
+    requestAnimationFrame(() => focus(spaceSide));
+  }
+
+  async function revealSpace(side: Side, place: SpacePlace, reveal?: string) {
+    const target = opposite(side);
+    if (place.kind !== "server" && !isFileServer(place) || sameConnection(connected.current[target], place)) {
+      if (processPanels[target]) showProcesses(target, false);
+      if (!await load(target, place, "push", reveal)) throw new Error(t("Could not open the selected location."));
+      requestAnimationFrame(() => focus(target));
+      return;
+    }
+    const { ticket, signal } = beginListing(target);
+    try {
+      const result = await waitForListing(readPlace(place), signal);
+      if (!result || ticket !== request.current[target]) return;
+      if (reveal !== undefined && !result.listing.entries.some((entry) => entry.name === reveal)) {
+        throw new Error(t("File no longer found: {0}", reveal));
+      }
+      routeLocation(target, result.place, result.listing, reveal);
+    } finally {
+      if (ticket === request.current[target]) delete pendingListings.current[target];
+    }
   }
 
   function open(side: Side, entry: Entry, selectParent = false) {
@@ -1172,7 +1224,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
-    if (previewSide || !windowsClient || item?.place.kind !== "local") return;
+    if (previewSide || spaceSide || !windowsClient || item?.place.kind !== "local") return;
     const { place, entry } = item;
     showProcesses(opposite(side), true, placePath(childPlace(place, entry.name)));
   }
@@ -1288,7 +1340,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function dropSide(x: number, y: number, local: boolean, source?: Side): Side | null {
     const side = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-pane]")?.dataset.dropPane;
-    if ((side !== "left" && side !== "right") || side === source || modal || helpTopic || activeDocument !== null) return null;
+    if ((side !== "left" && side !== "right") || side === source || side === spaceSide || modal || helpTopic || activeDocument !== null) return null;
     const pane = panes[side];
     return !pane.search && !pane.loading && !processPanels[side] &&
       (pane.place?.kind === "local" || (local && isFileServer(pane.place))) ? side : null;
@@ -1630,7 +1682,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function canSelectPanelMode(side: Side) {
     const place = panes[side].place;
-    return side !== previewSide && !panelsHidden && activeDocument === null && !processPanels[side] &&
+    return side !== previewSide && side !== spaceSide && !panelsHidden && activeDocument === null && !processPanels[side] &&
       !!place && place.kind !== "connections";
   }
 
@@ -1642,6 +1694,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function perform(command: Command, groupStep = 0) {
+    if (command === "analyzeSpace") {
+      if (!panesAvailable) return;
+      if (spaceAnalyzer && document.activeElement?.closest(".space-analyzer")) closeSpaceAnalyzer();
+      else if (filesAvailable && canAnalyze(pane.place)) openSpaceAnalyzer(active, pane.place);
+      return;
+    }
     if (command === "quickView") {
       if (!canToggleQuickView) return;
       setQuickViewSource(quickViewSource === null ? active : null);
@@ -1729,7 +1787,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     switch (command) {
       case "switchPane":
-        if (panelsHidden || previewSide) break;
+        if (panelsHidden || previewSide || spaceSide) break;
         if (document.activeElement === commandInput.current) setActive(opposite(active));
         else focus(opposite(active));
         break;
@@ -1766,7 +1824,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "leftLocations":
       case "rightLocations": {
         const side = command === "leftLocations" ? "left" : "right";
-        if (side === previewSide) break;
+        if (side === previewSide || side === spaceSide) break;
         if (panelsHidden) setPanelsHidden(false);
         setActive(side);
         requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
@@ -1919,6 +1977,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       bindingMatches(shortcuts[command], shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
       commands[command].key === physical && shortcuts[command].includes(physical));
     if (activeDocument !== null) return;
+    if (target.closest(".space-analyzer") && command !== "analyzeSpace" && command !== "menu") return;
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
@@ -1944,7 +2003,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
-    if (!event.repeat || (!["hidden", "attributes", "quickView", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
+    if (!event.repeat || (!["hidden", "attributes", "quickView", "analyzeSpace", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
       const groupStep = onFiles && shortcut === "ArrowLeft" && command === "firstRow" ? -rowsPerGroup.current[active] :
         onFiles && shortcut === "ArrowRight" && command === "lastRow" ? rowsPerGroup.current[active] : 0;
@@ -1976,7 +2035,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const panesAvailable = !panelsHidden && activeDocument === null;
   const filesAvailable = panesAvailable && !processPanels[active] && !pane.loading;
-  const canToggleQuickView = panesAvailable && (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
+  const canToggleQuickView = panesAvailable && !spaceSide && (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
   const previewFile = previewSide && filesAvailable ? currentFile : null;
   const previewName = currentItem?.entry.name ?? current?.name;
   const previewKey = previewFile ? JSON.stringify([
@@ -1996,7 +2055,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function paneMenu(side: Side): MenuGroup {
     const target = panes[side];
-    const available = panesAvailable && side !== previewSide && !target.loading;
+    const available = panesAvailable && side !== previewSide && side !== spaceSide && !target.loading;
     function inPane(command: "back" | "forward" | "parent" | "refresh", disabled: boolean) {
       return {
         ...menuCommand(command, !available || disabled),
@@ -2021,7 +2080,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           run: () => setPanelMode(side, id),
         })),
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
-        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null || side === previewSide, "Sources"),
+        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null || side === previewSide || side === spaceSide, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
@@ -2044,6 +2103,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     ] },
     { label: "Commands", items: [
       { ...menuCommand("quickView", !canToggleQuickView), checked: quickViewSource !== null },
+      menuCommand("analyzeSpace", !filesAvailable || !canAnalyze(pane.place)),
       menuCommand("search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       menuCommand("compare", !filesAvailable || comparison === null),
       menuCommand("copyFullPath", currentFullPath === null),
@@ -2118,8 +2178,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <main className="workspace" hidden={panelsHidden}
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
-          <Pane key={side} side={side} active={active === side} covered={side === previewSide} layout={preferences.layout} showHidden={preferences.hidden}
+          <Pane key={side} side={side} active={active === side} covered={side === previewSide || side === spaceSide} layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
+            preserveScroll={side === spaceSide}
+            onAnalyze={(place) => openSpaceAnalyzer(side, place)}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
             sortAvailable={!sorts[side].pending && sorts[side].canSort(sortMode(panes[side].sort.column))} sortPending={sorts[side].pending}
             onGroupRows={(rows) => { rowsPerGroup.current[side] = rows; }}
@@ -2174,6 +2236,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
+        {spaceAnalyzer && <Suspense fallback={<section className={"pane space-analyzer space-analyzer-" + spaceAnalyzer.side}>
+          <p className="pane-empty" role="status">{t("Scanning…")}</p>
+        </section>}>
+          <SpaceAnalyzer key={spaceAnalyzer.side} side={spaceAnalyzer.side} place={spaceAnalyzer.place}
+            resolvePlace={resolveSpacePlace} onClose={closeSpaceAnalyzer}
+            onReveal={(place, reveal) => revealSpace(spaceAnalyzer.side, place, reveal)} />
+        </Suspense>}
         {panesAvailable && previewSide && <Suspense fallback={<section className={`pane quick-view quick-view-${previewSide}`}>
           <p className="pane-empty" role="status">{t("Loading preview…")}</p>
         </section>}>
