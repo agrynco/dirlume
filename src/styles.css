@@ -1256,11 +1256,23 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .field-checkbox { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .field-checkbox input { flex: none; margin: 0; }
 .setting select { min-width: 156px; }
+.settings-layout label.setting,
+.settings-layout label.field:has(> :is(select, .editable-dropdown)),
+.settings-layout .view-font-setting,
+.settings-layout .settings-path-field {
+  display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 5px 8px; min-width: 0;
+}
+.settings-layout :is(.setting, .field, .view-font-setting) > :is(input, select) {
+  min-width: 0; max-width: 100%;
+}
+.settings-layout :is(.field > .editable-dropdown, .settings-path-field > .path-field) {
+  flex: 0 1 220px; min-width: 0; max-width: 100%;
+}
+.settings-layout .field-checkbox > input { order: -1; }
 .appearance-settings { display: grid; gap: 12px; min-height: 0; }
-.appearance-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.appearance-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .appearance-header .appearance-button { min-height: 34px; border-color: var(--line); }
-.favorite-schemes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
-.scheme-identity { grid-template-columns: minmax(0, 1fr) minmax(90px, 125px) auto; }
+.favorite-schemes { display: grid; gap: 8px; }
 .scheme-confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .scheme-confirm span { flex: 1; }
 .appearance-hint { color: var(--muted); }
@@ -1333,17 +1345,11 @@ button.color-swatch {
 .feature-font-sizes { grid-column: 1 / -1; min-width: 0; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .view-font-group { display: grid; gap: 7px; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius); }
 .reading-area-settings { padding-inline: min(.75em, 10px); }
-.view-font-setting { display: grid; grid-template-columns: minmax(0, 1fr) 94px; gap: 8px; align-items: center; }
-.view-font-setting input { width: 100%; }
-.unit-setting { display: flex; flex-wrap: wrap; row-gap: 5px; }
-.unit-setting > span { white-space: nowrap; }
-.unit-setting > input { margin-inline-start: auto; max-width: 100%; }
-.unit-setting > select { margin-inline-start: auto; max-width: 100%; }
-.view-font-setting.unit-setting > input { width: 94px; }
+.view-font-setting input { width: 94px; }
 
 .shortcut-scheme-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--line); }
-.shortcut-scheme-bar label { display: flex; flex: 1 1 220px; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.shortcut-scheme-bar select { flex: 1 1 110px; min-width: 0; max-width: 100%; }
+.shortcut-scheme-bar label { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; min-width: 0; }
+.shortcut-scheme-bar select { min-width: 0; max-width: 100%; }
 .shortcut-list { min-height: 0; overflow: auto; padding: 4px 14px; scrollbar-width: thin; }
 .shortcut-setting { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 8px; align-items: center; min-height: 34px; padding: 3px 0; border-bottom: 1px solid var(--subtle); }
 .shortcut-setting:last-child { border-bottom: 0; }

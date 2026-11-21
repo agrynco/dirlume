@@ -472,7 +472,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             </select>
           </label>
           {preferences.provider === "kswitcher" && (
-            <div className="field">
+            <div className="settings-path-field">
               <label htmlFor="kswitcher-folder"><SettingSearchLabel label="KSwitcher installation folder" /></label>
               <PathField id="kswitcher-folder" label={t("KSwitcher installation folder")} value={preferences.kswitcher}
                 browse="folder" showHidden={preferences.hidden} onChange={(path) => onChange({ ...preferences, kswitcher: path })} />
@@ -483,7 +483,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       ) : isFeaturePage(page) ? (
         <>
           {page === "terminal" && <div className="dialog-body settings-general">
-            <label className="view-font-setting unit-setting"><SettingSearchLabel label="Resize step (rows)" />
+            <label className="view-font-setting"><SettingSearchLabel label="Resize step (rows)" />
               <OptionalNumberInput label={t("Resize step (rows)")} size={preferences.terminalResizeRows === 1 ? undefined : preferences.terminalResizeRows}
                 fallback="1" min={1} max={maxTerminalResizeRows}
                 onChange={(rows) => onChange({ ...preferences, terminalResizeRows: rows ?? 1 })} />

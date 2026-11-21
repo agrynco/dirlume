@@ -189,7 +189,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           </label>
         </div>
         {active && (
-          <div className="appearance-header scheme-identity">
+          <div className="appearance-header">
             <label className="field"><SettingSearchLabel label="Scheme name" />
               <HistoryField historyKey="appearance-scheme-name" aria-label={t("Scheme name")} type="text" value={active.name}
                 maxLength={maxSchemeNameLength} onValueChange={(name) => update({ ...active, name })} />
@@ -245,7 +245,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
       {!selection && fontGroup === "viewer" && <>
         <fieldset className="view-font-group reading-area-settings">
           <legend><SettingSearchLabel label="Reading area" /></legend>
-          <label className="setting unit-setting"><SettingSearchLabel label="Max width (px)" aliases={["Maximum content width (px)", "Full width"]} />
+          <label className="setting"><SettingSearchLabel label="Max width (px)" aliases={["Maximum content width (px)", "Full width"]} />
             <OptionalNumberInput label={t("Max width (px)")} size={preferences.viewerContentWidth} fallback={t("Full width")}
               min={minViewerContentWidth} max={maxViewerContentWidth}
               onChange={(viewerContentWidth) => onChange({ ...preferences, viewerContentWidth })} />
@@ -273,7 +273,7 @@ function MarkdownWidthSettings({ preferences, onChange }: {
   const setWidth = (viewerMarkdownContentWidth?: Preferences["viewerMarkdownContentWidth"]) =>
     onChange({ ...preferences, viewerMarkdownContentWidth });
   return <>
-    <label className="setting unit-setting">
+    <label className="setting">
       <SettingSearchLabel label="Markdown reading width" aliases={["Use shared width", "Full width", "Custom width"]} />
       <select aria-label={t("Markdown reading width")} value={mode} onChange={({ target }) =>
         setWidth(target.value === "custom" ? preferences.viewerContentWidth ?? 960 : target.value === "full" ? "full" : undefined)}>
@@ -282,7 +282,7 @@ function MarkdownWidthSettings({ preferences, onChange }: {
         <option value="custom">{t("Custom width")}</option>
       </select>
     </label>
-    {typeof width === "number" && <label className="setting unit-setting">
+    {typeof width === "number" && <label className="setting">
       <SettingSearchLabel label="Markdown max width (px)" />
       <OptionalNumberInput label={t("Markdown max width (px)")} size={width} fallback=""
         min={minViewerContentWidth} max={maxViewerContentWidth} onChange={setWidth} />
