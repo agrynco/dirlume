@@ -10,6 +10,8 @@ Choose **Classic blue** in **Options → Appearance → Window → Color scheme*
 
 Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
 
+Use **Manage custom color schemes** on the same page to rename a saved scheme or delete an inactive one without changing the current appearance. A custom scheme currently applied by **System** is protected from deletion. Deleting an inactive favorite restores the matching built-in Light or Dark favorite. Use **Apply** or **Done** to save the changes.
+
 Use **Export settings** in **Options** to save selected settings groups and custom color schemes to a JSON file. To share only a palette, select its scheme. On another installation, use **Import settings** to choose what to apply from the file. Dirlume asks for confirmation before replacing a local color scheme. Imported schemes are available under **Options → Appearance → Window → Color scheme**.
 
 The JSON archive includes portable preferences such as panel modes and keyboard shortcuts. Dirlume migrates supported older files and skips settings it no longer recognizes. The KSwitcher installation folder is configured locally in **Options → General**.
