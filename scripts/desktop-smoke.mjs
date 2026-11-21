@@ -16,7 +16,7 @@ import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
-import { editPaneAddress } from "./pane-address-smoke.mjs";
+import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
@@ -367,6 +367,12 @@ try {
   const branchFolder = join(src, "breadcrumb-branch");
   const branchLeaf = join(branchFolder, "breadcrumb-leaf");
   await mkdir(branchLeaf, { recursive: true });
+  await writeFile(join(branchLeaf, "focus-fixture.txt"), "address focus fixture");
+  for (const side of ["left", "right"]) {
+    await navigate(side, branchLeaf);
+    await checkAddressFocusLoss(page, side, branchLeaf, "focus-fixture.txt", "breadcrumb-branch");
+  }
+  await navigate("right", dst);
   await navigate("left", branchLeaf);
   const leftBreadcrumbs = page.getByRole("navigation", { name: "left path breadcrumbs" });
   const currentCrumb = leftBreadcrumbs.locator('[aria-current="location"]');
