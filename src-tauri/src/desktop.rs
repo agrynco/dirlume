@@ -160,15 +160,31 @@ pub(crate) async fn set_appearance_picker(window: WebviewWindow, picking: bool) 
 pub(crate) async fn blocking<T: Send + 'static>(
     task: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
-    tauri::async_runtime::spawn_blocking(task)
-        .await
-        .map_err(|error| {
-            if matches!(&error, tauri::Error::JoinError(join) if join.is_panic()) {
-                diagnostics::PANIC_REJECTION.to_owned()
-            } else {
-                message(error)
-            }
-        })?
+    blocking_worker(None, task).await
+}
+
+pub(crate) async fn blocking_for<T: Send + 'static>(
+    command: &'static str,
+    task: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    blocking_worker(Some(command), task).await
+}
+
+async fn blocking_worker<T: Send + 'static>(
+    command: Option<&'static str>,
+    task: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tauri::async_runtime::spawn_blocking(move || {
+        diagnostics::worker(command, task).map_err(message)?
+    })
+    .await
+    .map_err(|error| {
+        if matches!(&error, tauri::Error::JoinError(join) if join.is_panic()) {
+            diagnostics::PANIC_REJECTION.to_owned()
+        } else {
+            message(error)
+        }
+    })?
 }
 
 #[tauri::command]
@@ -279,7 +295,10 @@ async fn installed_fonts() -> Result<Vec<String>> {
 
 #[tauri::command]
 async fn list_directory(path: String) -> Result<local::Listing> {
-    blocking(move || local::list(local::absolute(&path).map_err(message)?).map_err(message)).await
+    blocking_for("list_directory", move || {
+        local::list(local::absolute(&path).map_err(message)?).map_err(message)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1443,7 +1462,10 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
 
 #[tauri::command]
 async fn read_text(directory: String, name: String) -> Result<TextDocument> {
-    blocking(move || load_text(&selected(&directory, &name).map_err(message)?)).await
+    blocking_for("read_text", move || {
+        load_text(&selected(&directory, &name).map_err(message)?)
+    })
+    .await
 }
 
 #[derive(Serialize)]
@@ -1891,7 +1913,7 @@ async fn save_ftp_text(
 
 #[tauri::command]
 async fn save_text(directory: String, name: String, original: String, text: String) -> Result<()> {
-    blocking(move || {
+    blocking_for("save_text", move || {
         let path = selected(&directory, &name).map_err(message)?;
         save_local_text(&path, &original, &text)
     })

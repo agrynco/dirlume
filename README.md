@@ -261,7 +261,9 @@ Dirlume appends one JSON object per error to `diagnostics.jsonl` in the applicat
 - Linux: `$XDG_DATA_HOME/io.github.agrynco.dirlume/logs/diagnostics.jsonl` (defaults to `~/.local/share`)
 - macOS: `~/Library/Application Support/io.github.agrynco.dirlume/logs/diagnostics.jsonl`
 
-Each entry records the failed operation, an error code, a timestamp in Unix milliseconds, and up to 32 recent actions in chronological order. Successful actions remain in memory. The log persists between sessions and records only allowlisted operation names and error codes, along with numeric OS error codes when available. It omits paths, command input, credentials, URLs, raw error text, and file contents.
+Each entry records the failed operation, an error code, a timestamp in Unix milliseconds, and up to 32 recent actions in chronological order. Successful actions remain in memory. The log persists between sessions and uses allowlisted operation names and error codes, along with numeric OS error codes when available. It omits user and absolute build paths, command input, credentials, URLs, raw error text, and file contents.
+
+For Rust panics, the `panic` object includes the desktop build, platform, architecture and, when known, the repository-relative Rust source path and line. Use the build number to locate the matching GitHub Actions build and source revision. The `subsystem` and `command` fields describe the failing worker when that context is available. An outcome of `recovered` means a desktop worker caught the panic. Other panics report `unknown`. A missing source, subsystem, or command is represented by `null`.
 
 ## CI and releases
 

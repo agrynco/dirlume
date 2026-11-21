@@ -1,4 +1,8 @@
-use std::{env, fs, io::ErrorKind, path::PathBuf};
+use std::{
+    env, fs, io,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     println!("cargo:rerun-if-env-changed=DIRLUME_BUILD_NUMBER");
@@ -6,6 +10,7 @@ fn main() {
         env::var("CARGO_PKG_VERSION").expect("Cargo must provide the product version");
     if env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         bundle_release_highlights(&version);
+        panic_source_manifest().expect("Could not prepare the panic source manifest");
     }
     if let Ok(number) = std::env::var("DIRLUME_BUILD_NUMBER") {
         assert!(
@@ -21,6 +26,30 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         tauri_build::build();
     }
+}
+
+fn panic_source_manifest() -> io::Result<()> {
+    fn collect(directory: &Path, output: &mut Vec<String>) -> io::Result<()> {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                collect(&path, output)?;
+            } else if file_type.is_file()
+                && path.extension().is_some_and(|extension| extension == "rs")
+            {
+                output.push(path.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        Ok(())
+    }
+    println!("cargo:rerun-if-changed=src");
+    let mut paths = Vec::new();
+    collect(Path::new("src"), &mut paths)?;
+    paths.sort_unstable();
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"));
+    fs::write(output.join("panic-sources.txt"), paths.join("\n"))
 }
 
 fn bundle_release_highlights(version: &str) {

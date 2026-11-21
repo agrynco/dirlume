@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::{
-    desktop::{blocking, message, Result},
+    desktop::{blocking_for, message, Result},
     local, terminal,
 };
 
@@ -77,7 +77,7 @@ pub async fn complete_command(
     }
     let serial = queue.serial.fetch_add(1, Ordering::Relaxed) + 1;
     let queue = queue.inner().clone();
-    blocking(move || {
+    blocking_for("complete_command", move || {
         let _worker = queue.worker.lock().map_err(message)?;
         if queue.serial.load(Ordering::Relaxed) != serial {
             return Ok(CompletionBatch::default());

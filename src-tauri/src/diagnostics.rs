@@ -1,7 +1,9 @@
 use std::{
+    cell::RefCell,
     collections::VecDeque,
     fs::{self, OpenOptions},
     io::Write,
+    panic::{self, AssertUnwindSafe, PanicHookInfo},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
@@ -165,6 +167,63 @@ struct Entry<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     os_code: Option<i32>,
     recent_actions: &'a VecDeque<Action>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    panic: Option<&'a PanicDetails>,
+}
+
+#[derive(Serialize)]
+struct PanicSource {
+    path: String,
+    line: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PanicOutcome {
+    Unknown,
+    Recovered,
+}
+
+#[derive(Serialize)]
+struct PanicDetails {
+    build: &'static str,
+    platform: &'static str,
+    architecture: &'static str,
+    source: Option<PanicSource>,
+    subsystem: Option<&'static str>,
+    command: Option<&'static str>,
+    outcome: PanicOutcome,
+}
+
+struct WorkerScope {
+    command: Option<&'static str>,
+    panics: Vec<(u64, PanicDetails, VecDeque<Action>)>,
+}
+
+thread_local! {
+    static WORKER_SCOPE: RefCell<Option<WorkerScope>> = const { RefCell::new(None) };
+}
+
+fn panic_source(file: &str, line: u32) -> Option<PanicSource> {
+    if file.len() > 512 || line == 0 {
+        return None;
+    }
+    let normalized = file.replace('\\', "/");
+    let manifest = env!("CARGO_MANIFEST_DIR").replace('\\', "/");
+    let relative = normalized.strip_prefix("src-tauri/").unwrap_or_else(|| {
+        normalized
+            .strip_prefix(&manifest)
+            .and_then(|path| path.strip_prefix('/'))
+            .unwrap_or(&normalized)
+    });
+    let known = include_str!(concat!(env!("OUT_DIR"), "/panic-sources.txt"));
+    if relative.len() > 160 || !known.lines().any(|path| path == relative) {
+        return None;
+    }
+    Some(PanicSource {
+        path: format!("src-tauri/{relative}"),
+        line,
+    })
 }
 
 struct Diagnostics {
@@ -205,9 +264,89 @@ impl Diagnostics {
             code,
             os_code: os_code.filter(|code| matches!(code, 1..=65535)),
             recent_actions: actions,
+            panic: None,
         };
         let _ = append(&self.path, &entry);
     }
+
+    fn write_panic(&self, timestamp_ms: u64, details: &PanicDetails, actions: &VecDeque<Action>) {
+        let entry = Entry {
+            timestamp_ms,
+            operation: "native_runtime",
+            code: FailureCode::Panic,
+            os_code: None,
+            recent_actions: actions,
+            panic: Some(details),
+        };
+        let _ = append(&self.path, &entry);
+    }
+
+    fn capture_panic(&self, info: &PanicHookInfo<'_>) {
+        let timestamp_ms = timestamp();
+        let source = info
+            .location()
+            .and_then(|location| panic_source(location.file(), location.line()));
+        let actions = self
+            .actions
+            .try_lock()
+            .map(|actions| actions.clone())
+            .unwrap_or_default();
+        let mut entry = Some((
+            PanicDetails {
+                build: crate::BUILD_VERSION,
+                platform: std::env::consts::OS,
+                architecture: std::env::consts::ARCH,
+                source,
+                subsystem: None,
+                command: None,
+                outcome: PanicOutcome::Unknown,
+            },
+            actions,
+        ));
+        let _ = WORKER_SCOPE.try_with(|scope| {
+            let Ok(mut current) = scope.try_borrow_mut() else {
+                return;
+            };
+            let Some(scope) = current.as_mut() else {
+                return;
+            };
+            let Some((mut details, actions)) = entry.take() else {
+                return;
+            };
+            details.subsystem = Some("desktop_worker");
+            details.command = scope.command;
+            scope.panics.push((timestamp_ms, details, actions));
+        });
+        if let Some((details, actions)) = entry {
+            self.write_panic(timestamp_ms, &details, &actions);
+        }
+    }
+}
+
+fn run_worker<T>(
+    log: Option<&Diagnostics>,
+    command: Option<&'static str>,
+    task: impl FnOnce() -> T,
+) -> Result<T, &'static str> {
+    let previous = WORKER_SCOPE.replace(Some(WorkerScope {
+        command: command.and_then(operation_name),
+        panics: Vec::new(),
+    }));
+    let result = panic::catch_unwind(AssertUnwindSafe(task));
+    if let (Some(log), Some(scope)) = (log, WORKER_SCOPE.replace(previous)) {
+        for (timestamp_ms, mut details, actions) in scope.panics {
+            details.outcome = PanicOutcome::Recovered;
+            log.write_panic(timestamp_ms, &details, &actions);
+        }
+    }
+    result.map_err(|_| PANIC_REJECTION)
+}
+
+pub(crate) fn worker<T>(
+    command: Option<&'static str>,
+    task: impl FnOnce() -> T,
+) -> Result<T, &'static str> {
+    run_worker(LOG.get(), command, task)
 }
 
 fn timestamp() -> u64 {
@@ -255,10 +394,7 @@ pub fn setup(identifier: &str) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if let Some(log) = LOG.get() {
-            // A panic can occur while this same thread owns the history lock.
-            if let Ok(actions) = log.actions.try_lock() {
-                log.write("native_runtime", FailureCode::Panic, None, &actions);
-            }
+            log.capture_panic(info);
         }
         previous(info);
     }));
@@ -321,6 +457,76 @@ pub async fn report_diagnostic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panic_reports_are_bounded_and_distinguish_recovered_workers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagnostics.jsonl");
+        let log = std::sync::Arc::new(Diagnostics::new(path.clone()));
+        let thread = std::thread::current().id();
+        let previous = std::sync::Arc::new(panic::take_hook());
+        let other_hook = previous.clone();
+        let hook_log = log.clone();
+        panic::set_hook(Box::new(move |info| {
+            if std::thread::current().id() == thread {
+                hook_log.capture_panic(info);
+            } else {
+                other_hook(info);
+            }
+        }));
+
+        let line = std::cell::Cell::new(0);
+        let recovered = run_worker::<()>(Some(&log), Some("read_text"), || {
+            line.set(line!() + 1);
+            panic!("private fixture payload")
+        });
+        let other_log = log.clone();
+        let other = std::thread::spawn(move || other_log.remember("list_ftp")).join();
+        let unscoped_worker =
+            run_worker::<()>(Some(&log), None, || panic!("unrelated fixture payload"));
+        let history_guard = log.actions.lock().unwrap();
+        let unknown = panic::catch_unwind(|| panic!("C:\\private\\fixture.txt"));
+        drop(history_guard);
+        panic::set_hook(Box::new(move |info| previous(info)));
+
+        assert_eq!(recovered, Err(PANIC_REJECTION));
+        assert!(other.is_ok());
+        assert_eq!(unscoped_worker, Err(PANIC_REJECTION));
+        assert!(unknown.is_err());
+        let raw = fs::read_to_string(path).unwrap();
+        assert!(!raw.contains("payload") && !raw.contains("private") && !raw.contains("backtrace"));
+        let entries: Vec<serde_json::Value> = raw
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(entries.len(), 3);
+        let first = &entries[0];
+        assert_eq!(first["operation"], "native_runtime");
+        assert_eq!(first["code"], "panic");
+        assert_eq!(first["recentActions"], serde_json::json!([]));
+        assert_eq!(first["panic"]["build"], crate::BUILD_VERSION);
+        assert_eq!(first["panic"]["platform"], std::env::consts::OS);
+        assert_eq!(first["panic"]["architecture"], std::env::consts::ARCH);
+        assert_eq!(
+            first["panic"]["source"]["path"],
+            "src-tauri/src/diagnostics.rs"
+        );
+        assert_eq!(first["panic"]["source"]["line"], line.get());
+        assert_eq!(first["panic"]["source"].as_object().unwrap().len(), 2);
+        assert_eq!(first["panic"]["subsystem"], "desktop_worker");
+        assert_eq!(first["panic"]["command"], "read_text");
+        assert_eq!(first["panic"]["outcome"], "recovered");
+        assert_eq!(entries[1]["recentActions"][0]["operation"], "list_ftp");
+        assert!(entries[1]["panic"]["command"].is_null());
+        assert_eq!(entries[2]["recentActions"], serde_json::json!([]));
+        assert_eq!(entries[2]["panic"]["outcome"], "unknown");
+        assert!(entries[2]["panic"]["subsystem"].is_null());
+        assert!(entries[2]["panic"]["command"].is_null());
+        assert!(panic_source("/home/build/other/src/diagnostics.rs", 1).is_none());
+        assert!(panic_source("src/../src/diagnostics.rs", 1).is_none());
+        assert!(panic_source(&"x".repeat(513), 1).is_none());
+        assert!(panic_source("src/diagnostics.rs", 0).is_none());
+    }
 
     #[test]
     fn retains_recent_actions_in_order_and_writes_only_for_failure() {
