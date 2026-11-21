@@ -21,6 +21,7 @@ export async function testScreenColor(page) {
     $window.WindowStyle = 'None'
     $window.ResizeMode = 'NoResize'
     $window.Topmost = $true
+    $window.ShowActivated = $false
     $brush = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(36, 89, 120))
     $window.Background = $brush
     $surface = [Windows.Controls.Border]::new()
