@@ -12,7 +12,7 @@ export function topicForControl(target: EventTarget | null, fallback: HelpTopic)
 }
 
 export function helpIsOpen() {
-  return document.querySelector("dialog[data-context-help]:modal") !== null;
+  return document.querySelector("dialog[data-context-help]") !== null;
 }
 
 export function useHelpShortcut(bindings: readonly string[], fallback: HelpTopic) {

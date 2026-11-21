@@ -52,7 +52,9 @@ async function openHelp(page, control, id, helpLabel = "Help") {
 async function closeHelp(page, help, previous) {
   await page.keyboard.press("Escape");
   await help.waitFor({ state: "hidden" });
-  assert.equal(await previous.evaluate((node) => node === document.activeElement), true);
+  const control = await previous.elementHandle();
+  try { await page.waitForFunction((node) => document.activeElement === node, control, { timeout: 8000 }); }
+  finally { await control.dispose(); }
 }
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -79,7 +81,9 @@ try {
   await page.keyboard.press("Escape");
   await picker.waitFor({ state: "hidden" });
 
-  await files.press(await page.evaluate(() => /Macintosh/.test(navigator.userAgent)) ? "Meta+l" : "Control+l");
+  const breadcrumbs = page.locator("#left-path .address-breadcrumbs");
+  await breadcrumbs.hover();
+  await breadcrumbs.getByRole("button", { name: "Edit left path", exact: true }).click();
   const address = page.locator("#left-address");
   await address.fill("Unsubmitted draft");
   await openHelp(page, address, "paneAddress");
@@ -171,6 +175,7 @@ try {
       const selected = await files.getAttribute("aria-activedescendant");
       await scanPane.getByRole("button", { name: "Analyze space", exact: true }).click();
       const analyzer = workspace.getByRole("region", { name: "Space Analyzer", exact: true });
+      const close = analyzer.getByRole("button", { name: "Close", exact: true });
       const stop = analyzer.getByRole("button", { name: "Stop", exact: true });
       const treemap = analyzer.getByRole("button", { name: "Treemap", exact: true });
       const metric = analyzer.getByRole("combobox", { name: "Size metric", exact: true });
@@ -179,15 +184,13 @@ try {
       await workspace.keyboard.press("F1");
       await currentTopic(guide, "paneSources").waitFor();
       await guide.getByText(`This control changes the source for the ${other} pane.`, { exact: true }).waitFor();
-      await workspace.keyboard.press("Escape");
-      await guide.waitFor({ state: "hidden" });
+      await closeHelp(workspace, guide, close);
 
       await analyzer.locator(".space-target").hover();
       await workspace.keyboard.press("F1");
       await currentTopic(guide, "spacePath").waitFor();
       assert.match(await guide.locator(".help-reading").innerText(), /root being scanned/);
-      await workspace.keyboard.press("Escape");
-      await guide.waitFor({ state: "hidden" });
+      await closeHelp(workspace, guide, close);
 
       await treemap.focus();
       await drive.hover();
@@ -205,7 +208,7 @@ try {
       await workspace.evaluate(() => window.finishContextScan());
       await stop.waitFor({ state: "hidden" });
       await closeHelp(workspace, guide, analyzer.getByRole("treegrid"));
-      await analyzer.getByRole("button", { name: "Close", exact: true }).click();
+      await close.click();
     }
     await workspace.close();
   }
