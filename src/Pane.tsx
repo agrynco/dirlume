@@ -216,8 +216,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return () => { cancelled = true; };
   }, [localFolder, pane.loading, pane.entries]);
   const free = localFolder && space?.folder === localFolder ? space.value : null;
-  const spaceControl = !pane.loading && !processView && canAnalyze(pane.place)
-    ? <SpaceControl place={pane.place} free={free} onAnalyze={onAnalyze} disabled={spaceDisabled} /> : null;
+  const spaceControl = !processView && canAnalyze(pane.place)
+    ? <SpaceControl place={pane.place} free={free} onAnalyze={onAnalyze} disabled={spaceDisabled || pane.loading} /> : null;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
   useLayoutEffect(() => {
