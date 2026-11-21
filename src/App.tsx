@@ -735,7 +735,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }).finally(() => setModal((current) => current?.kind === "whatsNew" ? null : current));
   }
 
+  function workspaceMenuHasFocus() {
+    return !!document.activeElement?.closest(".main-menu, .location-popup");
+  }
+
   function focus(side: Side) {
+    if (workspaceMenuHasFocus()) return;
     side = quickViewSource ?? side;
     setActive(side);
     document.getElementById(side + (environmentPanels[side] ? "-environment" : "-files"))?.focus();
@@ -748,6 +753,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   function closeSourceMenu(restoreFocus: boolean) {
     setSourceMenu(null);
     if (restoreFocus) requestAnimationFrame(() => {
+      if (workspaceMenuHasFocus()) return;
       const previous = sourceMenu?.returnFocus;
       if (previous?.isConnected && !previous.closest("[inert], [hidden]")) previous.focus({ preventScroll: true });
       else focus(active);
@@ -770,7 +776,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function focusRevealedSide(side: Side) {
     requestAnimationFrame(() => {
-      if (document.activeElement?.closest(".main-menu, .location-popup")) return;
+      if (workspaceMenuHasFocus()) return;
       setActive(side);
       document.getElementById(side + "-files")?.focus({ preventScroll: true });
     });
@@ -1379,9 +1385,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   function showProcesses(side: Side, visible: boolean, path?: string) {
     if (visible) cancelFolderOperation(side);
     setProcessPanels((panels) => ({ ...panels, [side]: visible ? { path } : null }));
-    requestAnimationFrame(() => {
-      if (!document.activeElement?.closest(".location-popup")) focus(side);
-    });
+    requestAnimationFrame(() => focus(side));
   }
 
   function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
