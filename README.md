@@ -40,6 +40,8 @@ Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → 
 
 Click the free-space indicator or **Analyze space** to scan the folder shown in that pane. The adjacent arrow offers the containing volume, share, or connection root when available. The tree and treemap show file sizes or allocated storage, with percentages relative to each item's parent. **Show in other pane** opens a folder or selects a file there. **Stop** keeps partial results, **Rescan** repeats the same scope, and **Close** restores the file list. Configure the **Analyze space** binding in **Options → Keyboard shortcuts**.
 
+The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
+
 Set **Main menu position** under **Options → General**. Set **Action button width** under **Options → Main File Panels** to switch between compact and full-width buttons. Turn on **Hide action button icons** for a text-only File actions bar in any panel layout.
 
 Dirlume bundles **GoMono Nerd Font Mono** from [Nerd Fonts v3.5.1](https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1). By default, file panels use it at **15 px**, and the viewer, editor, and terminal use it at **18 px**. Menus, toolbars, and dialogs use the system interface font at **14 px**. Choose it by name in the font picker or clear an override to use the default. The bundled faces work offline. The [font notices](src/assets/fonts/GoMono-NOTICE.txt) and upstream licenses are included in the desktop packages.

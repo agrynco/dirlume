@@ -87,6 +87,11 @@ export async function testTerminalEnvironment(page) {
   await setting(true);
   try {
     await run(`$global:DirlumeSmokeSession = 'initial'; ${read}`, "missing");
+    for (const side of ["left", "right"]) {
+      const status = page.locator("#" + side + "-pane .pane-footer > .pane-status-line");
+      await status.waitFor();
+      assert.equal(await status.count(), 1);
+    }
     await saveInApp("%USERPROFILE%\\dirlume-env-probe", "expandable");
     assert.deepEqual(userEnvironment({ name: variable, read: true }), { value: "%USERPROFILE%\\dirlume-env-probe", kind: "ExpandString" });
     await notice.waitFor();

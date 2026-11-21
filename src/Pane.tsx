@@ -584,13 +584,6 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>
       </div>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
-      {statusColumns.length > 0 && <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns) }}>
-        {current && current.name !== ".." && statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
-          data-tooltip={itemValue(current, field)}>
-          {isNameField(field) ? <>{field === "markedName" && markedSet.has(current.name) && <Check aria-hidden="true" />}
-            {renderName(current, field, false)}</> : itemValue(current, field)}
-        </span>)}
-      </div>}
       <footer className="pane-footer">
         {pane.loading ? <div className="pane-progress">
           <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
@@ -603,17 +596,39 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
           </Button>
         </div> : <>
-          <span className="pane-counts">{search ? countText(entries.length, "match") :
-            <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
-          {pane.measuring.length > 0 ? <div className="pane-measurement">
+          <div className="pane-status-line">
+            {current && current.name !== ".." && statusColumns.length > 0 &&
+              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns) }}
+                data-tooltip={statusColumns.map(({ field }) => itemValue(current, field)).filter(Boolean).join(" · ")}>
+                {statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
+                  data-tooltip={itemValue(current, field)}>
+                  {isNameField(field) ? <>{field === "markedName" && markedSet.has(current.name) && <Check aria-hidden="true" />}
+                    {renderName(current, field, false)}</> : itemValue(current, field)}
+                </span>)}
+              </div>}
+            <div className="pane-summary">
+              <span className="pane-counts" data-tooltip={search ? countText(entries.length, "match") :
+                countText(folders, "folder") + " · " + countText(folderItems.length - folders, "file")}>
+                <span className="pane-counts-full">{search ? countText(entries.length, "match") :
+                  <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
+                <span className="pane-counts-compact" aria-hidden="true">
+                  {search ? <><Search />{entries.length.toLocaleString(locale())}</> :
+                    <><Folder />{folders.toLocaleString(locale())}<File />{(folderItems.length - folders).toLocaleString(locale())}</>}
+                </span>
+              </span>
+              {marked.length > 0 ? <span className="pane-marked">{t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes))}</span> :
+                <span className="pane-note">{sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" :
+                  pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
+              {!twin && spaceControl}
+            </div>
+          </div>
+          {pane.measuring.length > 0 && <div className="pane-progress pane-measurement">
             <div className="pane-progress-status" role="status">
               <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
             </div>
             <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
               shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
-          </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
-            sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
-          {!twin && spaceControl}
+          </div>}
         </>}
       </footer>
       </>}

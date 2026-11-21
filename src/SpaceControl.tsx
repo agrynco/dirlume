@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, HardDrive } from "lucide-react";
 import { Button } from "./Button";
 import { t } from "./i18n";
 import { formatSize } from "./panes";
@@ -29,11 +29,12 @@ export function SpaceControl({ place, free, onAnalyze, disabled }: {
   return <div className="space-control">
     <Button className="space-control-main" aria-label={t("Analyze space")} tooltip={capacity || t("Analyze space")}
       onClick={() => onAnalyze(place)} disabled={disabled}>
+      <HardDrive className="space-control-icon" aria-hidden="true" />
       {free ? <>
         <span className="pane-free-full">{capacity}</span>
         <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
         <span className="space-meter" aria-hidden="true"><span style={{ width: used + "%" }} /></span>
-      </> : t("Analyze space")}
+      </> : <span className="space-control-label">{t("Analyze space")}</span>}
     </Button>
     {scope && !disabled && <details ref={details} onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
