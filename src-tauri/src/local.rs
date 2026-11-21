@@ -798,6 +798,13 @@ pub fn permanently_delete(path: &Path) -> io::Result<()> {
     if metadata.is_dir() && !is_link(&metadata) {
         return fs::remove_dir_all(path);
     }
+    remove_entry(path, &metadata)
+}
+
+pub(crate) fn remove_entry(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    if metadata.is_dir() && !is_link(metadata) {
+        return fs::remove_dir(path);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;

@@ -55,6 +55,7 @@ const ACTIONS: &[&str] = &[
     "create_folder",
     "recycle_item",
     "delete_item",
+    "delete_selection",
     "connect_server",
     "list_server",
     "connect_ftp",

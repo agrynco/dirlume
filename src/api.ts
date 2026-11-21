@@ -270,6 +270,18 @@ export type Operation =
   | { kind: "create_file"; name: string; encoding?: TextEncoding }
   | { kind: "rename"; name: string; new_name: string };
 
+export type Deletion = { directory: string; names: string[]; permanent: boolean };
+export type DeletionCounts = { completed: number; skipped: number; failed: number; unprocessed: number };
+export type DeletionSelection = { files: number; folders: number; bytes: number; incomplete: boolean; availableBefore: number | null };
+export type DeletionProgress = { path: string; currentTotal: number; currentProcessed: number; counts: DeletionCounts };
+export type DeletionEvent =
+  | { phase: "preparing"; path: string; selection: DeletionSelection }
+  | { phase: "removing"; progress: DeletionProgress; selection: DeletionSelection }
+  | { phase: "locked"; token: number; path: string };
+export type DeletionResult = { selection: DeletionSelection; counts: DeletionCounts; cancelled: boolean;
+  availableAfter: number | null; failures: { path: string; message: string }[] };
+export type DeletionDecision = "retry" | "skip" | "skipRemaining";
+
 export type TransferSource =
   | { kind: "local"; directory: string; name: string }
   | { kind: "server"; connection: number; segments: string[]; folder: boolean }
@@ -491,6 +503,11 @@ export const api = {
     invoke<void>("measure_folders", { id, source, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
   beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
+  deleteSelection: (id: number, selection: Deletion, onProgress: Channel<DeletionEvent>) =>
+    invoke<DeletionResult>("delete_selection", { id, ...selection, onProgress }),
+  cancelDeletion: (id: number) => invoke<void>("cancel_deletion", { id }),
+  resolveDeletion: (id: number, token: number, decision: DeletionDecision) =>
+    invoke<void>("resolve_deletion", { id, token, decision }),
   cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
   finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
   resolveTransfer: (id: number, decision: "overwrite" | "skip", remember: boolean) =>

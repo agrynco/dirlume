@@ -44,6 +44,8 @@ In **Options → Panel modes**, edit the name, columns, current-item status line
 
 The built-in **Full** mode uses automatic Size and Date widths. These widths follow measured folder sizes and system-formatted dates in the current pane font. For a saved layout with fixed widths, set Size, Size in bytes, or Date to **0** to enable that behavior.
 
+After confirming a local deletion or Move to Trash, you can cancel preparation or follow progress for the current item and the full selection. If an item is locked, retry it, skip it, or skip all remaining locks in that batch. On Windows, **Find locking processes** opens the process inspector. Ending a process requires its own confirmation. Permanent deletion keeps a skipped item and its parent folders while continuing with removable siblings. The final free-space reading comes from the source volume.
+
 Open **Sort by** with **Ctrl+F12** or **Sort modes** in the **Left** or **Right** menu. Use the menu to sort by name, extension, size, timestamps, or other metadata supplied by the source. Choose **Unsorted** to keep listing order within each priority group. Press **+** for ascending, **−** for descending, or **\*** to reverse the direction. Press **F4** in the menu to edit tie-breakers.
 
 Use **Show selected first** to sort marked items ahead of unmarked items. **Show directories first** keeps folders together. **Options → Sort groups** lets you order filename masks before or after unmatched items. Enable **Use sort groups** for Name, Name only, and Extension. The pane remembers its sort and priorities when you switch folders, change its panel mode, or restart.

@@ -1,9 +1,150 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { close } from "./server-smoke.mjs";
+
+async function holdForDeletion(path) {
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "$file = [IO.File]::Open($env:DIRLUME_HELD_FIXTURE, 'Open', 'Read', 'ReadWrite'); if ($file) { Write-Output LOCKED; Start-Sleep 60 }"], {
+    windowsHide: true, env: { ...process.env, DIRLUME_HELD_FIXTURE: path },
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      const time = setTimeout(() => reject(new Error("The fixture did not lock its file.")), 6000);
+      const finish = (failure) => {
+        clearTimeout(time);
+        if (failure) reject(failure);
+        else resolve();
+      };
+      let message = "";
+      child.stdout.on("data", (data) => {
+        message += data;
+        if (message.includes("LOCKED")) finish();
+      });
+      child.once("error", finish);
+      child.once("exit", () => finish(new Error("The fixture stopped before locking its file.")));
+    });
+    return child;
+  } catch (error) {
+    await close(child);
+    throw error;
+  }
+}
+
+export async function testBatchDeletion(page, root) {
+  const prior = await Promise.all(["left", "right"].map((side) => page.locator(`#${side}-path`).getAttribute("data-path")));
+  const navigate = async (side, path) => {
+    const control = await editPaneAddress(page, side);
+    await control.fill(path);
+    await control.press("Enter");
+    await page.waitForFunction(({ side, path }) => document.getElementById(`${side}-path`).dataset.path === path &&
+      document.getElementById(`${side}-files`).getAttribute("aria-busy") === "false", { side, path });
+  };
+  const left = page.locator("#left-files");
+  const row = (name, side = "left") => page.locator(`#${side}-files [data-tooltip=${JSON.stringify(name)}]`);
+  const lock = page.getByRole("dialog", { name: "Item is in use", exact: true });
+  const apply = lock.getByRole("checkbox", { name: "Apply to all remaining locked items" });
+
+  for (const [permanent, command, title] of [[true, "Shift+Delete", "Delete permanently"], [false, "F8", "Move to Trash"]]) {
+    const directory = join(root, permanent ? "permanent-batch-check" : "trash-batch-check");
+    const folder = join(directory, "02-folder");
+    const nested = join(folder, "nested-locked.txt");
+    const sibling = join(folder, "sibling.txt");
+    const before = join(directory, "01-before");
+    const names = ["01-before", "02-folder", "03-locked.txt", "04-locked.txt", "06-after.txt"];
+    await mkdir(folder, { recursive: true });
+    await mkdir(before);
+    await Promise.all([nested, sibling, ...names.filter((name) => name.endsWith(".txt")).map((name) => join(directory, name))]
+      .map((path) => writeFile(path, "")));
+    const holders = [];
+
+    try {
+      for (const path of [nested, join(directory, "03-locked.txt"), join(directory, "04-locked.txt")]) {
+        holders.push(await holdForDeletion(path));
+      }
+      await navigate("right", directory);
+      await navigate("left", directory);
+      for (const name of names) {
+        await row(name).click({ modifiers: ["Control"] });
+        await row(name).and(left.locator(".marked")).waitFor();
+      }
+      const start = async () => {
+        await left.press(command);
+        await page.getByRole("dialog", { name: title, exact: true }).getByRole("button", { name: title, exact: true }).click();
+      };
+      await start();
+      await lock.getByText(permanent ? "nested-locked.txt" : "02-folder", { exact: true }).waitFor();
+      assert.equal(await apply.isChecked(), false);
+      assert.equal(await lock.getByRole("alert").count(), 1);
+      await assert.rejects(stat(before), { code: "ENOENT" });
+      await lock.getByRole("button", { name: "Skip", exact: true }).click();
+      await lock.getByText("03-locked.txt", { exact: true }).waitFor();
+      assert.equal(await apply.isChecked(), false);
+      await apply.check();
+      await lock.getByRole("button", { name: "Skip", exact: true }).click();
+
+      const result = page.getByRole("dialog", { name: "Deletion results", exact: true });
+      await result.getByText("Free space now", { exact: true }).waitFor();
+      await result.getByText(permanent ? "4 skipped" : "5 skipped", { exact: true }).waitFor();
+      await result.getByText("0 failed", { exact: true }).waitFor();
+      for (const side of ["left", "right"]) {
+        await row("06-after.txt", side).waitFor({ state: "detached" });
+        await row("02-folder", side).waitFor();
+      }
+      assert.ok(await stat(nested));
+      if (permanent) await assert.rejects(stat(sibling), { code: "ENOENT" });
+      else assert.ok(await stat(sibling));
+      await result.getByRole("button", { name: "Done", exact: true }).click();
+
+      const marked = await left.locator(".file-row.marked").evaluateAll((rows) => rows.map((item) => item.dataset.tooltip));
+      for (const name of marked) {
+        await row(name).click({ modifiers: ["Control"] });
+      }
+      await row("04-locked.txt").click();
+      await start();
+      await lock.getByText("04-locked.txt", { exact: true }).waitFor();
+      assert.equal(await apply.isChecked(), false);
+      await lock.getByRole("button", { name: "Cancel", exact: true }).click();
+      const cancelled = page.getByRole("dialog", { name: "Deletion cancelled", exact: true });
+      await cancelled.getByText("1 unprocessed", { exact: true }).waitFor();
+      await cancelled.getByRole("button", { name: "Done", exact: true }).click();
+      assert.ok(await stat(join(directory, "04-locked.txt")));
+
+      if (permanent) {
+        await row("04-locked.txt").click();
+        await start();
+        await lock.getByRole("button", { name: "Find locking processes", exact: true }).click();
+        const inspector = page.getByRole("dialog", { name: "Processes using these files", exact: true });
+        const owner = holders.at(-1);
+        const process = inspector.getByRole("option", { name: new RegExp(`PID ${owner.pid}\\)`) });
+        await process.waitFor();
+        await inspector.getByRole("button", { name: "Close", exact: true }).click();
+        await lock.getByText("04-locked.txt", { exact: true }).waitFor();
+        await lock.getByRole("button", { name: "Find locking processes", exact: true }).click();
+        await process.click();
+        await inspector.getByRole("button", { name: "End selected", exact: true }).click();
+        const confirm = page.getByRole("dialog", { name: "End processes", exact: true });
+        await confirm.getByText(new RegExp(`PID ${owner.pid}\\)`)).waitFor();
+        assert.equal(owner.exitCode, null);
+        await confirm.getByRole("button", { name: "End process", exact: true }).click();
+        await inspector.getByText("Windows found no processes using these files.").waitFor();
+        await inspector.getByRole("button", { name: "Close", exact: true }).click();
+        await lock.getByRole("button", { name: "Retry", exact: true }).click();
+        await row("04-locked.txt").waitFor({ state: "detached" });
+      }
+    } finally {
+      await Promise.all(holders.map(close));
+    }
+  }
+  for (const [index, side] of ["left", "right"].entries()) {
+    if (prior[index]) await navigate(side, prior[index]);
+  }
+  console.log("Verified native deletion and Trash skip, skip-all reset, cancellation, retained children, and both pane refreshes.");
+}
 
 async function dialogColors(dialog, action) {
   return dialog.evaluate((dialog, action) => {
@@ -61,11 +202,23 @@ export async function testAlertDialogStyles() {
           localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ theme }));
           window.__TAURI_INTERNALS__ = {
             transformCallback: () => 1,
-            invoke: async (command) => {
+            invoke: async (command, args) => {
               if (command === "locations") return [{ label: "Home", path }];
               if (command === "list_directory") return { path, parent: null, omitted: 0,
                 entries: [{ name: "fixture.txt", directory: false, link: false, hidden: false, size: 7, modified: null }] };
               if (command === "file_icons") return [];
+              if (command === "delete_selection") {
+                const selection = { files: 5, folders: 2, bytes: 8 * 1024, incomplete: false, availableBefore: 64 * 1024 };
+                const counts = { completed: 3, skipped: 0, failed: 0, unprocessed: 0 };
+                args.onProgress.onmessage({ phase: "preparing", selection, path });
+                return new Promise((resolve) => {
+                  window.showDeletionProgress = () => args.onProgress.onmessage({ phase: "removing", selection,
+                    progress: { path: "/fixture/folder/fixture.txt", currentTotal: 5, currentProcessed: 2, counts } });
+                  window.finishDeletionFixture = () => resolve({ selection, counts: { ...counts, unprocessed: 4 },
+                    cancelled: true, availableAfter: 72 * 1024, failures: [] });
+                });
+              }
+              if (command === "cancel_deletion") window.finishDeletionFixture();
               return null;
             },
           };
@@ -94,6 +247,27 @@ export async function testAlertDialogStyles() {
         }), true);
         await page.keyboard.press("Escape");
         await alert.waitFor({ state: "hidden" });
+        if (platform.startsWith("Windows") && theme === "dark") {
+          await list.press("Shift+Delete");
+          await alert.getByRole("button", { name: "Delete permanently", exact: true }).click();
+          const progress = page.getByRole("dialog", { name: "Deletion progress", exact: true });
+          await progress.getByRole("progressbar", { name: "Preparing selection…" }).waitFor();
+          await page.evaluate(() => window.showDeletionProgress());
+          const overall = progress.getByRole("progressbar", { name: "Overall progress" });
+          const current = progress.getByRole("progressbar", { name: "Current item progress" });
+          await overall.waitFor();
+          assert.deepEqual([await overall.getAttribute("value"), await overall.getAttribute("max")], ["3", "7"]);
+          assert.deepEqual([await current.getAttribute("value"), await current.getAttribute("max")], ["2", "5"]);
+          await progress.getByText("Estimated space to reclaim", { exact: true }).waitFor();
+          if (process.env.DIRLUME_DELETE_PROGRESS_SCREENSHOT) {
+            await progress.screenshot({ path: process.env.DIRLUME_DELETE_PROGRESS_SCREENSHOT, scale: "css" });
+          }
+          await progress.getByRole("button", { name: "Cancel deletion", exact: true }).click();
+          const cancelled = page.getByRole("dialog", { name: "Deletion cancelled", exact: true });
+          await cancelled.getByText("72 KiB", { exact: true }).waitFor();
+          await cancelled.getByText("4 unprocessed", { exact: true }).waitFor();
+          await cancelled.getByRole("button", { name: "Done", exact: true }).click();
+        }
         await page.close();
       }
     }
