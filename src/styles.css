@@ -413,6 +413,15 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .quick-view .pane-empty { margin: 0; overflow-wrap: anywhere; }
 .quick-view :is(.text-view, .markdown) { margin: 0; border: 0; border-radius: 0; }
 .quick-view-html { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--text-bg); }
+.binary-preview {
+  position: relative; flex: 1; min-height: 0; overflow: auto; overflow-x: hidden;
+  font: var(--viewer-size)/1.45 var(--viewer-font); font-variant-emoji: text;
+}
+.binary-preview-cell { position: absolute; visibility: hidden; pointer-events: none; }
+.binary-preview-rows { position: absolute; inset-inline: 0; }
+.binary-preview-row { display: grid; grid-auto-flow: column; justify-content: start; white-space: pre; }
+.binary-preview-row span { overflow: hidden; }
+.binary-preview-error { position: sticky; top: 0; }
 .quick-view-modes { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius); }
 .quick-view-modes button { min-height: 24px; padding-inline: 5px; font-size: .85em; white-space: nowrap; }
 .quick-view-image-tools { display: flex; align-items: center; gap: 3px; padding: 4px 6px; background: var(--raised); border-bottom: 1px solid var(--line); }

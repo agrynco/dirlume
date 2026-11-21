@@ -2,10 +2,9 @@ import { HistoryField } from "./HistoryField";
 import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { describeError, readPlaceBytes, type BytePage, type NamedFile } from "./api";
+import { describeError, fileBytePageSize, readPlaceBytes, type BytePage, type NamedFile } from "./api";
 
 const bytesPerRow = 16;
-const bytesPerPage = 1024;
 const hex = (value: number, length = 2) => value.toString(16).toUpperCase().padStart(length, "0");
 const columns = Array.from({ length: bytesPerRow }, (_, index) => hex(index)).join(" ");
 
@@ -49,8 +48,8 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
   return (
     <>
       <div ref={controls} tabIndex={-1} className="text-toolbar hex-toolbar">
-        <Button onClick={() => setOffset(Math.max(0, offset - bytesPerPage))} disabled={!offset}>{t("Previous page")}</Button>
-        <Button onClick={() => setOffset(offset + bytesPerPage)} disabled={!page || offset + bytesPerPage >= page.length}>{t("Next page")}</Button>
+        <Button onClick={() => setOffset(Math.max(0, offset - fileBytePageSize))} disabled={!offset}>{t("Previous page")}</Button>
+        <Button onClick={() => setOffset(offset + fileBytePageSize)} disabled={!page || offset + fileBytePageSize >= page.length}>{t("Next page")}</Button>
         <form onSubmit={goTo}>
           <HistoryField historyKey="hex-offset" aria-label={t("Byte offset")} placeholder="0x0000" value={address} onValueChange={setAddress} />
           <Button type="submit" disabled={!Number.isSafeInteger(addressValue) || !page || addressValue >= page.length}>{t("Go to offset")}</Button>
