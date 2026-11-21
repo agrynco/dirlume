@@ -20,12 +20,12 @@ use windows::Win32::{
         WindowsAndMessaging::{
             CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
             GetCursorInfo, GetSystemMetrics, LoadCursorW, PeekMessageW, RegisterClassW, SetCursor,
-            SetLayeredWindowAttributes, SetWindowsHookExW, ShowWindow, UnhookWindowsHookEx,
-            UnregisterClassW, CURSORINFO, HCURSOR, HHOOK, IDC_CROSS, LWA_ALPHA, MSG,
+            SetLayeredWindowAttributes, SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx,
+            UnregisterClassW, CURSORINFO, HCURSOR, HHOOK, HWND_TOPMOST, IDC_CROSS, LWA_ALPHA, MSG,
             MSLLHOOKSTRUCT, PM_REMOVE, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-            SM_YVIRTUALSCREEN, SW_SHOWNOACTIVATE, WH_MOUSE_LL, WM_HOTKEY, WM_LBUTTONDOWN,
-            WM_LBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-            WS_EX_TOPMOST, WS_POPUP,
+            SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WH_MOUSE_LL,
+            WM_HOTKEY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED,
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
         },
     },
 };
@@ -48,6 +48,12 @@ unsafe extern "system" fn sampler_window(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if message == WM_SETCURSOR {
+        if let Ok(cursor) = unsafe { LoadCursorW(None, IDC_CROSS) } {
+            unsafe { SetCursor(Some(cursor)) };
+            return LRESULT(1);
+        }
+    }
     unsafe { DefWindowProcW(window, message, wparam, lparam) }
 }
 
@@ -92,7 +98,17 @@ impl SamplingCursor {
         unsafe {
             SetLayeredWindowAttributes(overlay.window, COLORREF(0), 1, LWA_ALPHA)
                 .map_err(message)?;
-            let _ = ShowWindow(overlay.window, SW_SHOWNOACTIVATE);
+            // Place the sampler above existing topmost applications without taking keyboard focus.
+            SetWindowPos(
+                overlay.window,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+            .map_err(message)?;
             let _ = UpdateWindow(overlay.window);
             overlay.previous = previous;
             SetCursor(Some(cursor));
@@ -114,13 +130,13 @@ fn visible_cursor() -> Option<HCURSOR> {
 impl Drop for SamplingCursor {
     fn drop(&mut self) {
         unsafe {
+            if let Some(previous) = self.previous {
+                SetCursor(Some(previous));
+            }
             if !self.window.0.is_null() {
                 let _ = DestroyWindow(self.window);
             }
             let _ = UnregisterClassW(CURSOR_CLASS, Some(self.module));
-            if let Some(previous) = self.previous {
-                SetCursor(Some(previous));
-            }
         }
     }
 }

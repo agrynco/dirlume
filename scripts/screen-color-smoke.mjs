@@ -59,6 +59,7 @@ export async function testScreenColor(page) {
     const hint = color.getByText("Click a visible color anywhere on the screen. Press Esc to cancel.", { exact: true });
     const input = (action) => run("powershell.exe", command(`
       $ErrorActionPreference = 'Stop'
+      $ProgressPreference = 'SilentlyContinue'
       Add-Type @"
         using System.Runtime.InteropServices;
         public static class SampleInput {
@@ -71,6 +72,7 @@ export async function testScreenColor(page) {
           [DllImport("user32.dll")] public static extern bool SetPhysicalCursorPos(int x, int y);
           [DllImport("user32.dll")] public static extern bool GetPhysicalCursorPos(out Point point);
           [DllImport("user32.dll")] public static extern System.IntPtr WindowFromPhysicalPoint(Point point);
+          [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr window, System.Text.StringBuilder name, int length);
           [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint process);
           [DllImport("user32.dll")] public static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr context);
           [DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr window, System.IntPtr after, int x, int y, int width, int height, uint flags);
@@ -78,18 +80,25 @@ export async function testScreenColor(page) {
           [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
         }
 "@
+      $null = [SampleInput]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
       function Assert-Crosshair([bool]$expected) {
         $info = New-Object SampleInput+CursorInfo
         $info.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][SampleInput+CursorInfo])
         $crosshair = [SampleInput]::LoadCursor([IntPtr]::Zero, [IntPtr]::new(32515))
-        for ($attempt = 0; $attempt -lt 25; $attempt++) {
+        for ($attempt = 0; $attempt -lt 100; $attempt++) {
+          if ($expected -and ![SampleInput]::SetPhysicalCursorPos((102 + ($attempt % 2)), 152)) {
+            throw 'Could not move the pointer over the external application.'
+          }
           if ([SampleInput]::GetCursorInfo([ref]$info) -and (($info.Cursor -eq $crosshair) -eq $expected)) { return }
           Start-Sleep -Milliseconds 30
         }
-        throw "The sampling cursor state did not match $expected."
+        $point = New-Object SampleInput+Point
+        $null = [SampleInput]::GetPhysicalCursorPos([ref]$point)
+        $name = [System.Text.StringBuilder]::new(128)
+        $null = [SampleInput]::GetClassName([SampleInput]::WindowFromPhysicalPoint($point), $name, $name.Capacity)
+        throw "Expected crosshair=$expected at ($($point.X), $($point.Y)); window class=$name, cursor=$($info.Cursor), flags=$($info.Flags), crosshair=$crosshair."
       }
       ${action === "place" ? `
-        $null = [SampleInput]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
         $fixture = [IntPtr]::new([long]${fixtureHandle})
         [uint32]$owner = 0
         $null = [SampleInput]::GetWindowThreadProcessId($fixture, [ref]$owner)
@@ -102,12 +111,10 @@ export async function testScreenColor(page) {
         if ($owner -ne ${painter.pid}) { throw "The external color window is covered." }
         Assert-Crosshair $false
       ` : action === "click" ? `
-        if (![SampleInput]::SetPhysicalCursorPos(102, 152)) { throw "Could not place the pointer over the external application." }
         Assert-Crosshair $true
         [SampleInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
         [SampleInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
       ` : action === "escape" ? `
-        if (![SampleInput]::SetPhysicalCursorPos(102, 152)) { throw "Could not place the pointer over the external application." }
         Assert-Crosshair $true
         [SampleInput]::keybd_event(27, 0, 0, [UIntPtr]::Zero)
         [SampleInput]::keybd_event(27, 0, 2, [UIntPtr]::Zero)
