@@ -43,6 +43,7 @@ import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
 import { testNativeOptionalStatusBar } from "./status-bar-smoke.mjs";
+import { appendDiagnosticFixture, checkDiagnosticLog } from "./diagnostic-log-smoke.mjs";
 import { checkResizeMarker, closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -2099,11 +2100,13 @@ try {
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
   const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
+  await appendDiagnosticFixture(diagnosticsFile);
   await openMainMenu(page, "Help");
   await page.keyboard.press("End");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
   await page.keyboard.press("Enter");
   await errorLogViewer.waitFor();
+  await checkDiagnosticLog(errorLogViewer, diagnosticsFile);
   await page.keyboard.press("Escape");
   await errorLogViewer.waitFor({ state: "hidden" });
   await openMainMenu(page, "Help");

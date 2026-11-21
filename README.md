@@ -253,7 +253,7 @@ On Windows, add an **SMB** connection using a server name, IP address, or UNC sh
 
 ## Desktop diagnostics
 
-Use **Help → Open error log** to open the log in Dirlume's viewer.
+Use **Help → Open error log** to see the latest entries first, with local timestamps down to the millisecond. Expand an entry to inspect its fields and recent actions. A warning icon marks panics, and partial lines can be opened individually. Select **Source** to copy the original JSONL in file order. Opening a JSONL file from a file pane uses the regular text viewer.
 
 Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
 

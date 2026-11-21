@@ -962,15 +962,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side) {
+  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side, diagnosticLog?: true) {
     const image = !!imageType(file.name);
-    const existing = documents.find((item) => (image || item.editing === editing) && sameDocumentFile(item.file, file));
+    const existing = documents.find((item) => item.diagnosticLog === diagnosticLog &&
+      (image || item.editing === editing) && sameDocumentFile(item.file, file));
     const id = existing?.id ?? ++nextDocument.current;
     const imageOrigin = image ? origin : undefined;
     const imageIndex = imageOrigin ? imagesInPane(imageOrigin, file).findIndex((candidate) => sameDocumentFile(candidate, file)) : undefined;
     const canEdit = editing && (!image || canEditImage(file));
     if (!existing) {
-      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex }]);
+      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex, diagnosticLog }]);
     } else if (position || image) {
       setDocuments((current) => current.map((tab) => tab.id === id
         ? { ...tab, position: position ?? tab.position, imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex,
@@ -1020,7 +1021,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         return;
       }
       const end = Math.max(path.lastIndexOf("/"), windowsClient ? path.lastIndexOf("\\") : -1);
-      openDocument({ place: { kind: "local", path: path.slice(0, end), parent: null }, name: path.slice(end + 1) }, false);
+      openDocument({ place: { kind: "local", path: path.slice(0, end), parent: null }, name: path.slice(end + 1) },
+        false, undefined, undefined, true);
+      setStatus({ text: "Ready" });
     } catch (error) {
       setStatus({ text: describeError(error), error: true });
     }
@@ -2681,7 +2684,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
-        {documents.map(({ id, file, editing, position, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0 }) => {
+        {documents.map(({ id, file, editing, position, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0, diagnosticLog }) => {
           const documentKey = JSON.stringify([id, placePath(file.place), file.name]);
           if (imageType(file.name)) {
             const candidates = activeDocument === id ? imagesInPane(imageOrigin ?? active, file) : [];
@@ -2727,6 +2730,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           return (
           <TextWindow key={documentKey}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
+            diagnosticLog={diagnosticLog}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}
             shortcuts={shortcuts}
