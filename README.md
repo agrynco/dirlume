@@ -10,6 +10,8 @@ Choose **Classic blue** in **Options → Appearance → Window → Color scheme*
 
 Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
 
+Set **Window background** on that page to choose a solid color for the backdrop behind the file panes and modern toolbars. **Reset window background** restores the base scheme's backdrop.
+
 Use **Manage custom color schemes** on the same page to rename a saved scheme or delete an inactive one without changing the current appearance. A custom scheme currently applied by **System** is protected from deletion. Deleting an inactive favorite restores the matching built-in Light or Dark favorite. Use **Apply** or **Done** to save the changes.
 
 Check **Keep current fonts** to capture the font families and base sizes in use. The retained fonts apply when switching schemes in Options, in the title bar, or through System appearance. Clear the checkbox to use the selected scheme's fonts again. Per-view zoom settings stay in place.

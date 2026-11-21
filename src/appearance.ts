@@ -384,6 +384,9 @@ export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = 
   if (modernThemes.has(base)) root.dataset.look = "modern";
   else delete root.dataset.look;
   applyColors(root, scheme?.colors);
+  const windowBackground = scheme?.colors.canvas;
+  if (windowBackground) root.style.setProperty("--backdrop", windowBackground);
+  else root.style.removeProperty("--backdrop");
   for (const group of fontKeys) {
     const font = scheme?.fonts[group];
     const family = fontProperty(group);
