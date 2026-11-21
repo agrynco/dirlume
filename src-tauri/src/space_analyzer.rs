@@ -1,22 +1,275 @@
 use std::{
+    collections::{HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
+use tauri::{ipc::Channel, State};
 
-use crate::local::{self, Entry, EntryAttributes};
+use crate::local;
+
+#[cfg(windows)]
+mod mft;
+
+#[derive(Default)]
+pub struct Scans(Mutex<HashMap<String, Arc<AtomicBool>>>);
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ScanEvent {
+    Start { strategy: &'static str },
+    Batch { changes: Vec<Change> },
+    Finished,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum Change {
+    Entry {
+        parent: usize,
+        name: String,
+        directory: bool,
+        size: Option<u64>,
+        allocated: Option<u64>,
+        shared: bool,
+    },
+    Closed {
+        closed: usize,
+        error: Option<String>,
+        partial: bool,
+    },
+}
+
+struct Output<'a> {
+    send: &'a mut dyn FnMut(ScanEvent) -> io::Result<()>,
+    stop: &'a AtomicBool,
+    changes: Vec<Change>,
+    identities: HashSet<String>,
+    next_id: usize,
+    last: Instant,
+}
+
+impl Output<'_> {
+    fn check(&self) -> io::Result<()> {
+        if self.stop.load(Ordering::Relaxed) {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        Ok(())
+    }
+
+    fn start(&mut self, strategy: &'static str) -> io::Result<()> {
+        self.check()?;
+        self.changes.clear();
+        self.identities.clear();
+        self.next_id = 1;
+        (self.send)(ScanEvent::Start { strategy })
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.check()?;
+        if !self.changes.is_empty() {
+            (self.send)(ScanEvent::Batch {
+                changes: std::mem::take(&mut self.changes),
+            })?;
+            self.last = Instant::now();
+        }
+        Ok(())
+    }
+
+    fn push(&mut self, change: Change) -> io::Result<()> {
+        self.check()?;
+        self.changes.push(change);
+        if self.next_id == 2
+            || self.changes.len() >= 1024
+            || self.last.elapsed() >= Duration::from_millis(75)
+        {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn entry(
+        &mut self,
+        parent: usize,
+        name: String,
+        directory: bool,
+        size: Option<u64>,
+        allocated: Option<u64>,
+        identity: Option<String>,
+    ) -> io::Result<usize> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let shared =
+            allocated.is_some() && identity.is_some_and(|key| !self.identities.insert(key));
+        self.push(Change::Entry {
+            parent,
+            name,
+            directory,
+            size,
+            allocated: if shared { Some(0) } else { allocated },
+            shared,
+        })?;
+        Ok(id)
+    }
+
+    fn closed(&mut self, id: usize, partial: bool, error: Option<String>) -> io::Result<()> {
+        self.push(Change::Closed {
+            closed: id,
+            partial,
+            error,
+        })
+    }
+}
+
+#[tauri::command]
+pub async fn scan_local_space(
+    root: String,
+    id: String,
+    output: Channel<ScanEvent>,
+    scans: State<'_, Scans>,
+) -> Result<(), String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let mut active = scans.0.lock().map_err(crate::desktop::message)?;
+        if active.contains_key(&id) {
+            return Err("This scan is already running.".into());
+        }
+        active.insert(id.clone(), stop.clone());
+    }
+    let result = crate::desktop::blocking(move || {
+        let root = local::absolute(&root).map_err(crate::desktop::message)?;
+        let sent = scan(root, &stop, &mut |event| {
+            output.send(event).map_err(io::Error::other)
+        });
+        if stop.load(Ordering::Relaxed) {
+            Ok(())
+        } else {
+            sent.map_err(crate::desktop::message)
+        }
+    })
+    .await;
+    scans.0.lock().map_err(crate::desktop::message)?.remove(&id);
+    result
+}
+
+#[tauri::command]
+pub fn cancel_space_scan(id: String, scans: State<'_, Scans>) -> Result<(), String> {
+    if let Some(stop) = scans.0.lock().map_err(crate::desktop::message)?.get(&id) {
+        stop.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+fn scan(
+    root: &Path,
+    stop: &AtomicBool,
+    send: &mut dyn FnMut(ScanEvent) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut out = Output {
+        send,
+        stop,
+        changes: Vec::new(),
+        identities: HashSet::new(),
+        next_id: 1,
+        last: Instant::now(),
+    };
+    let root = root.canonicalize()?;
+    #[cfg(windows)]
+    if let Some(volume) = mft::open(&root) {
+        out.start("mft")?;
+        if mft::scan(&root, &volume, &mut out).is_ok() {
+            out.flush()?;
+            return (out.send)(ScanEvent::Finished);
+        }
+        out.check()?;
+    }
+    out.start("walk")?;
+    walk(&root, &mut out)?;
+    out.flush()?;
+    (out.send)(ScanEvent::Finished)
+}
+
+fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
+    let boundary = platform::boundary(root, &fs::metadata(root)?);
+    let mut jobs = vec![(0, root.to_path_buf())];
+    while let Some((parent, folder)) = jobs.pop() {
+        out.check()?;
+        let children = directory(&folder, &boundary);
+        let items = match children {
+            Ok(items) => items,
+            Err(error) if parent == 0 => return Err(error),
+            Err(error) => {
+                out.closed(parent, true, Some(error.to_string()))?;
+                continue;
+            }
+        };
+        let mut omitted = false;
+        for item in items {
+            out.check()?;
+            let child = item.and_then(|item| {
+                let path = item.path();
+                let metadata = item.metadata()?;
+                if local::is_link(&metadata)
+                    || !(metadata.is_dir() || metadata.is_file())
+                    || platform::boundary(&path, &metadata) != boundary
+                {
+                    return Ok(None);
+                }
+                let name = item
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
+                local::name_component(&name)?;
+                Ok(Some((path, name, metadata)))
+            });
+            match child {
+                Ok(Some((path, name, metadata))) if metadata.is_dir() => {
+                    jobs.push((out.entry(parent, name, true, None, None, None)?, path));
+                }
+                Ok(Some((path, name, metadata))) => {
+                    let (allocated, identity) = platform::usage(&path, &metadata);
+                    out.entry(
+                        parent,
+                        name,
+                        false,
+                        Some(metadata.len()),
+                        allocated,
+                        identity,
+                    )?;
+                }
+                Ok(None) => {}
+                Err(_) => omitted = true,
+            }
+        }
+        out.closed(parent, omitted, None)?;
+    }
+    Ok(())
+}
+
+fn directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::ReadDir> {
+    let metadata = fs::symlink_metadata(path)?;
+    if local::is_link(&metadata)
+        || platform::boundary(path, &metadata) != *boundary
+        || path.canonicalize()? != path
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "The folder is outside the scan scope.",
+        ));
+    }
+    fs::read_dir(path)
+}
 
 #[derive(Serialize)]
 pub struct Mount {
     path: String,
     share: bool,
-}
-
-#[derive(Serialize)]
-pub struct Directory {
-    entries: Vec<Entry>,
-    omitted: usize,
 }
 
 #[tauri::command]
@@ -30,80 +283,6 @@ pub async fn space_mount(path: String) -> Result<Mount, String> {
         })
     })
     .await
-}
-
-#[tauri::command]
-pub async fn list_space_directory(
-    root: String,
-    segments: Vec<String>,
-) -> Result<Directory, String> {
-    crate::desktop::blocking(move || {
-        let root = local::absolute(&root).map_err(|error| error.to_string())?;
-        list(root, &segments).map_err(|error| error.to_string())
-    })
-    .await
-}
-
-fn list(root: &Path, segments: &[String]) -> io::Result<Directory> {
-    let mut path = root.canonicalize()?;
-    let boundary = platform::boundary(&path, &fs::metadata(&path)?);
-    for segment in segments {
-        path.push(local::name_component(segment)?);
-        let metadata = fs::symlink_metadata(&path)?;
-        if !metadata.is_dir()
-            || local::is_link(&metadata)
-            || platform::boundary(&path, &metadata) != boundary
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "The folder is outside the scan scope.",
-            ));
-        }
-    }
-    if !segments.is_empty() && path.canonicalize()? != path {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "The folder is outside the scan scope.",
-        ));
-    }
-
-    let mut entries = Vec::new();
-    let mut omitted = 0;
-    for item in fs::read_dir(path)? {
-        match item.and_then(|item| describe(&item.path(), &boundary)) {
-            Ok(Some(entry)) => entries.push(entry),
-            Ok(None) => {}
-            Err(_) => omitted += 1,
-        }
-    }
-    Ok(Directory { entries, omitted })
-}
-
-fn describe(path: &Path, boundary: &platform::Boundary) -> io::Result<Option<Entry>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if local::is_link(&metadata)
-        || !(metadata.is_file() || metadata.is_dir())
-        || platform::boundary(path, &metadata) != *boundary
-    {
-        return Ok(None);
-    }
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Unsupported file name."))?;
-    local::name_component(name)?;
-    let mut entry = Entry::new(
-        name.to_owned(),
-        metadata.is_dir(),
-        false,
-        EntryAttributes::default(),
-        metadata.is_file().then_some(metadata.len()),
-        None,
-    );
-    if metadata.is_file() {
-        (entry.allocated, entry.allocation_id) = platform::usage(path, &metadata);
-    }
-    Ok(Some(entry))
 }
 
 #[cfg(windows)]
@@ -257,39 +436,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reports_file_allocation_and_hard_link_identity_without_following_links() {
+    fn scans_nested_files_counts_hard_links_once_and_skips_redirects() {
         let fixture = tempfile::tempdir().unwrap();
         let folder = fixture.path().join("folder");
+        let sub = folder.join("sub");
         let outside = fixture.path().join("outside");
-        fs::create_dir(&folder).unwrap();
+        fs::create_dir_all(&sub).unwrap();
         fs::create_dir(&outside).unwrap();
-        fs::write(folder.join(".hidden"), vec![42; 16_384]).unwrap();
+        fs::write(sub.join(".hidden"), vec![42; 16_384]).unwrap();
         fs::write(outside.join("excluded"), b"outside").unwrap();
-        fs::hard_link(folder.join(".hidden"), folder.join("second")).unwrap();
+        fs::hard_link(sub.join(".hidden"), folder.join("second")).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, folder.join("redirect")).unwrap();
         #[cfg(windows)]
         junction::create(&outside, folder.join("redirect")).unwrap();
+        let mut entries = Vec::new();
+        let mut started = false;
+        let mut finished = false;
+        scan(&folder, &AtomicBool::new(false), &mut |event| {
+            match event {
+                ScanEvent::Start { strategy } => {
+                    assert_eq!(strategy, "walk");
+                    started = true;
+                }
+                ScanEvent::Batch { changes } => {
+                    assert!(started && !finished);
+                    entries.extend(changes.into_iter().filter_map(|c| match c {
+                        Change::Entry {
+                            name,
+                            size,
+                            allocated,
+                            shared,
+                            ..
+                        } => Some((name, size, allocated, shared)),
+                        Change::Closed { partial, .. } => {
+                            assert!(!partial);
+                            None
+                        }
+                    }));
+                }
+                ScanEvent::Finished => finished = true,
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert!(finished);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.iter().filter(|e| e.3).count(), 1);
+        assert_eq!(entries.iter().filter_map(|e| e.1).sum::<u64>(), 32_768);
+        let expected = platform::usage(
+            &sub.join(".hidden"),
+            &fs::metadata(sub.join(".hidden")).unwrap(),
+        )
+        .0
+        .unwrap();
+        assert_eq!(entries.iter().filter_map(|e| e.2).sum::<u64>(), expected);
+        assert!(entries.iter().any(|e| e.0 == ".hidden"));
+        assert!(scan(
+            &folder.join("missing"),
+            &AtomicBool::new(false),
+            &mut |_| Ok(())
+        )
+        .is_err());
+    }
 
-        let listing = list(&folder, &[]).unwrap();
-        assert_eq!(listing.omitted, 0);
-        assert_eq!(listing.entries.len(), 2);
-        assert!(listing.entries.iter().any(|entry| entry.name == ".hidden"));
-        assert!(listing.entries[0].allocated.is_some());
-        assert!(listing.entries[0].allocation_id.is_some());
-        assert_eq!(
-            listing.entries[0].allocation_id,
-            listing.entries[1].allocation_id
-        );
-        assert!(list(&folder, &["redirect".into()]).is_err());
-        assert!(list(&folder, &["..".into()]).is_err());
-        assert!(list(&folder.join("missing"), &[]).is_err());
-        let (root, _) = platform::mount(&folder).unwrap();
-        let canonical = folder.canonicalize().unwrap();
-        assert!(
-            platform::boundary(&canonical, &fs::metadata(&canonical).unwrap())
-                == platform::boundary(&root, &fs::metadata(&root).unwrap())
-        );
+    #[test]
+    fn cancellation_stops_producing_batches() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("file"), b"hello").unwrap();
+        let stop = AtomicBool::new(false);
+        let result = scan(temp.path(), &stop, &mut |event| {
+            assert!(!stop.load(Ordering::Relaxed));
+            if matches!(event, ScanEvent::Batch { .. }) {
+                stop.store(true, Ordering::Relaxed);
+            }
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
     }
 
     #[cfg(target_os = "linux")]
@@ -309,6 +532,11 @@ mod tests {
         let (root, share) = platform::mount(target).unwrap();
         assert_eq!(root, target);
         assert!(!share);
-        assert!(list(Path::new("/dev"), &["shm".into()]).is_err());
+        let dev = Path::new("/dev");
+        assert!(directory(
+            target,
+            &platform::boundary(dev, &fs::metadata(dev).unwrap())
+        )
+        .is_err());
     }
 }

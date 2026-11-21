@@ -36,7 +36,14 @@ try {
             case "list_directory": return { path: args.path, parent: null, ...listing };
             case "list_processes": return [];
             case "read_text": return { text: "Test", encoding: "utf8" };
-            case "list_space_directory": return listing;
+            case "scan_local_space":
+              args.output.onmessage({ kind: "start", strategy: "walk" });
+              args.output.onmessage({ kind: "batch", changes: [
+                { parent: 0, name: file.name, directory: false, size: file.size, allocated: 8, shared: false },
+                { closed: 0, partial: false, error: null },
+              ] });
+              args.output.onmessage({ kind: "finished" });
+              return;
             case "git_repository": return { root: home, name: "Fixture", headRef: null, head: null, branches: [] };
             case "git_history": return { commits: [], nextOffset: null };
             case "ftp_profiles": return [{ id: "ftp", label: "FTP fixture", host: "fixture", port: 21 }];

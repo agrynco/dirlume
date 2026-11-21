@@ -225,7 +225,18 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
   useEffect(() => {
     const controller = new AbortController();
     scan.current = controller;
-    void scanSpace(resolvePlace(place), controller.signal, setResult);
+    let previousRoot: SpaceNode | undefined;
+    void scanSpace(resolvePlace(place), controller.signal, (next) => {
+      if (previousRoot && previousRoot !== next.root) {
+        setExpanded(new Set([0]));
+        setSelected(0);
+        setZoom(0);
+        setRevealError("");
+        revealRequest.current++;
+      }
+      previousRoot = next.root;
+      setResult(next);
+    });
     return () => { controller.abort(); revealRequest.current += 1; };
   }, [revision, place, resolvePlace]);
 

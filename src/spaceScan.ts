@@ -1,4 +1,5 @@
-import { api, describeError, folderLabel, isFileServer, placePath, type FileLocation, type Listing, type Place } from "./api";
+import { Channel } from "@tauri-apps/api/core";
+import { api, describeError, folderLabel, isFileServer, placePath, type FileLocation, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
 export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
@@ -89,10 +90,109 @@ function insideScope(name: string, windowsPaths: boolean) {
     (!windowsPaths || !name.includes("\\") && !name.includes(":"));
 }
 
-async function listSpace(root: SpacePlace, place: SpacePlace, segments: string[]) {
-  if (root.kind === "local") return api.listSpaceDirectory(root.path, segments);
-  return (await readPlace(place)).listing;
+async function scanLocalSpace(
+  place: Extract<SpacePlace, { kind: "local" }>,
+  signal: AbortSignal,
+  report: (result: SpaceResult) => void,
+) {
+  if (signal.aborted) return;
+  const id = crypto.getRandomValues(new Uint32Array(2)).join("-");
+  let result = initialSpaceResult(place);
+  let nodes = new Map(result.nodes);
+  let files = 0;
+  let knownAllocations = 0;
+  let lastReport = -Infinity;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let started = false;
+
+  function publish() {
+    clearTimeout(timer);
+    timer = undefined;
+    if (signal.aborted) return;
+    lastReport = performance.now();
+    result.supportsAllocation = files === 0 || knownAllocations > 0;
+    report({ ...result });
+  }
+
+  function update(change: SpaceChange) {
+    if ("closed" in change) {
+      const entry = nodes.get(change.closed)!;
+      entry.error = change.error ?? "";
+      for (let p: SpaceNode | null = entry; p; p = p.parent) {
+        p.pending--;
+        p.partial ||= change.partial;
+      }
+      return;
+    }
+    const parent = nodes.get(change.parent)!;
+    const child = node(nodes.size, change.name, change.directory, parent);
+    nodes.set(child.id, child);
+    parent.children.push(child);
+    if (!child.directory) {
+      files++;
+      if (change.allocated !== null) knownAllocations++;
+      child.logical = change.size ?? 0;
+      child.allocated = change.allocated ?? 0;
+      child.missingLogical = Number(change.size === null);
+      child.missingAllocated = Number(change.allocated === null);
+      child.shared = change.shared;
+    }
+    for (let p: SpaceNode | null = parent; p; p = p.parent) {
+      p.pending += child.pending;
+      p.logical += child.logical;
+      p.allocated += child.allocated;
+      p.missingLogical += child.missingLogical;
+      p.missingAllocated += child.missingAllocated;
+    }
+  }
+
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
+  function cancel() {
+    clearTimeout(timer);
+    if (started) void api.cancelSpaceScan(id).catch(() => {});
+    finish();
+  }
+  const output = new Channel<SpaceScanEvent>((event) => {
+    if (event.kind === "start") {
+      started = true;
+      if (signal.aborted) { cancel(); return; }
+      // A failed MFT read restarts with an empty tree and a fresh sequence of node IDs.
+      result = initialSpaceResult(place);
+      nodes = new Map(result.nodes);
+      result.nodes = nodes;
+      files = knownAllocations = 0;
+      publish();
+      lastReport = -Infinity;
+      return;
+    }
+    if (signal.aborted) return;
+    if (event.kind === "finished") {
+      result.phase = result.root.partial ? "partial" : "complete";
+      publish();
+      finish();
+      return;
+    }
+    for (const change of event.changes) update(change);
+    const delay = 75 - (performance.now() - lastReport);
+    if (delay <= 0) publish();
+    else timer ??= setTimeout(publish, delay);
+  });
+  signal.addEventListener("abort", cancel, { once: true });
+  publish();
+  try {
+    // The command response can arrive ahead of the last ordered channel message.
+    await Promise.all([api.scanLocalSpace(place.path, id, output), finished]);
+  } catch (error) {
+    result.phase = "error";
+    result.error = describeError(error);
+    publish();
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", cancel);
+  }
 }
+
 
 function connectionLost(error: string) {
   return /connect to the .* server first|could not reach the .* server|connection (?:closed|reset|refused|aborted|lost|error)|broken pipe|network is unreachable|timed out|unexpected eof|disconnected|error sending request/i.test(error);
@@ -106,32 +206,31 @@ export async function scanSpace(
   rootPlace: SpacePlace,
   signal: AbortSignal,
   report: (result: SpaceResult) => void,
-  list = listSpace,
 ) {
+  if (rootPlace.kind === "local") return scanLocalSpace(rootPlace, signal, report);
   const result = initialSpaceResult(rootPlace);
   const nodes = new Map(result.nodes);
   result.nodes = nodes;
-  const jobs = [{ entry: result.root, place: rootPlace, segments: [] as string[] }];
+  const jobs = [{ entry: result.root, place: rootPlace as SpacePlace }];
   const identities = new Set<string>();
   let allocatedFiles = 0;
-  let files = 0;
   let lastReport = 0;
   let nextReport: ReturnType<typeof setTimeout> | undefined;
   function publish() {
     clearTimeout(nextReport);
     nextReport = undefined;
     if (signal.aborted) return;
-    result.supportsAllocation = allocatedFiles > 0 || (rootPlace.kind === "local" && files === 0);
+    result.supportsAllocation = allocatedFiles > 0;
     lastReport = performance.now();
     report({ ...result });
   }
   publish();
   while (jobs.length && !signal.aborted) {
     const job = jobs.pop()!;
-    const { entry, place, segments } = job;
+    const { entry, place } = job;
     const children: typeof jobs = [];
     try {
-      const listing: Listing = await list(rootPlace, place, segments);
+      const listing: Listing = (await readPlace(place)).listing;
       if (signal.aborted) return;
       entry.partial = listing.omitted > 0;
       const names = new Set<string>();
@@ -146,10 +245,9 @@ export async function scanSpace(
         nodes.set(child.id, child);
         entry.children.push(child);
         if (file.directory) {
-          children.push({ entry: child, place: childPlace(place, file.name) as SpacePlace, segments: [...segments, file.name] });
+          children.push({ entry: child, place: childPlace(place, file.name) as SpacePlace });
           continue;
         }
-        files += 1;
         const logical = bytes(file.size);
         const allocated = bytes(file.allocated);
         child.logical = logical ?? 0;
@@ -169,7 +267,7 @@ export async function scanSpace(
       if (entry === result.root) {
         result.phase = "error";
         result.error = entry.error;
-      } else if (rootPlace.kind !== "local" && connectionLost(entry.error)) {
+      } else if (connectionLost(entry.error)) {
         result.phase = "partial";
         result.error = entry.error;
         jobs.length = 0;
