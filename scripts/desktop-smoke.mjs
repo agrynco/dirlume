@@ -42,7 +42,7 @@ import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
-import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -2259,6 +2259,7 @@ try {
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);
+  await testMarkdownOptionsDismissal(page, attributes);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
