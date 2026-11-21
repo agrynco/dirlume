@@ -18,6 +18,8 @@ export async function testViewerReadingArea(page, source) {
   ]);
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
   const viewer = (name) => page.getByRole("region", { name, exact: true });
+  const files = page.getByRole("listbox", { name: "left files", exact: true });
+  const tabs = page.getByRole("navigation", { name: "Open documents", exact: true });
   async function open(name) {
     const row = page.locator(`#left-files [role="option"][data-tooltip="${name}"]`);
     await row.click();
@@ -25,7 +27,12 @@ export async function testViewerReadingArea(page, source) {
     await viewer(name).waitFor();
     return viewer(name);
   }
-  const close = (document) => button(document, "Close document").click();
+  async function close(document) {
+    await button(document, "Close document").click();
+    await document.waitFor({ state: "hidden" });
+    if (!await files.isVisible()) await button(tabs, "Files").click();
+    await files.waitFor();
+  }
   const plainViewer = await open(plain);
   const tool = await openOptionsWindow(page, () => button(plainViewer, "Viewer options").click());
   const options = tool.getByRole("dialog", { name: "Options", exact: true });
@@ -77,15 +84,20 @@ export async function testViewerReadingArea(page, source) {
     await page.mouse.wheel(0, 180);
     await page.waitForFunction(({ selector, previous }) =>
       window.document.querySelector(".text-window:not([hidden]) " + selector)?.scrollTop > previous, { selector, previous });
-    const gutter = await viewport.evaluate((view) => (view.offsetWidth - view.clientWidth) / 2);
+    const { gutter, clientHeight } = await viewport.evaluate((view) => ({
+      gutter: (view.offsetWidth - view.clientWidth) / 2, clientHeight: view.clientHeight,
+    }));
     if (gutter > 2) {
-      await viewport.evaluate((view) => view.scrollTo(0, 0));
+      const middle = await viewport.evaluate((view) => {
+        view.scrollTo(0, (view.scrollHeight - view.clientHeight) / 2);
+        return view.scrollTop;
+      });
       const x = box.x + box.width - gutter / 2;
-      await page.mouse.move(x, box.y + 8);
+      await page.mouse.move(x, box.y + clientHeight / 2);
       await page.mouse.down();
-      await page.mouse.move(x, box.y + box.height / 2, { steps: 8 });
+      await page.mouse.move(x, box.y + clientHeight * .68, { steps: 8 });
       await page.mouse.up();
-      assert.ok(await scrollTop() > 0, `${selector} should scroll when its scrollbar is dragged.`);
+      assert.ok(await scrollTop() > middle, `${selector} should scroll when its scrollbar is dragged.`);
     }
     return viewport;
   }

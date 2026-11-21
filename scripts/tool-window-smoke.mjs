@@ -85,7 +85,9 @@ export async function testMarkdownOptionsDismissal(page, source) {
   }
   for (const action of ["Cancel", "native"]) {
     const invalid = await open();
-    await button(invalid, "Sort groups").click();
+    const search = invalid.getByRole("searchbox", { name: "Search settings" });
+    await search.fill("Sort groups");
+    await search.press("Enter");
     await button(invalid, "Add sort group").click();
     await invalid.getByText("Enter a filename mask.", { exact: true }).waitFor();
     assert.ok(await button(invalid, "Done").isDisabled());

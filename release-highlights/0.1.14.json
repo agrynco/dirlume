@@ -1,0 +1,10 @@
+{
+  "version": "0.1.14",
+  "highlights": [
+    "Keep the active file pane and supported local or SSH terminal synchronized as you change folders.",
+    "Read with scrollbars at the edge of Viewer, customize the space beside the reading column, and give rendered Markdown its own width.",
+    "See settings save errors in Options, then retry or dismiss the window and discard the pending changes.",
+    "Swap panes in Git View, Quick View, Space Analyzer, environment variables, and side-by-side file comparisons.",
+    "Edit environment variables with a full-width value field, clear keyboard focus, and definition details below the form."
+  ]
+}
