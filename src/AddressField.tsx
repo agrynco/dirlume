@@ -101,6 +101,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   const location = place ? placeKey(place) : "";
   const addressKey = JSON.stringify([side, location]);
   const root = useRef<HTMLDivElement>(null);
+  const browsing = useRef(false);
   const [editing, setEditing] = useState(false);
   const { clip, track, clipped } = useBreadcrumbClip(editing);
   const [overflow, setOverflow] = useState(false);
@@ -157,11 +158,17 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   }
 
   return <div className="address" ref={root} id={side + "-path"} data-path={path} onBlur={(event) => {
-    if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setOverflow(false);
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setOverflow(false);
+    if (editing && !browsing.current) {
+      setEditing(false);
+      setDraft(path);
+    }
   }}>
     {editing ? <PathField id={side + "-address"} label={label}
       suggestionLabel={t(side === "left" ? "left path suggestions" : "right path suggestions")}
       value={draft} showHidden={showHidden} server={server} browse="folder" selectOnFocus
+      onBrowseStateChange={(open) => { browsing.current = open; }}
       onChange={setDraft} onCommit={(value) => {
         setEditing(false);
         if (value !== path) onNavigate(value);

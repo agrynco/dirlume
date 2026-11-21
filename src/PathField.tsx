@@ -30,7 +30,7 @@ function splitPath(value: string, windows: boolean, baseDirectory?: string) {
 
 export function PathField({ id, label, suggestionLabel, value, onChange, onCommit, onEscape, historyKey = id,
   server, kswitcher, includeFiles = false, showHidden = false, readOnly = false, required = false,
-  initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value, baseDirectory }: {
+  initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value, baseDirectory, onBrowseStateChange }: {
   id: string;
   historyKey?: string;
   label: string;
@@ -51,6 +51,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   browse?: "folder" | "save";
   browsePath?: string;
   baseDirectory?: string;
+  onBrowseStateChange?: (browsing: boolean) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLSpanElement>(null);
@@ -173,6 +174,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   async function pickPath() {
     closeSuggestions();
     setBrowsing(true);
+    onBrowseStateChange?.(true);
     setBrowseFailed(false);
     try {
       const options = { title: browseLabel, defaultPath: browsePath || undefined };
@@ -186,6 +188,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
       setBrowseFailed(true);
     } finally {
       setBrowsing(false);
+      onBrowseStateChange?.(false);
     }
   }
 
