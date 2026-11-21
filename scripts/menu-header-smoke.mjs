@@ -6,7 +6,13 @@ const mainMenu = (page) => page.getByRole("menubar", { name: "Main menu", exact:
 
 export async function revealMainMenu(page) {
   const bar = mainMenu(page);
-  if (!await bar.isVisible()) await page.keyboard.press("F9");
+  if (!await bar.isVisible()) {
+    const pane = page.locator(".pane.active .file-list, .pane.active .process-table");
+    if (await pane.isVisible() && !await page.evaluate(() => Boolean(document.activeElement?.closest(".app")))) {
+      await pane.focus();
+    }
+    await page.keyboard.press("F9");
+  }
   await bar.waitFor();
   return bar;
 }

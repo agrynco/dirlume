@@ -296,6 +296,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
   const loadingLabel = t("Opening folder…");
+  const measuringLabel = t("Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
   const sources = [
@@ -597,7 +598,13 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           </Button>
         </div> : <>
           <div className="pane-status-line">
-            {current && current.name !== ".." && statusColumns.length > 0 &&
+            {pane.measuring.length > 0 ? <div className="pane-progress pane-measurement">
+              <div className="pane-progress-status" role="status" data-tooltip={measuringLabel}>
+                <LoaderCircle className="spin" aria-hidden="true" /><span>{measuringLabel}</span>
+              </div>
+              <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
+                shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
+            </div> : current && current.name !== ".." && statusColumns.length > 0 &&
               <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns) }}
                 data-tooltip={statusColumns.map(({ field }) => itemValue(current, field)).filter(Boolean).join(" · ")}>
                 {statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
@@ -622,13 +629,6 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
               {!twin && spaceControl}
             </div>
           </div>
-          {pane.measuring.length > 0 && <div className="pane-progress pane-measurement">
-            <div className="pane-progress-status" role="status">
-              <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
-            </div>
-            <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
-              shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
-          </div>}
         </>}
       </footer>
       </>}
