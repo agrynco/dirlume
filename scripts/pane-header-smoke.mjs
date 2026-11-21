@@ -47,12 +47,13 @@ export async function testFolderNavigationHeader() {
         const pane = page.locator(`#${side}-pane`);
         const columns = pane.locator(".file-columns");
         const list = pane.locator(".file-list");
+        const capacity = (label) => pane.locator(`.pane-volume button[data-tooltip=${JSON.stringify(label)}]`);
         const bounds = () => columns.evaluate((header) => {
           const { x, y, width, height } = header.getBoundingClientRect();
           return { x, y, width, height, nameEdge: header.querySelector(".col-name").getBoundingClientRect().right };
         });
         await list.locator('[data-tooltip="Subfolder"]').click();
-        if (layout === "twin") await pane.locator(".pane-volume-free").getByText("2 KiB free of 4 KiB").waitFor();
+        if (layout === "twin") await capacity("2 KiB free of 4 KiB").waitFor();
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
         const before = await bounds();
         await list.press("Enter");
@@ -63,7 +64,7 @@ export async function testFolderNavigationHeader() {
         await list.locator('[data-tooltip="file-0.txt"]').waitFor();
         assert.deepEqual(await bounds(), before, `The ${layout} ${side} column header moved when the list changed.`);
         await page.evaluate(() => window.showFolderSpace());
-        if (layout === "twin") await pane.locator(".pane-volume-free").getByText("1 KiB free of 4 KiB").waitFor();
+        if (layout === "twin") await capacity("1 KiB free of 4 KiB").waitFor();
         assert.deepEqual(await bounds(), before, `The ${layout} ${side} column header moved when free space arrived.`);
         await page.close();
       }

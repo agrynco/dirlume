@@ -686,7 +686,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .pane-summary .pane-marked { flex: none; }
 .pane-measurement { gap: 2px; min-width: 0; }
 .pane-measurement .pane-progress-status span { flex-shrink: 1; }
-.pane-measurement > button { flex: none; width: 20px; height: 20px; min-height: 20px; }
+.pane-measurement > button { flex: none; width: 20px; height: 20px; min-height: 20px; padding: 0; }
 .pane-counts-compact, .space-control-main .space-control-icon { display: none; }
 .pane-counts-compact svg, .space-control-main .space-control-icon { flex: none; width: 13px; height: 13px; }
 @container (max-width: 540px) {
