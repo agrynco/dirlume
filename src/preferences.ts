@@ -64,8 +64,10 @@ export const commands = {
   downRow: { label: "Next item", key: "ArrowDown" },
   selectUpRow: { label: "Extend selection up", key: "Shift+ArrowUp" },
   selectDownRow: { label: "Extend selection down", key: "Shift+ArrowDown" },
-  firstRow: { label: "First item", key: "ArrowLeft" },
-  lastRow: { label: "Last item", key: "ArrowRight" },
+  firstRow: { label: "First item", key: "Home" },
+  lastRow: { label: "Last item", key: "End" },
+  leftRow: { label: "Previous page or first item", key: "ArrowLeft" },
+  rightRow: { label: "Next page or last item", key: "ArrowRight" },
   pageUp: { label: "Previous page", key: "PageUp" },
   pageDown: { label: "Next page", key: "PageDown" },
   mark: { label: "Mark or unmark item", key: "Insert" },
@@ -198,8 +200,6 @@ export type Provider = "server" | "kswitcher";
 const alternateDefaults: Partial<Record<Command, { oldCommand: string; key: string }>> = {
   sortAscending: { oldCommand: "sortAscendingAlternate", key: "Shift++" },
   sortReverse: { oldCommand: "sortReverseAlternate", key: "Shift+*" },
-  firstRow: { oldCommand: "firstRowAlternate", key: "Home" },
-  lastRow: { oldCommand: "lastRowAlternate", key: "End" },
   refresh: { oldCommand: "refreshAlternate", key: "" },
   saveText: { oldCommand: "saveTextAlternate", key: "F2" },
   documentRedo: { oldCommand: "documentRedoAlternate", key: macDocumentKeys ? "" : "Ctrl+Shift+Z" },
@@ -320,7 +320,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
-export const preferenceBindingVersion = 7;
+export const preferenceBindingVersion = 8;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -340,8 +340,24 @@ export function shortcutBindings(preferences: Preferences) {
 }
 
 function readBindings(saved: Record<string, unknown> | undefined, version: number): Bindings {
+  if (saved && version < 8) {
+    saved = { ...saved };
+    for (const [edge, horizontal, boundary] of [["firstRow", "leftRow", "Home"], ["lastRow", "rightRow", "End"]] as const) {
+      const former = saved[edge];
+      if (Array.isArray(former)) {
+        const arrow = commands[horizontal].key;
+        saved[horizontal] = former.filter((key) => key === arrow);
+        saved[edge] = former.filter((key) => key !== arrow);
+      } else {
+        const alternate = saved[edge + "Alternate"];
+        if (typeof former === "string" && (version > 0 || former !== boundary)) saved[horizontal] = former;
+        if (typeof alternate === "string") saved[edge] = alternate;
+        else delete saved[edge];
+      }
+    }
+  }
   const oldDefaults: Partial<Record<Command, string>> = {
-    firstRow: "Home", lastRow: "End", mark: "Space", rename: "F2",
+    mark: "Space", rename: "F2",
     filter: mac ? "Meta+F" : "Ctrl+F", terminal: mac ? "Meta+`" : "Ctrl+`",
     previousChange: "Alt+ArrowUp", nextChange: "Alt+ArrowDown",
   };

@@ -629,6 +629,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-column-probes span:last-child { padding-inline: 9px; font-variant-numeric: tabular-nums; }
 .file-columns, .file-list { scrollbar-width: thin; scrollbar-gutter: stable; }
 .file-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 5px; }
+.file-list[data-paged] { overflow-y: hidden; }
 .file-list:focus-visible { outline-offset: -2px; outline-width: 1px; }
 .virtual-file-list { position: relative; overflow-anchor: none; }
 .virtual-file-list .file-row, .file-row-probe { height: max(25px, calc(1.45em + 3px)); }

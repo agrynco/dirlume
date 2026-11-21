@@ -33,7 +33,8 @@ interface PaneProps {
   mode: PanelMode;
   sortAvailable: boolean;
   sortPending: boolean;
-  onGroupRows: (rows: number) => void;
+  onGroupLayout: (rows: number, pageSize: number) => void;
+  onPage: (capacity: number, direction: number) => void;
   showHidden: boolean;
   pane: PaneState;
   entries: Entry[];
@@ -109,7 +110,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
+export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
@@ -141,14 +142,18 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const matches = pane.search?.matches;
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
   const grouped = groups.length > 1;
+  const paged = grouped && (layoutMode === "brief" || layoutMode === "medium");
   const virtual = grouped || search || entries.length > 100;
   const visibleRows = Math.max(1, Math.floor((viewport.height - 8) / viewport.rowHeight));
-  const rowsPerGroup = grouped ? Math.max(visibleRows, Math.ceil(entries.length / groups.length)) : Math.max(1, entries.length);
+  const rowsPerGroup = paged ? visibleRows : grouped ? Math.max(visibleRows, Math.ceil(entries.length / groups.length)) : Math.max(1, entries.length);
+  const capacity = rowsPerGroup * groups.length;
+  const pageStart = paged ? Math.floor(Math.max(0, selected) / capacity) * capacity : 0;
+  const lastWheelPage = useRef(-Infinity);
   const renderedGroups = groups.map((group, groupIndex) => {
-    const first = groupIndex * rowsPerGroup;
+    const first = pageStart + groupIndex * rowsPerGroup;
     const last = Math.min(first + rowsPerGroup, entries.length);
-    const start = virtual ? Math.min(last, first + Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : first;
-    const end = virtual ? Math.min(last, first + Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : last;
+    const start = virtual && !paged ? Math.min(last, first + Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : first;
+    const end = virtual && !paged ? Math.min(last, first + Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : last;
     const indices = Array.from({ length: Math.max(0, end - start) }, (_, offset) => start + offset);
     if (virtual && selected >= first && selected < last && (selected < start || selected >= end)) {
       indices.push(selected);
@@ -226,7 +231,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     observer.observe(probe);
     return () => observer.disconnect();
   }, [virtual, processView]);
-  useLayoutEffect(() => { onGroupRows(grouped && !processView ? rowsPerGroup : 0); }, [grouped, processView, rowsPerGroup, onGroupRows]);
+  useLayoutEffect(() => {
+    onGroupLayout(grouped && !processView ? rowsPerGroup : 0, paged && !processView ? capacity : 0);
+  }, [grouped, paged, processView, rowsPerGroup, capacity, onGroupLayout]);
   useLayoutEffect(() => {
     const element = list.current;
     if (!element) return;
@@ -248,7 +255,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
       return;
     }
-    if (!active || selected < 0) return;
+    if (!active || selected < 0 || paged) return;
     if (virtual) {
       const top = (selected % rowsPerGroup) * viewport.rowHeight;
       const bottom = top + viewport.rowHeight + 8;
@@ -258,7 +265,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     } else {
       element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
     }
-  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll]);
+  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll, paged]);
   useEffect(() => {
     const target = document.getElementById(`${side}-pane`);
     const show = () => {
@@ -420,8 +427,15 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           setModeVisibility((before) => ({ ...before, [layoutMode]: next }));
           saveColumnLayout(side, layoutMode, next);
         }} />
-      <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
+      <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} data-paged={paged || undefined}
+        role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
         onContextMenu={(event) => { event.preventDefault(); onContext(event.clientX, event.clientY); }}
+        onWheel={(event) => {
+          if (!paged || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
+            Math.abs(event.deltaY) <= Math.abs(event.deltaX) || event.timeStamp - lastWheelPage.current < 150) return;
+          lastWheelPage.current = event.timeStamp;
+          onPage(capacity, Math.sign(event.deltaY));
+        }}
         onScroll={(event) => {
           if (columnHeader.current) columnHeader.current.scrollLeft = event.currentTarget.scrollLeft;
           if (!virtual) return;
