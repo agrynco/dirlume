@@ -348,7 +348,7 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
       const former = saved[edge];
       if (Array.isArray(former)) {
         const arrow = commands[horizontal].key;
-        saved[horizontal] = former.filter((key) => key === arrow);
+        if (!Object.hasOwn(saved, horizontal)) saved[horizontal] = former.filter((key) => key === arrow);
         saved[edge] = former.filter((key) => key !== arrow);
       } else {
         const alternate = saved[edge + "Alternate"];

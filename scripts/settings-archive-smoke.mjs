@@ -261,6 +261,10 @@ try {
   assert.equal(migrated.mainMenuAlignment, "left");
   assert.equal(migrated.activeShortcutScheme, "my-shortcuts");
   assert.deepEqual(migrated.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+M"]);
+  assert.deepEqual(migrated.shortcutSchemes[0].bindings.firstRow, ["Home"]);
+  assert.deepEqual(migrated.shortcutSchemes[0].bindings.leftRow, ["ArrowLeft"]);
+  assert.deepEqual(migrated.shortcutSchemes[0].bindings.lastRow, ["End"]);
+  assert.deepEqual(migrated.shortcutSchemes[0].bindings.rightRow, ["ArrowRight"]);
   assert.equal(migrated.language, after.language);
   assert.equal(migrated.kswitcher, "Fixture installation folder");
   assert.equal(Object.hasOwn(migrated, "retiredOption"), false);
