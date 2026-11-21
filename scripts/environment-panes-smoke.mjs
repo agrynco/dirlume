@@ -5,7 +5,7 @@ import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
-  const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
+  const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, colorScheme: "light" });
   page.setDefaultTimeout(8000);
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -29,9 +29,16 @@ try {
         const table = window.environment[args.scope];
         if (command === "environment_scope") return {
           rows: Object.values(table).map(({ name, source, overriddenBy }) => ({ name, source, overriddenBy })),
-          info: { target: args.scope === "user" ? "HKCU" : "HKLM", activation: "Fixture session", expandable: true },
+          info: { target: args.scope === "user" ? "HKCU" : "HKLM", activation: "Fixture session", expandable: args.scope !== "process" },
         };
-        if (command === "environment_value") return structuredClone(table[args.name] ?? null);
+        if (command === "environment_value") {
+          const value = structuredClone(table[args.name] ?? null);
+          if (window.holdEnvironmentValue) {
+            return new Promise((resolve) => { window.finishEnvironmentValue = () => resolve(value); });
+          }
+          return value;
+        }
+        if (command === "save_environment" && window.failEnvironmentWrite) throw new Error("Fixture save error");
         if (command === "save_environment") return { outcomes: args.edits.map((edit) => {
           const current = table[edit.name] ?? null;
           if (JSON.stringify(current) !== JSON.stringify(edit.expected)) return { name: edit.name, result: "conflict" };
@@ -64,11 +71,63 @@ try {
   await leftList.press("F3");
   const inspect = dialog("Inspect environment variable");
   assert.equal(await inspect.getByRole("textbox", { name: "Value", exact: true }).inputValue(), "private user text");
+  assert.ok(await inspect.getByRole("textbox", { name: "Value", exact: true }).evaluate((field) => field.readOnly));
+  assert.equal(await button(inspect, "Save").count(), 0);
   await button(inspect, "Close").click();
+  await page.evaluate(() => {
+    window.environment.user.VALUE.overriddenBy = "override/" + "long-definition".repeat(20);
+    window.holdEnvironmentValue = true;
+  });
   await leftList.press("F4");
   const edit = dialog("Edit environment variable");
+  const editName = edit.getByRole("textbox", { name: "Variable name", exact: true });
   const editValue = edit.getByRole("textbox", { name: "Value", exact: true });
+  await edit.getByRole("status").getByText("Loading environment variable…").waitFor();
+  assert.ok(await editName.evaluate((field) => field.readOnly));
+  assert.ok(await button(edit, "Save").isDisabled());
+  await page.waitForFunction(() => window.finishEnvironmentValue);
+  await page.evaluate(() => { window.holdEnvironmentValue = false; window.finishEnvironmentValue(); });
+  await editValue.waitFor();
+  assert.ok(await editValue.evaluate((field) => field.matches(":focus-visible")));
+  const editorLayout = () => edit.evaluate((dialog) => {
+    const form = dialog.querySelector("form");
+    const [name, type, value] = form.querySelectorAll("label.field");
+    const a = name.getBoundingClientRect();
+    const b = type.getBoundingClientRect();
+    const v = value.getBoundingClientRect();
+    const bar = dialog.querySelector("footer").getBoundingClientRect();
+    const edge = form.getBoundingClientRect();
+    return {
+      stacked: b.top >= a.bottom,
+      padding: a.left - edge.left,
+      fullWidth: Math.abs(v.width - (form.clientWidth - 32)) < 2,
+      detailsBelow: form.querySelector(".environment-source").getBoundingClientRect().top >= v.bottom,
+      bodyScrolls: form.scrollHeight > form.clientHeight,
+      footerFits: bar.bottom <= dialog.getBoundingClientRect().bottom,
+      horizontalOverflow: form.scrollWidth > form.clientWidth,
+    };
+  });
+  const wide = await editorLayout();
+  assert.equal(wide.stacked, false);
+  assert.equal(wide.padding, 16);
+  assert.ok(wide.fullWidth && wide.detailsBelow && wide.footerFits && !wide.horizontalOverflow);
+  await edit.getByText("Overridden by", { exact: true }).waitFor();
+  await edit.getByText("Fixture session", { exact: true }).waitFor();
+  assert.ok(await button(edit, "Save").evaluate((button) => button.classList.contains("primary")));
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.locator('html[data-theme="dark"]').waitFor();
+  await page.setViewportSize({ width: 350, height: 350 });
+  const narrow = await editorLayout();
+  assert.ok(narrow.stacked && narrow.fullWidth && narrow.bodyScrolls && narrow.footerFits && !narrow.horizontalOverflow, JSON.stringify(narrow));
+  await editValue.press("Shift+Tab");
+  assert.ok(await edit.getByLabel("Value type").evaluate((field) => field === document.activeElement));
+  await page.setViewportSize({ width: 1100, height: 760 });
   await editValue.fill("new draft");
+  await page.evaluate(() => { window.failEnvironmentWrite = true; });
+  await button(edit, "Save").click();
+  await edit.getByRole("alert").getByText("Could not save the environment variable.").waitFor();
+  assert.equal(await editValue.inputValue(), "new draft");
+  await page.evaluate(() => { window.failEnvironmentWrite = false; });
   await page.evaluate(() => { window.environment.user.VALUE.value = "external change"; });
   await button(edit, "Save").click();
   await edit.getByRole("alert").getByText("Changed since review").waitFor();
@@ -78,10 +137,19 @@ try {
   await edit.waitFor({ state: "hidden" });
   await leftList.press("Shift+F4");
   const create = dialog("New environment variable");
-  await create.getByLabel("Variable name").fill("NEW_VALUE");
+  const createName = create.getByLabel("Variable name");
+  assert.ok(await createName.evaluate((field) => field.matches(":focus-visible")));
+  await createName.fill("NEW_VALUE");
   await create.getByRole("textbox", { name: "Value", exact: true }).fill("é with whitespace ");
   await button(create, "Save").click();
   await left.getByRole("option", { name: /^NEW_VALUE/ }).waitFor();
+  await left.getByRole("option", { name: /^PATH/ }).click();
+  await leftList.press("F4");
+  await edit.getByRole("checkbox", { name: "Replace the entire destination PATH definition." }).waitFor();
+  assert.ok(await button(edit, "Save").isDisabled());
+  await edit.getByRole("checkbox", { name: "Replace the entire destination PATH definition." }).check();
+  assert.ok(await button(edit, "Save").isEnabled());
+  await button(edit, "Cancel").click();
 
   const filter = left.getByRole("searchbox", { name: "Filter variables" });
   await filter.fill("NEW_VALUE");
@@ -128,7 +196,12 @@ try {
   await button(process, "Inspect").click();
   const inherited = dialog("Inspect environment variable");
   assert.equal(await inherited.getByRole("textbox", { name: "Value", exact: true }).inputValue(), "inherited value");
-  console.log("Verified independent environment panes, value privacy, conflict review, PATH replacement, and partial copy results.");
+  assert.equal(await inherited.getByLabel("Value type").count(), 0);
+  assert.ok(await inherited.getByLabel("Variable name").evaluate((field) => {
+    const value = field.closest("form").querySelector("textarea");
+    return Math.abs(field.getBoundingClientRect().width - value.getBoundingClientRect().width) < 1;
+  }));
+  console.log("Verified environment dialog spacing, wrapping, focus, read-only inspection, save errors, conflict review, PATH confirmation, and pane swaps.");
 } finally {
   await browser.close();
 }
