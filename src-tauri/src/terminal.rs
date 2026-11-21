@@ -321,6 +321,58 @@ pub async fn close_terminal(id: u32, state: State<'_, Terminals>) -> Result<()> 
     .await
 }
 
+#[cfg(all(test, unix))]
+#[test]
+fn reports_directory_changes_at_the_unix_shell_prompt() {
+    use std::process::{Command, Stdio};
+
+    let (shell, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("/bin/zsh", &["-f", "-i"])
+    } else {
+        ("/bin/bash", &["--noprofile", "--norc", "-i"])
+    };
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().canonicalize().unwrap();
+    let next = root.join("test directory");
+    std::fs::create_dir(&next).unwrap();
+    let token = "Dirlume-directory-fixture";
+    let mut child = Command::new(shell)
+        .args(args)
+        .current_dir(&root)
+        .env("DIRLUME_PROMPT_TOKEN", token)
+        .env("HISTFILE", "/dev/null")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    assert!(install_prompt(shell.as_ref(), &mut stdin).unwrap());
+    writeln!(stdin, "cd -- 'test directory'").unwrap();
+    writeln!(stdin, "cd -- 'missing directory'").unwrap();
+    writeln!(stdin, "exit 0").unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let prompt = format!("\x1b]2;{token}:0:");
+    let directories: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .split(&prompt)
+        .skip(1)
+        .map(|marker| {
+            let encoded = marker.split_once('\x07').unwrap().0;
+            String::from_utf8(STANDARD.decode(encoded).unwrap()).unwrap()
+        })
+        .collect();
+    assert_eq!(
+        directories,
+        [
+            root.to_string_lossy().into_owned(),
+            next.to_string_lossy().into_owned(),
+            next.to_string_lossy().into_owned(),
+        ]
+    );
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

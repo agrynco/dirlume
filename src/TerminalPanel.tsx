@@ -52,7 +52,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  pasteShortcut, pasteOnRightClick, onPasteError, onCommandsQueued, rowHeight, onCommandSubmitted, focusRequested, onClose }: {
+  pasteShortcut, pasteOnRightClick, onPasteError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -65,6 +65,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   onPasteError: (error: unknown) => void;
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
+  onDirectoryChange: (directory: string) => void;
   rowHeight: { current: number };
   focusRequested: { current: number | null };
   onClose: () => void;
@@ -80,6 +81,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   acknowledge.current = onCommandsQueued;
   const record = useRef(onCommandSubmitted);
   record.current = onCommandSubmitted;
+  const reportDirectory = useRef(onDirectoryChange);
+  reportDirectory.current = onDirectoryChange;
   const pasteSettings = useRef({ pasteShortcut, pasteOnRightClick, onPasteError, visible });
   pasteSettings.current = { pasteShortcut, pasteOnRightClick, onPasteError, visible };
 
@@ -120,6 +123,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let draft = false;
     let currentDirectory: string | null = session.path;
     let nextDirectory: string | null = null;
+    let followingPane = false;
     let queued = Promise.resolve();
     let resizing = Promise.resolve();
     const remote = session.kind === "ssh";
@@ -184,7 +188,10 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (nextDirectory === null) return;
       const next = nextDirectory;
       nextDirectory = null;
-      if (currentDirectory !== next) send(internalPrefix + changeShellDirectory(next, windows) + "\r");
+      if (currentDirectory !== next) {
+        followingPane = true;
+        send(internalPrefix + changeShellDirectory(next, windows) + "\r");
+      }
     }
     function prompt(title: string) {
       if (!title.startsWith(promptPrefix)) return false;
@@ -199,6 +206,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       const separator = title.indexOf(":", promptPrefix.length);
       if (separator < 0) return false;
       const path = title.slice(separator + 1);
+      const previousDirectory = currentDirectory;
       try {
         if (title.slice(promptPrefix.length, separator) === "command") {
           const fields = path.split(":");
@@ -213,6 +221,10 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       setShellDirectory(currentDirectory ?? "");
       atPrompt = true;
       draft = false;
+      if (!followingPane && nextDirectory === null && currentDirectory && currentDirectory !== previousDirectory) {
+        reportDirectory.current(currentDirectory);
+      }
+      followingPane = false;
       if (!runQueuedCommand()) synchronize();
       return true;
     }

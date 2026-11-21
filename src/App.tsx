@@ -237,7 +237,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
-  const pendingListings = useRef<Partial<Record<Side, AbortController>>>({});
+  const pendingListings = useRef<Partial<Record<Side, { controller: AbortController; background: boolean }>>>({});
+  const terminalListings = useRef<Partial<Record<Side, number>>>({});
   const nextSession = useRef(0);
   const measureId = useRef(0);
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
@@ -382,20 +383,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   const invalidateListing = useCallback((side: Side) => {
     ++request.current[side];
-    pendingListings.current[side]?.abort();
+    pendingListings.current[side]?.controller.abort();
     delete pendingListings.current[side];
     return request.current[side];
   }, []);
 
-  const beginListing = useCallback((side: Side) => {
+  const beginListing = useCallback((side: Side, background = false) => {
     const ticket = invalidateListing(side);
     const controller = new AbortController();
-    pendingListings.current[side] = controller;
+    pendingListings.current[side] = { controller, background };
     return { ticket, signal: controller.signal };
   }, [invalidateListing]);
 
-  function cancelLoading(side: Side) {
-    if (!latest.current[side].loading) return false;
+  function cancelLoading(side: Side, pending = latest.current[side].loading) {
+    if (!pending) return false;
     const addressRevision = invalidateListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined, addressRevision }));
     return true;
@@ -414,7 +415,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (background && (pendingListings.current[side] || latest.current[side].sudoListing ||
         (dialog?.kind === "smb" && dialog.side === side && dialog.navigation))) return false;
     if (action !== "refresh" && !background) cancelScan(side);
-    const { ticket, signal } = beginListing(side);
+    const { ticket, signal } = beginListing(side, background);
     if (!background) updatePane(side, (pane) => ({
       ...pane, loading: true, loadingPath: placePath(place), error: "", elevationPath: undefined,
       deniedSshListing: elevated ? pane.deniedSshListing : undefined,
@@ -1561,6 +1562,31 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return session;
   }
 
+  function followShellDirectory(session: TerminalSession, path: string) {
+    if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active]) return;
+    const current = latest.current[active];
+    const place = current.place;
+    if (!place || (session.kind === "local" ? place.kind !== "local" :
+      place.kind !== "ssh" || place.id !== session.connection)) return;
+
+    const fromShell = terminalListings.current[active] === request.current[active];
+    const pending = pendingListings.current[active];
+    if (pending && !pending.background && !fromShell) return;
+    const absolute = session.kind === "local" && windowsClient ? /^[a-z]:[\\/]|^[\\/]{2}[^\\/]/i.test(path) : path.startsWith("/");
+    if (!absolute) return;
+    if (path === placePath(place)) {
+      if (fromShell && pending) cancelLoading(active, true);
+      return;
+    }
+    const destination = place.kind === "ssh" ? { ...place, segments: path.split("/").filter(Boolean) } : filesystemPlace(path);
+    const listing = load(active, destination);
+    const ticket = request.current[active];
+    terminalListings.current[active] = ticket;
+    void listing.finally(() => {
+      if (terminalListings.current[active] === ticket) delete terminalListings.current[active];
+    });
+  }
+
   const followTerminal = useEffectEvent(() => { openTerminal(false); });
   useEffect(() => {
     if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
@@ -2445,7 +2471,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
             }))}
-            onCommandSubmitted={recordCommand} onClose={() => { dropTerminal(key); showCommandLine(); }} />
+            onCommandSubmitted={recordCommand} onDirectoryChange={(path) => followShellDirectory(session, path)}
+            onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
       </Suspense>
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">

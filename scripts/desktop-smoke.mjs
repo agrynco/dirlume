@@ -1533,6 +1533,17 @@ try {
     document.querySelector(".xterm-accessibility-tree")?.textContent?.includes(text), text);
   const waitForDirectory = (path) => page.waitForFunction((path) =>
     document.querySelector(".terminal-card header span")?.textContent?.toLowerCase() === path.toLowerCase(), path);
+  const driveRoot = parse(src).root;
+  await input.pressSequentially(`cd ${driveRoot}`);
+  await input.press("Enter");
+  await waitForDirectory(driveRoot);
+  await page.waitForFunction((path) => document.querySelector("#left-path")?.dataset.path.toLowerCase() === path.toLowerCase() &&
+    document.querySelector("#left-files")?.getAttribute("aria-busy") === "false", driveRoot);
+  assert.equal(await panePath("right"), dst);
+  await input.pressSequentially("cd 'missing-dirlume-terminal-fixture'; Write-Output ('unchanged-' + (Get-Location).Path)");
+  await input.press("Enter");
+  await waitForTerminalText("unchanged-" + driveRoot);
+  assert.equal(await panePath("left"), driveRoot);
   const subfolder = join(src, "terminal ' [folder]");
   await mkdir(subfolder);
   await navigate("left", subfolder);
