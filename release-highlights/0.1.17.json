@@ -1,0 +1,9 @@
+{
+  "version": "0.1.17",
+  "highlights": [
+    "The editor and file comparison preserve mixed line endings. Local saves recheck the file before replacing it and preserve its access controls.",
+    "SSH and archive downloads check destination conflicts before transferring data. The hex viewer reuses verified archive data when you page through a file.",
+    "Archive cleanup checks each input before removing it. If a multi-file deletion stops partway through, the panes refresh so you can review the remaining items.",
+    "The embedded Bash terminal respects your shell history filters, and large folders on a Dirlume server load in pages."
+  ]
+}
