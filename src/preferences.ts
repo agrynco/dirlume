@@ -302,10 +302,11 @@ export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wh
 export const defaultBindings = Object.fromEntries<readonly string[]>(commandNames.map((command) => {
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
-    command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" &&
+    command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" && command !== "quickView" &&
     !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
-  return [command, [key, alternateDefaults[command]?.key].filter((value): value is string => Boolean(value))];
+  const alternate = mac && (command === "shrinkLeft" || command === "growLeft") ? commands[command].key : alternateDefaults[command]?.key;
+  return [command, [key, alternate].filter((value): value is string => Boolean(value))];
 })) as Bindings;
 
 export function shortcutBindings(preferences: Preferences) {
@@ -336,7 +337,7 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
     const configuredAlternate = typeof alternateValue === "string" && !(command === "refresh" && version < 4 && alternateValue === "F2");
     return [
       { command, key: useSaved ? value : defaultBindings[command][0], configured: useSaved },
-      { command, key: configuredAlternate ? alternateValue : alternate?.key, configured: configuredAlternate },
+      { command, key: configuredAlternate ? alternateValue : defaultBindings[command][1], configured: configuredAlternate },
     ];
   });
   const accepted = new Set<(typeof candidates)[number]>();
