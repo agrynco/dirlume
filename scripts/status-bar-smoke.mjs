@@ -167,6 +167,7 @@ async function testStatusBar() {
       assert.ok(await terminal.locator(".xterm-helper-textarea").evaluate((input) => input === document.activeElement));
       await button(terminal, "Close terminal").click();
       await hint.waitFor({ state: "hidden" });
+      await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Command line");
       await list.focus();
       const commands = await openMainMenu(page, "Commands");
       await commands.getByRole("menuitemradio", { name: "Environment variables", exact: true }).click();
