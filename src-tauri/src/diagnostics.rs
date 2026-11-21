@@ -180,6 +180,7 @@ enum EntryDetail<'a> {
     Panic(&'a PanicDetails),
     Frontend(&'a FrontendDetails),
     FileRead(&'a FileReadDetails),
+    UpdateCheck(&'a crate::updates::UpdateCheckDetails),
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -635,6 +636,15 @@ pub(crate) fn file_read(
         code,
         os_code,
         Some(EntryDetail::FileRead(&details)),
+    );
+}
+
+pub(crate) fn update_check(code: FailureCode, details: &crate::updates::UpdateCheckDetails) {
+    record_failure(
+        "check_for_update",
+        code,
+        None,
+        Some(EntryDetail::UpdateCheck(details)),
     );
 }
 

@@ -64,7 +64,8 @@ impl UpdateFixture {
                 highlights,
             }));
         }
-        let Some(mut update) = restore_update(app, "https://localhost/latest.json", self.metadata)?
+        let Some(mut update) = restore_update(app, "https://localhost/latest.json", self.metadata)
+            .map_err(|cause| cause.message())?
         else {
             return Ok(None);
         };

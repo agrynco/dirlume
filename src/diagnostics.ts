@@ -69,12 +69,13 @@ export async function invokeWithDiagnostics<T>(command: string, args?: InvokeArg
   try {
     return await invoke<T>(command, args);
   } catch (failure) {
-    const reportedRead = command === "read_text" && typeof failure === "object" && failure !== null &&
-      "readCause" in failure && "message" in failure && typeof failure.message === "string" ? failure.message : undefined;
-    const error = failure instanceof Error ? failure : new Error(reportedRead ?? String(failure));
+    const reportedMessage = typeof failure === "object" && failure !== null &&
+      ((command === "read_text" && "readCause" in failure) || (command === "check_for_update" && "updateCause" in failure)) &&
+      "message" in failure && typeof failure.message === "string" ? failure.message : undefined;
+    const error = failure instanceof Error ? failure : new Error(reportedMessage ?? String(failure));
     reported.add(error);
-    // Native read diagnostics and panic reports are written before the rejection reaches JavaScript.
-    if (reportedRead === undefined && error.message !== "An internal operation panicked.") {
+    // Structured native diagnostics and panic reports are written before the rejection reaches JavaScript.
+    if (reportedMessage === undefined && error.message !== "An internal operation panicked.") {
       const osCode = /\(os error (\d{1,5})\)$/.exec(error.message)?.[1];
       const code = osCode ? "os_error"
         : /permission denied|access (?:is )?denied/i.test(error.message) ? "permission_denied"
