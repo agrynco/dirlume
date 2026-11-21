@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { close, withServer } from "./server-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 export async function testMcp({ page, root, startDesktop, exitDesktop, pid }) {
   const source = join(root, "mcp-source");
@@ -20,8 +21,7 @@ export async function testMcp({ page, root, startDesktop, exitDesktop, pid }) {
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
   async function serverDialog() {
-    const menu = page.getByRole("menu", { name: "Commands", exact: true });
-    if (!await menu.isVisible()) await page.getByRole("menubar").getByRole("menuitem", { name: "Commands", exact: true }).click();
+    const menu = await openMainMenu(page, "Commands");
     await menu.getByRole("menuitem", { name: "MCP server", exact: true }).click();
     return dialog("MCP server");
   }

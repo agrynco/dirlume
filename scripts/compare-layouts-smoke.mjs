@@ -3,6 +3,7 @@ import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 export async function testCompareLayouts(page, root) {
   const left = join(root, "compare-original");
@@ -34,10 +35,9 @@ export async function testCompareLayouts(page, root) {
   }
   const actions = page.getByRole("navigation", { name: "File actions", exact: true });
   await checkAction(() => actions.getByRole("button", { name: "Compare", exact: true }).click());
-  const menubar = page.getByRole("menubar", { name: "Main menu", exact: true });
   for (const [group, label] of [["Files", "Compare"], ["Commands", "Compare files"]]) {
-    await menubar.getByRole("menuitem", { name: group, exact: true }).click();
-    const entry = menubar.getByRole("menu", { name: group, exact: true }).getByRole("menuitem", { name: label, exact: true });
+    const menu = await openMainMenu(page, group);
+    const entry = menu.getByRole("menuitem", { name: label, exact: true });
     assert.match(await entry.getAttribute("data-tooltip"), /Shift\+F11/);
     await checkAction(() => entry.click());
   }

@@ -2,6 +2,7 @@ import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst }) {
   const dialog = () => page.getByRole("dialog", { name: "Folder shortcuts", exact: true });
@@ -21,10 +22,8 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   }
 
   async function openGroups() {
-    const menu = page.getByRole("menubar", { name: "Main menu" });
-    await menu.getByRole("menuitem", { name: "Commands", exact: true }).click();
-    await menu.getByRole("menu", { name: "Commands", exact: true })
-      .getByRole("menuitem", { name: "Folder shortcuts", exact: true }).click();
+    const menu = await openMainMenu(page, "Commands");
+    await menu.getByRole("menuitem", { name: "Folder shortcuts", exact: true }).click();
   }
 
   async function openGroup(side, digit) {

@@ -190,7 +190,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const installingUpdate = useRef(false);
   const [documents, setDocuments] = useState<DocumentTab[]>(startup?.documents ?? []);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
-  const documentMenu = useRef<MainMenuHandle>(null);
   const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
   const dirtyDocuments = useRef(new Set<number>());
   const exitConfirmed = useRef(false);
@@ -332,7 +331,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (event.key !== "Alt" || !singleAlt) return;
       singleAlt = false;
       event.preventDefault();
-      (documentMenu.current ?? mainMenu.current)?.open();
+      mainMenu.current?.open();
     }
     const reset = () => { singleAlt = false; };
     window.addEventListener("keydown", down, true);
@@ -845,7 +844,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }
       return;
     }
-    if (bindingMatches(shortcuts.menu, shortcut)) {
+    if (bindingMatches(shortcuts.menu, shortcut) || bindingMatches(shortcuts.menuAlternate, shortcut)) {
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) perform("menu");
@@ -1777,8 +1776,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": openSettings(); break;
       case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
-      case "menu":
-      case "menuAlternate": (documentMenu.current ?? mainMenu.current)?.open(); break;
+      case "menu": mainMenu.current?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
@@ -2093,7 +2091,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <div className="brand">
           <span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1>
         </div>
-        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} />
+        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
         <div className="top-actions">
           {panesAvailable && formattedPreview && <div className="quick-view-modes" role="group" aria-label={t("Quick View format")}>
             <Button aria-pressed={!quickViewSourceText} onClick={() => { setQuickViewSourceText(false); focus(active); }}>{t("Rendered")}</Button>
@@ -2229,7 +2227,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             viewerContentWidth={preferences.viewerContentWidth} colors={scheme?.colors}
-            shortcuts={shortcuts} menuRef={activeDocument === id ? documentMenu : undefined}
+            shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
             onSwitchMode={() => openDocument(file, !editing)}

@@ -310,6 +310,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .window-controls button:focus-visible { outline-offset: -2px; }
 .window-controls .window-close:hover { background: var(--danger-bg); color: var(--danger); }
 .main-menu { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; min-width: 0; gap: 2px; }
+.main-menu[hidden] { visibility: hidden; }
 .topbar[data-menu-position="left"] .main-menu { justify-content: flex-start; }
 .topbar[data-menu-position="right"] .main-menu { justify-content: flex-end; }
 .main-menu-group { position: relative; }

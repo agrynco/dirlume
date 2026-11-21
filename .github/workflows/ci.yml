@@ -133,6 +133,9 @@ jobs:
       - name: Verify Quick View in both panes
         if: github.event.action != 'closed'
         run: node scripts/quick-view-smoke.mjs
+      - name: Verify main menu visibility and shortcuts
+        if: github.event.action != 'closed'
+        run: node scripts/menu-header-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
