@@ -79,6 +79,21 @@ async function fixture(browser, layout, source = "local") {
             const child = (parent, entry) => ({ parent, name: entry.name, directory: entry.directory,
               size: entry.size, allocated: entry.allocated ?? null, shared: false });
             const closed = (id, error = null) => ({ closed: id, error, partial: !!error });
+            if (window.spaceOperationFixture) {
+              send({ kind: "start", strategy: "walk" });
+              batch(child(0, dir("alpha")), child(0, dir("beta")), closed(0),
+                child(1, file("same.txt", 7, 4096)), closed(1));
+              const name = window.spaceOperationFixture.beta;
+              if (name) batch(child(2, file(name, 13, 4096)));
+              batch(closed(2));
+              if (window.spaceOperationFixture.hold) {
+                window.spaceOperationFixture.hold = false;
+                await new Promise((resolve) => { window.finishOutdatedScan = resolve; });
+                batch(child(2, file("obsolete.txt", 90, 4096)));
+              }
+              send({ kind: "finished" });
+              return;
+            }
             send({ kind: "start", strategy: "mft" });
             batch(child(0, file("discarded-before-fallback", 123, 4096)));
             send({ kind: "start", strategy: "walk" });
@@ -102,6 +117,12 @@ async function fixture(browser, layout, source = "local") {
             return;
           }
           case "cancel_space_scan": window.spaceCalls.push({ command, id: args.id }); return;
+          case "transfer_item":
+            window.spaceCalls.push({ command, request: args.request });
+            if (args.request.moving && args.request.source.directory === folder + joiner + "beta") {
+              window.spaceOperationFixture.beta = args.request.destination.split(joiner).at(-1);
+            }
+            return { kind: "completed" };
 
           case "ftp_profiles": return [{ id: "ftp", label: "FTP fixture", host: "fixture", port: 21 }];
           case "ssh_profiles": return [{ id: "sftp", label: "SFTP fixture", host: "fixture", port: 22 }];
@@ -295,7 +316,84 @@ try {
     await row(remote, "outside-root").waitFor();
     await page.close();
   }
-  console.log("Verified pane controls, metric bars, treemap, scan cancellation and provider scopes.");
+  for (const source of ["mac", "mounted"]) {
+    const page = await fixture(browser, "standard", source);
+    await page.evaluate(() => { window.spaceOperationFixture = { beta: "same.txt", hold: true }; });
+    const left = pane(page, "left");
+    const right = pane(page, "right");
+    await button(right, "Locations for right pane").click();
+    await right.getByRole("button", { name: /^Downloads/ }).click();
+    await button(left, "Analyze space").click();
+    const analyzer = page.getByRole("region", { name: "Space Analyzer", exact: true });
+    const tree = analyzer.getByRole("treegrid");
+    const root = row(tree, "open");
+    const alpha = row(tree, "alpha");
+    const beta = row(tree, "beta");
+    await alpha.dblclick();
+    await beta.dblclick();
+    const duplicate = row(tree, "same.txt");
+    await duplicate.nth(1).waitFor();
+    await root.click();
+    await tree.press("F6");
+    assert.equal(await page.getByRole("dialog").count(), 0);
+    await duplicate.nth(1).click({ button: "right" });
+    const menu = page.getByRole("menu", { name: "File actions", exact: true });
+    await menu.getByRole("menuitem", { name: "Rename or move" }).waitFor();
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "hidden" });
+    assert.equal(await tree.evaluate((element) => document.activeElement === element), true);
+    await tree.press("F5");
+    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await copy.getByRole("combobox", { name: "Destination" }).inputValue(), "/other");
+    await button(copy, "Cancel").click();
+    await tree.press("F8");
+    const recycle = page.getByRole("dialog").filter({ has: button(page, "Move to Trash") });
+    await button(recycle, "Cancel").click();
+    await tree.press("Shift+Delete");
+    const remove = page.getByRole("dialog", { name: "Delete permanently", exact: true });
+    await button(remove, "Cancel").click();
+    assert.equal(await duplicate.count(), 2);
+    await tree.press("F6");
+    const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+    const dest = move.getByRole("combobox", { name: "Destination" });
+    assert.equal(await dest.inputValue(), "/other");
+    const basedir = source === "mac" ? "/Users/fixture/open" : "/mnt/samba/open";
+    await dest.fill(basedir + "/beta/new.txt");
+    await button(move, "Move").click();
+    await move.waitFor({ state: "hidden" });
+    const transfer = await page.evaluate(() => window.spaceCalls.find(({ command }) => command === "transfer_item").request);
+    assert.deepEqual(transfer.source, { kind: "local", directory: basedir + "/beta", name: "same.txt" });
+    await row(tree, "new.txt").waitFor();
+    await page.evaluate(() => window.finishOutdatedScan());
+    await finished(analyzer);
+    assert.equal(await duplicate.count(), 1);
+    assert.equal(await alpha.getAttribute("aria-expanded"), "true");
+    assert.equal(await beta.getAttribute("aria-expanded"), "true");
+    assert.equal(await row(tree, "obsolete.txt").count(), 0);
+    assert.equal(await tree.evaluate((element) => document.activeElement === element), true);
+    await button(right, "Locations for right pane").click();
+    await button(right, "FTP").click();
+    await right.getByRole("option", { name: /^FTP fixture/ }).waitFor();
+    await row(tree, "new.txt").click();
+    await tree.press("F5");
+    assert.equal(await copy.getByRole("combobox", { name: "Destination" }).inputValue(), "");
+    await button(copy, "Cancel").click();
+    if (source === "mounted") {
+      await button(page, "Options").click();
+      const options = page.getByRole("dialog", { name: "Options", exact: true });
+      await button(options, "Keyboard shortcuts").click();
+      await button(options, "Change F5 for Copy").click();
+      await options.getByRole("textbox", { name: "New shortcut to replace F5 for Copy" }).press("Control+Shift+F5");
+      await button(options, "Done").click();
+      await row(tree, "new.txt").click();
+      await tree.press("F5");
+      assert.equal(await copy.count(), 0);
+      await tree.press("Control+Shift+F5");
+      await button(copy, "Cancel").click();
+    }
+    await page.close();
+  }
+  console.log("Verified pane controls, metric bars, treemap, scan cancellation, provider scopes, and path-based local tree actions.");
 } finally {
   await browser.close();
 }
