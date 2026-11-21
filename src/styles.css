@@ -975,10 +975,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .syntax-results p { margin: 0; padding: 7px; color: var(--muted); }
 kbd { background: var(--raised); border-radius: 3px; color: var(--muted); padding: 0 4px; font: .78em/1.55 var(--mono); }
 .statusbar { justify-content: space-between; gap: 12px; padding: 0 12px; font-size: .88em; color: var(--muted); background: var(--surface); border-top: 1px solid var(--line); }
-.statusbar-message, .statusbar-terminal-hint, .statusbar-location { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.statusbar-terminal-hint:empty { position: absolute; }
+.statusbar-message, .statusbar-location { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar-location { flex: none; }
-.statusbar:has(.statusbar-terminal-hint:not(:empty)) .statusbar-location { flex: 0 1 auto; }
+.statusbar:has(.terminal-shortcut-hint) .statusbar-location { flex: 0 1 auto; }
 .statusbar:has(.window-resize-marker) { position: relative; padding-right: 28px; }
 .statusbar.danger .statusbar-message { color: var(--danger); }
 .statusbar svg { display: inline-block; vertical-align: text-bottom; }
@@ -999,10 +998,16 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .workspace-error .icon-button { flex: none; min-height: 22px; width: 22px; }
 .terminal-card { display: flex; flex-direction: column; min-height: 0; margin: 0 12px 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--terminal-bg); overflow: hidden; }
 .terminal-card header { display: flex; align-items: center; gap: 12px; min-height: 33px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); background: var(--raised); }
-.terminal-card h2 { margin: 0; font-size: 13px; font-weight: 650; }
-.terminal-card header span { flex: 1; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.terminal-environment-notice, .terminal-focus-hint:not(:empty) { margin: 0; padding: 4px 10px; background: var(--raised); color: var(--ink); font-size: .84em; }
-.terminal-focus-hint:empty { margin: 0; }
+.terminal-card h2 { flex: none; margin: 0; font-size: 13px; font-weight: 650; white-space: nowrap; }
+.terminal-location { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.terminal-card header > button { flex: none; }
+.terminal-environment-notice { margin: 0; padding: 4px 10px; background: var(--raised); color: var(--ink); font-size: .84em; }
+.terminal-shortcut-hint { display: flex; align-items: center; gap: 5px; min-width: 24px; }
+.terminal-card .terminal-shortcut-hint { flex: 0 1 auto; max-width: 65%; font-size: .84em; color: var(--muted); }
+.terminal-shortcut-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-shortcut-text strong { font-weight: 600; color: var(--ink); }
+.terminal-shortcut-hint .terminal-shortcut-help { flex: none; width: 24px; min-height: 24px; height: 24px; padding: 0; }
+.terminal-shortcut-help svg { width: 15px; height: 15px; }
 .terminal-surface { flex: 1; min-height: 0; margin: 6px 8px; }
 [data-theme="classic-blue"] .terminal-surface .xterm .xterm-scrollable-element > .scrollbar { background: var(--scrollbar-track); }
 [data-theme="classic-blue"] .terminal-surface .xterm .xterm-scrollable-element > .scrollbar > .slider { background: var(--scrollbar-thumb); }

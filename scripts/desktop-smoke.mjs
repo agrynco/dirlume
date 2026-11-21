@@ -1451,7 +1451,7 @@ try {
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const toggleTerminal = page.getByRole("button", { name: "Toggle terminal", exact: true });
   const terminalInput = page.locator(".xterm-helper-textarea");
-  const terminalFocusHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
+  const terminalFocusHint = page.locator(".statusbar").getByRole("status").filter({ hasText: "File shortcuts paused. Click a file pane to use them." });
   const paneHeight = () => left.evaluate((pane) => pane.getBoundingClientRect().height);
   const compactHeight = await paneHeight();
   await page.locator("#left-files").press("Control+ArrowRight");

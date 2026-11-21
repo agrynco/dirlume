@@ -58,7 +58,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
-  focusHint?: string;
+  focusHint?: React.ReactNode;
   theme: Theme;
   scheme: Scheme | null;
   pendingCommands: TerminalCommand[];
@@ -519,13 +519,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
 
   return (
     <section className="terminal-card" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
-      <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}><h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2><span data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
+      <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}>
+        <h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2>
+        <span className="terminal-location" data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
+        {focusHint}
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
       {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}
       </p>}
-      {focusHint !== undefined && <p className="terminal-focus-hint" role="status">{focusHint}</p>}
       <div className="terminal-surface" ref={container} />
       {visible && popup && <CommandSuggestions id={suggestionId} {...popup} choose={(option) => chooseSuggestion.current(option)} />}
     </section>

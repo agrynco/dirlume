@@ -7,9 +7,10 @@ import { commandLabel, defaultBindings, showShortcuts } from "./preferences";
 
 export type { HelpTopic } from "./helpContent";
 
-export function HelpDialog({ initialTopic, language, onClose }: {
+export function HelpDialog({ initialTopic, language, copyShortcuts, onClose }: {
   initialTopic: HelpTopic;
   language: Language;
+  copyShortcuts?: readonly string[];
   onClose: () => void;
 }) {
   const [topic, setTopic] = useState(initialTopic);
@@ -54,6 +55,7 @@ export function HelpDialog({ initialTopic, language, onClose }: {
                     event.preventDefault();
                     openTopic(part as HelpTopic);
                   }}>{paragraph[index + 1]}</a> : null)}</p>
+                {id === "terminalShortcuts" && !!copyShortcuts?.length && <p>{t("Configured file Copy shortcut: {0}.", showShortcuts(copyShortcuts))}</p>}
                 {helpTopics[id].keys.length > 0 && <>
                   <h4>{t("Default shortcuts")}</h4>
                   <dl className="help-keys">

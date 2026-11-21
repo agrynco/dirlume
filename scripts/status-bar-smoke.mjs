@@ -16,6 +16,44 @@ async function openStatusSetting(options) {
   await showStatusBar(options).waitFor();
 }
 
+async function checkTerminalHint(page, statusShown) {
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  const output = terminal.locator(".terminal-surface");
+  const input = terminal.locator(".xterm-helper-textarea");
+  const bar = statusShown ? page.locator(".statusbar") : terminal.locator("header");
+  const hint = bar.getByRole("status").filter({ hasText: "File shortcuts paused. Click a file pane to use them." });
+  const helpButton = button(bar, "Why are file shortcuts paused?");
+  const list = page.getByRole("listbox", { name: "left files", exact: true });
+  await list.focus();
+  await hint.waitFor({ state: "hidden" });
+  const height = (await output.boundingBox()).height;
+  await input.focus();
+  await hint.waitFor();
+  assert.equal((await output.boundingBox()).height, height);
+  assert.equal(await page.locator(".terminal-shortcut-hint").count(), 1);
+  assert.equal(await hint.locator("strong").evaluate((node) => getComputedStyle(node).fontWeight), "600");
+  assert.equal(await hint.getAttribute("data-tooltip"), "File shortcuts paused. Click a file pane to use them.");
+  if (!statusShown) {
+    const close = await button(terminal, "Close terminal").boundingBox();
+    const question = await helpButton.boundingBox();
+    assert.ok(question.x + question.width <= close.x + 1);
+    assert.ok(Math.abs(question.y + question.height / 2 - close.y - close.height / 2) < 1);
+  }
+  const dialog = page.getByRole("dialog", { name: "Help", exact: true });
+  await helpButton.focus();
+  await hint.waitFor();
+  await helpButton.press("Enter");
+  await dialog.getByRole("heading", { name: "File shortcuts in the terminal", exact: true }).waitFor();
+  await dialog.getByText("Configured file Copy shortcut: F5.", { exact: true }).waitFor();
+  await button(dialog, "Close").click();
+  await page.waitForFunction(() => document.activeElement?.matches(".xterm-helper-textarea"));
+  await helpButton.click();
+  await dialog.waitFor();
+  await button(dialog, "Close").click();
+  await page.waitForFunction(() => document.activeElement?.matches(".xterm-helper-textarea"));
+  return { terminal, input };
+}
+
 export async function testNativeOptionalStatusBar(page) {
   const tool = await openOptionsWindow(page);
   const options = optionsOf(tool);
@@ -37,13 +75,27 @@ export async function testNativeOptionalStatusBar(page) {
   await checkResizeMarker(resizeMarker(page, ".app"));
   await button(page, "Back to files").click();
   await checkResizeMarker(fileGrip);
+  await page.getByRole("listbox", { name: "left files", exact: true }).press("F12");
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent.includes("PS "));
+  await terminal.locator(".xterm-helper-textarea").pressSequentially("Write-Output 'terminal-help-continued'");
+  const { input } = await checkTerminalHint(page, false);
+  await input.press("Enter");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]")
+    .some(({ text }) => text === "Write-Output 'terminal-help-continued'"));
+  if (process.env.DIRLUME_TERMINAL_HINT_CAPTURE) await terminal.locator("header").screenshot({ path: process.env.DIRLUME_TERMINAL_HINT_CAPTURE });
+  await button(terminal, "Close terminal").click();
   const restored = await openOptionsWindow(page);
   const restoredOptions = optionsOf(restored);
   await openStatusSetting(restoredOptions);
   await showStatusBar(restoredOptions).check();
   await closeToolWindow(restored, () => button(restoredOptions, "Done").click());
   await checkResizeMarker(resizeMarker(page, ".statusbar"));
-  console.log("Verified optional status bar resize placement and maximize or restore in Windows WebView2.");
+  await page.getByRole("listbox", { name: "left files", exact: true }).press("F12");
+  await terminal.locator(".xterm-helper-textarea").waitFor({ state: "attached" });
+  await checkTerminalHint(page, true);
+  await button(terminal, "Close terminal").click();
+  console.log("Verified optional status bar, terminal help, and preservation of a PowerShell draft in Windows WebView2.");
 }
 
 async function testStatusBar() {
@@ -61,7 +113,7 @@ async function testStatusBar() {
         return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
       });
       await page.addInitScript(() => {
-        const home = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
+        const home = (/Windows/.test(navigator.userAgent) ? "C:\\fixture\\" : "/fixture/") + "directory-".repeat(12);
         const file = { name: "notes.txt", directory: false, hidden: false, link: false, size: 4, modified: null };
         const callbacks = new Map();
         const events = new Map();
@@ -165,6 +217,17 @@ async function testStatusBar() {
       const hint = terminal.getByRole("status").filter({ hasText: "File shortcuts paused." });
       await hint.waitFor();
       assert.ok(await terminal.locator(".xterm-helper-textarea").evaluate((input) => input === document.activeElement));
+      const { input } = await checkTerminalHint(page, false);
+      await input.press(platform === "macOS" ? "Meta+o" : "Control+o");
+      await terminal.locator("header").getByRole("status").filter({ hasText: "Use the Terminal button to return to files." }).waitFor()
+        .catch(async (failure) => { throw new Error(await page.locator(".app").evaluate((app) =>
+          JSON.stringify({ app: app.className, statusBar: app.dataset.statusBar, documentFocus: document.hasFocus(),
+            focus: document.activeElement?.outerHTML.slice(0, 200), hint: app.querySelector(".terminal-shortcut-hint")?.outerHTML,
+            header: app.querySelector(".terminal-card header")?.textContent })),
+          { cause: failure }); });
+      await page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: "Terminal", exact: true }).click();
+      await list.press("F12");
+      await hint.waitFor();
       await button(terminal, "Close terminal").click();
       await hint.waitFor({ state: "hidden" });
       await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Command line");
@@ -187,6 +250,12 @@ async function testStatusBar() {
       await showStatusBar(options).check();
       await button(options, "Apply").click();
       await status.waitFor();
+      await button(options, "Done").click();
+      await list.press("F12");
+      await terminal.locator(".xterm-helper-textarea").waitFor({ state: "attached" });
+      await checkTerminalHint(page, true);
+      await button(terminal, "Close terminal").click();
+      await button(page, "Options").click();
       await page.evaluate(() => { window.statusFixture.imported = JSON.stringify(window.statusFixture.exported); });
       await button(options, "Import settings").click();
       await button(page.getByRole("dialog", { name: "Import settings", exact: true }), "Import").click();
