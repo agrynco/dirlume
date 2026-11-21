@@ -391,7 +391,7 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
       if (seed !== null) setQuickSearch(seed);
       else {
         const next = matches("upRow") ? index - 1 : matches("downRow") ? index + 1 :
-          matches("firstRow") ? 0 : matches("lastRow") ? rows.length - 1 : null;
+          matches("firstRow") || matches("leftRow") ? 0 : matches("lastRow") || matches("rightRow") ? rows.length - 1 : null;
         if (next === null || !rows.length) return;
         selectVariable(rows[Math.min(rows.length - 1, Math.max(0, next))].name);
       }

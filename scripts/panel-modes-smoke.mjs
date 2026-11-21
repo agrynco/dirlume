@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { link, mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { chromium } from "playwright-core";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 import { openMainMenu } from "./menu-header-smoke.mjs";
@@ -12,14 +13,91 @@ async function pressDigit(page, side, digit) {
   await page.keyboard.up(ctrl);
 }
 
+const fileName = (index) => `item-${String(index).padStart(3, "0")}.txt`;
+const fileNames = Array.from({ length: 220 }, (_, index) => fileName(index));
+
+async function checkGroupedPages(page, side, columns, names) {
+  const list = page.locator(`#${side}-files`);
+  const cursor = list.locator(".file-row[data-current=true]");
+  const rows = (column) => list.locator(`.file-row-group:nth-child(${column}) .file-row`);
+  const press = (key) => list.press(key);
+  const expectAt = async (index, visual) => {
+    const selected = cursor.and(list.locator(`[aria-posinset="${index + 1}"]`));
+    await selected.waitFor();
+    assert.equal(await selected.getAttribute("data-tooltip"), names[index]);
+    const box = await selected.boundingBox();
+    if (visual) assert.deepEqual([box.x, box.y], [visual.x, visual.y]);
+    const viewport = await list.boundingBox();
+    assert.ok(box.y >= viewport.y && box.y + box.height <= viewport.y + viewport.height + 0.01);
+    return box;
+  };
+
+  await press("Home");
+  await expectAt(0);
+  const perColumn = await rows(1).count();
+  const capacity = perColumn * columns;
+  assert.ok(perColumn > 2 && capacity * 2 < names.length);
+  for (let column = 1; column <= columns; column++) {
+    const last = perColumn * column - 1;
+    await rows(column).last().click();
+    const before = await expectAt(last);
+    await press("ArrowDown");
+    const after = await expectAt(last + 1);
+    assert.ok(after.y < before.y);
+    assert.ok(column < columns ? after.x > before.x : after.x < before.x);
+    await press("ArrowUp");
+    await expectAt(last, before);
+  }
+  await press("Home");
+  const initial = await expectAt(0);
+  await press("ArrowLeft");
+  await expectAt(0, initial);
+  const offset = perColumn + 2;
+  await rows(2).nth(2).click();
+  const coordinate = await expectAt(offset);
+  for (const [next, previous] of [["ArrowRight", "ArrowLeft"], ["PageDown", "PageUp"]]) {
+    await press(next);
+    await expectAt(capacity + offset, coordinate);
+    await press(previous);
+    await expectAt(offset, coordinate);
+  }
+  await press("End");
+  await expectAt(names.length - 1);
+  await press("ArrowRight");
+  await press("ArrowDown");
+  await expectAt(names.length - 1);
+  const lastCount = names.length % capacity;
+  if (lastCount) {
+    await press("PageUp");
+    const lastFullPage = names.length - lastCount - capacity;
+    await rows(columns).last().click();
+    await expectAt(lastFullPage + capacity - 1);
+    await press("PageDown");
+    await expectAt(names.length - 1);
+  }
+  await press("Home");
+  for (let index = 0; index < names.length; index++) {
+    assert.equal(await cursor.getAttribute("data-tooltip"), names[index]);
+    await press("ArrowDown");
+  }
+  for (let index = names.length - 1; index >= 0; index--) {
+    assert.equal(await cursor.getAttribute("data-tooltip"), names[index]);
+    await press("ArrowUp");
+  }
+  assert.equal(await cursor.getAttribute("data-tooltip"), names[0]);
+  assert.equal(await list.evaluate((element) => element.scrollTop), 0);
+}
+
 export async function testPanelModes({ page, startDesktop, exitDesktop, root }) {
   const folder = join(root, "panel modes");
+  const pagingFolder = join(root, "panel pages");
   await mkdir(folder);
+  await mkdir(pagingFolder);
   await mkdir(join(folder, "SAMPLE.FOLDER"));
   await writeFile(join(folder, "UPPERCASE.TXT"), "x".repeat(12345));
   await Promise.all(["report.txt", "archive.tar.gz", "LICENSE", ".gitignore"].map((name) => writeFile(join(folder, name), "")));
-  await Promise.all(Array.from({ length: 80 }, (_, index) =>
-    writeFile(join(folder, `item-${String(index).padStart(3, "0")}.txt`), "")));
+  await Promise.all(fileNames.slice(0, 80).map((name) => writeFile(join(folder, name), "")));
+  await Promise.all(fileNames.map((name) => writeFile(join(pagingFolder, name), "")));
   const list = (side) => page.locator(`#${side}-files`);
   const row = (name) => list("left").locator(`[data-tooltip="${name}"]`);
   const visibleName = (name) => row(name).locator(".file-name-text");
@@ -66,18 +144,26 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   await waitMode("right", "full");
   assert.equal(await list("left").locator(".file-row-group").count(), 3);
   assert.equal(await row("item-000.txt").getAttribute("data-current"), "true");
-  await list("left").press("ArrowRight");
-  await list("left").locator(".file-row-group:nth-child(2) [data-current=true]").waitFor();
-  await list("left").press("ArrowLeft");
-  await row("item-000.txt").and(list("left").locator("[data-current=true]")).waitFor();
-  await list("left").press("End");
-  await list("left").locator(".file-row-group:nth-child(3) [data-current=true]").waitFor();
-  await list("left").press("Home");
+  const openFolder = async (side, destination) => {
+    const field = await editPaneAddress(page, side);
+    await field.fill(destination);
+    await field.press("Enter");
+    await page.waitForFunction(({ side, destination }) =>
+      document.getElementById(side + "-path").dataset.path === destination &&
+      document.getElementById(side + "-files").getAttribute("aria-busy") === "false", { side, destination });
+  };
+  const expected = ["..", ...fileNames];
+  await openFolder("left", pagingFolder);
+  await checkGroupedPages(page, "left", 3, expected);
+  await openFolder("left", folder);
 
+  await openFolder("right", pagingFolder);
+  await list("right").locator('[data-tooltip="item-000.txt"]').waitFor();
   await list("right").focus();
   await pressDigit(page, "Left", 2);
   await waitMode("right", "medium");
   assert.equal(await list("right").locator(".file-row-group").count(), 2);
+  await checkGroupedPages(page, "right", 2, expected);
   for (const [digit, id] of [[1, "brief"], [3, "full"], [4, "wide"], [8, "owners"], [9, "links"], [0, "alternativeFull"]]) {
     await pressDigit(page, "Left", digit);
     await waitMode("right", id);
@@ -167,3 +253,80 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   console.log("Verified panel layouts, Ctrl sides, selection, metadata, and editable and persistent mode definitions.");
   return page;
 }
+
+export async function testBrowserPanelPages(userAgent) {
+  const browser = await chromium.launch({ channel: "chrome" });
+  try {
+    const page = await browser.newPage({ userAgent, viewport: { width: 1120, height: 720 } });
+    page.setDefaultTimeout(8000);
+    await page.route("http://dirlume.test/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
+    });
+    await page.addInitScript((files) => {
+      const base = /Windows/i.test(navigator.userAgent) ? "C:\\" : "/";
+      const panel = (name) => ({ place: { kind: "local", path: base + name, parent: base } });
+      localStorage.setItem("dirlume.workspace.v1", JSON.stringify({
+        panels: { left: panel("left"), right: panel("right") }, active: "left", split: 50, documents: [],
+      }));
+      localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
+        bindingDefaults: 7, activeShortcutScheme: "test", shortcutSchemes: [
+          { id: "test", name: "Existing shortcuts", bindings: { firstRow: ["ArrowLeft", "Home"], lastRow: ["ArrowRight", "End"] } },
+        ],
+      }));
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: async (command, args) => {
+          if (command === "locations") return [{ label: "Home", path: base + "left" }];
+          if (command === "list_directory") return { path: args.path, parent: base, omitted: 0,
+            entries: files.map((name) => ({ name, directory: false, link: false, size: 1, modified: null })) };
+          if (command === "read_text") return { text: args.name, encoding: "utf8" };
+          if (command === "file_icons") return [];
+          return null;
+        },
+      };
+    }, fileNames);
+    await page.goto("http://dirlume.test/");
+    const list = (side) => page.locator(`#${side}-files`);
+    for (const [side, mode, columns] of [["left", "Brief", 3], ["right", "Medium", 2]]) {
+      await list(side).locator('[data-tooltip="item-000.txt"]').waitFor();
+      const menu = await openMainMenu(page, side === "left" ? "Left" : "Right");
+      await menu.getByRole("menuitemradio", { name: mode, exact: true }).click();
+      await page.locator("#" + side + "-files[data-paged] .file-row").first().waitFor();
+      await checkGroupedPages(page, side, columns, ["..", ...fileNames]);
+    }
+    const right = list("right");
+    const firstColumn = right.locator(".file-row-group:first-child .file-row");
+    const oldCount = await firstColumn.count();
+    await page.setViewportSize({ width: 1020, height: 560 });
+    await page.waitForFunction((old) => document.querySelectorAll("#right-files .file-row-group:first-child .file-row").length < old, oldCount);
+    const pageSize = 2 * await firstColumn.count();
+    await right.press("Home");
+    await right.press("ArrowDown");
+    await right.press("Control+q");
+    await page.locator(".quick-view-left").getByText("item-000.txt", { exact: true }).last().waitFor();
+    await right.press("PageDown");
+    await page.locator(".quick-view-left").getByText(fileName(pageSize), { exact: true }).last().waitFor();
+    await right.press("Control+q");
+
+    await page.getByRole("button", { name: "Options", exact: true }).click();
+    const options = page.getByRole("dialog", { name: "Options", exact: true });
+    const button = (name) => options.getByRole("button", { name, exact: true });
+    await button("Keyboard shortcuts").click();
+    await button("Change → for Next page or last item").click();
+    await options.getByRole("textbox", { name: "New shortcut to replace → for Next page or last item", exact: true }).press("Alt+ArrowDown");
+    await button("Remove PageDown from Next page").click();
+    await button("Done").click();
+    await right.press("Home");
+    await right.press("ArrowRight");
+    await right.press("PageDown");
+    assert.equal(await right.locator("[data-current=true]").getAttribute("data-tooltip"), "..");
+    await right.press("Alt+ArrowDown");
+    assert.equal(await right.locator("[data-current=true]").getAttribute("data-tooltip"), fileName(pageSize - 1));
+    console.log("Verified deterministic column and page navigation, resizing, Quick View and shortcut changes.");
+  } finally {
+    await browser.close();
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) await testBrowserPanelPages();

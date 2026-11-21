@@ -138,7 +138,8 @@ type Modal =
   | ActionModal;
 
 const rowCommands = {
-  firstRow: 0, lastRow: Number.POSITIVE_INFINITY, upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
+  firstRow: 0, lastRow: Number.POSITIVE_INFINITY, leftRow: 0, rightRow: Number.POSITIVE_INFINITY,
+  upRow: -1, downRow: 1, pageUp: -12, pageDown: 12,
   selectUpRow: -1, selectDownRow: 1,
 };
 
@@ -211,6 +212,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
   const rowsPerGroup = useRef<Record<Side, number>>({ left: 0, right: 0 });
+  const groupPageSize = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
@@ -2004,7 +2006,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       (movedFocus?.isConnected ? movedFocus : document.getElementById(id))?.focus({ preventScroll: true }));
   }
 
-  function perform(command: Command, groupStep = 0) {
+  function moveGroupPage(side: Side, capacity: number, direction: number) {
+    const items = entries[side];
+    updatePane(side, (pane) => {
+      const index = paneCursorIndex(pane, items);
+      if (index < 0) return pane;
+      const target = (Math.floor(index / capacity) + direction) * capacity;
+      if (target < 0 || target >= items.length) return pane;
+      return { ...pane, selected: items[Math.min(items.length - 1, index + direction * capacity)].name };
+    });
+  }
+
+  function perform(command: Command) {
     if (command === "leftLocations" || command === "rightLocations") {
       toggleSourceMenu(command === "leftLocations" ? "left" : "right");
       return;
@@ -2111,7 +2124,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (command in rowCommands) {
       const items = entries[active];
       if (!items.length) return;
+      const direction = command === "pageUp" || command === "leftRow" ? -1 :
+        command === "pageDown" || command === "rightRow" ? 1 : 0;
+      const capacity = groupPageSize.current[active];
+      if (capacity && direction) {
+        moveGroupPage(active, capacity, direction);
+        return;
+      }
       const offset = rowCommands[command as keyof typeof rowCommands];
+      const groupStep = command === "leftRow" || command === "rightRow" ? direction * rowsPerGroup.current[active] : 0;
       updatePane(active, (pane) => {
         const index = paneCursorIndex(pane, items);
         if (groupStep && (index + groupStep < 0 || index + groupStep >= items.length)) return pane;
@@ -2347,9 +2368,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     event.preventDefault();
     if (!event.repeat || (!["hidden", "attributes", "quickView", "gitView", "analyzeSpace", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
-      const groupStep = onFiles && shortcut === "ArrowLeft" && command === "firstRow" ? -rowsPerGroup.current[active] :
-        onFiles && shortcut === "ArrowRight" && command === "lastRow" ? rowsPerGroup.current[active] : 0;
-      perform(command, groupStep);
+      perform(command);
     }
   }
 
@@ -2545,7 +2564,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
             sortAvailable={!sorts[side].pending && sorts[side].canSort(sortMode(panes[side].sort.column))} sortPending={sorts[side].pending}
-            onGroupRows={(rows) => { rowsPerGroup.current[side] = rows; }}
+            onGroupLayout={(rows, capacity) => {
+              rowsPerGroup.current[side] = rows;
+              groupPageSize.current[side] = capacity;
+            }}
+            onPage={(capacity, direction) => moveGroupPage(side, capacity, direction)}
             rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
               ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
