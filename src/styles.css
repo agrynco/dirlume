@@ -881,7 +881,17 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .document-shortcuts:empty { display: none; }
 .document-shortcuts button { min-height: 25px; }
 .syntax-toolbar { display: flex; align-items: center; gap: 6px; font-size: .85em; }
-.syntax-toolbar select { max-width: min(210px, 33vw); padding-block: 3px; }
+.syntax-toolbar > button {
+  display: inline-block; max-width: min(210px, 33vw); min-height: 23px; padding: 2px 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.syntax-picker { display: grid; gap: 6px; min-width: 0; }
+.syntax-picker input { width: 100%; }
+.syntax-results { max-height: min(48vh, 360px); min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.syntax-results [role="option"] { display: flex; justify-content: space-between; width: 100%; min-height: 24px; padding: 2px 7px; text-align: start; border-radius: 0; }
+.syntax-results [data-highlighted] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.syntax-results svg { width: 14px; height: 14px; }
+.syntax-results p { margin: 0; padding: 7px; color: var(--muted); }
 kbd { background: var(--raised); border-radius: 3px; color: var(--muted); padding: 0 4px; font: .78em/1.55 var(--mono); }
 .statusbar { justify-content: space-between; gap: 12px; padding: 0 12px; font-size: .88em; color: var(--muted); background: var(--surface); border-top: 1px solid var(--line); }
 .statusbar-message, .statusbar-terminal-hint, .statusbar-location { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1326,7 +1336,7 @@ button.color-swatch {
 .markdown code { font: var(--view-font-size, var(--viewer-size))/1.65 var(--viewer-font); tab-size: 4; }
 .text-view { white-space: pre-wrap; overflow-wrap: anywhere; }
 .source-surface { display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.syntax-toolbar label, .hex-toolbar form { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hex-toolbar form { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .hex-toolbar { flex-wrap: wrap; }
 .hex-toolbar .history-field { width: 150px; }
 .hex-view { white-space: pre; overflow-wrap: normal; }

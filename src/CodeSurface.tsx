@@ -1,12 +1,12 @@
 import { t } from "./i18n";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { createPortal } from "react-dom";
 import { cursorDocEnd, cursorDocStart, defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, type Command } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { languageChoices } from "./syntaxCatalog";
 
 const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.comment, tags.docComment], class: "syntax-comment" },
@@ -17,8 +17,6 @@ const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.propertyName, tags.attributeName, tags.function(tags.variableName)], class: "syntax-property" },
   { tag: tags.invalid, class: "syntax-invalid" },
 ]));
-const languageChoices = [...languages].sort((a, b) => a.name.localeCompare(b.name));
-const syntaxOptions = languageChoices.map(({ name }) => name);
 const externalEdit = Annotation.define<boolean>();
 export type SourceStatus = { line: number; column: number; canUndo: boolean; canRedo: boolean };
 export type SourceActions = {
@@ -31,20 +29,18 @@ export type SourceActions = {
 };
 const managedCommands: Command[] = [selectAll, cursorDocStart, cursorDocEnd];
 
-export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, syntaxTarget, onChange,
-  ref, syntaxOverride, onSyntaxChange, onSyntaxOptions, onSourceStatus }: {
+export default function CodeSurface({ fileName, editing, locked, active, fontSize, value, onChange,
+  ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus }: {
   fileName: string;
   editing: boolean;
   locked: boolean;
   active: boolean;
   fontSize?: number;
   value: string;
-  syntaxTarget: HTMLElement | null;
   onChange: (text: string) => void;
   ref?: Ref<SourceActions>;
   syntaxOverride?: string;
-  onSyntaxChange?: (syntax: string) => void;
-  onSyntaxOptions?: (options: readonly string[]) => void;
+  onSyntaxInfo?: (info: { detected: string | undefined; unavailable: boolean }) => void;
   onSourceStatus?: (status: SourceStatus) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -55,13 +51,11 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   const editSlot = useMemo(() => new Compartment(), []);
   const labelSlot = useMemo(() => new Compartment(), []);
   const label = t(editing ? "Edit {0}" : "View {0}", fileName);
-  const [syntaxChoice, setSyntax] = useState("auto");
-  const syntax = syntaxOverride ?? syntaxChoice;
   const [unavailable, setUnavailable] = useState(false);
-  const language = syntax === "auto" ? LanguageDescription.matchFilename(languages, fileName) :
-    languageChoices.find(({ name }) => name === syntax);
+  const detected = LanguageDescription.matchFilename(languages, fileName);
+  const language = syntaxOverride === "auto" ? detected : languageChoices.find(({ name }) => name === syntaxOverride);
   const managed = Boolean(ref);
-  useEffect(() => { onSyntaxOptions?.(syntaxOptions); }, [onSyntaxOptions]);
+  useEffect(() => { onSyntaxInfo?.({ detected: detected?.name, unavailable }); }, [detected, unavailable, onSyntaxInfo]);
 
   useImperativeHandle(ref, () => ({
     selection: () => editor.current?.state.sliceDoc(editor.current.state.selection.main.from, editor.current.state.selection.main.to) ?? "",
@@ -157,17 +151,5 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
     return () => { canceled = true; };
   }, [language, languageSlot]);
 
-  return (
-    <>
-      {syntaxTarget && createPortal(<div className="syntax-toolbar">
-        <label>{t("Syntax")} <select value={syntax} onChange={(event) => (onSyntaxChange ?? setSyntax)(event.target.value)}>
-          <option value="auto">{t("Automatic ({0})", language?.name ?? t("Plain text"))}</option>
-          <option value="plain">{t("Plain text")}</option>
-          {languageChoices.map(({ name }) => <option key={name} value={name}>{name}</option>)}
-        </select></label>
-        {unavailable && <span role="status">{t("Syntax unavailable.")}</span>}
-      </div>, syntaxTarget)}
-      <div className="code-surface" ref={container} />
-    </>
-  );
+  return <div className="code-surface" ref={container} />;
 }

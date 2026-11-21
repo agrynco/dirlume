@@ -24,6 +24,7 @@ import { SplitDivider } from "./SplitDivider";
 import { PathField } from "./PathField";
 
 const CodeSurface = lazy(() => import("./CodeSurface"));
+const SyntaxPicker = lazy(() => import("./SyntaxPicker"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
 
 function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
@@ -57,9 +58,11 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const [preview, setPreview] = useState(!editing && isMarkdownFile(file.name));
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
-  const [syntaxTarget, setSyntaxTarget] = useState<HTMLDivElement | null>(null);
   const [syntax, setSyntax] = useState("auto");
-  const [syntaxOptions, setSyntaxOptions] = useState<readonly string[]>([]);
+  const [syntaxInfo, setSyntaxInfo] = useState<{ detected: string | undefined; unavailable: boolean }>();
+  const [choosingSyntax, setChoosingSyntax] = useState(false);
+  const syntaxButton = useRef<HTMLButtonElement>(null);
+  const syntaxOpener = useRef<HTMLElement | null>(null);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ line: 1, column: 1, canUndo: false, canRedo: false });
   const [hexSize, setHexSize] = useState<number>();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -323,11 +326,22 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     ...(sourceVisible ? [{ label: "Syntax", items: [
       { label: "Automatic", run: () => setSyntax("auto") },
       { label: "Plain text", run: () => setSyntax("plain") },
-      { label: "Choose syntax…", disabled: !syntaxOptions.length,
-        items: syntaxOptions.map((name) => ({ label: name, run: () => setSyntax(name) })) },
+      { label: "Choose syntax…", run: () => openSyntax(section.current?.querySelector<HTMLElement>(
+        '[data-menu-group="' + menuGroups.findIndex(({ label }) => label === "Syntax") + '"]') ?? null) },
     ] }] : []),
   ];
   const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), switchMode, closeAction];
+  function openSyntax(opener: HTMLElement | null) {
+    syntaxOpener.current = opener;
+    setChoosingSyntax(true);
+  }
+  function closeSyntax() {
+    setChoosingSyntax(false);
+    requestAnimationFrame(() => {
+      const opener = syntaxOpener.current;
+      (opener?.isConnected ? opener : syntaxButton.current)?.focus();
+    });
+  }
 
   return (
     <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
@@ -361,7 +375,13 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         <div className="document-status">
           <span>{t(editing ? "Edit" : "View")}</span>
           {document && <span className="document-encoding">{textEncodingLabels[document.encoding]}</span>}
-          {sourceVisible && <div ref={setSyntaxTarget} />}
+          {sourceVisible && <div className="syntax-toolbar">
+            <Button ref={syntaxButton} aria-label={t("Syntax")} aria-haspopup="dialog" onClick={(event) => openSyntax(event.currentTarget)}>
+              {syntax === "auto" ? t("Automatic ({0})", syntaxInfo?.detected ?? t("Plain text")) :
+                syntax === "plain" ? t("Plain text") : syntax}
+            </Button>
+            {syntaxInfo?.unavailable && <span role="status">{t("Syntax unavailable.")}</span>}
+          </div>}
           {fileSize !== undefined && <span>{t("{0} bytes", fileSize.toLocaleString(locale()))}</span>}
           {sourceVisible && <span>{t("Ln {0}, Col {1}", sourceStatus.line, sourceStatus.column)}</span>}
           {(saving || dirty) && <span className="document-modified">{t(saving ? "Saving…" : "Modified")}</span>}
@@ -423,9 +443,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         <div className="source-surface" hidden={preview || hex}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
-              fontSize={fontSize} value={text} syntaxTarget={sourceVisible ? syntaxTarget : null} onChange={setText}
-              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxChange={setSyntax}
-              onSyntaxOptions={setSyntaxOptions} />
+              fontSize={fontSize} value={text} onChange={setText}
+              ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>
         </div>
       </>}
@@ -433,6 +452,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {hints.map((hint) => hint.shortcut && <Button type="button" key={hint.label} disabled={hint.disabled}
           shortcut={hint.shortcut} tooltip={t(hint.label)} onClick={hint.run}><kbd>{hint.shortcut}</kbd> {t(hint.label)}</Button>)}
       </footer>
+      {choosingSyntax && sourceVisible && <Suspense>
+        <SyntaxPicker syntax={syntax} editing={editing} onSelect={(choice) => { setSyntax(choice); closeSyntax(); }} onClose={closeSyntax} />
+      </Suspense>}
       {sudoAction && file.place.kind === "ssh" && <SudoDialog operation={sudoAction} address={file.place.address}
         path={path} onClose={() => setSudoAction(null)}
         onConfirm={async (password) => {
@@ -757,7 +779,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
           <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
             <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === "left"}
-              value={documents[side]} syntaxTarget={null} onChange={(text) => {
+              value={documents[side]} onChange={(text) => {
                 setDocuments((previous) => previous && { ...previous, [side]: text });
                 setCurrent(0);
               }} />
