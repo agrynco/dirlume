@@ -348,6 +348,20 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .main-menu-dropdown kbd { flex: none; white-space: nowrap; }
 .main-menu-dropdown button:focus-visible { outline-offset: -2px; }
 .main-menu-dropdown button[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: default; }
+.main-menu-dropdown[data-action-icons] {
+  grid-template-columns: 15px minmax(0, 1fr) max-content 13px;
+  column-gap: 8px;
+}
+.main-menu-dropdown[data-action-icons] > :is(button, .main-menu-separator) { grid-column: 1 / -1; }
+.main-menu-dropdown[data-action-icons] > button {
+  display: grid; grid-template-columns: 15px minmax(0, 1fr) max-content 13px;
+  grid-template-columns: subgrid; align-items: center;
+  column-gap: inherit; row-gap: 0;
+}
+.main-menu-action-icon { grid-column: 1; width: 15px; height: 15px; }
+.main-menu-action-label { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.main-menu-dropdown[data-action-icons] kbd { grid-column: 3; }
+.main-menu-action-check { grid-column: 4; width: 13px; height: 13px; }
 .main-menu-submenu { z-index: 26; }
 .main-menu-separator { margin: 4px 2px; border-top: 1px solid var(--line); }
 .sudo-body { display: grid; gap: 8px; }

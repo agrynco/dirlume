@@ -9,8 +9,9 @@ import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
-  Calculator, CircleHelp, GitBranch, Moon, Pencil, ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2,
+  ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Copy, Eye, EyeOff, FileDiff,
+  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
+  ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -2256,6 +2257,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     };
   }
 
+  const commandWithIcon = (Icon: LucideIcon, command: Command, disabled = false, label?: string) =>
+    ({ ...menuCommand(command, disabled, label), Icon });
+
   const menuGroups: MenuGroup[] = [
     paneMenu("left"),
     { label: "Files", items: [
@@ -2268,21 +2272,23 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search || !current || busy)]),
     ] },
     { label: "Commands", items: [
-      { ...menuCommand("quickView", !canToggleQuickView), checked: quickViewSource !== null },
-      { ...menuCommand("gitView", !canToggleGitView), checked: showingGit },
-      { ...menuCommand("environmentVariables", !panesAvailable || !!gitView || !!spaceSide), checked: environmentActive },
-      menuCommand("analyzeSpace", !filesAvailable || showingEnvironment || !canAnalyze(pane.place)),
-      menuCommand("search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
-      menuCommand("compare", !filesAvailable || comparison === null),
-      menuCommand("copyFullPath", currentFullPath === null),
-      menuCommand("copyItemNames", !canCopyItemNames),
-      menuCommand("connect", activeDocument !== null, "Connect"),
-      menuCommand("swap", !panesAvailable || !canSwapPanes),
-      menuCommand("commandHistory", activeDocument !== null),
-      menuCommand("folderShortcuts", !panesAvailable),
-      menuCommand("toggleTerminal", activeDocument !== null),
-      ...(isTauri() ? [{ label: "MCP server", run: () => setModal({ kind: "mcp" }) }] : []),
-      ...(isTauri() ? [{ label: "Check for updates", run: () => { void checkUpdates(true); } }] : []),
+      { ...commandWithIcon(ScanEye, "quickView", !canToggleQuickView), checked: quickViewSource !== null },
+      { ...commandWithIcon(GitBranch, "gitView", !canToggleGitView), checked: showingGit },
+      { ...commandWithIcon(Braces, "environmentVariables", !panesAvailable || !!gitView || !!spaceSide), checked: environmentActive },
+      commandWithIcon(FolderTree, "analyzeSpace", !filesAvailable || showingEnvironment || !canAnalyze(pane.place)),
+      commandWithIcon(Search, "search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
+      commandWithIcon(FileDiff, "compare", !filesAvailable || comparison === null),
+      commandWithIcon(ClipboardCopy, "copyFullPath", currentFullPath === null),
+      commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
+      commandWithIcon(Server, "connect", activeDocument !== null, "Connect"),
+      commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
+      commandWithIcon(History, "commandHistory", activeDocument !== null),
+      commandWithIcon(Bookmark, "folderShortcuts", !panesAvailable),
+      commandWithIcon(TerminalIcon, "toggleTerminal", activeDocument !== null),
+      ...(isTauri() ? [
+        { label: "MCP server", Icon: Plug, run: () => setModal({ kind: "mcp" }) },
+        { label: "Check for updates", Icon: RefreshCw, run: () => { void checkUpdates(true); } },
+      ] : []),
     ] },
     { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
     paneMenu("right"),
