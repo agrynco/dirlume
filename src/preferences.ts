@@ -592,11 +592,15 @@ export function eventShortcut(event: { key: string; code?: string; ctrlKey: bool
 }
 
 
-export function quickSearchSeed(event: KeyboardEvent, bindings: readonly string[]): string | null {
+export function quickSearchSeed(event: KeyboardEvent, bindings: readonly string[], includeDigits = false): string | null {
   const shortcut = eventShortcut(event);
   if (bindingMatches(bindings, shortcut)) return "";
   if (!bindings.includes("Alt+Letter")) return null;
   if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (includeDigits) {
+    if (/^[0-9]$/.test(event.key)) return event.key;
+    if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
+  }
   if (Array.from(event.key).length === 1 && /\p{L}/u.test(event.key)) return event.key;
   // Option on macOS can emit a symbol or dead key for a physical letter key.
   if (mac && /^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase();

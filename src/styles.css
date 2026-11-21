@@ -847,6 +847,16 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .environment-list button:is([aria-selected="true"], [data-marked]) { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .environment-list button > :is(strong, span) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .environment-list button > span { opacity: .85; font-size: .84em; }
+.environment-list { scroll-padding-block-start: 2em; }
+.environment-list :is(.environment-columns, .environment-row) {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 8px; align-items: center; padding: 4px 7px; text-align: start;
+}
+.environment-columns {
+  position: sticky; inset-block-start: 0; z-index: 1; border: 1px solid var(--line);
+  background: var(--raised); color: var(--muted); font-weight: 600;
+}
+.environment-columns span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .environment-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--raised); border-top: 1px solid var(--line); }
 .environment-source { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 8px; margin-block: 5px 9px; }
 .environment-source dt { color: var(--muted); }
