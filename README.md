@@ -239,6 +239,10 @@ Each entry records the failed operation, an error code, a timestamp in Unix mill
 
 ## CI and releases
 
+The [DirLume project board](https://github.com/users/agrynco/projects/12/views/1) uses issue labels, issue branches, and task pull requests to keep its columns current. The `ready for dev` label moves a queued issue to **Ready**. A published `codex/issue-N` branch or draft task pull request marks it **In progress**. A task pull request ready for review marks it **In review**. Merging that pull request into `prerelease` moves the issue to **prerelease**, and closing it moves it to **Done**. Link task pull requests with `Refs #N`.
+
+The sync workflow uses the `DIRLUME_PROJECT_TOKEN` Actions secret. Use a GitHub classic personal access token with the `project` scope for this user-owned project. Run **Sync Dirlume project status** in GitHub Actions to reconcile the board immediately after setting the secret.
+
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers and portable copies, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
 Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
