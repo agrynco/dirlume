@@ -78,6 +78,11 @@ async function checkViews(page) {
   assert.equal(await list(page, "right").count(), 0);
   await page.keyboard.press("ArrowDown");
   await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).waitFor();
+  await list(page, "left").press("Control+u");
+  await preview(page, "left").getByText(front["02-beta.txt"], { exact: true }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+  await list(page, "right").press("Control+u");
+  await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).waitFor();
   await assertDivider(page, "left");
   assert.equal(await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).isVisible(), true);
   await page.keyboard.press("Tab");

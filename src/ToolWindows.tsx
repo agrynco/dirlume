@@ -76,7 +76,7 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   };
   return <>
     {comparison ? <CompareDialog {...comparison} standalone
-      previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange}
+      previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap}
       onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} /> :
       <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {
       const next = readPreferences();

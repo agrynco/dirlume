@@ -16,6 +16,8 @@ The JSON archive includes portable preferences such as panel modes and keyboard 
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
+Press **Ctrl+U** or choose **Commands → Swap panes** to exchange the workspace panes while keeping the active view and its selection. This works with files, processes, Quick View, Space Analyzer, and environment variables. In Git View it exchanges **Branches** and **Commit history** for the current session. In **Side-by-side** comparison it exchanges the files, including unsaved edits, and the merge actions follow the displayed sides. Change or disable **Swap panes** in **Options → Keyboard shortcuts**.
+
 Local copies can preserve timestamps and access rights, follow symbolic links, and filter filenames using `*` and `?`. **Process multiple destinations** copies the selection to each listed folder.
 
 Drop files or folders from your system file manager onto a local, FTP, or SSH pane to open the transfer dialog. Local drops also offer a move. Dragging between Dirlume's panes uses the same transfer flow.

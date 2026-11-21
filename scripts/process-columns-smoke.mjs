@@ -79,10 +79,17 @@ export async function testProcessColumns(page) {
     await resize("left", name).dblclick();
     assert.equal(await width("left", name), await width("right", name));
   }
-  for (const side of ["left", "right"]) {
-    await table(side).focus();
-    await page.locator(".actionbar").getByRole("button", { name: "Back to files", exact: true }).click();
-    await table(side).waitFor({ state: "detached" });
-  }
+  const backToFiles = page.locator(".actionbar").getByRole("button", { name: "Back to files", exact: true });
+  await table("right").focus();
+  await backToFiles.click();
+  await table("right").waitFor({ state: "detached" });
+  await target.click();
+  await table("left").press("Control+u");
+  await table("right").locator("[data-current='true']").getByRole("gridcell", { name: String(process.pid), exact: true }).waitFor();
+  await pane("left").getByRole("listbox", { name: "left files", exact: true }).waitFor();
+  await table("right").press("Control+u");
+  await row.waitFor();
+  await backToFiles.click();
+  await table("left").waitFor({ state: "detached" });
   console.log("Verified process column visibility, independent panes, header sorting, selection, and the last-column guard.");
 }
