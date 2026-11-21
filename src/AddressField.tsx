@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { ChevronRight, Copy, Pencil } from "lucide-react";
 import { folderLabel, isFileServer, placePath, windowsClient, type FileLocation } from "./api";
 import { Button } from "./Button";
@@ -34,6 +34,58 @@ function breadcrumbPlaces(place: FileLocation | null, limit = 4, inSameSource = 
   return places.reverse();
 }
 
+function useBreadcrumbClip(editing = false) {
+  const clip = useRef<HTMLDivElement>(null);
+  const track = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState(false);
+
+  useLayoutEffect(() => {
+    const viewport = clip.current;
+    const content = track.current;
+    if (editing || !viewport || !content) return;
+    const measure = () => setClipped(content.offsetWidth > viewport.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [editing]);
+
+  return { clip, track, clipped };
+}
+
+function BreadcrumbTrack({ clip, track, ancestors, current, goTo }: {
+  clip: Ref<HTMLDivElement>;
+  track: Ref<HTMLDivElement>;
+  ancestors: readonly FileLocation[];
+  current: string;
+  goTo?: (place: FileLocation) => void;
+}) {
+  return <div ref={clip} className="address-crumb-clip">
+    <div ref={track} className="address-crumbs">
+      {ancestors.map((ancestor) => <div key={placeKey(ancestor)} className="address-ancestor">
+        {goTo ? <button type="button" onClick={() => goTo(ancestor)}>{folderLabel(ancestor)}</button> :
+          <span>{folderLabel(ancestor)}</span>}
+        <ChevronRight aria-hidden="true" />
+      </div>)}
+      <span aria-current="location" className="address-current">{current}</span>
+    </div>
+  </div>;
+}
+
+export function ReadOnlyAddressBreadcrumbs({ place, path }: { place: FileLocation; path: string }) {
+  // A volume or share can be scanned without loading a directory listing first.
+  const target = place.kind === "local" && place.parent === null ? { ...place, parent: parentPath(place.path, windowsClient) } : place;
+  const ancestors = breadcrumbPlaces(target).slice(0, -1);
+  const { clip, track, clipped } = useBreadcrumbClip();
+  const shortened = clipped || (ancestors.length === 3 && Boolean(parentPlace(ancestors[0])));
+
+  return <div className="address-breadcrumbs" role="group" aria-label={path} title={path}>
+    <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} current={folderLabel(target)} />
+    {shortened && <span className="address-overflow address-ellipsis" aria-hidden="true">…</span>}
+  </div>;
+}
+
 export function AddressField({ side, place, showHidden, onNavigate, onNavigateAncestor, onCopy, focusFiles }: {
   side: Side;
   place: FileLocation | null;
@@ -49,10 +101,8 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   const location = place ? placeKey(place) : "";
   const addressKey = JSON.stringify([side, location]);
   const root = useRef<HTMLDivElement>(null);
-  const clip = useRef<HTMLDivElement>(null);
-  const track = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
-  const [clipped, setClipped] = useState(false);
+  const { clip, track, clipped } = useBreadcrumbClip(editing);
   const [overflow, setOverflow] = useState(false);
   const [hoverX, setHoverX] = useState<number>();
   const [draft, setDraft] = useState(path);
@@ -94,19 +144,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   }, [branch, branchIndex]);
 
   useLayoutEffect(() => {
-    if (editing) {
-      root.current?.querySelector("input")?.focus({ preventScroll: true });
-      return;
-    }
-    const viewport = clip.current;
-    const content = track.current;
-    if (!viewport || !content) return;
-    const measure = () => setClipped(content.offsetWidth > viewport.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
-    observer.observe(content);
-    return () => observer.disconnect();
+    if (editing) root.current?.querySelector("input")?.focus({ preventScroll: true });
   }, [editing]);
 
   function goTo(folder: FileLocation, goingUp = false) {
@@ -146,15 +184,8 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
         setOverflow(false);
         focusFiles();
       }}>
-        <div ref={clip} className="address-crumb-clip">
-          <div ref={track} className="address-crumbs">
-            {ancestors.map((ancestor) => <div key={placePath(ancestor)} className="address-ancestor">
-              <button type="button" onClick={() => goTo(ancestor, true)}>{folderLabel(ancestor)}</button>
-              <ChevronRight aria-hidden="true" />
-            </div>)}
-            <span aria-current="location" className="address-current">{place ? folderLabel(place) : t("Enter a path")}</span>
-          </div>
-        </div>
+        <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} goTo={(ancestor) => goTo(ancestor, true)}
+          current={place ? folderLabel(place) : t("Enter a path")} />
         {forward.length > 0 && <div className="address-forward">
           {forward.map((folder) => <div key={placeKey(folder)} className="address-ancestor">
             <ChevronRight aria-hidden="true" />

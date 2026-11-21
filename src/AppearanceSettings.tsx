@@ -4,14 +4,15 @@ import { Button } from "./Button";
 import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  basePalette, baseThemes, builtInThemes, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
+  basePalette, baseThemes, builtInThemes, captureFonts, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
   isAvailableFont, isHexColor, surfaceColors,
-  maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, useSystemTheme, viewerColors,
+  maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, systemTheme, useSystemTheme, viewerColors,
   type Color, type Font, type FontGroup, type Palette, type Scheme, type Surface,
 } from "./appearance";
 import { maxViewerContentWidth, minViewerContentWidth, type Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { ColorPicker } from "./ColorPicker";
+import { Dialog } from "./Dialog";
 import { FontFamilyField, type InstalledFonts } from "./FontFamilyField";
 import { SchemeOptions } from "./SchemeOptions";
 import { maxViewFontSize, minViewFontSize, viewFontKeys, viewFonts, type ViewFont } from "./viewFonts";
@@ -32,7 +33,7 @@ export function ViewFontSettings({ preferences, onChange, views }: {
   function fields(keys: readonly ViewFont[]) {
     return keys.map((view) => {
       const { label, group } = viewFonts[view];
-      const fallback = effectiveFontSize(scheme?.fonts, group);
+      const fallback = parseFloat(preferences.retainedFonts?.[`--${group}-size`] ?? "") || effectiveFontSize(scheme?.fonts, group);
       return <label className="view-font-setting" key={view}>
         <SettingSearchLabel label={label} aliases={["zoom", "wheel", "font size"]} />
         <FontSizeInput label={label} size={preferences.viewFontSizes[view]} fallback={fallback}
@@ -64,13 +65,16 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   views?: readonly ViewFont[];
   selection?: AppearancePick;
 }) {
-  const [deleting, setDeleting] = useState(false);
+  const [managedId, setManagedId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const system = useSystemTheme();
   const [palette, setPalette] = useState<Palette>({});
   const [picker, setPicker] = useState<{ color: Color; label: string; initial: string; previous: Preferences; surface?: Surface } | null>(null);
   const [installed, setInstalled] = useState<InstalledFonts>(null);
   const active = preferences.schemes.find(({ id }) => id === preferences.activeScheme);
   const { scheme: applied, theme } = resolveAppearance(preferences, system);
+  const managed = preferences.schemes.find(({ id }) => id === managedId) ?? applied ?? preferences.schemes[0];
+  const deleting = preferences.schemes.find(({ id }) => id === deleteId);
   const base = theme;
   const overrides = applied?.colors;
   const picked = selection && pickedSurface(selection);
@@ -95,18 +99,20 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   }, [showingFonts]);
 
   function select(value: string) {
-    setDeleting(false);
     onChange(selectAppearance(preferences, value));
   }
 
-  function create(fonts = applied?.fonts ?? {}, colors = applied?.colors ?? {}, viewFontSizes = preferences.viewFontSizes) {
+  function create({
+    fonts = applied?.fonts ?? {}, colors = applied?.colors ?? {}, viewFontSizes = preferences.viewFontSizes, automaticName = true,
+  }: { fonts?: Scheme["fonts"]; colors?: Palette; viewFontSizes?: Preferences["viewFontSizes"]; automaticName?: boolean } = {}) {
     let number = 1;
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
+    const name = number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number);
     const scheme: Scheme = {
-      id: `scheme-${number}`, name: number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number),
-      base, colors, fonts,
+      id: `scheme-${number}`, name, base, colors, fonts,
+      ...(automaticName ? { suggestedName: name } : {}),
     };
-    setDeleting(false);
+    setManagedId(scheme.id);
     onChange({ ...preferences, viewFontSizes, activeScheme: scheme.id, schemes: [...preferences.schemes, scheme] });
   }
 
@@ -126,24 +132,24 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     }
     const scheme = Object.hasOwn(surfaceColors, group) ? applied : active;
     if (scheme) update({ ...scheme, fonts }, viewFontSizes);
-    else create(fonts, applied?.colors, viewFontSizes);
+    else create({ fonts, viewFontSizes });
   }
 
   function setColor(color: Color, value?: string, surface?: Surface) {
     const scheme = surface || color === "viewer-outside-bg" ? applied : active;
     if (scheme) update({ ...scheme, colors: { ...scheme.colors, [color]: value } });
-    else if (value) create(applied?.fonts, { ...applied?.colors, [color]: value });
+    else if (value) create({ colors: { ...applied?.colors, [color]: value } });
   }
 
   function remove(scheme: Scheme) {
+    if (resolveAppearance(preferences, systemTheme()).scheme?.id === scheme.id) return;
     const schemes = preferences.schemes.filter(({ id }) => id !== scheme.id);
     onChange({
-      ...preferences, theme: scheme.base, activeScheme: null,
-      schemes,
+      ...preferences, schemes,
       systemLightScheme: readSystemScheme(preferences.systemLightScheme, schemes, "light"),
       systemDarkScheme: readSystemScheme(preferences.systemDarkScheme, schemes, "dark"),
     });
-    setDeleting(false);
+    setDeleteId(null);
   }
 
   function colorFields(keys: readonly Color[], surface?: Surface) {
@@ -167,8 +173,13 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
               <SchemeOptions schemes={preferences.schemes} />
             </select>
           </label>
-          <Button type="button" className="appearance-button" onClick={() => create()}><Plus /> <SettingSearchLabel label="New scheme" /></Button>
+          <Button type="button" className="appearance-button" onClick={() => create({ automaticName: false })}><Plus /> <SettingSearchLabel label="New scheme" /></Button>
         </div>
+        <label className="field-checkbox">
+          <SettingSearchLabel label="Keep current fonts" />
+          <input type="checkbox" checked={preferences.retainedFonts !== undefined}
+            onChange={({ target }) => onChange({ ...preferences, retainedFonts: target.checked ? captureFonts(theme, applied) : undefined })} />
+        </label>
         <MenuAlignmentSetting label="Main menu alignment" value={preferences.mainMenuAlignment}
           onChange={(mainMenuAlignment) => onChange({ ...preferences, mainMenuAlignment })} />
         <label className="field-checkbox">
@@ -188,26 +199,42 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
             </select>
           </label>
         </div>
-        {active && (
-          <div className="appearance-header scheme-identity">
+        {managed && <fieldset className="view-font-group scheme-management">
+          <legend><SettingSearchLabel label="Manage custom color schemes" /></legend>
+          <label className="field"><SettingSearchLabel label="Scheme to manage" aliases={preferences.schemes.map(({ name }) => name)} />
+            <select aria-label={t("Scheme to manage")} value={managed.id} onChange={(event) => setManagedId(event.target.value)}>
+              {preferences.schemes.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+          <div className="appearance-header">
             <label className="field"><SettingSearchLabel label="Scheme name" />
-              <HistoryField historyKey="appearance-scheme-name" aria-label={t("Scheme name")} type="text" value={active.name}
-                maxLength={maxSchemeNameLength} onValueChange={(name) => update({ ...active, name })} />
-            </label>
-            <label className="field"><SettingSearchLabel label="Base theme" aliases={baseThemes.map((theme) => builtInThemes[theme])} />
-              <select aria-label={t("Base theme")} value={active.base} onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
-                {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
-              </select>
+              <HistoryField historyKey="appearance-scheme-name" aria-label={t("Scheme name")} type="text" value={managed.name}
+                maxLength={maxSchemeNameLength} onValueChange={(name) => update({ ...managed, name })} />
             </label>
             <Button type="button" className="icon-button appearance-button" aria-label={t("Delete scheme")}
-              tooltip={t("Delete scheme")} onClick={() => setDeleting(!deleting)}><Trash2 /></Button>
+              tooltip={t("Delete scheme")} disabled={managed.id === applied?.id} onClick={() => setDeleteId(managed.id)}>
+              <Trash2 aria-hidden="true" />
+            </Button>
           </div>
-        )}
-        {active && deleting && <div className="scheme-confirm">
-          <span>{t("Delete this color scheme?")}</span>
-          <Button type="button" onClick={() => setDeleting(false)}>{t("Keep scheme")}</Button>
-          <Button type="button" className="negative" onClick={() => remove(active)}>{t("Delete scheme")}</Button>
-        </div>}
+          {managed.id === applied?.id && <p className="appearance-hint">{t("Switch to another color scheme before deleting this one.")}</p>}
+          {active?.id === managed.id &&
+            <label className="field"><SettingSearchLabel label="Base theme" aliases={baseThemes.map((theme) => builtInThemes[theme])} />
+              <select aria-label={t("Base theme")} value={active.base}
+                onChange={(event) => update({ ...active, base: event.target.value as Scheme["base"] })}>
+                {baseThemes.map((item) => <option key={item} value={item}>{t(builtInThemes[item])}</option>)}
+              </select>
+            </label>}
+        </fieldset>}
+        {deleting && <Dialog title={t("Delete color scheme")} tone="warning" onClose={() => setDeleteId(null)} footer={<>
+          <Button type="button" data-initial-focus onClick={() => setDeleteId(null)}>{t("Keep scheme")}</Button>
+          <Button type="button" className="alert-confirm" disabled={deleting.id === applied?.id}
+            onClick={() => remove(deleting)}>{t("Delete scheme")}</Button>
+        </>}>
+          <div className="dialog-body">
+            <p>{t("Delete this color scheme?")} <strong>{deleting.name}</strong></p>
+            {deleting.id === applied?.id && <p>{t("Switch to another color scheme before deleting this one.")}</p>}
+          </div>
+        </Dialog>}
       </>}
       {!(surfaces.length ? applied : active) && <p className="appearance-hint">{showingFonts ? t("Changing a font creates a custom scheme.") :
         t("Editing a color creates a custom scheme.")}</p>}
@@ -245,7 +272,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
       {!selection && fontGroup === "viewer" && <>
         <fieldset className="view-font-group reading-area-settings">
           <legend><SettingSearchLabel label="Reading area" /></legend>
-          <label className="setting unit-setting"><SettingSearchLabel label="Max width (px)" aliases={["Maximum content width (px)", "Full width"]} />
+          <label className="setting"><SettingSearchLabel label="Max width (px)" aliases={["Maximum content width (px)", "Full width"]} />
             <OptionalNumberInput label={t("Max width (px)")} size={preferences.viewerContentWidth} fallback={t("Full width")}
               min={minViewerContentWidth} max={maxViewerContentWidth}
               onChange={(viewerContentWidth) => onChange({ ...preferences, viewerContentWidth })} />
@@ -273,7 +300,7 @@ function MarkdownWidthSettings({ preferences, onChange }: {
   const setWidth = (viewerMarkdownContentWidth?: Preferences["viewerMarkdownContentWidth"]) =>
     onChange({ ...preferences, viewerMarkdownContentWidth });
   return <>
-    <label className="setting unit-setting">
+    <label className="setting">
       <SettingSearchLabel label="Markdown reading width" aliases={["Use shared width", "Full width", "Custom width"]} />
       <select aria-label={t("Markdown reading width")} value={mode} onChange={({ target }) =>
         setWidth(target.value === "custom" ? preferences.viewerContentWidth ?? 960 : target.value === "full" ? "full" : undefined)}>
@@ -282,7 +309,7 @@ function MarkdownWidthSettings({ preferences, onChange }: {
         <option value="custom">{t("Custom width")}</option>
       </select>
     </label>
-    {typeof width === "number" && <label className="setting unit-setting">
+    {typeof width === "number" && <label className="setting">
       <SettingSearchLabel label="Markdown max width (px)" />
       <OptionalNumberInput label={t("Markdown max width (px)")} size={width} fallback=""
         min={minViewerContentWidth} max={maxViewerContentWidth} onChange={setWidth} />

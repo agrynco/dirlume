@@ -10,6 +10,12 @@ Choose **Classic blue** in **Options → Appearance → Window → Color scheme*
 
 Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
 
+Set **Window background** on that page to choose a solid color for the backdrop behind the file panes and modern toolbars. **Reset window background** restores the base scheme's backdrop.
+
+Use **Manage custom color schemes** on the same page to rename a saved scheme or delete an inactive one without changing the current appearance. A custom scheme currently applied by **System** is protected from deletion. Deleting an inactive favorite restores the matching built-in Light or Dark favorite. Use **Apply** or **Done** to save the changes.
+
+Check **Keep current fonts** to capture the font families and base sizes in use. The retained fonts apply when switching schemes in Options, in the title bar, or through System appearance. Clear the checkbox to use the selected scheme's fonts again. Per-view zoom settings stay in place.
+
 Use **Export settings** in **Options** to save selected settings groups and custom color schemes to a JSON file. To share only a palette, select its scheme. On another installation, use **Import settings** to choose what to apply from the file. Dirlume asks for confirmation before replacing a local color scheme. Imported schemes are available under **Options → Appearance → Window → Color scheme**.
 
 The JSON archive includes portable preferences such as panel modes and keyboard shortcuts. Dirlume migrates supported older files and skips settings it no longer recognizes. The KSwitcher installation folder is configured locally in **Options → General**.
@@ -122,7 +128,9 @@ With Git installed, choose **Git View** beside **Quick View** from a local repos
 
 ### Environment variables
 
-Choose **Commands → Environment variables** in either pane, then open **User variables**, **System variables**, or the read-only **Dirlume process environment**. The list shows names and definition sources. Press **Enter** or **F3** to inspect a value, **F4** to edit, and **Shift+F4** to create a variable. Use **F5** to review and copy selected or marked variables to an opposite pane showing the other writable scope. **Ctrl+R** reloads the scope. **Back to files** restores the file pane.
+Choose **Commands → Environment variables** in either pane, then open **User variables**, **System variables**, or the read-only **Dirlume process environment**. The list shows variable names and definition sources in aligned columns. With the list focused, press **Alt+Letter** or **Alt+0–9** to start Quick search by name prefix. On macOS, use **Option** for Alt. Use **Up** or **Down** to cycle through matches, **Enter** to inspect the current match, and **Escape** to return to the list. Quick search works within the rows shown by **Filter variables** and uses the **Quick search by name prefix** binding in Options.
+
+Press **Enter** or **F3** to inspect a value, **F4** to edit, and **Shift+F4** to create a variable. Use **F5** to review and copy selected or marked variables to an opposite pane showing the other writable scope. **Ctrl+R** reloads the scope. **Back to files** restores the file pane.
 
 On Windows, saved definitions are read from the user and machine Environment registry keys. Saved strings retain their expandable type and raw text. Start a new PowerShell session with **Refresh environment** enabled to pick up registry changes. On Ubuntu, Dirlume writes `90-dirlume-user.conf` in the user `environment.d` directory and `/etc/environment.d/90-dirlume-system.conf` for system defaults. Reload the systemd user manager or sign in again so newly launched user services inherit the definitions. On macOS, enable login shell integration to add a startup hook to `.zprofile` or `/etc/zprofile`. The dialog previews which file will change. Start a new `zsh` login shell to load the managed definitions. System writes can request administrator authorization.
 

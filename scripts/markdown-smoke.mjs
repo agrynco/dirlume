@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 export async function testViewerReadingArea(page, source) {
   const plain = "reader.txt";
@@ -43,7 +43,10 @@ export async function testViewerReadingArea(page, source) {
   await outside.fill("#a7437d");
   const sharedWidth = options.getByRole("spinbutton", { name: "Max width (px)", exact: true });
   await sharedWidth.fill("420");
-  const apply = () => button(options, "Apply").click();
+  const apply = async () => {
+    await button(options, "Apply").click();
+    await keepSuggestedColorSchemeName(tool);
+  };
   await apply();
   const readingWidths = options.getByRole("combobox", { name: "Markdown reading width" });
   assert.equal(await readingWidths.inputValue(), "inherit");
