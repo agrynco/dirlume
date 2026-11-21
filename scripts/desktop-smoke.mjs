@@ -30,7 +30,7 @@ import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-p
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
-import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testAlertDialogStyles, testBatchDeletion, testPermanentDelete } from "./permanent-delete-smoke.mjs";
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
 import { testDocumentWatch } from "./document-watch-smoke.mjs";
@@ -1313,7 +1313,8 @@ try {
   await left.getByRole("option", { name: /^locked-by-process.txt/ }).click();
   await page.keyboard.press("Shift+Delete");
   await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click();
-  await deleteDialog.getByRole("button", { name: "Find locking processes", exact: true }).click();
+  const blockedRemoval = page.getByRole("dialog", { name: "Item is in use", exact: true });
+  await blockedRemoval.getByRole("button", { name: "Find locking processes", exact: true }).click();
   const lockDialog = page.getByRole("dialog", { name: "Processes using these files", exact: true });
   await lockDialog.getByRole("option", { name: new RegExp(`PID ${lockedBy.pid}\\)`) }).waitFor();
   await lockDialog.getByRole("button", { name: "Select all", exact: true }).click();
@@ -1321,7 +1322,7 @@ try {
   await endProcesses.getByRole("button", { name: "End process", exact: true }).click();
   await lockDialog.getByText("Windows found no processes using these files.").waitFor();
   await lockDialog.getByRole("button", { name: "Close", exact: true }).click();
-  await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await blockedRemoval.getByRole("button", { name: "Retry", exact: true }).click();
   await left.getByRole("option", { name: /^locked-by-process.txt/ }).waitFor({ state: "detached" });
 
   if (process.env.DIRLUME_CROSS_VOLUME_TEST_ROOT) {
@@ -2283,6 +2284,7 @@ try {
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
   await testOsTimestamps(page, temp);
   await testPermanentDelete(page, temp);
+  await testBatchDeletion(page, temp);
   await testInlineRename(page, temp);
   await testLockingProcessPane(page, temp);
   await testProcessColumns(page);

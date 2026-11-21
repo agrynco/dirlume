@@ -47,6 +47,8 @@ import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
+import { DeletionDialog } from "./DeletionDialog";
+import type { Deletion } from "./api";
 import { Settings } from "./Settings";
 import { SortCriteriaDialog, SortMenu } from "./FileSortMenu";
 import { defaultSortCriteria, sortMode, sortModes, type SortMode } from "./fileSort";
@@ -121,6 +123,7 @@ type Modal =
   | { kind: "verifyConnection"; side: Side; profile: SavedConnection; verification: SshHostVerification }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; transfer: Transfer }
+  | { kind: "deletion"; deletion: Deletion }
   | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
@@ -161,7 +164,7 @@ function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | u
   if (modal === "search" || modal === "compare") return modal;
   if (modal === "connect" || modal === "smb" || modal === "connectionEditor") return "remote";
   if (modal === "createArchive" || modal === "archivePassword") return "archives";
-  if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename") return "operations";
+  if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename" || modal === "deletion") return "operations";
   return editing === undefined ? "files" : editing ? "editor" : "viewer";
 }
 
@@ -3047,6 +3050,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         showHidden={preferences.hidden} onClose={() => setModal(null)} onCreated={() => { refresh("left"); refresh("right"); }} />}
       {modal?.kind === "archivePassword" && <ArchivePasswordDialog onClose={() => setModal(null)}
         onOpen={async (password) => { await openArchive(modal.side, modal.path, password); setModal(null); }} />}
+      {modal?.kind === "deletion" && <DeletionDialog deletion={modal.deletion} onClose={() => setModal(null)} onFinished={(result) => {
+        refresh("left");
+        refresh("right");
+        if (result && !result.cancelled && result.counts.failed + result.counts.skipped + result.counts.unprocessed === 0) {
+          setStatus({ text: t(modal.deletion.permanent ? "Deleted {0}." : "Moved {0} to Trash.", countText(result.counts.completed, "item")) });
+        }
+      }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
           hasNonemptyFolders={modal.remote && "names" in modal ? async () => {
@@ -3065,17 +3075,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             await api.deleteArchiveEntries(archive.id, modal.names.map((name) => [...archive.segments, name]));
             refresh("left");
             refresh("right");
-          } else if ("names" in modal) {
+          } else if ("names" in modal && remote) {
             try {
-              const remove = remote?.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
-              await batch(modal.names, (name) => remote
-                ? remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false))
-                : api.operate(modal.path, { kind: modal.kind, name }));
+              const remove = remote.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
+              await batch(modal.names, (name) => remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false)));
             } catch (error) {
-              // A single failed file has no completed items to replay. Keep its recovery actions available.
-              if (!remote && modal.names.length === 1 && !modal.directories?.length) {
-                throw error instanceof Error && error.cause !== undefined ? error.cause : error;
-              }
               setStatus({ text: describeError(error), error: true });
               setModal(null);
               return;
@@ -3083,6 +3087,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               refresh("left");
               refresh("right");
             }
+          } else if ("names" in modal) {
+            setModal({ kind: "deletion", deletion: { directory: modal.path, names: modal.names, permanent: modal.kind === "delete" } });
+            return;
           } else if (operation) {
             if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);

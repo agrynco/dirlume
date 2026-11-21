@@ -2382,6 +2382,7 @@ pub fn run() {
         .manage(Connections::default())
         .manage(crate::archives::Archives::default())
         .manage(crate::archive_create::ArchiveJobs::default())
+        .manage(crate::deletion::DeleteJobs::default())
         .manage(ftp::FtpState::default())
         .manage(ssh::SshState::default())
         .manage(TransferSessions::default())
@@ -2534,6 +2535,9 @@ pub fn run() {
         kswitcher_peers,
         list_kswitcher,
         begin_transfer,
+        crate::deletion::delete_selection,
+        crate::deletion::cancel_deletion,
+        crate::deletion::resolve_deletion,
         cancel_transfer,
         finish_transfer,
         resolve_transfer,

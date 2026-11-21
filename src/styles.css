@@ -1179,6 +1179,33 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .transfer-meter span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .transfer-meter span:last-child { flex: none; color: var(--muted); }
 .transfer-body progress { width: 100%; accent-color: var(--accent-fill); }
+.deletion-body { display: grid; gap: 12px; }
+.deletion-body p { margin: 0; }
+.deletion-path { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.deletion-path > svg { flex: none; width: 21px; height: 21px; color: var(--muted); }
+.deletion-path > div { display: grid; gap: 3px; min-width: 0; }
+.deletion-path span { font-family: var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.deletion-path[role="alert"] > svg { color: var(--dialog-warning-ink, var(--danger)); }
+.deletion-meter { display: grid; gap: 4px; }
+.deletion-meter > div { display: flex; justify-content: space-between; gap: 8px; }
+.deletion-meter span, .deletion-details dt, .deletion-note { color: var(--muted); }
+.deletion-meter progress { width: 100%; accent-color: var(--accent-fill); }
+.deletion-meter progress[value] { appearance: none; block-size: 8px; border: 0; border-radius: 4px; background: var(--line); }
+.deletion-meter progress[value]::-webkit-progress-bar { background: var(--line); border-radius: 4px; }
+.deletion-meter progress[value]::-webkit-progress-value { background: var(--accent-fill); border-radius: 4px; }
+.deletion-meter progress[value]::-moz-progress-bar { background: var(--accent-fill); border-radius: 4px; }
+.deletion-meter[data-secondary] progress[value]::-webkit-progress-value { background: var(--muted); }
+.deletion-meter[data-secondary] progress[value]::-moz-progress-bar { background: var(--muted); }
+.deletion-details {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+  padding-block-start: 10px; border-block-start: 1px solid var(--line); margin: 0;
+}
+.deletion-details dd { margin: 3px 0 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.deletion-counts { display: flex; flex-wrap: wrap; column-gap: 10px; row-gap: 3px; padding: 0; margin: 0 auto 0 0; list-style: none; color: var(--muted); }
+.deletion-remember { display: flex; align-items: center; gap: 7px; }
+.deletion-failures ul { margin: 7px 0 0; padding-inline-start: 1.25em; }
+.deletion-failures li { overflow-wrap: anywhere; }
+.deletion-failures li > span { display: block; color: var(--muted); }
 .conflict-details { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .conflict-details :is(th, td) { padding: 5px 8px; border-block: 1px solid var(--line); text-align: left; }
 .conflict-details td { color: var(--muted); }

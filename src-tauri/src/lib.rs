@@ -7,6 +7,8 @@ mod archives;
 #[cfg(feature = "desktop")]
 mod completion;
 #[cfg(feature = "desktop")]
+mod deletion;
+#[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
 mod diagnostics;
