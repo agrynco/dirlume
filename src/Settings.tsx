@@ -523,6 +523,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             <label className="field-checkbox"><SettingSearchLabel label="Show hidden files" />
               <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
             </label>
+            <label className="field-checkbox"><SettingSearchLabel label="Right-click selection" />
+              <input type="checkbox" checked={preferences.rightClickSelection} onChange={(event) =>
+                onChange({ ...preferences, rightClickSelection: event.target.checked })} />
+            </label>
             <label className="setting"><SettingSearchLabel label="Panel layout" aliases={Object.values(panelLayouts)} />
               <select value={preferences.layout} onChange={(event) => onChange({ ...preferences, layout: event.target.value as PanelLayout })}>
                 {Object.entries(panelLayouts).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}

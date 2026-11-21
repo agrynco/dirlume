@@ -3,6 +3,7 @@ import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
@@ -22,6 +23,7 @@ import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
 import { SpaceControl } from "./SpaceControl";
 import { canAnalyze, type SpacePlace } from "./spaceScan";
+import { useRightClickSelection } from "./useRightClickSelection";
 
 function sizeLabel(bytes: number, incomplete?: boolean, formatter?: Intl.NumberFormat) {
   const value = formatter ? formatter.format(bytes) : formatSize(bytes);
@@ -41,12 +43,14 @@ interface PaneProps {
   onGroupLayout: (rows: number, pageSize: number) => void;
   onPage: (capacity: number, direction: number) => void;
   showHidden: boolean;
+  rightClickSelection: boolean;
   pane: PaneState;
   entries: Entry[];
   locations: QuickLocation[];
   rename?: { name: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
   activate: () => void;
   onRow: (entry: Entry, range: boolean, mark: boolean) => void;
+  onRightClickMark: (names: readonly string[], mark: boolean) => void;
   onQuickMatch: (name: string) => void;
   onOpen: (entry: Entry) => void;
   onPath: (path: string) => void;
@@ -72,7 +76,7 @@ interface PaneProps {
   dropTarget: boolean;
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
-  onContext: (x: number, y: number, entry?: Entry) => void;
+  onContext: (x: number, y: number, entry?: Entry, preserveMarks?: boolean) => void;
   onAnalyze: (place: SpacePlace) => void;
   spaceDisabled: boolean;
 }
@@ -115,7 +119,8 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
+export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden,
+  rightClickSelection, pane, entries, locations, rename, activate, onRow, onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
@@ -126,6 +131,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const list = useRef<HTMLDivElement>(null);
+  const markedSet = new Set(pane.marked);
+  const rightClick = useRightClickSelection({ list, entries, marked: markedSet, scope: path,
+    enabled: rightClickSelection && !catalog && !processView && !covered && !pane.loading,
+    onMark: onRightClickMark, onContext: (x, y, entry) => onContext(x, y, entry, true) });
   const savedScroll = useRef<{ top: number; left: number } | null>(null);
   const columnHeader = useRef<HTMLDivElement>(null);
   const [modeVisibility, setModeVisibility] = useState(() => ({
@@ -313,7 +322,6 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const isRemote = host || (pane.place && pane.place.kind !== "local");
   const folderItems = entries.filter(({ name }) => name !== "..");
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
-  const markedSet = new Set(pane.marked);
   const marked = entries.filter(({ name }) => markedSet.has(name));
   const complete = marked.every((entry) => entry.directory ? folderMeasurement(pane, entry)?.incomplete === false : entry.size !== null);
   const markedBytes = marked.reduce((bytes, entry) => bytes + (folderMeasurement(pane, entry)?.bytes ?? entry.size ?? 0), 0);
@@ -462,9 +470,18 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           setModeVisibility((before) => ({ ...before, [layoutMode]: next }));
           saveColumnLayout(side, layoutMode, next);
         }} />
+      {rightClick.spinner && createPortal(<span className="right-selection-hold" role="status"
+        aria-label={t("Release to open the context menu")} style={{
+          left: Math.min(window.innerWidth - 22, rightClick.spinner.x + 12),
+          top: Math.min(window.innerHeight - 22, rightClick.spinner.y + 12),
+        }}><LoaderCircle className="spin" aria-hidden="true" /></span>, document.body)}
       <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} data-paged={paged || undefined}
         role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
-        onContextMenu={(event) => { event.preventDefault(); onContext(event.clientX, event.clientY); }}
+        {...rightClick.events}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (!rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY);
+        }}
         onWheel={(event) => {
           if (!paged || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
             Math.abs(event.deltaY) <= Math.abs(event.deltaX) || event.timeStamp - lastWheelPage.current < 150) return;
@@ -495,12 +512,12 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 role="option" aria-setsize={virtual ? entries.length : undefined} aria-posinset={virtual ? index + 1 : undefined}
                 aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
                 data-file-color={fileColor(entry)}
-                aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name}
+                aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name} data-entry-index={index}
                 onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  onContext(event.clientX, event.clientY, entry.name === ".." ? undefined : entry);
+                  if (!rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY, entry.name === ".." ? undefined : entry);
                 }}
                 onPointerDown={(event) => { if (entry.name !== ".." && rename?.name !== entry.name) onStartDrag(entry, event); }}
                 onDragStart={(event) => event.preventDefault()}

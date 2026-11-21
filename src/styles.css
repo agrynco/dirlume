@@ -645,6 +645,12 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-columns, .file-list { scrollbar-width: thin; scrollbar-gutter: stable; }
 .file-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 5px; }
 .file-list[data-paged] { overflow-y: hidden; }
+.right-selection-hold {
+  position: fixed; z-index: 90; pointer-events: none; display: grid; place-items: center;
+  width: 20px; height: 20px; border: 1px solid var(--line); border-radius: 50%;
+  background: var(--raised); color: var(--accent);
+}
+.right-selection-hold svg { width: 14px; height: 14px; }
 .file-list:focus-visible { outline-offset: -2px; outline-width: 1px; }
 .virtual-file-list { position: relative; overflow-anchor: none; }
 .virtual-file-list .file-row, .file-row-probe { height: max(25px, calc(1.45em + 3px)); }

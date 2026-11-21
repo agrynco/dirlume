@@ -1637,9 +1637,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => { active = false; void listener.then((unlisten) => unlisten()).catch(() => {}); };
   }, []);
 
-  async function copyClipboard(side: Side, entry?: Entry) {
+  async function copyClipboard(side: Side, entry?: Entry, useMarks?: boolean) {
     if (!entry) return;
-    const items = transferItems(side, entry, panes[side].marked.includes(entry.name) || entry === current);
+    const items = transferItems(side, entry, useMarks ?? (panes[side].marked.includes(entry.name) || entry === current));
     try {
       await api.copyFileReferences(items.map(({ place, entry }) => {
         if (place.kind !== "local") throw new Error("Choose local files to copy to the system clipboard.");
@@ -1663,10 +1663,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     } catch (failure) { setStatus({ text: describeError(failure), error: true }); }
   }
 
-  function contextActions(side: Side, x: number, y: number, entry?: Entry) {
+  function contextActions(side: Side, x: number, y: number, entry?: Entry, preserveMarks = false) {
     setActive(side);
     setFileMenu(null);
-    if (entry && !panes[side].marked.includes(entry.name)) selectRow(side, entry, false, false);
+    if (entry && !panes[side].marked.includes(entry.name)) {
+      if (preserveMarks) {
+        selectionAnchor.current[side] = entry.name;
+        updatePane(side, (pane) => ({ ...pane, selected: entry.name }));
+      } else selectRow(side, entry, false, false);
+    }
     const state = panes[side];
     const item = entry ? paneItem(state, entry) : null;
     const place = entry ? item?.place : state.search ? null : state.place;
@@ -1706,6 +1711,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         ? pane.marked.includes(entry.name) ? pane.marked.filter((name) => name !== entry.name) : [...pane.marked, entry.name]
         : pane.marked.includes(entry.name) ? pane.marked : [],
     }));
+  }
+
+  function setRightClickMarks(side: Side, names: readonly string[], mark: boolean) {
+    const selected = names.at(-1);
+    if (!selected) return;
+    selectionAnchor.current[side] = selected;
+    updatePane(side, (pane) => {
+      const marked = new Set(pane.marked);
+      for (const name of names) {
+        if (mark) marked.add(name);
+        else marked.delete(name);
+      }
+      return { ...pane, selected, marked: [...marked] };
+    });
   }
 
   async function renameItem(place: RenameLocation, name: string, newName: string) {
@@ -2575,7 +2594,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {(["left", "right"] as const).map((side) => (
           <Pane key={swappedPanes ? opposite(side) : side} side={side}
             active={active === side} covered={paneCovered(side)}
-            layout={preferences.layout} showHidden={preferences.hidden}
+            layout={preferences.layout} showHidden={preferences.hidden} rightClickSelection={preferences.rightClickSelection}
             pane={panes[side]} entries={entries[side]} locations={locations}
             preserveScroll={showingGit || !!environmentPanels[side] || side === spaceSide}
             onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
@@ -2589,6 +2608,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             rename={rowRename?.side === side && sameRenameLocation(panes[side].place, rowRename.place) && !panes[side].search
               ? { name: rowRename.name, onCancel: () => closeRowRename(side), onSave: (name) => submitRowRename(rowRename, name) } : undefined}
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
+            onRightClickMark={(names, mark) => setRightClickMarks(side, names, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
@@ -2619,7 +2639,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onCloseResults={() => closeResults(side)}
             onStartDrag={(entry, event) => startDrag(side, entry, event)} dropTarget={dropTarget === side}
             processView={processPanels[side]} onProcesses={(visible) => showProcesses(side, visible)}
-            onContext={(x, y, entry) => contextActions(side, x, y, entry)}
+            onContext={(x, y, entry, preserveMarks) => contextActions(side, x, y, entry, preserveMarks)}
             onRevealResult={(entry) => {
               const item = paneItem(panes[side], entry);
               if (item) revealResult(side, item.place, item.entry.name);
@@ -2968,7 +2988,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             }}>{t("Copy")}</Button>
             {item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
-              void copyClipboard(side, entry);
+              void copyClipboard(side, entry, !!entry && state.marked.includes(entry.name));
             }}>{t("Copy files to clipboard")}</Button>}
             {windowsClient && item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);

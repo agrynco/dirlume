@@ -56,6 +56,8 @@ Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → 
 
 The current marked row in the active pane has its own fill and outline. Adjust or reset **Current marked row background** and **Current marked row outline** independently in **Options → Appearance → Panels**.
 
+Enable **Right-click selection** under **Options → Main File Panels** to mark an item with a short right-click. Drag with the right button held to mark the rows you cross, or start on a marked row to unmark them. Hold the button over a row or empty pane space for half a second and release when the spinner appears to open the usual context menu.
+
 Click the free-space indicator or **Analyze space** to scan the folder shown in that pane. The adjacent arrow offers the containing volume, share, or connection root when available. The tree and treemap show file sizes or allocated storage, with percentages relative to each item's parent. **Show in other pane** opens a folder or selects a file there. **Stop** keeps partial results, **Rescan** repeats the same scope, and **Close** restores the file list. On Windows, full local NTFS volume scans use the Master File Table when accessible. Without volume access, Dirlume reads the sizes and file IDs of local NTFS directory entries in batches and scans folders concurrently. On solid-state storage, it uses up to 16 workers when the processor supports them. Local scans stream results to the pane as they arrive. Configure the **Analyze space** binding in **Options → Keyboard shortcuts**.
 
 The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
