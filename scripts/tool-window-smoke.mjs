@@ -118,5 +118,12 @@ export async function testMarkdownOptionsDismissal(page, source) {
     assert.equal(await savedWidth(), action === "Done" ? 1300 : 1650);
   }
   await button(viewer, "Close document").click();
+  await viewer.waitFor({ state: "hidden" });
+  const files = page.getByRole("listbox", { name: "left files", exact: true });
+  if (!await files.isVisible()) {
+    const tabs = page.getByRole("navigation", { name: "Open documents", exact: true });
+    await button(tabs, "Files").click();
+  }
+  await files.waitFor();
   console.log("Verified clean, edited, applied, invalid, and failed Options dismissal from rendered Markdown on Windows.");
 }
