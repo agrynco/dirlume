@@ -70,6 +70,10 @@ fn bundled_highlights(document: &str, installed: &Version) -> Vec<String> {
 }
 
 fn history_directory(app: &AppHandle) -> Result<PathBuf, tauri::Error> {
+    #[cfg(feature = "ui-automation")]
+    if let Some(directory) = std::env::var_os("DIRLUME_TEST_HIGHLIGHTS_DIR") {
+        return Ok(PathBuf::from(directory));
+    }
     #[cfg(windows)]
     if let Some(directory) = crate::portable::root() {
         return Ok(directory.join("release-highlights"));
