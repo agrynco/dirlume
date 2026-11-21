@@ -19,6 +19,12 @@ pub struct UpdateFixture {
     check_clipboard: bool,
     #[serde(default)]
     check_screen_color: bool,
+    #[serde(default)]
+    restart_check: bool,
+    #[serde(default)]
+    offline_launch: bool,
+    #[serde(default)]
+    debian_url: Option<String>,
     metadata: serde_json::Value,
 }
 
@@ -33,11 +39,31 @@ pub fn read(app: &AppHandle) -> Option<UpdateFixture> {
 }
 
 impl UpdateFixture {
+    pub(super) fn history_directory(&self) -> Option<PathBuf> {
+        let name = if self.debian_url.is_some() {
+            "debian-release-highlights"
+        } else {
+            "release-highlights"
+        };
+        Some(self.result.parent()?.join(name))
+    }
+
     pub fn offer(
         self,
         app: &AppHandle,
         pending: &PendingUpdate,
     ) -> Result<Option<UpdateOffer>, &'static str> {
+        let highlights = super::release_highlights(self.metadata["notes"].as_str());
+        if self.offline_launch || app.package_info().version.to_string() == self.expected {
+            return Ok(None);
+        }
+        if let Some(url) = self.debian_url {
+            return Ok(Some(UpdateOffer::Debian {
+                version: self.expected,
+                url,
+                highlights,
+            }));
+        }
         let Some(mut update) = restore_update(app, "https://localhost/latest.json", self.metadata)?
         else {
             return Ok(None);
@@ -49,7 +75,7 @@ impl UpdateFixture {
             return Err(MANIFEST_FAILED);
         }
         update.no_proxy = true;
-        pending.offer(update).map(Some)
+        pending.offer(update, highlights).map(Some)
     }
 }
 
@@ -71,15 +97,21 @@ pub fn page_loaded(webview: &Webview, payload: &PageLoadPayload<'_>) {
     #[cfg(not(windows))]
     let portable = false;
     let script = include_str!("../../../scripts/updater-smoke-webview.js");
-    let directory =
-        serde_json::to_string(&fixture.result.parent()).unwrap_or_else(|_| "null".into());
-    let _ = webview.eval(format!(
-        "({script})({upgraded}, {}, {portable}, {}, {}, {}, {directory});",
-        fixture.reject,
-        fixture.replacement_failure,
-        fixture.check_clipboard,
-        fixture.check_screen_color
-    ));
+    let test = serde_json::json!({
+        "upgraded": upgraded,
+        "portable": portable,
+        "reject": fixture.reject,
+        "replacementFailure": fixture.replacement_failure,
+        "checkClipboard": fixture.check_clipboard,
+        "checkScreenColor": fixture.check_screen_color,
+        "fixtureDirectory": fixture.result.parent(),
+        "version": fixture.expected,
+        "highlights": fixture.metadata["notes"].as_str().map(|body| super::release_highlights(Some(body))),
+        "restartCheck": fixture.restart_check,
+        "offlineLaunch": fixture.offline_launch,
+        "debian": fixture.debian_url.is_some(),
+    });
+    let _ = webview.eval(format!("({script})({test});"));
 }
 
 #[tauri::command]

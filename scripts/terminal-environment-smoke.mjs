@@ -39,6 +39,14 @@ $result = [UIntPtr]::Zero
 export async function testTerminalEnvironment(page) {
   const variable = `DIRLUME_SMOKE_ENV_${randomBytes(8).toString("hex").toUpperCase()}`;
   const change = (value, kind = "String") => userEnvironment({ name: variable, value, kind });
+  const saveInApp = async (value, kind) => {
+    const result = await page.evaluate(async ({ name, value, kind }) => {
+      const scope = "user";
+      const expected = await window.__TAURI_INTERNALS__.invoke("environment_value", { scope, name });
+      return window.__TAURI_INTERNALS__.invoke("save_environment", { scope, edits: [{ name, value, kind, expected, replacePath: false }], integrate: false });
+    }, { name: variable, value, kind });
+    assert.deepEqual(result.outcomes, [{ name: variable, result: "saved" }]);
+  };
   const field = page.getByRole("combobox", { name: "Command line", exact: true });
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const toggle = page.getByRole("button", { name: "Toggle terminal", exact: true });
@@ -79,7 +87,13 @@ export async function testTerminalEnvironment(page) {
   await setting(true);
   try {
     await run(`$global:DirlumeSmokeSession = 'initial'; ${read}`, "missing");
-    change("%USERPROFILE%\\dirlume-env-probe", "ExpandString");
+    for (const side of ["left", "right"]) {
+      const status = page.locator("#" + side + "-pane .pane-footer > .pane-status-line");
+      await status.waitFor();
+      assert.equal(await status.count(), 1);
+    }
+    await saveInApp("%USERPROFILE%\\dirlume-env-probe", "expandable");
+    assert.deepEqual(userEnvironment({ name: variable, read: true }), { value: "%USERPROFILE%\\dirlume-env-probe", kind: "ExpandString" });
     await notice.waitFor();
     await run(read, "missing");
     await run("$result = $global:DirlumeSmokeSession", "initial");
@@ -96,7 +110,7 @@ export async function testTerminalEnvironment(page) {
       await run(`$result = ($env:Path.Split(';') -contains '${expected}')`, "True");
     }
 
-    change("Змінна ✓");
+    await saveInApp("Змінна ✓", "literal");
     await notice.waitFor();
     await run(read, `${process.env.USERPROFILE}\\dirlume-env-probe`);
     await reopen();

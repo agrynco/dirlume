@@ -1,7 +1,12 @@
+use std::{env, fs, io::ErrorKind, path::PathBuf};
+
 fn main() {
     println!("cargo:rerun-if-env-changed=DIRLUME_BUILD_NUMBER");
     let mut version =
-        std::env::var("CARGO_PKG_VERSION").expect("Cargo must provide the product version");
+        env::var("CARGO_PKG_VERSION").expect("Cargo must provide the product version");
+    if env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
+        bundle_release_highlights(&version);
+    }
     if let Ok(number) = std::env::var("DIRLUME_BUILD_NUMBER") {
         assert!(
             !number.starts_with('0')
@@ -16,4 +21,28 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         tauri_build::build();
     }
+}
+
+fn bundle_release_highlights(version: &str) {
+    let directory = PathBuf::from("../release-highlights");
+    println!("cargo:rerun-if-changed={}", directory.display());
+    println!("cargo:rerun-if-env-changed=DIRLUME_UPDATER_HIGHLIGHTS_FIXTURE");
+    let source = if env::var_os("CARGO_FEATURE_UI_AUTOMATION").is_some() {
+        env::var_os("DIRLUME_UPDATER_HIGHLIGHTS_FIXTURE").map(PathBuf::from)
+    } else {
+        None
+    };
+    let contents = if let Some(source) = source {
+        println!("cargo:rerun-if-changed={}", source.display());
+        fs::read(source).expect("Could not read the updater fixture highlights")
+    } else {
+        match fs::read(directory.join(format!("{version}.json"))) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == ErrorKind::NotFound => b"null".to_vec(),
+            Err(error) => panic!("Could not read release highlights: {error}"),
+        }
+    };
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"));
+    fs::write(output.join("release-highlights.json"), contents)
+        .expect("Could not bundle release highlights");
 }

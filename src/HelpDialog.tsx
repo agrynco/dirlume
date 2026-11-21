@@ -20,6 +20,13 @@ export function HelpDialog({ initialTopic, language, onClose }: {
     if (focusTopic.current) heading.current?.focus();
   }, [topic]);
 
+  function openTopic(id: HelpTopic) {
+    focusTopic.current = true;
+    if (id === topic) heading.current?.focus();
+    else setTopic(id);
+  }
+
+  const paragraph = helpText[language][topic].split(/\[\[([a-zA-Z]+)\|([^\]]+)\]\]/g);
   return (
     <Dialog title={t("Help")} onClose={onClose} wide>
       <div className="help-layout">
@@ -32,9 +39,7 @@ export function HelpDialog({ initialTopic, language, onClose }: {
                 data-initial-focus={id === initialTopic ? true : undefined}
                 onClick={(event) => {
                   event.preventDefault();
-                  focusTopic.current = true;
-                  if (id === topic) heading.current?.focus();
-                  else setTopic(id);
+                  openTopic(id);
                 }}>{t(helpTopics[id].title)}</a>)}
             </div>
           ))}
@@ -44,7 +49,11 @@ export function HelpDialog({ initialTopic, language, onClose }: {
             <section id={`help-${id}`} key={id} hidden={id !== topic} aria-labelledby={`help-heading-${id}`}>
               {id === topic && <>
                 <h3 id={`help-heading-${id}`} tabIndex={-1} ref={heading}>{t(helpTopics[id].title)}</h3>
-                <p>{helpText[language][id]}</p>
+                <p>{paragraph.map((part, index) => index % 3 === 0 ? part : index % 3 === 1 ?
+                  <a key={index} href={`#help-${part}`} onClick={(event) => {
+                    event.preventDefault();
+                    openTopic(part as HelpTopic);
+                  }}>{paragraph[index + 1]}</a> : null)}</p>
                 {helpTopics[id].keys.length > 0 && <>
                   <h4>{t("Default shortcuts")}</h4>
                   <dl className="help-keys">

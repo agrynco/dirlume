@@ -1,5 +1,5 @@
 import { readSchemes, readSystemScheme, readTheme, type Scheme, type Theme } from "./appearance";
-import { validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
+import { migrateSharedViewerZoom, validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
 import { isTauri } from "@tauri-apps/api/core";
@@ -83,6 +83,9 @@ export const commands = {
   lockingProcesses: { label: "Find locking processes", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
   quickView: { label: "Quick View", key: "Ctrl+Q" },
+  gitView: { label: "Git View", key: "Ctrl+Shift+G" },
+  environmentVariables: { label: "Environment variables", key: "" },
+  analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
   cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
@@ -271,6 +274,7 @@ export interface Preferences {
   sortSettings: SortSettings;
   selectedPanelModes: Record<"left" | "right", PanelModeId>;
   actionButtonWidth: ActionButtonWidth;
+  hideActionButtonIcons: boolean;
   mainMenuAlignment: MenuPosition;
   systemLightScheme: string;
   systemDarkScheme: string;
@@ -433,6 +437,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
     return { left: isPanelMode(left) ? left : "full", right: isPanelMode(right) ? right : "full" };
   } },
   actionButtonWidth: { group: "filePanels", portable: true, read: (value) => value === "full" ? "full" : "compact" },
+  hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
   refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
@@ -481,7 +486,9 @@ export function normalizePreferences(value: unknown): Preferences {
 
 export function readPreferences(): Preferences {
   try {
-    return normalizePreferences(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
+    const saved = preferenceValues(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
+    return normalizePreferences(saved.independentViewerZoom === true ? saved :
+      { ...saved, viewFontSizes: migrateSharedViewerZoom(saved.viewFontSizes) });
   } catch (error) {
     reportFrontendError("load_preferences", error);
     return normalizePreferences(null);
@@ -516,6 +523,7 @@ export function flushPortablePreferences() {
 export function persistPreferences(preferences: Preferences) {
   const settings = Object.fromEntries(preferenceKeys.map((key) => [key, preferences[key]]));
   settings.bindingDefaults = preferenceBindingVersion;
+  Object.assign(settings, { independentViewerZoom: true });
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;

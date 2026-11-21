@@ -4,6 +4,7 @@ import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, wr
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { artifactVersion, manifestVersion } from "./build-version.mjs";
+import { releaseNotes } from "./release-highlights.mjs";
 
 async function version() {
   const manifest = await manifestVersion();
@@ -179,12 +180,18 @@ async function verifyRelease() {
   const portableSignature = (await readFile(join("release", portable + ".sig"), "utf8")).trim();
   if (!portableSignature) throw new Error("Missing updater signature for Windows Portable.");
   platforms["windows-x86_64-portable"] = { signature: portableSignature, url: `${download}/${portable}` };
-  await writeFile(join("release", "latest.json"), JSON.stringify({ version: DIRLUME_PRODUCT_VERSION, platforms }, null, 2) + "\n");
+  const notes = await releaseNotes(DIRLUME_PRODUCT_VERSION);
+  await writeFile(join("release", "latest.json"), JSON.stringify({
+    version: DIRLUME_PRODUCT_VERSION,
+    ...(notes ? { notes } : {}),
+    platforms,
+  }, null, 2) + "\n");
   const downloads = Object.entries(platformLabels).map(([platform, name]) => {
     const names = artifactNames(platform, label, true);
     return `| ${name} | [Installer](${download}/${names[0]}) | [ZIP](${download}/${portableName(platform, label)}) |`;
   });
   console.log([
+    ...(notes ? [notes, ""] : []),
     "## Downloads", "",
     "| Platform | Installer | Portable ZIP |", "| --- | --- | --- |",
     ...downloads, "",

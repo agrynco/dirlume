@@ -13,6 +13,8 @@ mod diagnostics;
 #[cfg(feature = "desktop")]
 mod disk_space;
 #[cfg(feature = "desktop")]
+pub mod environment;
+#[cfg(feature = "desktop")]
 mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;
@@ -22,6 +24,8 @@ mod folders;
 mod ftp;
 #[cfg(feature = "desktop")]
 mod ftp_transfer;
+#[cfg(feature = "desktop")]
+mod git_view;
 #[cfg(feature = "desktop")]
 mod kswitcher;
 mod local;
@@ -40,6 +44,8 @@ mod remote_transfer;
 mod screen_color;
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "desktop")]
+mod space_analyzer;
 #[cfg(feature = "desktop")]
 mod ssh;
 #[cfg(feature = "desktop")]

@@ -1221,10 +1221,11 @@ try {
   await page.keyboard.press("F2");
   const editor = page.getByRole("region", { name: "draft.md", exact: true });
   await editor.locator(".document-heading .document-encoding").filter({ hasText: /^UTF-8$/ }).waitFor();
-  await editor.locator(".document-heading").getByRole("combobox", { name: "Syntax" }).waitFor();
+  await editor.locator(".document-heading").getByRole("button", { name: "Syntax", exact: true }).waitFor();
   assert.ok(await editor.locator(".cm-lineNumbers .cm-gutterElement").first().evaluate((number) =>
     parseFloat(getComputedStyle(number).paddingInlineEnd) >= 6));
   assert.equal(await editor.getByRole("button", { name: "Save", exact: true }).count(), 0);
+  await editor.locator(".document-modified").waitFor({ state: "hidden" });
   await page.keyboard.press("F10");
   await editor.waitFor({ state: "hidden" });
   assert.equal(await readFile(join(src, "draft.md"), "utf8"), "# Draft");
@@ -1357,7 +1358,7 @@ try {
   assert.equal(await textFontFamily.inputValue(), "Arial");
   await textFontSize.fill("18");
   await optionsDialog.getByRole("button", { name: "Apply", exact: true }).click();
-  assert.equal(await fontSize(markdownSurface), 18, "Apply should update an open Markdown preview with saved wheel zoom.");
+  assert.equal(await fontSize(markdownSurface), linkedMarkdownFont, "Changing the family while keeping the same base size should preserve zoom.");
   assert.match(await markdownFamily(), /^Arial,/);
   await textFontFamily.fill("Georgia");
   await textFontSize.fill("16");
@@ -1416,13 +1417,13 @@ try {
   const hexSurface = ".text-window:not([hidden]) .hex-view";
   const hexFont = await fontSize(hexSurface);
   await wheelFont(hexSurface, -120);
-  const viewerFont = await fontSize(hexSurface);
-  assert.ok(viewerFont > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
+  const enlargedHexFont = await fontSize(hexSurface);
+  assert.ok(enlargedHexFont > hexFont, "Ctrl+Wheel should enlarge the hexadecimal viewer's font.");
   await page.getByRole("button", { name: "Close document", exact: true }).click();
   await left.getByRole("option", { name: /^sample.rs/ }).click();
   await page.keyboard.press("F3");
   await page.getByText("fn", { exact: true }).first().waitFor();
-  assert.equal(await fontSize(codeSurface), viewerFont, "Text and hex should share the viewer setting.");
+  assert.equal(await fontSize(codeSurface), hexFont, "Hexadecimal zoom should leave the text viewer size alone.");
   await page.keyboard.press("Escape");
   if (process.env.DIRLUME_SMOKE_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SMOKE_SCREENSHOT, scale: "css" });
 
@@ -1444,7 +1445,7 @@ try {
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
   const terminalSplit = await paneSplit();
   for (const key of ["ArrowUp", "ArrowDown", "Control+ArrowLeft", "Control+ArrowRight",
-    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "F1", "F5", "F8", "Alt+F7"]) {
+    "Control+Shift+ArrowLeft", "Control+Shift+ArrowRight", "F5", "F8", "Alt+F7"]) {
     await terminalInput.press(key);
   }
   assert.equal(await paneSplit(), terminalSplit);
@@ -1762,8 +1763,8 @@ try {
   await showOptions();
   assert.equal(await optionsDialog.getByRole("button", { name: "Text tools", exact: true }).getAttribute("aria-pressed"), "true");
   await optionsDialog.getByRole("button", { name: "View font sizes", exact: true }).click();
-  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Markdown preview font size" }).inputValue(), String(enlargedMarkdown));
-  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Text and hex viewer font size" }).inputValue(), String(viewerFont));
+  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Markdown reading view font size" }).inputValue(), String(enlargedMarkdown));
+  assert.equal(await optionsDialog.getByRole("spinbutton", { name: "Hexadecimal view font size" }).inputValue(), String(enlargedHexFont));
   await optionsDialog.getByRole("button", { name: "Window", exact: true }).click();
   assert.equal(await optionsDialog.getByLabel("Scheme name").inputValue(), "Blueprint");
   assert.equal(await page.locator("html").evaluate((element) => element.style.getPropertyValue("--file-hidden")), "#41536d");
@@ -1875,7 +1876,7 @@ try {
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
   await featureDialog.getByRole("spinbutton", { name: "Left file pane font size" }).waitFor();
   async function checkFeatureFontLayout() {
-    const fits = await featureDialog.locator(".font-setting:has(.feature-font-sizes)").evaluate((group) => {
+    const fits = await featureDialog.locator(".font-setting:has(.feature-font-sizes)").first().evaluate((group) => {
       const family = group.querySelector(".font-family").getBoundingClientRect();
       const size = group.querySelector(".font-size-controls").getBoundingClientRect();
       const details = group.querySelector(".feature-font-sizes").getBoundingClientRect();
@@ -1962,7 +1963,10 @@ try {
   if (await terminalButton.getAttribute("aria-pressed") === "false") await terminalButton.click();
   const helpTerminalInput = page.locator(".xterm-helper-textarea");
   await helpTerminalInput.press("F1");
-  assert.equal(await help.isVisible(), false);
+  await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await help.waitFor({ state: "hidden" });
+  assert.equal(await helpTerminalInput.evaluate((element) => document.activeElement === element), true);
   await terminalButton.click();
   await page.getByRole("combobox", { name: "Command line", exact: true }).press("F1");
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
@@ -1971,6 +1975,16 @@ try {
   await showOptions();
   const shortcutOptions = optionsDialog;
   const shortcutSearch = shortcutOptions.getByRole("searchbox", { name: "Search settings" });
+  await shortcutSearch.fill("");
+  const helpAppearance = shortcutOptions.getByRole("button", { name: "Appearance", exact: true });
+  await helpAppearance.press("F1");
+  const optionsHelp = optionsPage.getByRole("dialog", { name: "Help", exact: true });
+  await optionsHelp.locator('.help-contents [aria-current="location"][href="#help-appearance"]').waitFor();
+  await optionsHelp.locator('.help-reading a[href="#help-window"]').press("Enter");
+  await optionsHelp.locator('.help-contents [aria-current="location"][href="#help-window"]').waitFor();
+  await optionsPage.keyboard.press("Escape");
+  await optionsHelp.waitFor({ state: "hidden" });
+  assert.equal(await helpAppearance.evaluate((element) => element === document.activeElement), true);
   await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   await shortcutOptions.getByRole("button", { name: "Change F1 for Help", exact: true }).click();
@@ -1991,6 +2005,10 @@ try {
   await closeToolWindow(optionsPage, () => shortcutOptions.getByRole("button", { name: "Done", exact: true }).click());
   await page.keyboard.press("Control+Shift+F1");
   assert.equal(await help.count(), 0);
+  await showOptions();
+  await optionsDialog.getByRole("button", { name: "Add shortcut for Help", exact: true }).click();
+  await optionsDialog.getByRole("textbox", { name: "New shortcut for Help", exact: true }).press("F1");
+  await closeToolWindow(optionsPage, () => optionsDialog.getByRole("button", { name: "Done", exact: true }).click());
   console.log("Verified offline Help, all topics in three languages, focus restoration, and rebinding or disabling F1.");
   const menubar = page.getByRole("menubar", { name: "Main menu" });
   const group = (name) => menubar.getByRole("menuitem", { name, exact: true });
@@ -2004,7 +2022,7 @@ try {
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowDown");
   const helpItems = menu("Help").getByRole("menuitem");
-  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About", "Open error log"]);
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log"]);
   const errorLogAction = helpItems.filter({ hasText: "Open error log" });
   assert.equal(await errorLogAction.evaluate((item) => item.previousElementSibling?.getAttribute("role")), "separator");
   await page.keyboard.press("Enter");
@@ -2012,6 +2030,15 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await fileList.evaluate((list) => document.activeElement === list), true);
   await openMainMenu(page, "Help");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
+  const releaseNotes = whatsNew.getByRole("link", { name: `Full release notes for ${productVersion}`, exact: true });
+  assert.match(await releaseNotes.getAttribute("href"), new RegExp(`/releases/tag/v${productVersion.replaceAll(".", "\\.")}$`));
+  await page.keyboard.press("Escape");
+  await whatsNew.waitFor({ state: "hidden" });
+  await openMainMenu(page, "Help");
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   const about = page.getByRole("dialog", { name: "About", exact: true });
@@ -2027,8 +2054,7 @@ try {
   await page.keyboard.press("Escape");
   const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
   await openMainMenu(page, "Help");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
   await page.keyboard.press("Enter");
   await errorLogViewer.waitFor();
@@ -2219,6 +2245,8 @@ try {
   await testScreenColor(page);
   page = await testFileSort({ page, startDesktop, exitDesktop, root: temp });
   await testNativeQuickView(page, temp);
+  await navigate("left", attributes);
+  await testNativeSpaceAnalyzer(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
@@ -2236,4 +2264,19 @@ try {
       await setTimeout(400);
     }
   }
+}
+
+async function testNativeSpaceAnalyzer(page) {
+  const exactButton = (scope, name) => scope.getByRole("button", { name, exact: true });
+  const pane = page.getByRole("region", { name: "left pane", exact: true });
+  await exactButton(pane, "Analyze space").click();
+  const analyzer = page.getByRole("region", { name: "Space Analyzer", exact: true });
+  await exactButton(analyzer, "Rescan").waitFor();
+  await exactButton(analyzer, "Stop").waitFor({ state: "hidden" });
+  assert.equal(await analyzer.getByRole("combobox", { name: "Size metric" }).inputValue(), "allocated");
+  await analyzer.getByText("system-hidden.dll", { exact: true }).click();
+  await exactButton(analyzer, "Show in other pane").click();
+  await page.locator("#right-files").getByRole("option", { name: /^system-hidden\.dll/, selected: true }).waitFor();
+  await exactButton(analyzer, "Close").click();
+  await page.waitForFunction(() => document.activeElement?.id === "left-files");
 }

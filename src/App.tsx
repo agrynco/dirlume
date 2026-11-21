@@ -10,7 +10,7 @@ import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHist
 import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, CheckSquare, Copy, Eye, EyeOff, FileDiff, FilePlus, FolderPlus, FolderTree,
-  Calculator, CircleHelp, Moon, Pencil, ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2,
+  Calculator, CircleHelp, GitBranch, Moon, Pencil, ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -19,8 +19,11 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { textEncodingLabels, type AppUpdate, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
+import { canAnalyze, type SpacePlace } from "./spaceScan";
+import type { EnvironmentMode } from "./EnvironmentPane";
+import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { reportFrontendError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
@@ -31,6 +34,7 @@ import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
+import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
@@ -65,6 +69,9 @@ import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const QuickView = lazy(() => import("./QuickView"));
+const SpaceAnalyzer = lazy(() => import("./SpaceAnalyzer"));
+const GitView = lazy(() => import("./GitView"));
+const EnvironmentPane = lazy(() => import("./EnvironmentPane"));
 const previousTerminalHeights = [28, 28, 38, 48, 58];
 const noCommands: TerminalCommand[] = [];
 
@@ -115,6 +122,7 @@ type Modal =
   | { kind: "about" | "commandHistory" | "mcp" }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
+  | { kind: "whatsNew" }
   | { kind: "upToDate" }
   | { kind: "installUpdate"; version: string }
   | ActionModal;
@@ -132,10 +140,12 @@ function isTerminalInput(target: EventTarget | null) {
   return target instanceof Element && target.closest(".terminal-surface") !== null;
 }
 
-function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | null, editing: boolean | undefined): HelpTopic {
+function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | undefined): HelpTopic {
   if (modal === "settings") return "general";
-  if (modal === "search") return "search";
-  if (target?.closest(".terminal-card, .command-bar")) return "terminal";
+  if (modal === "search" || modal === "compare") return modal;
+  if (modal === "connect" || modal === "smb" || modal === "connectionEditor") return "remote";
+  if (modal === "createArchive" || modal === "archivePassword") return "archives";
+  if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename") return "operations";
   return editing === undefined ? "files" : editing ? "editor" : "viewer";
 }
 
@@ -172,7 +182,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [focusedSide, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
-  const active = quickViewSource ?? focusedSide;
+  const [spaceAnalyzer, setSpaceAnalyzer] = useState<{ side: Side; place: SpacePlace } | null>(null);
+  const [gitView, setGitView] = useState<{ side: Side; path: string } | null>(null);
+  const [gitRefresh, setGitRefresh] = useState(0);
+  const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
+  const [environmentRevision, setEnvironmentRevision] = useState(0);
+  const spaceSide = spaceAnalyzer?.side;
+  const active = quickViewSource ?? (spaceSide === focusedSide ? opposite(focusedSide) : focusedSide);
+  const environmentActive = environmentPanels[active] !== null;
+  const showingEnvironment = environmentPanels.left !== null || environmentPanels.right !== null;
   const previewSide = quickViewSource === null ? null : opposite(quickViewSource);
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
   const [preferences, setPreferences] = useState(initialPreferences);
@@ -182,8 +200,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [modal, setModal] = useState<Modal | null>(null);
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
-  const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
+  const [installedRelease, setInstalledRelease] = useState<InstalledRelease | null | undefined>(undefined);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const checkingUpdates = useRef(false);
   const manualUpdateCheck = useRef(false);
@@ -235,7 +253,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const pane = panes[active];
   const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
-  const canSwapPanes = !previewSide && !panes.left.loading && !panes.right.loading && !busy;
+  const canSwapPanes = !showingEnvironment && !gitView && !previewSide && !spaceSide && !panes.left.loading && !panes.right.loading && !busy;
   const showingSortMenu = modal?.kind === "sortMenu" ? modal.side : undefined;
   const leftSort = useFileSortMetadata(panes.left, preferences.sortSettings, showingSortMenu === "left");
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
@@ -268,9 +286,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const otherFileServer = !other.search && isFileServer(other.place);
   const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
-  const helpShortcut = shortcuts.help;
-  const modalKind = modal?.kind;
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
+  const [helpTopic, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
 
   const checkUpdates = useCallback(async (manual: boolean) => {
     if (manual) {
@@ -297,26 +314,28 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, [checkUpdates, portableUpdateError]);
 
   useEffect(() => {
-    if (!updateNotice || modal || helpTopic) return;
+    if (!isTauri()) return;
+    let current = true;
+    void api.installedRelease().then((release) => {
+      if (current) setInstalledRelease(release);
+    }, (error: unknown) => {
+      if (current) setInstalledRelease(null);
+      reportFrontendError("installed_release", error);
+    });
+    return () => { current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (modal || helpTopic || installedRelease === undefined) return;
+    if (installedRelease?.showOnStartup) {
+      setInstalledRelease({ ...installedRelease, showOnStartup: false });
+      setModal({ kind: "whatsNew" });
+      return;
+    }
+    if (!updateNotice) return;
     setModal(updateNotice);
     setUpdateNotice(null);
-  }, [updateNotice, modal, helpTopic]);
-
-  useLayoutEffect(() => {
-    if (!helpShortcut.length) return;
-    function openHelp(event: WindowEventMap["keydown"]) {
-      if (event.defaultPrevented || event.isComposing || !bindingMatches(helpShortcut, eventShortcut(event))) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (isTerminalInput(target) || target?.closest("[data-shortcut-capture]")) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.repeat) return;
-      const topic = contextHelpTopic(modalKind, target, editingDocument);
-      setHelpTopic((current) => current ?? topic);
-    }
-    document.addEventListener("keydown", openHelp, true);
-    return () => document.removeEventListener("keydown", openHelp, true);
-  }, [helpShortcut, modalKind, editingDocument]);
+  }, [updateNotice, installedRelease, modal, helpTopic]);
 
   useEffect(() => {
     if (!shortcuts.menuAlternate.includes("Alt")) return;
@@ -403,13 +422,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean) => {
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
-      const found = reveal === ".." ? hasParentRow(openedPlace) :
-        reveal !== undefined && openedListing.entries.some((entry) => entry.name === reveal);
+      const revealed = reveal !== undefined ? openedListing.entries.find((entry) => entry.name === reveal) : undefined;
+      const found = reveal === ".." ? hasParentRow(openedPlace) : !!revealed;
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
-        return found && reveal !== undefined ? { ...listing, selected: reveal, filter: "", marked: [] } : listing;
+        return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
       });
       return true;
     };
@@ -517,6 +536,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   const leftPath = (ready || !panes.left.loading) && panes.left.place?.kind === "local" ? panes.left.place.path : null;
   const rightPath = (ready || !panes.right.loading) && panes.right.place?.kind === "local" ? panes.right.place.path : null;
+  const showingGit = gitView !== null;
+  const leftEnvironment = environmentPanels.left !== null;
+  const rightEnvironment = environmentPanels.right !== null;
   useEffect(() => {
     const locations = [["left", leftPath], ["right", rightPath]] as const;
     const stopWatching = locations.map(([side, path]) => {
@@ -525,7 +547,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       let timer: number | undefined;
       const refreshWatchedFolder = () => {
         const current = latest.current[side];
-        if (stopped || current.place?.kind !== "local" || current.place.path !== path) return;
+        if (stopped || showingGit || side === spaceSide || (side === "left" ? leftEnvironment : rightEnvironment) ||
+            current.place?.kind !== "local" || current.place.path !== path) return;
         if (pendingListings.current[side]) timer = window.setTimeout(refreshWatchedFolder, 150);
         else void load(side, current.place, "background");
       };
@@ -541,7 +564,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       };
     });
     return () => stopWatching.forEach((stop) => stop());
-  }, [leftPath, rightPath, load]);
+  }, [leftPath, rightPath, load, spaceSide, showingGit, leftEnvironment, rightEnvironment]);
 
   const leftRemote = panes.left.place?.kind !== "local" ? panes.left.place : null;
   const rightRemote = panes.right.place?.kind !== "local" ? panes.right.place : null;
@@ -549,12 +572,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!leftRemote && !rightRemote) return;
     const timer = window.setInterval(() => {
       for (const side of ["left", "right"] as const) {
+        if (showingGit || side === spaceSide || (side === "left" ? leftEnvironment : rightEnvironment)) continue;
         const { place } = latest.current[side];
         if (place && place.kind !== "local" && place.kind !== "connections") void load(side, place, "background");
       }
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [leftRemote, rightRemote, load]);
+  }, [leftRemote, rightRemote, load, spaceSide, showingGit, leftEnvironment, rightEnvironment]);
 
   useEffect(() => {
     persistPreferences(preferences);
@@ -615,7 +639,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       labels.disconnect();
       document.fonts.removeEventListener("loadingdone", fitButtons);
     };
-  }, [scheme, theme]);
+  }, [scheme, theme, preferences.actionButtonWidth, preferences.hideActionButtonIcons, preferences.layout]);
 
   useEffect(() => {
     function preventWorkspaceSelectAll(event: globalThis.KeyboardEvent) {
@@ -694,10 +718,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     });
   }
 
+  function dismissWhatsNew() {
+    void api.acknowledgeRelease().catch((error: unknown) => {
+      setStatus({ text: describeError(error), error: true });
+    }).finally(() => setModal((current) => current?.kind === "whatsNew" ? null : current));
+  }
+
   function focus(side: Side) {
     side = quickViewSource ?? side;
     setActive(side);
-    document.getElementById(`${side}-files`)?.focus();
+    document.getElementById(side + (environmentPanels[side] ? "-environment" : "-files"))?.focus();
   }
 
   function selectDocument(id: number | null) {
@@ -720,7 +750,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return;
     }
     if (event.target instanceof Element && event.target.closest("[role=menu]")) return;
-    if (bindingMatches(shortcuts.cancelMeasure, shortcut) && activeDocument === null &&
+    if (!gitView && !environmentActive && bindingMatches(shortcuts.cancelMeasure, shortcut) && activeDocument === null &&
         !panelsHidden && cancelFolderOperation(active)) {
       event.preventDefault();
       event.stopPropagation();
@@ -742,7 +772,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const hasModifier = event.ctrlKey || event.altKey || event.metaKey || /^F\d+$/.test(event.key);
     if ((!noControl && (!inTitlebar || !hasModifier)) ||
         !shortcut || !commandNames.some((command) => bindingMatches(shortcuts[command], shortcut))) return;
-    const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".terminal-card:not([hidden])" : `#${active}-files`;
+    const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".terminal-card:not([hidden])" :
+      gitView ? ".git-pane" : environmentActive ? "#" + active + "-environment" : `#${active}-files`;
     const target = document.querySelector(selector);
     if (target && !target.dispatchEvent(new globalThis.KeyboardEvent("keydown", {
       key: event.key, code: event.code, altKey: event.altKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, metaKey: event.metaKey,
@@ -851,7 +882,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function routeLocation(side: Side, place: Place, listing: Listing) {
+  function routeLocation(side: Side, place: Place, listing: Listing, reveal?: string) {
     showProcesses(side, false);
     cancelScan(side);
     invalidateListing(side);
@@ -868,8 +899,73 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         return applyListing(pane, place, listing, "refresh");
       }
       const history = pane.history.slice(0, pane.position + 1).filter((location) => location.kind === "local");
-      return applyListing({ ...pane, history, position: history.length - 1 }, place, listing, "push");
+      const opened = applyListing({ ...pane, history, position: history.length - 1 }, place, listing, "push");
+      const revealed = reveal === undefined ? undefined : listing.entries.find((entry) => entry.name === reveal);
+      return revealed ? { ...opened, selected: revealed.name, revealedHidden: revealed.hidden ? revealed.name : undefined, marked: [], filter: "" } : opened;
     });
+  }
+
+  const resolveSpacePlace = useCallback((place: SpacePlace): SpacePlace => {
+    if (place.kind !== "server" && !isFileServer(place)) return place;
+    const connections = Object.values(connected.current);
+    if (connections.some((connection) => sameConnection(connection, place))) return place;
+    const shared = connections.find((connection) => connection?.kind === place.kind &&
+      (connection.kind === "server" ? place.kind === "server" && connection.origin === place.origin && connection.share === place.share
+        : isFileServer(place) && connection.profileId === place.profileId));
+    return shared ? { ...place, id: shared.id } : place;
+  }, []);
+
+  function openSpaceAnalyzer(side: Side, place: SpacePlace) {
+    if (pendingListings.current[side]) invalidateListing(side);
+    setQuickViewSource(null);
+    setSpaceAnalyzer({ side, place });
+    setActive(opposite(side));
+  }
+
+  function closeSpaceAnalyzer() {
+    if (!spaceSide) return;
+    setSpaceAnalyzer(null);
+    setActive(spaceSide);
+    requestAnimationFrame(() => focus(spaceSide));
+  }
+
+  function closeGitView() {
+    if (!gitView) return;
+    const { side } = gitView;
+    setGitView(null);
+    setActive(side);
+    requestAnimationFrame(() => focus(side));
+  }
+
+  function showEnvironment(side: Side, mode: EnvironmentMode | null) {
+    if (mode && !environmentPanels[side] && pendingListings.current[side] && !cancelLoading(side)) {
+      invalidateListing(side);
+    }
+    setQuickViewSource(null);
+    setEnvironmentPanels((panels) => ({ ...panels, [side]: mode }));
+    setActive(side);
+    if (!mode) requestAnimationFrame(() => document.getElementById(side + "-files")?.focus());
+  }
+
+  async function revealSpace(side: Side, place: SpacePlace, reveal?: string) {
+    const target = opposite(side);
+    if (place.kind !== "server" && !isFileServer(place) || sameConnection(connected.current[target], place)) {
+      if (processPanels[target]) showProcesses(target, false);
+      if (!await load(target, place, "push", reveal)) throw new Error(t("Could not open the selected location."));
+      requestAnimationFrame(() => focus(target));
+      return;
+    }
+    const { ticket, signal } = beginListing(target);
+    try {
+      const result = await waitForListing(readPlace(place), signal);
+      if (!result || ticket !== request.current[target]) return;
+      if (reveal !== undefined && !result.listing.entries.some((entry) => entry.name === reveal)) {
+        throw new Error(t("File no longer found: {0}", reveal));
+      }
+      routeLocation(target, result.place, result.listing, reveal);
+    } finally {
+      if (ticket === request.current[target]) delete pendingListings.current[target];
+    }
   }
 
   function open(side: Side, entry: Entry, selectParent = false) {
@@ -1187,7 +1283,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function showLockingProcesses(side: Side, item: ReturnType<typeof paneItem>) {
-    if (previewSide || !windowsClient || item?.place.kind !== "local") return;
+    if (previewSide || spaceSide || environmentPanels[opposite(side)] || !windowsClient || item?.place.kind !== "local") return;
     const { place, entry } = item;
     showProcesses(opposite(side), true, placePath(childPlace(place, entry.name)));
   }
@@ -1303,7 +1399,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function dropSide(x: number, y: number, local: boolean, source?: Side): Side | null {
     const side = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-pane]")?.dataset.dropPane;
-    if ((side !== "left" && side !== "right") || side === source || modal || helpTopic || activeDocument !== null) return null;
+    if ((side !== "left" && side !== "right") || side === source || side === spaceSide || environmentPanels[side] ||
+        gitView || modal || helpTopic || activeDocument !== null) return null;
     const pane = panes[side];
     return !pane.search && !pane.loading && !processPanels[side] &&
       (pane.place?.kind === "local" || (local && isFileServer(pane.place))) ? side : null;
@@ -1645,7 +1742,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function canSelectPanelMode(side: Side) {
     const place = panes[side].place;
-    return side !== previewSide && !panelsHidden && activeDocument === null && !processPanels[side] &&
+    return !gitView && !environmentPanels[side] && side !== previewSide && side !== spaceSide && !panelsHidden && activeDocument === null && !processPanels[side] &&
       !!place && place.kind !== "connections";
   }
 
@@ -1657,6 +1754,33 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function perform(command: Command, groupStep = 0) {
+    if (command === "environmentVariables") {
+      if (panesAvailable && !gitView && !spaceSide) showEnvironment(active, environmentPanels[active] ? null : "root");
+      return;
+    }
+    if (environmentActive && !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
+    if (command === "gitView") {
+      if (!canToggleGitView) return;
+      if (gitView) closeGitView();
+      else if (local) {
+        for (const side of ["left", "right"] as const) {
+          if (pendingListings.current[side] && !panes[side].loading) invalidateListing(side);
+        }
+        setQuickViewSource(null);
+        setGitView({ side: active, path: local.path });
+      }
+      return;
+    }
+    if (gitView) {
+      if (command === "refresh") setGitRefresh((revision) => revision + 1);
+      if (!["menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
+    }
+    if (command === "analyzeSpace") {
+      if (!panesAvailable || showingEnvironment) return;
+      if (spaceAnalyzer && document.activeElement?.closest(".space-analyzer")) closeSpaceAnalyzer();
+      else if (filesAvailable && canAnalyze(pane.place)) openSpaceAnalyzer(active, pane.place);
+      return;
+    }
     if (command === "quickView") {
       if (!canToggleQuickView) return;
       setQuickViewSource(quickViewSource === null ? active : null);
@@ -1744,7 +1868,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     switch (command) {
       case "switchPane":
-        if (panelsHidden || previewSide) break;
+        if (panelsHidden || previewSide || spaceSide) break;
         if (document.activeElement === commandInput.current) setActive(opposite(active));
         else focus(opposite(active));
         break;
@@ -1775,13 +1899,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": openSettings(); break;
-      case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
+      case "help": setHelpTopic(topicForControl(document.activeElement, contextHelpTopic(undefined, editingDocument))); break;
       case "menu": mainMenu.current?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
       case "rightLocations": {
         const side = command === "leftLocations" ? "left" : "right";
-        if (side === previewSide) break;
+        if (side === previewSide || side === spaceSide) break;
         if (panelsHidden) setPanelsHidden(false);
         setActive(side);
         requestAnimationFrame(() => document.getElementById(`${side}-pane`)?.dispatchEvent(new Event("dirlume-locations")));
@@ -1934,6 +2058,26 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       bindingMatches(shortcuts[command], shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
       commands[command].key === physical && shortcuts[command].includes(physical));
     if (activeDocument !== null) return;
+    if (environmentActive) {
+      const fromEnvironmentList = target.id === active + "-environment";
+      if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft"].includes(command) ||
+          command === "switchPane" && fromEnvironmentList)) {
+        event.preventDefault();
+        if (!event.repeat) perform(command);
+      }
+      return;
+    }
+    if (gitView) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeGitView();
+      } else if (command && ["gitView", "refresh", "menu", "help", "close", "shrinkLeft", "growLeft"].includes(command)) {
+        event.preventDefault();
+        if (!event.repeat) perform(command);
+      }
+      return;
+    }
+    if (target.closest(".space-analyzer") && command !== "analyzeSpace" && command !== "menu") return;
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
@@ -1959,7 +2103,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
-    if (!event.repeat || (!["hidden", "attributes", "quickView", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
+    if (!event.repeat || (!["hidden", "attributes", "quickView", "gitView", "analyzeSpace", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
       const groupStep = onFiles && shortcut === "ArrowLeft" && command === "firstRow" ? -rowsPerGroup.current[active] :
         onFiles && shortcut === "ArrowRight" && command === "lastRow" ? rowsPerGroup.current[active] : 0;
@@ -1990,8 +2134,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const panesAvailable = !panelsHidden && activeDocument === null;
-  const filesAvailable = panesAvailable && !processPanels[active] && !pane.loading;
-  const canToggleQuickView = panesAvailable && (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
+  const filesAvailable = panesAvailable && !gitView && !environmentActive && !processPanels[active] && !pane.loading;
+  const canToggleQuickView = panesAvailable && !showingEnvironment && !gitView && !spaceSide &&
+    (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
+  const canToggleGitView = panesAvailable && !showingEnvironment && (!!gitView || filesAvailable && !!local && !spaceSide && !busy && !panes[opposite(active)].loading);
   const previewFile = previewSide && filesAvailable ? currentFile : null;
   const previewName = currentItem?.entry.name ?? current?.name;
   const previewKey = previewFile ? JSON.stringify([
@@ -2011,7 +2157,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function paneMenu(side: Side): MenuGroup {
     const target = panes[side];
-    const available = panesAvailable && side !== previewSide && !target.loading;
+    const available = panesAvailable && !gitView && !environmentPanels[side] && side !== previewSide && side !== spaceSide && !target.loading;
     function inPane(command: "back" | "forward" | "parent" | "refresh", disabled: boolean) {
       return {
         ...menuCommand(command, !available || disabled),
@@ -2036,7 +2182,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           run: () => setPanelMode(side, id),
         })),
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
-        menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null || side === previewSide, "Sources"),
+        menuCommand(side === "left" ? "leftLocations" : "rightLocations", !!gitView || !!environmentPanels[side] || activeDocument !== null || side === previewSide || side === spaceSide, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
         inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
@@ -2059,6 +2205,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     ] },
     { label: "Commands", items: [
       { ...menuCommand("quickView", !canToggleQuickView), checked: quickViewSource !== null },
+      { ...menuCommand("gitView", !canToggleGitView), checked: showingGit },
+      { ...menuCommand("environmentVariables", !panesAvailable || !!gitView || !!spaceSide), checked: environmentActive },
+      menuCommand("analyzeSpace", !filesAvailable || showingEnvironment || !canAnalyze(pane.place)),
       menuCommand("search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       menuCommand("compare", !filesAvailable || comparison === null),
       menuCommand("copyFullPath", currentFullPath === null),
@@ -2073,7 +2222,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     ] },
     { label: "Options", items: [menuCommand("settings"), menuCommand("hidden")] },
     paneMenu("right"),
-    { label: "Help", items: [menuCommand("help"), { label: "About", run: () => setModal({ kind: "about" }) },
+    { label: "Help", items: [menuCommand("help"),
+      ...(installedRelease ? [{ label: "What's new", run: () => setModal({ kind: "whatsNew" }) }] : []),
+      { label: "About", run: () => setModal({ kind: "about" }) },
       { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
@@ -2099,18 +2250,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           </div>}
           <Button className="icon-button" aria-label={t("Quick View")} aria-pressed={quickViewSource !== null}
             shortcut={keyLabel("quickView")} disabled={!canToggleQuickView} onClick={() => perform("quickView")}><ScanEye /></Button>
-          <Button className="toolbar-button topbar-connect" aria-label={t("Connect")} shortcut={keyLabel("connect")} onClick={() => perform("connect")}>
+          <Button className="icon-button" aria-label={t("Git View")} aria-pressed={showingGit} shortcut={keyLabel("gitView")}
+            disabled={!canToggleGitView} onClick={() => perform("gitView")}><GitBranch /></Button>
+          <Button className="toolbar-button topbar-connect" data-help-topic="remote" aria-label={t("Connect")} shortcut={keyLabel("connect")} disabled={showingGit} onClick={() => perform("connect")}>
             <Server /> <span>{t("Connect")}</span>
           </Button>
-          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")}
-            disabled={activeDocument !== null || !!processPanels[active] || !pane.place || pane.place.kind === "smbRoot" || pane.loading}
+          <Button className="icon-button" data-help-topic="search" aria-label={t("Find files")} shortcut={keyLabel("search")}
+            disabled={!filesAvailable || !pane.place || pane.place.kind === "smbRoot"}
             onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
           <Button className="icon-button" aria-label={t("Swap panes")} shortcut={keyLabel("swap")}
             disabled={!canSwapPanes} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
           <Button className="icon-button" aria-label={t("Show hidden files")} aria-pressed={preferences.hidden}
-            shortcut={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
-          <Button className="icon-button" aria-label={t("Toggle terminal")} aria-pressed={terminalVisible}
+            shortcut={keyLabel("hidden")} disabled={showingGit} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
+          <Button className="icon-button" data-help-topic="terminal" aria-label={t("Toggle terminal")} aria-pressed={terminalVisible}
             shortcut={keyLabel("toggleTerminal")} disabled={activeDocument !== null} onClick={toggleTerminal}><TerminalIcon /></Button>
           <Button className="icon-button" aria-label={t(isLightTheme(theme) ? "Switch to favorite dark scheme" : "Switch to favorite light scheme")}
             onClick={() => setPreferences((current) => selectAppearance(current,
@@ -2133,8 +2286,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <main className="workspace" hidden={panelsHidden}
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
-          <Pane key={side} side={side} active={active === side} covered={side === previewSide} layout={preferences.layout} showHidden={preferences.hidden}
+          <Pane key={side} side={side} active={active === side} covered={showingGit || !!environmentPanels[side] || side === previewSide || side === spaceSide} layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
+            preserveScroll={showingGit || !!environmentPanels[side] || side === spaceSide}
+            onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
             sortAvailable={!sorts[side].pending && sorts[side].canSort(sortMode(panes[side].sort.column))} sortPending={sorts[side].pending}
             onGroupRows={(rows) => { rowsPerGroup.current[side] = rows; }}
@@ -2189,6 +2344,30 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             sourceBindings={shortcuts} zoomShortcut={shortcuts.zoomFont}
             fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
         ))}
+        {(["left", "right"] as const).map((side) => {
+          const mode = environmentPanels[side];
+          return mode && <Suspense key={side} fallback={<section className={"pane environment-pane environment-" + side}>
+            <p className="pane-empty" role="status">{t("Loading environment variables…")}</p>
+          </section>}>
+            <EnvironmentPane side={side} active={active === side} mode={mode} oppositeMode={environmentPanels[opposite(side)]}
+              shortcuts={shortcuts} revision={environmentRevision} onMode={(mode) => showEnvironment(side, mode)}
+              onClose={() => showEnvironment(side, null)} onFocus={() => setActive(side)}
+              onChanged={() => setEnvironmentRevision((revision) => revision + 1)} />
+          </Suspense>;
+        })}
+        {gitView && <Suspense fallback={<section className={"pane git-pane git-pane-" + gitView.side}>
+          <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
+        </section>}>
+          <GitView side={gitView.side} path={gitView.path} refresh={gitRefresh}
+            onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
+        </Suspense>}
+        {spaceAnalyzer && <Suspense fallback={<section className={"pane space-analyzer space-analyzer-" + spaceAnalyzer.side}>
+          <p className="pane-empty" role="status">{t("Scanning…")}</p>
+        </section>}>
+          <SpaceAnalyzer key={spaceAnalyzer.side} side={spaceAnalyzer.side} place={spaceAnalyzer.place}
+            resolvePlace={resolveSpacePlace} onClose={closeSpaceAnalyzer}
+            onReveal={(place, reveal) => revealSpace(spaceAnalyzer.side, place, reveal)} />
+        </Suspense>}
         {panesAvailable && previewSide && <Suspense fallback={<section className={`pane quick-view quick-view-${previewSide}`}>
           <p className="pane-empty" role="status">{t("Loading preview…")}</p>
         </section>}>
@@ -2272,7 +2451,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
         {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
       </div>}
-      <form className="command-bar" hidden={terminalVisible} onSubmit={submitCommand}>
+      <form className="command-bar" data-help-topic="terminal" hidden={terminalVisible || showingGit || environmentActive} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>
@@ -2281,17 +2460,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           history={commandTexts} refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
-      <nav ref={actionbar} className="actionbar" data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
+      <nav ref={actionbar} className="actionbar" hidden={showingGit || environmentActive} data-button-width={preferences.actionButtonWidth} aria-label={t("File actions")}>
         {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
           fileActions.map(({ command, label, Icon, disabled }) => (
           <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
             aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
             {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
-            <Icon /><span>{t(label)}</span>
+            {!preferences.hideActionButtonIcons && <Icon />}<span>{t(label)}</span>
           </Button>
         ))}
         <Button type="button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
-          <TerminalIcon /><span>{t("Terminal")}</span>{keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
+          {!preferences.hideActionButtonIcons && <TerminalIcon />}<span>{t("Terminal")}</span>
+          {keyLabel("toggleTerminal") && <kbd aria-hidden="true">{keyLabel("toggleTerminal")}</kbd>}
         </Button>
       </nav>
       <nav className="document-bar" aria-label={t("Open documents")} aria-hidden={!documents.length}>
@@ -2349,6 +2529,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <Dialog title={t("Update available")} onClose={() => setModal(null)}>
           <div className="dialog-body transfer-body">
             <p>{t("Dirlume {0} is available.", modal.update.version)}</p>
+            <ReleaseNotes release={modal.update} onError={(text) => setStatus({ text, error: true })} />
             {modal.update.kind === "debian" && <>
               <p>{t("Download the Debian package and run this command in the download folder.")}</p>
               <code>sudo apt install ./{modal.update.url.split("/").at(-1)}</code>
@@ -2361,6 +2542,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else installUpdate(modal.update);
             }}>{t(modal.update.kind === "debian" ? "Download Debian package" : "Install and restart")}</Button>
           </footer>
+        </Dialog>
+      )}
+      {modal?.kind === "whatsNew" && installedRelease && (
+        <Dialog title={t("What's new")} onClose={dismissWhatsNew}
+          footer={<Button type="button" data-initial-focus onClick={dismissWhatsNew}>{t("Close")}</Button>}>
+          <div className="dialog-body transfer-body">
+            <p>{t("Dirlume {0}", installedRelease.version)}</p>
+            <ReleaseNotes release={installedRelease} onError={(text) => setStatus({ text, error: true })} />
+          </div>
         </Dialog>
       )}
       {modal?.kind === "upToDate" && (

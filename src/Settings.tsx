@@ -9,7 +9,7 @@ import { HistoryField } from "./HistoryField";
 import { SettingsPreview } from "./SettingsPreview";
 import { SettingsArchiveDialog, type SettingsArchiveAction } from "./SettingsArchiveDialog";
 import { parseSettingsArchive } from "./settingsArchive";
-import { builtInThemes, colorGroups, fontGroups, mermaidColors, viewerColors } from "./appearance";
+import { builtInThemes, colorGroups, colorKeysForSurface, colorLabels, fontGroups, mermaidColors, viewerColors, type Surface } from "./appearance";
 import { MenuAlignmentSetting, menuAlignmentTerms } from "./MenuAlignmentSetting";
 import { matchesSettings, SettingSearchLabel, SettingsSearchTerms } from "./SettingSearchLabel";
 import { api, describeError, windowsClient } from "./api";
@@ -19,7 +19,8 @@ import {
   type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
-import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
+import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
+import type { HelpTopic } from "./helpContent";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
@@ -33,13 +34,24 @@ type ShortcutCapture = { command: Command; replacing?: string };
 type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
 const optionsLocationKey = "dirlume.options-location";
 const featurePages = Object.keys(featureOptions) as FeaturePage[];
+const surfaceTerms = (surfaces: readonly Surface[]) => surfaces.flatMap((surface) =>
+  [fontGroups[surface].label, "Font family", "Font size", ...colorKeysForSurface(surface).map((color) => colorLabels[color])]);
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
-    id: id as AppearanceSection, label: group.label, terms: Object.values(group.colors),
+    id: id as AppearanceSection, label: group.label,
+    terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : [])],
   })),
-  { id: "fonts" as const, label: "Fonts", terms: [...Object.values(fontGroups).map(({ label }) => label), "family size installed"] },
+  { id: "fonts" as const, label: "Fonts", terms: [fontGroups.ui.label, fontGroups.panel.label,
+    fontGroups.dialog.label, fontGroups.mono.label, "family size installed"] },
   { id: "viewFonts" as const, label: "View font sizes", terms: [...Object.values(viewFonts).map(({ label }) => label), "zoom wheel"] },
 ];
+
+function optionsHelpTopic(page: Page): HelpTopic {
+  if (page === "filePanels" || page === "sortGroups" || isPanelMode(page)) return "files";
+  if (page === "files") return "fileTypes";
+  if (page === "text") return "textTools";
+  return page;
+}
 
 function readOptionsLocation(): OptionsLocation {
   const defaults: OptionsLocation = { page: "general", query: "", expanded: true, scrollTop: 0 };
@@ -110,14 +122,15 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
     const terms = feature === "filePanels" ? [
-      "Show hidden files", "Panel layout", "Action button width",
+      "Show hidden files", "Panel layout", "Action button width", "Hide action button icons",
       ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
     ] :
       feature === "viewer" ? ["Reading area", "Max width (px)", "Maximum content width (px)", "Full width", "Mermaid diagrams",
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
       feature === "terminal" ? ["Resize step (rows)", "Paste on right-click", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Installed fonts", "Size (px)", "font size",
-      ...(views.length ? ["zoom", "wheel"] : []), ...views.map((view) => viewFonts[view].label), ...terms);
+      ...(views.length ? ["zoom", "wheel"] : []), ...views.map((view) => viewFonts[view].label), ...terms,
+      ...surfaceTerms(feature === "filePanels" ? [] : optionSurfaces[feature]));
   });
   const appearanceMatches = appearancePages.filter(({ id, label, terms }) => matches("Appearance", label, ...terms,
     ...(id === "window" ? ["Color scheme", "New scheme", "Scheme name", "Base theme", "Delete scheme",
@@ -309,7 +322,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
 
   return <SettingsSearchTerms value={terms}>
-    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
+    <Dialog title={t("Options")} helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
+      wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
       <div className="settings-archive-actions">
         <Button type="button" disabled={loadingArchive} onClick={() => void startImport()}>{t("Import settings")}</Button>
         <Button type="button" disabled={loadingArchive} onClick={() => setSettingsArchive({ kind: "export" })}>{t("Export settings")}</Button>
@@ -343,20 +357,20 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 else if (showShortcuts) select("shortcuts");
               }} />
           </label>
-          {onPick && <Button ref={pickButton} type="button" className="icon-button" aria-label={t("Pick an element")}
+          {onPick && <Button ref={pickButton} type="button" className="icon-button" data-help-topic="appearance" aria-label={t("Pick an element")}
             tooltip={t("Pick an element")} disabled={picking} onClick={() => { void pick(); }}><Crosshair /></Button>}
           </div>
           {pickError && <p role="alert" className="dialog-error">{t("Could not start the appearance picker.")}</p>}
           <nav className="settings-tree" aria-label={t("Options sections")}>
-            {showGeneral && <Button type="button" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
-            {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
+            {showGeneral && <Button type="button" data-help-topic="general" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
+            {featureMatches.map((id) => <Button key={id} type="button" data-help-topic={optionsHelpTopic(id)} aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
             </Button>)}
-            {showSortGroups && <Button type="button" aria-pressed={!selection && page === "sortGroups"} onClick={() => select("sortGroups")}>
+            {showSortGroups && <Button type="button" data-help-topic="files" aria-pressed={!selection && page === "sortGroups"} onClick={() => select("sortGroups")}>
               {t("Sort groups")}
             </Button>}
             {modesMatch.length > 0 && <>
-              <Button type="button" aria-expanded={modesExpanded || searching} aria-controls="options-panel-modes"
+              <Button type="button" data-help-topic="files" aria-expanded={modesExpanded || searching} aria-controls="options-panel-modes"
                 onClick={() => {
                   if (!modePage || selection) { select(modesMatch[0]); setModesExpanded(true); }
                   else setModesExpanded(!modesExpanded);
@@ -364,14 +378,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 {modesExpanded || searching ? <ChevronDown /> : <ChevronRight />} {t("Panel modes")}
               </Button>
               <div id="options-panel-modes" className="settings-tree-branch" hidden={!modesExpanded && !searching}>
-                {modesMatch.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
+                {modesMatch.map((id) => <Button key={id} type="button" data-help-topic="files" aria-pressed={!selection && page === id} onClick={() => select(id)}>
                   {panelModeName(id, preferences.panelModes)}
                 </Button>)}
               </div>
             </>}
             {appearanceMatches.length > 0 && (
               <>
-                <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
+                <Button type="button" data-help-topic="appearance" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
                   onClick={() => {
                     if (!isAppearance || selection) { select(appearanceMatches[0].id); setExpanded(true); }
                     else setExpanded(!expanded);
@@ -380,12 +394,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </Button>
                 <div id="options-appearance-pages" className="settings-tree-branch" hidden={!expanded && !searching}>
                   {appearanceMatches.map(({ id, label }) => (
-                    <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>{t(label)}</Button>
+                    <Button key={id} type="button" data-help-topic={optionsHelpTopic(id)} aria-pressed={!selection && page === id} onClick={() => select(id)}>{t(label)}</Button>
                   ))}
                 </div>
               </>
             )}
-            {showShortcuts && <Button type="button" aria-pressed={!selection && page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
+            {showShortcuts && <Button type="button" data-help-topic="shortcuts" aria-pressed={!selection && page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
             {!searching && onPick && <>
               <Button type="button" aria-expanded={historyExpanded} aria-controls="options-picker-history"
                 onClick={() => setHistoryExpanded(!historyExpanded)}>
@@ -483,6 +497,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 onChange={(event) => onChange({ ...preferences, actionButtonWidth: event.target.value as ActionButtonWidth })}>
                 {Object.entries(actionButtonWidths).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
               </select>
+            </label>
+            <label className="field-checkbox"><SettingSearchLabel label="Hide action button icons" />
+              <input type="checkbox" checked={preferences.hideActionButtonIcons}
+                onChange={(event) => onChange({ ...preferences, hideActionButtonIcons: event.target.checked })} />
             </label>
           </div>}
           <AppearanceSettings section={page === "filePanels" ? "panels" : "fonts"} fontGroup={featureOptions[page].font}

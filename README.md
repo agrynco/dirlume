@@ -38,7 +38,11 @@ Press **Enter** on a local folder row to open it with the cursor on **..**. Pres
 
 Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → Main File Panels → Panel layout**. Every layout works with every color scheme. Twin panels keeps file icons and adds drive buttons with icons, a line with the drive's free space above each list, column separators, and a flat key bar with icons. Classic commander uses dense rows without icons, a bar of drives and places above each pane, details of the current item below the list, and a function-key strip. Marked items use the **Marked items** color from **Appearance → Panels** for their check marks. The active and inactive selection colors set the row backgrounds. The pane footer shows the free space on the volume of a local folder.
 
-Set **Main menu position** under **Options → General**. Set **Action button width** under **Options → Main File Panels** to switch between the default compact buttons and full-width buttons.
+Click the free-space indicator or **Analyze space** to scan the folder shown in that pane. The adjacent arrow offers the containing volume, share, or connection root when available. The tree and treemap show file sizes or allocated storage, with percentages relative to each item's parent. **Show in other pane** opens a folder or selects a file there. **Stop** keeps partial results, **Rescan** repeats the same scope, and **Close** restores the file list. Configure the **Analyze space** binding in **Options → Keyboard shortcuts**.
+
+The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
+
+Set **Main menu position** under **Options → General**. Set **Action button width** under **Options → Main File Panels** to switch between compact and full-width buttons. Turn on **Hide action button icons** for a text-only File actions bar in any panel layout.
 
 Dirlume bundles **GoMono Nerd Font Mono** from [Nerd Fonts v3.5.1](https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1). By default, file panels use it at **15 px**, and the viewer, editor, and terminal use it at **18 px**. Menus, toolbars, and dialogs use the system interface font at **14 px**. Choose it by name in the font picker or clear an override to use the default. The bundled faces work offline. The [font notices](src/assets/fonts/GoMono-NOTICE.txt) and upstream licenses are included in the desktop packages.
 
@@ -46,7 +50,7 @@ Use **Options → Appearance → Window → New scheme** to save your own colors
 
 **File types** has separate colors for hidden and system items. Their names are italic and slightly dimmed. Hidden items include dot-prefixed names and items with the Windows Hidden attribute. Items with the Windows System attribute use the system color, including when they are also hidden. **Show hidden files** controls whether hidden items are listed.
 
-Use **Search settings** above the Options tree to find a setting or shortcut. **Main File Panels** contains hidden-file visibility, pane fonts and sizes, and panel colors. **Viewer**, **Editor**, and **Terminal** each have their own font settings. They inherit the scheme's shared text font and size until you set their own values. **General** contains the interface language and remote connection settings, and **Appearance** contains shared themes and styles.
+Use **Search settings** above the Options tree to find a setting or shortcut. **Main File Panels** contains hidden-file visibility, pane fonts and sizes, and panel colors. Set individual fonts and colors in **Viewer** (including Hex Viewer and Markdown preview), **Editor**, **Terminal** (including Command line), and **Appearance → Text tools → Compare files**. Each field shows its effective value and whether the scheme inherits or customizes it. Reset a field to restore its inherited value. **General** contains the interface language and remote connection settings.
 
 Use **Pick an element** beside **Search settings** to find the appearance controls for something visible on screen. Options hides while you point at the element. Click the highlight to return to Options with its colors, fonts, and sizes together. Press **Esc** to return to the same page and keep your draft. **Picker history** lists successful picks by local date and reopens them with current values. The history stores appearance categories and states.
 
@@ -64,7 +68,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 
 | Default keys | Action |
 | --- | --- |
-| F1 | Open the offline Help guide in the current interface language. |
+| F1 | Open the offline Help topic for the focused feature. Follow related topics in the guide and press Esc to return to the previous control. |
 | Alt or F9 | Show or hide the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to hide the menu and return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
@@ -108,9 +112,17 @@ On Windows, **Options → Terminal → Automatically refresh environment variabl
 
 **Compare files** opens a separate window. Use **Previous** and **Next** to select a change, then **Apply to left** or **Apply to right** to transfer it. Turn on **Edit files** to work directly in both panes. When closing with unsaved edits, choose **Overwrite original** or **Save as** for each changed file.
 
-Viewers and editors use the same syntax highlighting and let you change the detected language or choose plain text. Customize syntax colors in **Options → Appearance → Text tools**. Markdown preview renders fenced Mermaid diagrams. Use **HTML formatting** in the viewer toolbar to toggle support for inline spans that specify `white-space: nowrap` in table cells. The setting applies to the open viewer tab. The **Open documents** bar switches between the files view and open documents. Dirlume restores local browsing history, selection, layout, and viewer/editor windows at startup. Unsaved changes require confirmation before closing the editor or exiting.
+Open the syntax control in the Viewer or Editor header or choose **Syntax → Choose syntax…** to search by language, alias, or extension. Use the arrow keys and **Enter** to apply a choice. **Automatic** uses filename detection and **Plain text** turns off highlighting. Customize syntax colors for the individual tool in **Options → Viewer** or **Options → Editor**. The shared syntax colors remain in **Appearance → Text tools**. Markdown preview renders fenced Mermaid diagrams. Use **HTML formatting** in the viewer toolbar to toggle support for inline spans that specify `white-space: nowrap` in table cells. The setting applies to the open viewer tab. The **Open documents** bar switches between the files view and open documents. Dirlume restores local browsing history, selection, layout, and viewer/editor windows at startup. Unsaved changes require confirmation before closing the editor or exiting.
 
 Press **Ctrl+Q** or select **Quick View** in the main toolbar to preview the current file in the opposite pane while browsing. Toggle it again to restore that pane. **Ctrl+Left** and **Ctrl+Right** move the divider. Use **Rendered** and **Source** in the toolbar for Markdown and HTML. Rendered HTML runs no scripts and loads no external resources. For PNG, JPEG, GIF, WebP, and BMP images up to 16 MiB, use the buttons to zoom, fit, or rotate the preview.
+
+With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Git View works offline with locally available objects and leaves the working tree and index intact. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
+
+### Environment variables
+
+Choose **Commands → Environment variables** in either pane, then open **User variables**, **System variables**, or the read-only **Dirlume process environment**. The list shows names and definition sources. Press **Enter** or **F3** to inspect a value, **F4** to edit, and **Shift+F4** to create a variable. Use **F5** to review and copy selected or marked variables to an opposite pane showing the other writable scope. **Ctrl+R** reloads the scope. **Back to files** restores the file pane.
+
+On Windows, saved definitions are read from the user and machine Environment registry keys. Saved strings retain their expandable type and raw text. Start a new PowerShell session with **Refresh environment** enabled to pick up registry changes. On Ubuntu, Dirlume writes `90-dirlume-user.conf` in the user `environment.d` directory and `/etc/environment.d/90-dirlume-system.conf` for system defaults. Reload the systemd user manager or sign in again so newly launched user services inherit the definitions. On macOS, enable login shell integration to add a startup hook to `.zprofile` or `/etc/zprofile`. The dialog previews which file will change. Start a new `zsh` login shell to load the managed definitions. System writes can request administrator authorization.
 
 In **New file** (**Shift+F4**), choose UTF-8, UTF-8 with BOM, UTF-16 LE, or UTF-16 BE. UTF-8 is the default. The editor preserves the chosen encoding when saving or reopening the file.
 
@@ -122,7 +134,7 @@ Use **F6** or the document's **File** menu to switch modes for the current file.
 
 The Viewer refreshes an open local file when it changes on disk. The Editor offers **Reload from disk** to open the updated file or **Keep editing** to retain the current buffer. Reloading discards any unsaved edits. Saving still checks that the disk contents match the version originally opened or last saved by the Editor.
 
-Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text and hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing a scheme’s font size clears wheel adjustments for views that use that size. A custom Viewer family also applies to Markdown.
+Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text viewer, the hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing the effective base size clears the wheel adjustment for the affected view. An imported font that is unavailable uses its current inherited fallback and keeps its saved name.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
@@ -233,6 +245,8 @@ The sync workflow uses the `DIRLUME_PROJECT_TOKEN` Actions secret. Use a GitHub 
 
 Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers and portable copies, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
 
+The update dialog shows the offered version’s highlights and links to its full release notes. After installation, **What’s new** shows the installed version’s highlights offline. Dismiss the dialog once for that product version. It also appears on a clean installation when highlights are available. Use **Help → What’s new** to reopen it. Each Windows Portable folder keeps its own acknowledgment.
+
 Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
 
 [GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64, Ubuntu x64, macOS Apple Silicon, and macOS Intel. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
@@ -247,6 +261,8 @@ Invoke [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md)
 
 After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
 
+Prepare one to eight short English highlights in `release-highlights/X.Y.Z.json` for the next stable version before opening its promotion pull request. Set `version` to that product version and list the sentences in `highlights`. The same summary goes into the desktop packages, the updater manifest, and the GitHub Release.
+
 To publish manually, open **Actions → CI and releases → Run workflow** and select `main`. A manual release runs the full build and test suite before publishing.
 
 For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
@@ -257,4 +273,4 @@ Windows Portable uses **Install and restart** to update its current folder. Extr
 
 The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 
-The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks that a modified package is rejected and that the original signed package installs, restarts, and restores a saved pane font setting.
+The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks signature rejection, installation, restored pane settings, and release highlights before and after install. The Ubuntu job also checks the manual Debian upgrade path.

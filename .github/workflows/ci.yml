@@ -74,6 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'closed' }}
+          CHECK_NEXT_RELEASE_HIGHLIGHTS: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'prerelease' }}
         run: node scripts/build-version.mjs resolve
 
   build:
@@ -130,12 +131,27 @@ jobs:
       - name: Verify selective settings import and export
         if: github.event.action != 'closed'
         run: node scripts/settings-archive-smoke.mjs
+      - name: Verify independent text surface appearance
+        if: github.event.action != 'closed'
+        run: node scripts/text-appearance-smoke.mjs
       - name: Verify Quick View in both panes
         if: github.event.action != 'closed'
         run: node scripts/quick-view-smoke.mjs
       - name: Verify main menu visibility and shortcuts
         if: github.event.action != 'closed'
         run: node scripts/menu-header-smoke.mjs
+      - name: Verify contextual offline Help
+        if: github.event.action != 'closed'
+        run: node scripts/contextual-help-smoke.mjs
+      - name: Verify Space Analyzer controls and provider scopes
+        if: github.event.action != 'closed'
+        run: node scripts/space-analyzer-smoke.mjs
+      - name: Verify Git View
+        if: github.event.action != 'closed'
+        run: node scripts/git-view-smoke.mjs
+      - name: Verify environment variable panes and copy review
+        if: github.event.action != 'closed'
+        run: node scripts/environment-panes-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

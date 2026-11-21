@@ -1,0 +1,13 @@
+{
+  "version": "0.1.13",
+  "highlights": [
+    "Analyze disk usage in a file pane, with a folder tree and treemap for local and remote storage.",
+    "Browse local Git branches and commit history from a file pane.",
+    "Inspect and edit environment variables for supported scopes on Windows, Ubuntu, and macOS.",
+    "Open contextual Help with F1 and follow links between related topics.",
+    "Search Viewer and Editor syntax modes by language, alias, or extension.",
+    "Choose separate fonts and colors for Viewer, Editor, Hex Viewer, Markdown preview, Terminal, Command line, and Compare files.",
+    "See file details and counts in one pane status row, and hide File actions icons from Options.",
+    "See release highlights in the updater and reopen them from Help after installation."
+  ]
+}

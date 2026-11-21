@@ -20,11 +20,14 @@ import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColum
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
+import { SpaceControl } from "./SpaceControl";
+import { canAnalyze, type SpacePlace } from "./spaceScan";
 
 interface PaneProps {
   side: Side;
   active: boolean;
   covered?: boolean;
+  preserveScroll?: boolean;
   layout: PanelLayout;
   modeId: PanelModeId;
   mode: PanelMode;
@@ -68,6 +71,8 @@ interface PaneProps {
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
   onContext: (x: number, y: number, entry?: Entry) => void;
+  onAnalyze: (place: SpacePlace) => void;
+  spaceDisabled: boolean;
 }
 
 function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["rename"]>) {
@@ -108,10 +113,10 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, covered, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
+export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo }: PaneProps) {
+  onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
@@ -122,6 +127,7 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
   const locationsBox = useRef<HTMLDivElement>(null);
   const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef<{ top: number; left: number } | null>(null);
   const columnHeader = useRef<HTMLDivElement>(null);
   const [modeVisibility, setModeVisibility] = useState(() => ({
     brief: readColumnLayout(side, "brief"), medium: readColumnLayout(side, "medium"),
@@ -210,7 +216,8 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
     return () => { cancelled = true; };
   }, [localFolder, pane.loading, pane.entries]);
   const free = localFolder && space?.folder === localFolder ? space.value : null;
-  const freeLabel = free ? t("{0} free of {1}", formatSize(free.available), formatSize(free.total)) : undefined;
+  const spaceControl = !processView && canAnalyze(pane.place)
+    ? <SpaceControl place={pane.place} free={free} onAnalyze={onAnalyze} disabled={spaceDisabled || pane.loading} /> : null;
 
   useEffect(() => setQuickSearch(null), [path, processView, matches]);
   useLayoutEffect(() => {
@@ -236,7 +243,19 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
   }, [path, matches, processView]);
   useLayoutEffect(() => {
     const element = list.current;
-    if (!active || selected < 0 || !element) return;
+    if (!element) return;
+    if (preserveScroll) {
+      savedScroll.current ??= { top: element.scrollTop, left: element.scrollLeft };
+      return;
+    }
+    if (savedScroll.current) {
+      element.scrollTop = savedScroll.current.top;
+      element.scrollLeft = savedScroll.current.left;
+      savedScroll.current = null;
+      setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
+      return;
+    }
+    if (!active || selected < 0) return;
     if (virtual) {
       const top = (selected % rowsPerGroup) * viewport.rowHeight;
       const bottom = top + viewport.rowHeight + 8;
@@ -246,7 +265,7 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
     } else {
       element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
     }
-  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView]);
+  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll]);
   useEffect(() => {
     if (!locationsOpen) return;
     locationsBox.current?.querySelector<HTMLButtonElement>(".location-popup button")?.focus();
@@ -277,6 +296,7 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
   const loadingLabel = t("Opening folder…");
+  const measuringLabel = t("Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
   const sources = [
@@ -343,7 +363,6 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
         field === "rightName" ? <span>{text}</span> : text}
     </span>;
   }
-  const usedShare = free && free.total > 0 ? Math.min(100, Math.max(0, 100 - free.available / free.total * 100)) : 0;
   // The drive bar highlights the most specific quick location that contains the current folder.
   const comparablePath = (value: string) => windowsClient ? value.replace(/[\\/]+$/, "").toLocaleLowerCase() : value.replace(/\/+$/, "");
   const currentLocation = localFolder ? locations.reduce<QuickLocation | undefined>((best, location) => {
@@ -357,6 +376,7 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
   return (
     <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered}
       data-panel-mode={catalog || processView ? undefined : modeId}
+      data-help-topic={processView ? "processes" : search ? "search" : catalog ? "remote" : "files"}
       data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
@@ -402,13 +422,10 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
           </Button>}
         </div>
       </header>
-      {twin && localFolder && !search && !processView && <div className="pane-volume">
-        <HardDrive aria-hidden="true" />
-        <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span>
-        {free && <>
-          <span className="pane-volume-free" data-tooltip={freeLabel}>{freeLabel}</span>
-          <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
-        </>}
+      {twin && spaceControl && <div className="pane-volume">
+        {localFolder && <><HardDrive aria-hidden="true" />
+          <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span></>}
+        {spaceControl}
       </div>}
       <div className="navigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
@@ -568,13 +585,6 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>
       </div>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
-      {statusColumns.length > 0 && <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns) }}>
-        {current && current.name !== ".." && statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
-          data-tooltip={itemValue(current, field)}>
-          {isNameField(field) ? <>{field === "markedName" && markedSet.has(current.name) && <Check aria-hidden="true" />}
-            {renderName(current, field, false)}</> : itemValue(current, field)}
-        </span>)}
-      </div>}
       <footer className="pane-footer">
         {pane.loading ? <div className="pane-progress">
           <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
@@ -587,21 +597,38 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
             {t("Cancel")}{cancelKey && <kbd aria-hidden="true">{cancelKey}</kbd>}
           </Button>
         </div> : <>
-          <span className="pane-counts">{search ? countText(entries.length, "match") :
-            <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
-          {pane.measuring.length > 0 ? <div className="pane-measurement">
-            <div className="pane-progress-status" role="status">
-              <LoaderCircle className="spin" aria-hidden="true" /><span>{t("Calculating folder sizes…")}</span>
+          <div className="pane-status-line">
+            {pane.measuring.length > 0 ? <div className="pane-progress pane-measurement">
+              <div className="pane-progress-status" role="status" data-tooltip={measuringLabel}>
+                <LoaderCircle className="spin" aria-hidden="true" /><span>{measuringLabel}</span>
+              </div>
+              <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
+                shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
+            </div> : current && current.name !== ".." && statusColumns.length > 0 &&
+              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns) }}
+                data-tooltip={statusColumns.map(({ field }) => itemValue(current, field)).filter(Boolean).join(" · ")}>
+                {statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
+                  data-tooltip={itemValue(current, field)}>
+                  {isNameField(field) ? <>{field === "markedName" && markedSet.has(current.name) && <Check aria-hidden="true" />}
+                    {renderName(current, field, false)}</> : itemValue(current, field)}
+                </span>)}
+              </div>}
+            <div className="pane-summary">
+              <span className="pane-counts" data-tooltip={search ? countText(entries.length, "match") :
+                countText(folders, "folder") + " · " + countText(folderItems.length - folders, "file")}>
+                <span className="pane-counts-full">{search ? countText(entries.length, "match") :
+                  <>{countText(folders, "folder")}<span className="dot" />{countText(folderItems.length - folders, "file")}</>}</span>
+                <span className="pane-counts-compact" aria-hidden="true">
+                  {search ? <><Search />{entries.length.toLocaleString(locale())}</> :
+                    <><Folder />{folders.toLocaleString(locale())}<File />{(folderItems.length - folders).toLocaleString(locale())}</>}
+                </span>
+              </span>
+              {marked.length > 0 ? <span className="pane-marked">{t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes))}</span> :
+                <span className="pane-note">{sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" :
+                  pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
+              {!twin && spaceControl}
             </div>
-            <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
-              shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
-          </div> : <span className={marked.length ? "pane-marked" : "pane-note"}>{marked.length ? t("{0} marked · {1}{2}", marked.length, complete ? "" : "≥ ", formatSize(markedBytes)) :
-            sortPending ? t("Loading sort metadata…") : search ? pane.search?.incomplete ? t("Partial results") : "" : pane.omitted ? t("{0} unavailable", pane.omitted) : ""}</span>}
-          {free && !search && !twin && <span className="pane-free" data-tooltip={freeLabel}>
-            <span className="pane-free-full">{freeLabel}</span>
-            <span className="pane-free-short">{t("{0} free", formatSize(free.available))}</span>
-            <span className="space-meter" aria-hidden="true"><span style={{ width: `${usedShare}%` }} /></span>
-          </span>}
+          </div>
         </>}
       </footer>
       </>}

@@ -40,6 +40,8 @@ pub struct Entry {
     pub(crate) changed: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) allocated: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) allocation_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -88,6 +90,7 @@ impl Entry {
             accessed: None,
             changed: None,
             allocated: None,
+            allocation_id: None,
             modified: modified.and_then(|value| {
                 value
                     .duration_since(UNIX_EPOCH)

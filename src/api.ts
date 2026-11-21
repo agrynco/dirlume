@@ -11,6 +11,7 @@ export interface Entry extends Partial<PanelMetadata> {
   modified: number | null;
   connection?: SavedConnection;
   description?: string | null;
+  allocationId?: string;
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -177,6 +178,71 @@ export interface DiskSpace {
   total: number;
 }
 
+export interface GitBranch {
+  reference: string;
+  name: string;
+  tip: string;
+  remote: boolean;
+}
+
+export interface GitRepository {
+  root: string;
+  name: string;
+  headRef: string | null;
+  head: string | null;
+  branches: GitBranch[];
+}
+
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface GitHistory {
+  commits: GitCommit[];
+  nextOffset: number | null;
+}
+
+export interface GitDetails {
+  message: string;
+  merge: boolean;
+  changes: { status: string; path: string; previousPath: string | null }[];
+}
+
+export type EnvironmentScope = "user" | "system" | "process";
+export type EnvironmentKind = "literal" | "expandable";
+export interface EnvironmentRow {
+  name: string;
+  source: string;
+  overriddenBy: string | null;
+}
+export interface EnvironmentValue extends EnvironmentRow {
+  value: string;
+  kind: EnvironmentKind;
+}
+export interface EnvironmentInfo {
+  target: string;
+  activation: string;
+  startupFile: string | null;
+  integrationEnabled: boolean;
+  expandable: boolean;
+}
+export interface EnvironmentEdit {
+  name: string;
+  value: string;
+  kind: EnvironmentKind;
+  expected: EnvironmentValue | null;
+  replacePath: boolean;
+}
+export type EnvironmentOutcome = "saved" | "conflict" | "invalid" | "denied" | "failed";
+export interface EnvironmentSave {
+  outcomes: { name: string; result: EnvironmentOutcome }[];
+  integration: EnvironmentOutcome | null;
+}
+
 export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
@@ -244,7 +310,9 @@ export interface ProcessInfo extends ProcessId {
 
 export type McpConnection = { endpoint: string; token: string };
 
-export type AppUpdate = { kind: "install"; version: string } | { kind: "debian"; version: string; url: string };
+export type ReleaseHighlights = { version: string; highlights: string[] };
+export type InstalledRelease = ReleaseHighlights & { showOnStartup: boolean };
+export type AppUpdate = ReleaseHighlights & ({ kind: "install" } | { kind: "debian"; url: string });
 export type UpdateProgress = { downloaded: number; total: number | null };
 
 export const api = {
@@ -260,6 +328,8 @@ export const api = {
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
   checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
+  installedRelease: () => invoke<InstalledRelease>("installed_release"),
+  acknowledgeRelease: () => invoke<void>("acknowledge_release"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },
     initialPage?: import("./featureOptions").FeaturePage) =>
     invoke<void>("open_tool_window", { title, ...size, comparison, initialPage }),
@@ -268,6 +338,15 @@ export const api = {
   installUpdate: (version: string, onProgress: Channel<UpdateProgress>) =>
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
+  spaceMount: (path: string) => invoke<{ path: string; share: boolean }>("space_mount", { path }),
+  listSpaceDirectory: (root: string, segments: string[]) => invoke<Listing>("list_space_directory", { root, segments }),
+  gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
+  gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
+  gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
+  environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
+  environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
+  saveEnvironment: (scope: EnvironmentScope, edits: EnvironmentEdit[], integrate = false) =>
+    invoke<EnvironmentSave>("save_environment", { scope, edits, integrate }),
   requestedLocation: () => invoke<string | null>("requested_location"),
   listProcesses: () => invoke<ProcessInfo[]>("list_processes"),
   processIcons: (ids: ProcessId[]) => invoke<(string | null)[]>("process_icons", { ids }),

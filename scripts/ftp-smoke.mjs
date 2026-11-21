@@ -164,6 +164,19 @@ export async function testFtp(page, temp, source, destination, config, restartDe
 
     await remoteRow("search-fixture").dblclick();
     await remoteRow("root.find.txt").waitFor();
+    const beforeAnalysis = retrieves().length;
+    await button(rightPane, "Analyze space").click();
+    const analyzer = page.getByRole("region", { name: "Space Analyzer", exact: true });
+    await button(analyzer, "Rescan").waitFor();
+    await button(analyzer, "Stop").waitFor({ state: "hidden" });
+    await analyzer.getByText("File size", { exact: true }).waitFor();
+    await analyzer.getByText(".hidden.find.txt", { exact: true }).waitFor();
+    await analyzer.getByText("branch", { exact: true }).dblclick();
+    await analyzer.getByText("middle.find.txt", { exact: true }).waitFor();
+    assert.equal(retrieves().length, beforeAnalysis);
+    await button(analyzer, "Close").click();
+    await right.waitFor();
+    await page.waitForFunction(() => document.activeElement?.id === "right-files");
     const beforeSearch = logins();
     await page.keyboard.press("Alt+F7");
     const search = page.getByRole("dialog", { name: "Find files", exact: true });

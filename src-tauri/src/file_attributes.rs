@@ -120,6 +120,11 @@ pub fn stream_sort_supported(directory: &Path) -> bool {
     platform::stream_sort_supported(directory)
 }
 
+#[cfg(windows)]
+pub fn space_usage(path: &Path) -> (Option<u64>, Option<String>) {
+    platform::space_usage(path)
+}
+
 pub fn update(path: &Path, changes: &[Change]) -> io::Result<Attributes> {
     if !changes.is_empty() {
         platform::update(path, changes)?;
@@ -233,8 +238,7 @@ mod platform {
     ) {
         use std::{mem::size_of_val, os::windows::io::AsRawHandle};
         use windows_sys::Win32::Storage::FileSystem::{
-            FileBasicInfo, FileStandardInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
-            FILE_STANDARD_INFO,
+            FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
         };
 
         let needs_handle =
@@ -255,18 +259,7 @@ mod platform {
                 }
             }
             if fields.contains(&SortField::Allocated) {
-                let mut info = FILE_STANDARD_INFO::default();
-                let success = unsafe {
-                    GetFileInformationByHandleEx(
-                        file.as_raw_handle(),
-                        FileStandardInfo,
-                        (&mut info as *mut FILE_STANDARD_INFO).cast(),
-                        size_of_val(&info) as u32,
-                    )
-                };
-                if success != 0 {
-                    out.allocated = u64::try_from(info.AllocationSize).ok();
-                }
+                out.allocated = allocated_bytes(&file);
             }
         }
         let needs_streams = metadata.is_file()
@@ -277,6 +270,61 @@ mod platform {
             out.stream_count = Some(count);
             out.stream_size = Some(size);
         }
+    }
+
+    fn allocated_bytes(file: &fs::File) -> Option<u64> {
+        use std::{mem::size_of_val, os::windows::io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileStandardInfo, GetFileInformationByHandleEx, FILE_STANDARD_INFO,
+        };
+        let mut info = FILE_STANDARD_INFO::default();
+        let success = unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileStandardInfo,
+                (&mut info as *mut FILE_STANDARD_INFO).cast(),
+                size_of_val(&info) as u32,
+            )
+        };
+        (success != 0)
+            .then(|| u64::try_from(info.AllocationSize).ok())
+            .flatten()
+    }
+
+    pub(super) fn space_usage(path: &Path) -> (Option<u64>, Option<String>) {
+        use std::{mem::size_of_val, os::windows::io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
+            BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ID_INFO,
+        };
+        let Ok(file) = metadata_handle(path) else {
+            return (None, None);
+        };
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        let success = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+        if success != 0
+            && info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
+                != 0
+        {
+            return (None, None);
+        }
+        let id = (success != 0 && info.nNumberOfLinks > 1)
+            .then(|| {
+                let mut identity = FILE_ID_INFO::default();
+                let success = unsafe {
+                    GetFileInformationByHandleEx(
+                        file.as_raw_handle(),
+                        FileIdInfo,
+                        (&mut identity as *mut FILE_ID_INFO).cast(),
+                        size_of_val(&identity) as u32,
+                    )
+                };
+                let id = u128::from_le_bytes(identity.FileId.Identifier);
+                (success != 0 && id != 0)
+                    .then(|| format!("{}:{id:032x}", identity.VolumeSerialNumber))
+            })
+            .flatten();
+        (allocated_bytes(&file), id)
     }
 
     fn streams(path: &Path) -> Option<(u64, u64)> {

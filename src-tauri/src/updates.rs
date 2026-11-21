@@ -10,6 +10,9 @@ use url::Url;
 
 #[cfg(feature = "ui-automation")]
 pub mod fixture;
+pub mod highlights;
+
+use highlights::release_highlights;
 
 const RELEASE_API: &str = "https://api.github.com/repos/agrynco/dirlume/releases/latest";
 const RELEASE_DOWNLOADS: &str = "https://github.com/agrynco/dirlume/releases/download";
@@ -26,6 +29,7 @@ struct Release {
     draft: bool,
     prerelease: bool,
     assets: Vec<Asset>,
+    body: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -36,8 +40,15 @@ struct Asset {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum UpdateOffer {
-    Install { version: String },
-    Debian { version: String, url: String },
+    Install {
+        version: String,
+        highlights: Vec<String>,
+    },
+    Debian {
+        version: String,
+        url: String,
+        highlights: Vec<String>,
+    },
 }
 
 #[derive(Clone, Serialize)]
@@ -86,10 +97,13 @@ pub async fn save_portable_preferences(preferences: serde_json::Value) -> Result
 }
 
 impl PendingUpdate {
-    fn offer(&self, update: Update) -> Result<UpdateOffer, &'static str> {
+    fn offer(&self, update: Update, highlights: Vec<String>) -> Result<UpdateOffer, &'static str> {
         let version = update.version.clone();
         *self.0.lock().map_err(|_| CHECK_FAILED)? = Some(update);
-        Ok(UpdateOffer::Install { version })
+        Ok(UpdateOffer::Install {
+            version,
+            highlights,
+        })
     }
 }
 
@@ -183,12 +197,14 @@ pub async fn check_for_update(
     let Some(version) = release.newer_version(&app.package_info().version) else {
         return Ok(None);
     };
+    let highlights = release_highlights(release.body.as_deref());
     let download_base = format!("{RELEASE_DOWNLOADS}/v{version}");
     if debian {
         let package = release.debian_package(&version).ok_or(MANIFEST_FAILED)?;
         return Ok(Some(UpdateOffer::Debian {
             version: version.to_string(),
             url: format!("{download_base}/{package}"),
+            highlights,
         }));
     }
     if !release.includes("latest.json") {
@@ -215,7 +231,7 @@ pub async fn check_for_update(
     if update.version != version || !package.is_some_and(|name| release.includes(name)) {
         return Err(MANIFEST_FAILED);
     }
-    state.offer(update).map(Some)
+    state.offer(update, highlights).map(Some)
 }
 
 #[tauri::command]
@@ -282,6 +298,7 @@ mod tests {
             draft: false,
             prerelease: false,
             assets: vec![],
+            body: None,
         };
         assert!(release.newer_version(&current).is_none());
         release.tag_name = "v1.2.4-rc.1".into();
@@ -307,6 +324,7 @@ mod tests {
             .into_iter()
             .map(|name| Asset { name: name.into() })
             .collect(),
+            body: None,
         };
         assert_eq!(
             release.debian_package(&Version::new(1, 2, 4)),

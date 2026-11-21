@@ -138,7 +138,7 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
   }
 
   return (
-    <Dialog title={t("Find files")} onClose={onClose}>
+    <Dialog title={t("Find files")} helpTopic="search" onClose={onClose}>
       <form className="dialog-form" onSubmit={(event) => { void search(event); }}>
         <div className="dialog-body search-body">
           <label className="field">{t("File mask")}
