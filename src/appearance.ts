@@ -249,6 +249,24 @@ export interface Scheme {
 }
 
 export const fontKeys = Object.keys(fontGroups) as FontGroup[];
+const fontProperty = (group: FontGroup) => group === "mono" ? "--mono" : `--${group}-font` as const;
+const typographyProperties = [
+  ...fontKeys.flatMap((group) => [fontProperty(group), `--${group}-size`] as const),
+  "--markdown-inherited-font", "--markdown-code-font", "--compare-editor-font", "--compare-editor-size",
+] as const;
+export type RetainedFonts = Record<typeof typographyProperties[number], string>;
+
+export function readRetainedFonts(value: unknown): RetainedFonts | undefined {
+  if (!value || typeof value !== "object") return;
+  const fonts = value as Record<string, unknown>;
+  if (!typographyProperties.every((property) => {
+    const setting = fonts[property];
+    return typeof setting === "string" && setting.length <= 512 &&
+      CSS.supports(property.endsWith("-size") ? "font-size" : "font-family", setting);
+  })) return;
+  return Object.fromEntries(typographyProperties.map((property) => [property, fonts[property]])) as RetainedFonts;
+}
+
 export const minFontSize = 10;
 export const maxFontSize = 24;
 export const maxFontFamilyLength = 80;
@@ -358,7 +376,7 @@ export function readSchemes(value: unknown): Scheme[] {
   return result;
 }
 
-export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = document.documentElement) {
+export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = document.documentElement, retainedFonts?: RetainedFonts) {
   const base = scheme?.base ?? theme;
   root.dataset.theme = base;
   if (modernThemes.has(base)) root.dataset.look = "modern";
@@ -366,7 +384,7 @@ export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = 
   applyColors(root, scheme?.colors);
   for (const group of fontKeys) {
     const font = scheme?.fonts[group];
-    const family = group === "mono" ? "--mono" : `--${group}-font`;
+    const family = fontProperty(group);
     const name = font?.family?.trim();
     if (name) root.style.setProperty(family, `${CSS.escape(name)}, ${fontGroups[group].fallback}`);
     else root.style.removeProperty(family);
@@ -383,6 +401,23 @@ export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = 
   const markdownFamily = scheme?.fonts.markdown?.family?.trim();
   if (markdownFamily) root.style.setProperty("--markdown-code-font", `${CSS.escape(markdownFamily)}, var(--viewer-font)`);
   else root.style.removeProperty("--markdown-code-font");
+  if (retainedFonts) {
+    for (const property of typographyProperties) root.style.setProperty(property, retainedFonts[property]);
+  }
+}
+
+export function captureFonts(theme: BaseTheme, scheme: Scheme | null): RetainedFonts {
+  const sample = document.createElement("div");
+  sample.hidden = true;
+  document.body.append(sample);
+  try {
+    applyAppearance(theme, scheme, sample);
+    const style = getComputedStyle(sample);
+    return Object.fromEntries(typographyProperties.map((property) =>
+      [property, style.getPropertyValue(property).trim()])) as RetainedFonts;
+  } finally {
+    sample.remove();
+  }
 }
 
 function applyColors(root: HTMLElement, palette?: Palette) {

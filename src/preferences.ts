@@ -1,4 +1,4 @@
-import { readSchemes, readSystemScheme, readTheme, type Scheme, type Theme } from "./appearance";
+import { readRetainedFonts, readSchemes, readSystemScheme, readTheme, type RetainedFonts, type Scheme, type Theme } from "./appearance";
 import { migrateSharedViewerZoom, validViewFontSize, viewFontKeys, type ViewFontSizes } from "./viewFonts";
 import { readLanguage, t, type Language } from "./i18n";
 import { reportFrontendError } from "./diagnostics";
@@ -282,6 +282,7 @@ export interface Preferences {
   showTitlebarScheme: boolean;
   activeScheme: string | null;
   schemes: Scheme[];
+  retainedFonts?: RetainedFonts;
   hidden: boolean;
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
@@ -419,6 +420,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   kswitcher: { group: "general", portable: false, read: (value) => typeof value === "string" ? value : "" },
   theme: { group: "appearance", portable: true, read: readTheme },
   schemes: { group: "appearance", portable: "items", read: readSchemes },
+  retainedFonts: { group: "appearance", portable: true, read: readRetainedFonts },
   activeScheme: { group: "appearance", portable: true,
     read: (value, get) => get("schemes").find(({ id }) => id === value)?.id ?? null,
     acceptsReference: (value) => value === null || typeof value === "string" && value.length > 0 },

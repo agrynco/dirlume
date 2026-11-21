@@ -10,6 +10,26 @@ export async function testSystemTheme(page) {
   await windowPage.click();
   const scheme = options.getByRole("combobox", { name: "Color scheme", exact: true });
   const apply = options.getByRole("button", { name: "Apply", exact: true });
+  const keepFonts = options.getByRole("checkbox", { name: "Keep current fonts", exact: true });
+  const preview = options.locator(".preview-frame");
+  const typography = (element) => element.evaluate((root) => {
+    const style = getComputedStyle(root);
+    return ["--panel-font", "--panel-size", "--viewer-font", "--viewer-size"]
+      .map((property) => style.getPropertyValue(property).trim());
+  });
+  await scheme.selectOption("light");
+  const lightFonts = await typography(preview);
+  await keepFonts.check();
+  await scheme.selectOption("lavender");
+  assert.deepEqual(await typography(preview), lightFonts);
+  await apply.click();
+  await page.locator('html[data-theme="lavender"]').waitFor();
+  await tool.locator('html[data-theme="lavender"]').waitFor();
+  assert.deepEqual(await typography(page.locator("html")), lightFonts);
+  assert.deepEqual(await typography(tool.locator("html")), lightFonts);
+  await keepFonts.uncheck();
+  assert.notDeepEqual(await typography(preview), lightFonts);
+  await apply.click();
   await options.getByRole("combobox", { name: "Favorite light scheme", exact: true }).selectOption("light");
   await options.getByRole("combobox", { name: "Favorite dark scheme", exact: true }).selectOption("dark");
   if (await apply.isEnabled()) await apply.click();
@@ -34,5 +54,5 @@ export async function testSystemTheme(page) {
   }
   await page.emulateMedia({ colorScheme: null });
   await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
-  console.log("Verified immediate Windows System theme preview and Apply in light and dark system modes.");
+  console.log("Verified font retention in the Windows main and tool windows and System theme preview in light and dark modes.");
 }

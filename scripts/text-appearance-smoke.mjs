@@ -240,6 +240,66 @@ try {
   await page.reload();
   assert.equal((await preferences()).viewerMarkdownContentWidth, "full");
   assert.equal((await preferences()).schemes.find(({ id }) => id === legacy.id).colors["viewer-outside-bg"], "#8d2878");
+
+  const typography = (scope) => scope.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return Object.fromEntries([
+      "--panel-font", "--panel-size", "--viewer-font", "--viewer-size", "--markdown-font", "--markdown-code-font",
+      "--markdown-size", "--compare-editor-font", "--compare-editor-size", "--dialog-font", "--dialog-size",
+      "--terminal-font", "--terminal-size", "--command-font",
+    ].map((property) => [property, style.getPropertyValue(property).trim()]));
+  });
+  const root = page.locator("html");
+  const originalFonts = await typography(root);
+  const originalSettings = await preferences();
+  await openOptions();
+  await search.fill("Keep current fonts");
+  await search.press("Enter");
+  const keepFonts = options.getByRole("checkbox", { name: "Keep current fonts", exact: true });
+  const scheme = options.getByRole("combobox", { name: "Color scheme", exact: true });
+  assert.equal(await keepFonts.isChecked(), false);
+  await keepFonts.check();
+  await scheme.selectOption("lavender");
+  const preview = options.locator(".preview-frame");
+  assert.equal(await preview.getAttribute("data-theme"), "lavender");
+  assert.deepEqual(await typography(preview), originalFonts);
+  await options.getByRole("checkbox", { name: "Show color scheme switcher in the title bar", exact: true }).check();
+  await exactButton(options, "Apply").click();
+  await page.locator('html[data-theme="lavender"]').waitFor();
+  assert.deepEqual(await typography(root), originalFonts);
+  await done();
+  const titlebar = page.locator(".topbar-scheme");
+  await titlebar.selectOption("graphite");
+  await page.locator('html[data-theme="graphite"]').waitFor();
+  assert.deepEqual(await typography(root), originalFonts);
+  await exactButton(page, "Switch to favorite light scheme").click();
+  await page.locator('html[data-theme="light"]').waitFor();
+  assert.deepEqual(await typography(root), originalFonts);
+  await titlebar.selectOption("system");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.locator('html[data-theme="dark"]').waitFor();
+  assert.deepEqual(await typography(root), originalFonts);
+  await page.reload();
+  await page.locator('html[data-theme="dark"]').waitFor();
+  assert.deepEqual(await typography(root), originalFonts);
+  assert.deepEqual((await preferences()).viewFontSizes, originalSettings.viewFontSizes);
+  assert.deepEqual((await preferences()).schemes, originalSettings.schemes);
+
+  await openOptions();
+  await search.fill("Keep current fonts");
+  await search.press("Enter");
+  assert.equal(await keepFonts.isChecked(), true);
+  await keepFonts.uncheck();
+  assert.notDeepEqual(await typography(preview), originalFonts);
+  assert.deepEqual(await typography(root), originalFonts);
+  await page.keyboard.press("Escape");
+  assert.deepEqual(await typography(root), originalFonts);
+  await openOptions();
+  assert.equal(await keepFonts.isChecked(), true);
+  await keepFonts.uncheck();
+  await done();
+  assert.equal((await preferences()).retainedFonts, undefined);
+  assert.notDeepEqual(await typography(root), originalFonts);
   console.log("Verified seven text surfaces, live local and SSH terminal themes, inherited colors, font fallback, independent zoom, system schemes, and restart.");
 } finally {
   await browser.close();
