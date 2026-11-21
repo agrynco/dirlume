@@ -5,7 +5,7 @@ import App from "./App";
 import { ToolWindow } from "./ToolWindows";
 import { NativeAppearancePicker } from "./AppearancePicker";
 import type { NamedFile } from "./api";
-import { installDiagnosticListeners, reportFrontendError } from "./diagnostics";
+import { installDiagnosticListeners, reportReactError } from "./diagnostics";
 import { setLanguage } from "./i18n";
 import { isFeaturePage } from "./featureOptions";
 import { readPreferences, restorePortablePreferences, trackControlKeys } from "./preferences";
@@ -26,8 +26,9 @@ void restorePortablePreferences(label === "main").then((portable) => {
   const preferences = readPreferences();
   setLanguage(preferences.language);
   createRoot(document.getElementById("root")!, {
-    onCaughtError: (error) => reportFrontendError("react_render", error),
-    onRecoverableError: (error) => reportFrontendError("react_render", error),
+    onCaughtError: reportReactError,
+    onRecoverableError: reportReactError,
+    onUncaughtError: reportReactError,
   }).render(<>
     {label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
       optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
