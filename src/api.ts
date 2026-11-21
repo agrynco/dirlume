@@ -257,7 +257,8 @@ export type TerminalOutput = { event: "data"; data: string } | { event: "closed"
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
   ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });
-export type CommandCompletion = { index: number; length: number; matches: { label: string; text: string; directory: boolean }[] };
+export type CommandCompletion = { index: number; length: number; exclusive?: boolean; matches: { label: string; text: string; directory: boolean }[] };
+export type ShellCompletionEnvironment = Record<string, string | null>;
 export interface SizeResult {
   name: string;
   bytes: number;
@@ -478,8 +479,8 @@ export const api = {
       refreshEnvironment: session.refreshEnvironment,
       ssh: session.kind === "ssh" ? { connection: session.connection, segments: session.segments } : undefined,
     }, output }),
-  completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean) =>
-    invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment } }),
+  completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean, shellEnvironment?: ShellCompletionEnvironment) =>
+    invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment, shellEnvironment } }),
   completeSshTerminal: (id: number, line: string, caret: number, directory: string, searchPath: string) =>
     invoke<CommandCompletion>("complete_ssh_terminal", { id, request: { line, caret, directory, searchPath } }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),

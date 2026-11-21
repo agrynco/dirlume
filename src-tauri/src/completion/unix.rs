@@ -54,6 +54,7 @@ pub(super) fn native(
         index: context.index,
         length: context.length,
         matches,
+        exclusive: false,
     })
 }
 

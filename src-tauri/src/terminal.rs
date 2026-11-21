@@ -58,7 +58,19 @@ function global:prompt {
     }
     $global:DirlumePromptCount++
     $editor = if ($global:DirlumeTracksSubmissions) { 'powershell' }
-    [Console]::Title = '{0}:{1}:{2}:{3}:{4}:{5}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path, $global:DirlumeCommandCount, $global:DirlumeLatestCommand, $editor
+    $settings = @{
+        PATH = $env:PATH
+        DOCKER_CONFIG = $env:DOCKER_CONFIG
+        DOCKER_CONTEXT = $env:DOCKER_CONTEXT
+        DOCKER_HOST = $env:DOCKER_HOST
+        DOCKER_TLS = $env:DOCKER_TLS
+        DOCKER_TLS_VERIFY = $env:DOCKER_TLS_VERIFY
+        DOCKER_CERT_PATH = $env:DOCKER_CERT_PATH
+        DOCKER_API_VERSION = $env:DOCKER_API_VERSION
+    }
+    $settingsBytes = [Text.Encoding]::UTF8.GetBytes((Microsoft.PowerShell.Utility\ConvertTo-Json $settings -Compress))
+    $settingsMarker = if ($settingsBytes.Length -le 12288) { [Convert]::ToBase64String($settingsBytes) }
+    [Console]::Title = '{0}:{1}:{2}:{3}:{4}:{5}:{6}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path, $global:DirlumeCommandCount, $global:DirlumeLatestCommand, $editor, $settingsMarker
     $text
 }
 "#;

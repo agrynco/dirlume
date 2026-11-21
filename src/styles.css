@@ -1039,6 +1039,8 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-suggestions [role="option"]:hover { background: var(--hover); }
 .command-suggestions [aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .command-suggestions [role="option"] span { color: inherit; max-width: none; }
+.command-suggestion-label > svg { width: 14px; height: 14px; margin-inline-end: 6px; color: var(--folder); vertical-align: -.1em; }
+.command-suggestions [aria-selected="true"] .command-suggestion-label > svg { color: currentColor; }
 .command-suggestions small { flex: none; color: var(--muted); }
 .terminal-card .command-suggestions {
   position: fixed; width: max-content; font: var(--terminal-size)/1.35 var(--terminal-font); color: var(--ink);

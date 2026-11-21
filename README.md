@@ -118,6 +118,8 @@ The shell receives keystrokes while its input has focus. A hint in the status ba
 
 Right-click terminal output to open **Copy**, **Paste**, and **Select All**. On macOS, Control-click also opens the menu. **Copy** is available when text is selected. You can enable **Paste on right-click** in **Options → Terminal** to paste directly instead.
 
+In the Windows PowerShell terminal, `cd` suggests directories as you type. Select a folder to continue into its children. With Docker installed, `docker container` suggests subcommands, names, or IDs from the shell's active Docker context.
+
 At a supported PowerShell, Bash, or Zsh prompt, the terminal shows suggestions next to the caret as you edit a single-line command. Use **↑/↓** to select, **Tab** to insert the selected or first suggestion, or **Esc** to dismiss. Click a suggestion or press **Enter** with one selected to insert it. **Enter** submits the command when the list has no selection. Dirlume SSH terminals use the remote working directory and search path. If you run `ssh` yourself, the parent terminal suspends suggestions until it recognizes its prompt again.
 
 Type in the command line to see matching history and completions for the active local folder. On Windows, PowerShell supplies completions, including options for Windows tools and installed Git and .NET commands. On macOS and Linux, Dirlume uses available Bash or Zsh completions and can also complete executable names and paths. Use **↑/↓** to choose a suggestion, **Tab** or **Enter** to insert it, and **Esc** to dismiss the list. **Enter** runs the draft when no suggestion is selected. **Shift+Enter** runs it with the list open.
