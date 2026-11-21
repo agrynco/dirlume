@@ -1,0 +1,11 @@
+{
+  "version": "0.1.15",
+  "highlights": [
+    "See environment variable names and sources in separate columns and jump to a variable with Quick search.",
+    "Recognize actions by their icons in the Commands menu. In Options, labels sit beside their controls and checkboxes line up.",
+    "Start settings exports with all groups and custom color schemes selected.",
+    "Manage saved color schemes without switching the active scheme, name newly created schemes, and retain the current fonts when changing schemes.",
+    "Set a solid window background in modern color schemes or reset it to restore the original gradient.",
+    "See the scan location as breadcrumbs in Space Analyzer, and open pane sources and numbered folder bookmark groups from any workspace pane."
+  ]
+}
