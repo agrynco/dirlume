@@ -267,7 +267,7 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
     }
   }
 
-  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="files"
+  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="files" data-pane-side={side}
     onKeyDown={(event) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();

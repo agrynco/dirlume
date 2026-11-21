@@ -523,6 +523,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .path-suggestions svg { width: 14px; height: 14px; flex: none; color: var(--folder); }
 .path-suggestions span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .location-menu { position: relative; }
+.location-menu[data-overlay] { grid-row: 1; align-self: start; justify-self: end; z-index: 7; }
+.location-menu[data-overlay="left"] { grid-column: 1; }
+.location-menu[data-overlay="right"] { grid-column: 3; }
+.location-menu[data-overlay] .location-popup { max-width: min(46vw, 320px); }
 .location-source-group { border-block-start: 1px solid var(--line); padding-block-start: 4px; margin-block-start: 4px; }
 .location-popup kbd { min-inline-size: 2ch; margin-inline-start: auto; padding: 0; text-align: center; background: transparent; font-size: .85em; }
 .location-trigger { width: 38px; gap: 2px; border-color: var(--line); }

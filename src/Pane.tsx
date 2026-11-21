@@ -2,9 +2,9 @@ import { HistoryField } from "./HistoryField";
 import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, File, Folder,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, File, Folder,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
@@ -12,7 +12,7 @@ import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, p
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
-import { bindingMatches, driveSourceCommand, eventShortcut, showShortcut, type Bindings, type DriveSourceCommand, type PanelLayout } from "./preferences";
+import { showShortcut, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
@@ -56,11 +56,7 @@ interface PaneProps {
   cancelFolderShortcut: readonly string[];
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
-  onRemote: () => void;
-  onFtp: () => void;
-  onSsh: () => void;
-  onSmb: () => void;
-  sourceBindings: Pick<Bindings, "processSources" | "ftpSources" | "sshSources" | "smbSources" | "remoteSources" | DriveSourceCommand>;
+  sourceMenu: ReactNode;
   zoomShortcut: readonly string[];
   fontSize?: number;
   onZoom: ZoomViewFont;
@@ -114,7 +110,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 }
 
 export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
-  onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
+  onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
@@ -123,9 +119,6 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const catalog = pane.place?.kind === "connections";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
-  const [locationsOpen, setLocationsOpen] = useState(false);
-  const locationsBox = useRef<HTMLDivElement>(null);
-  const locationsButton = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const savedScroll = useRef<{ top: number; left: number } | null>(null);
   const columnHeader = useRef<HTMLDivElement>(null);
@@ -267,30 +260,13 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     }
   }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll]);
   useEffect(() => {
-    if (!locationsOpen) return;
-    locationsBox.current?.querySelector<HTMLButtonElement>(".location-popup button")?.focus();
-    function closeOutside(event: PointerEvent) {
-      if (event.target instanceof Node && !locationsBox.current?.contains(event.target)) setLocationsOpen(false);
-    }
-    window.addEventListener("pointerdown", closeOutside);
-    return () => window.removeEventListener("pointerdown", closeOutside);
-  }, [locationsOpen]);
-  useEffect(() => {
     const target = document.getElementById(`${side}-pane`);
     const show = () => {
       setFilterOpen(true);
       requestAnimationFrame(() => filterField.current?.focus());
     };
-    const showLocations = () => {
-      setLocationsOpen((open) => !open);
-      locationsButton.current?.focus();
-    };
     target?.addEventListener("dirlume-filter", show);
-    target?.addEventListener("dirlume-locations", showLocations);
-    return () => {
-      target?.removeEventListener("dirlume-filter", show);
-      target?.removeEventListener("dirlume-locations", showLocations);
-    };
+    return () => target?.removeEventListener("dirlume-filter", show);
   }, [side]);
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
@@ -299,22 +275,6 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const measuringLabel = t("Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
-  const sources = [
-    { label: t("Processes"), key: sourceBindings.processSources, Icon: Activity, open: () => onProcesses(true) },
-    { label: "FTP", key: sourceBindings.ftpSources, Icon: Server, open: onFtp },
-    { label: "SSH", key: sourceBindings.sshSources, Icon: Server, open: onSsh },
-    ...(windowsClient ? [{ label: "SMB", key: sourceBindings.smbSources, Icon: Server, open: onSmb }] : []),
-    { label: t("Remote machine"), key: sourceBindings.remoteSources, Icon: Server, open: onRemote },
-  ];
-  const localLocations = locations.map((location) => {
-    const command = driveSourceCommand(location);
-    return { location, bindings: command ? sourceBindings[command] : [] };
-  });
-  function openLocalLocation(location: QuickLocation) {
-    setLocationsOpen(false);
-    onLocalLocation(location);
-    list.current?.focus();
-  }
   const folderItems = entries.filter(({ name }) => name !== "..");
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
   const markedSet = new Set(pane.marked);
@@ -377,14 +337,14 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered}
       data-panel-mode={catalog || processView ? undefined : modeId}
       data-help-topic={processView ? "processes" : search ? "search" : catalog ? "remote" : "files"}
-      data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
+      data-drop-pane={side} data-pane-side={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
       <header className={`pane-heading${(catalog || localFolder && !host) && !processView && !search ? " local-heading" : ""}`}>
         {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
-              onClick={() => openLocalLocation(location)}>
+              onClick={() => onLocalLocation(location)}>
               {twin && (/^[a-z]:$/i.test(location.label) ? <HardDrive aria-hidden="true" /> : <Folder aria-hidden="true" />)}{t(location.label)}
             </Button>
           ))}
@@ -435,58 +395,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
         </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
-        <div className="location-menu" ref={locationsBox} onKeyDown={(event) => {
-          if (!locationsOpen || event.defaultPrevented || event.nativeEvent.isComposing) return;
-          const shortcut = eventShortcut(event);
-          const localLocation = shortcut && localLocations.find(({ bindings }) => bindingMatches(bindings, shortcut));
-          if (localLocation) {
-            event.preventDefault();
-            event.stopPropagation();
-            openLocalLocation(localLocation.location);
-            return;
-          }
-          const source = shortcut && sources.find(({ key }) => bindingMatches(key, shortcut));
-          if (source) {
-            event.preventDefault();
-            event.stopPropagation();
-            setLocationsOpen(false);
-            source.open();
-            return;
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            setLocationsOpen(false);
-            list.current?.focus();
-          }
-          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-            event.preventDefault();
-            const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".location-popup button"));
-            if (!buttons.length) return;
-            const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-            const direction = event.key === "ArrowUp" ? -1 : 1;
-            const next = current < 0 ? (direction > 0 ? 0 : buttons.length - 1) : (current + direction + buttons.length) % buttons.length;
-            buttons[next].focus();
-          }
-        }}>
-          <Button ref={locationsButton} className="icon-button location-trigger" aria-label={t(side === "left" ? "Locations for left pane" : "Locations for right pane")}
-            aria-expanded={locationsOpen} onClick={() => setLocationsOpen(!locationsOpen)}><HardDrive /><ChevronDown /></Button>
-          {locationsOpen && (
-            <div className="location-popup">
-              {localLocations.map(({ location, bindings }) => (
-                <Button key={location.path} tooltip={location.path} shortcut={showShortcut(bindings[0])} onClick={() => openLocalLocation(location)}>
-                  <Folder /> <span>{t(location.label)}</span>{bindings.length > 0 && <kbd aria-hidden="true">{showShortcut(bindings[0])}</kbd>}
-                </Button>
-              ))}
-              <div className="location-source-group" role="group" aria-label={t("Sources")}>
-                {sources.map(({ label, key, Icon, open }) => (
-                  <Button key={label} shortcut={showShortcut(key[0])} onClick={() => { setLocationsOpen(false); open(); }}>
-                    <Icon /> <span>{label}</span>{key.length > 0 && <kbd aria-hidden="true">{showShortcut(key[0])}</kbd>}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        {sourceMenu}
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
       {(filterOpen || pane.filter) && (
