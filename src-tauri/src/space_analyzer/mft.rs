@@ -5,7 +5,7 @@ use std::{
     path::{Component, Prefix},
 };
 
-use ntfs_mft::{RawMftScanOptions, Volume};
+use ntfs_mft::{NtfsFileReference, NtfsName, RawMftScanOptions, Volume};
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
@@ -158,6 +158,15 @@ impl Tree {
     }
 }
 
+// The MFT reader stores a single name in the primary fields alone. Multi-link records
+// can repeat that primary name in the links collection.
+fn file_names<'a>(
+    primary: (NtfsFileReference, &'a NtfsName),
+    links: impl Iterator<Item = (NtfsFileReference, &'a NtfsName)> + 'a,
+) -> impl Iterator<Item = (NtfsFileReference, &'a NtfsName)> {
+    std::iter::once(primary).chain(links.filter(move |link| *link != primary))
+}
+
 pub(super) fn scan(root: &Path, volume: &Volume, out: &mut Output<'_>) -> io::Result<()> {
     let raw = volume.raw_mft().map_err(io::Error::other)?;
     let root_ref = raw
@@ -192,8 +201,12 @@ pub(super) fn scan(root: &Path, volume: &Volume, out: &mut Output<'_>) -> io::Re
         let reference = record.file_reference.get();
         let reparse = record.is_reparse_point || record.si_file_attributes.is_reparse_point();
         let linked = record.hard_link_count > 1 || record.links.len() > 1;
-        for link in record.links {
-            let parent = link.parent_reference;
+        let primary = (record.parent_reference, &record.file_name);
+        let links = record
+            .links
+            .iter()
+            .map(|link| (link.parent_reference, &link.file_name));
+        for (parent, name) in file_names(primary, links) {
             // Records below 24 are NTFS housekeeping files. Only the volume root has browsable children.
             if parent.record_number() < 24 && parent.get() != root_ref {
                 tree.branches.entry(parent.get()).or_insert(None);
@@ -202,7 +215,7 @@ pub(super) fn scan(root: &Path, volume: &Volume, out: &mut Output<'_>) -> io::Re
                 parent.get(),
                 Item {
                     reference,
-                    name: link.file_name.try_to_string().ok(),
+                    name: name.try_to_string().ok(),
                     directory: record.is_directory,
                     size: Some(record.real_size),
                     // FileStandardInfo reports resident allocations rounded to an eight-byte boundary.
@@ -239,6 +252,23 @@ mod tests {
     use super::*;
     use crate::space_analyzer::{Change, ScanEvent};
     use std::{collections::HashSet, sync::atomic::AtomicBool, time::Instant};
+
+    #[test]
+    fn includes_primary_names_with_and_without_additional_links() {
+        let directory = NtfsFileReference::new(5);
+        let first = NtfsName::from("first");
+        let other = NtfsName::from("other");
+        let primary = (directory, &first);
+        let alias = (directory, &other);
+        assert_eq!(
+            file_names(primary, std::iter::empty()).collect::<Vec<_>>(),
+            [primary]
+        );
+        assert_eq!(
+            file_names(primary, [primary, alias].into_iter()).collect::<Vec<_>>(),
+            [primary, alias]
+        );
+    }
 
     #[test]
     fn holds_children_until_their_parent_is_read_and_excludes_unreadable_subtrees() {
