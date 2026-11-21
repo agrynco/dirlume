@@ -269,6 +269,8 @@ For JavaScript failures reported by the window, a rejected promise, or React, th
 
 Local text reads that encounter a problem include `fileRead` with the caller surface when known, the platform, the stage and reason, and any native `osCode`. A `preview_fallback` entry with outcome `recovered` means Quick View found a usable preview after its text read failed. An unsuccessful fallback reports `failed` and includes the fallback stage and cause. Read numeric codes in the context of the operating system that wrote the log.
 
+A failed update check includes `updateCheck` with the initiating trigger, build, platform, architecture, package target, stage, and reason. `httpStatus` is the code of the response available at the failure. A rate limit can be identified from HTTP 429 or a 403 with rate-limit headers. The update check records none of the response headers or body. Download and installation errors still use `install_update`.
+
 ## CI and releases
 
 The [DirLume project board](https://github.com/users/agrynco/projects/12/views/1) uses issue labels, issue branches, and task pull requests to keep its columns current. The `ready for dev` label moves a queued issue to **Ready**. A published `codex/issue-N` branch or draft task pull request marks it **In progress**. A task pull request ready for review marks it **In review**. Merging that pull request into `prerelease` moves the issue to **prerelease**, and closing it moves it to **Done**. Link task pull requests with `Refs #N`.

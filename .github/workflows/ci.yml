@@ -131,6 +131,9 @@ jobs:
       - name: Verify packaged JavaScript error locations
         if: github.event.action != 'closed'
         run: node scripts/frontend-diagnostics-smoke.mjs
+      - name: Verify startup and manual update checks
+        if: github.event.action != 'closed'
+        run: node scripts/update-check-smoke.mjs
       - name: Verify editable dropdowns in light and dark themes
         if: github.event.action != 'closed'
         run: node scripts/editable-dropdown-smoke.mjs

@@ -339,7 +339,7 @@ export const api = {
   readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
-  checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
+  checkForUpdate: (trigger: "automatic" | "manual") => invoke<AppUpdate | null>("check_for_update", { trigger }),
   installedRelease: () => invoke<InstalledRelease>("installed_release"),
   acknowledgeRelease: () => invoke<void>("acknowledge_release"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },

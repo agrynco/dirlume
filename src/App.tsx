@@ -339,7 +339,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (checkingUpdates.current) return;
     checkingUpdates.current = true;
     try {
-      const update = await api.checkForUpdate();
+      const update = await api.checkForUpdate(manual ? "manual" : "automatic");
       if (update) setUpdateNotice({ kind: "update", update });
       else if (manualUpdateCheck.current) setUpdateNotice({ kind: "upToDate" });
       if (manualUpdateCheck.current) setStatus({ text: "Ready" });
