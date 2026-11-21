@@ -25,7 +25,9 @@ use url::Url;
 
 use crate::{
     local::{self, Entry},
-    protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
+    protocol::{
+        BytePage, ByteRequest, Invitation, ListPage, ListRequest, RemoteListing, RemotePath,
+    },
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -99,25 +101,37 @@ fn relative_path(path: RemotePath) -> io::Result<PathBuf> {
 }
 
 // Use a directory capability for every path access so that links cannot escape the share.
-fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
+fn list(share: &Share, request: ListRequest) -> io::Result<ListPage> {
     #[cfg(any(unix, windows))]
     use cap_std::fs::MetadataExt;
 
-    let directory = share.root.open_dir(relative_path(path)?)?;
+    let directory = share.root.open_dir(relative_path(request.path)?)?;
     let mut entries = Vec::new();
     let mut omitted = 0;
+    const PAGE_SIZE: usize = 512;
+    let mut names = std::collections::BTreeSet::new();
+    let mut more = false;
     for entry in directory.entries()? {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => {
+        let Some(name) = entry
+            .ok()
+            .and_then(|entry| entry.file_name().into_string().ok())
+        else {
+            if request.after.is_none() {
                 omitted += 1;
-                continue;
             }
-        };
-        let Ok(name) = entry.file_name().into_string() else {
-            omitted += 1;
             continue;
         };
+        if request.after.as_ref().is_some_and(|after| name <= *after) {
+            continue;
+        }
+        names.insert(name);
+        if request.paged && names.len() > PAGE_SIZE {
+            names.pop_last();
+            more = true;
+        }
+    }
+    let next = if more { names.last().cloned() } else { None };
+    for name in names {
         let Ok(metadata) = directory.symlink_metadata(&name) else {
             omitted += 1;
             continue;
@@ -177,7 +191,10 @@ fn list(share: &Share, path: RemotePath) -> io::Result<RemoteListing> {
         }
         entries.push(item);
     }
-    Ok(RemoteListing { entries, omitted })
+    Ok(ListPage {
+        listing: RemoteListing { entries, omitted },
+        next,
+    })
 }
 
 fn response_error(error: io::Error) -> StatusCode {
@@ -192,8 +209,8 @@ fn response_error(error: io::Error) -> StatusCode {
 async fn list_directory(
     State(share): State<Arc<Share>>,
     headers: HeaderMap,
-    Json(path): Json<RemotePath>,
-) -> std::result::Result<Json<RemoteListing>, StatusCode> {
+    Json(path): Json<ListRequest>,
+) -> std::result::Result<Json<ListPage>, StatusCode> {
     share.authorize(&headers)?;
     let listing = spawn_blocking(move || list(&share, path))
         .await
@@ -351,6 +368,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lists_every_entry_across_page_boundaries() {
+        let temp = tempfile::tempdir().unwrap();
+        for i in 0..515 {
+            fs::write(temp.path().join(format!("item-{i:04}")), []).unwrap();
+        }
+        let share = make_share(temp.path(), "token").unwrap();
+        let request = |after| ListRequest {
+            path: RemotePath { segments: vec![] },
+            paged: true,
+            after,
+        };
+        let first = list(&share, request(None)).unwrap();
+        assert_eq!(first.listing.entries.len(), 512);
+        let second = list(&share, request(first.next)).unwrap();
+        assert!(second.next.is_none());
+        assert_eq!(second.listing.entries.len(), 3);
+        let names: Vec<_> = first
+            .listing
+            .entries
+            .into_iter()
+            .chain(second.listing.entries)
+            .map(|entry| entry.name)
+            .collect();
+        assert_eq!(
+            names,
+            (0..515).map(|i| format!("item-{i:04}")).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn rejects_traversal_and_state_inside_share() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("share");
@@ -378,8 +425,12 @@ mod tests {
         let share = make_share(&root, "token").unwrap();
         assert!(list(
             &share,
-            RemotePath {
-                segments: vec!["outside".into()]
+            ListRequest {
+                path: RemotePath {
+                    segments: vec!["outside".into()]
+                },
+                paged: true,
+                after: None
             }
         )
         .is_err());

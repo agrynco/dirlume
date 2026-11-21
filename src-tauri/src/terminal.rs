@@ -62,7 +62,7 @@ function global:prompt {
 }
 "#;
 
-#[cfg(not(windows))]
+#[cfg(any(not(windows), test))]
 fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<bool> {
     let marker = r#"printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')""#;
     let init = match std::path::Path::new(shell).file_name().and_then(std::ffi::OsStr::to_str) {
@@ -71,12 +71,12 @@ fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::R
             r#"command=$(HISTTIMEFORMAT= builtin history 1; printf .); command=${command%.}; command=${command%$'\n'};"#,
             r#"if [[ ! $command =~ $pattern || -z ${BASH_REMATCH[2]} ]]; then return; fi;"#,
             r#"id=${BASH_REMATCH[1]}; command=${BASH_REMATCH[2]};"#,
-            r#"if [[ $1 == prompt ]]; then local previous=${__dirlume_history_id-}; __dirlume_history_id=$id; [[ -n $previous && $previous != "$id" ]] || return; fi;"#,
+            r#"local previous=${__dirlume_history_id-}; __dirlume_history_id=$id; [[ $1 != baseline && ${__dirlume_history_ready-} && $previous != "$id" && -o history ]] || return;"#,
             r#"printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$command" | base64 | tr -d '\n')"; };"#,
-            r#"__dirlume_prompt() { local status=$?; if [[ ${__dirlume_prompt_history-} ]]; then __dirlume_history prompt; fi;"#,
+            r#"__dirlume_prompt() { local status=$?; __dirlume_history "$__dirlume_prompt_mode"; __dirlume_history_ready=1;"#,
             marker,
-            r#"; return "$status"; }; HISTCONTROL=; HISTIGNORE=; shopt -s cmdhist lithist; set -o history;"#,
-            r#"if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then PS0='$(__dirlume_history submitted)'"${PS0-}"; else __dirlume_prompt_history=1; fi;"#,
+            r#"; return "$status"; };"#,
+            r#"if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then __dirlume_prompt_mode=baseline; PS0='$(__dirlume_history submitted)'"${PS0-}"; else __dirlume_prompt_mode=prompt; fi;"#,
             r#"if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a '* ]]; then PROMPT_COMMAND+=(__dirlume_prompt); else PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__dirlume_prompt"; fi"#,
         ].join(" "),
         Some("zsh") => r#"__dirlume_prompt() { printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')"; }; __dirlume_history() { printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$1" | base64 | tr -d '\n')"; }; precmd_functions+=(__dirlume_prompt); preexec_functions+=(__dirlume_history)"#.to_owned(),
@@ -487,5 +487,64 @@ mod tests {
             missed.is_none(),
             "Submitted command marker missing: {missed:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod bash_history_tests {
+    use super::install_prompt;
+    use std::{
+        ffi::OsStr,
+        io::Write,
+        process::{Command, Stdio},
+    };
+    #[test]
+    fn reports_only_history_eligible_submissions() {
+        #[cfg(windows)]
+        let bash = std::path::PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default())
+            .join("Git/bin/bash.exe");
+        #[cfg(windows)]
+        if !bash.is_file() {
+            return;
+        }
+        #[cfg(unix)]
+        let bash = "bash";
+        let mut shell = Command::new(bash)
+            .args(["--noprofile", "--norc", "-i"])
+            .env("HISTFILE", "/dev/null")
+            .env("HISTCONTROL", "ignorespace")
+            .env("HISTIGNORE", "*ignored-marker*")
+            .env("DIRLUME_PROMPT_TOKEN", "fixture")
+            .env("PS1", "")
+            .env("PS2", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = shell.stdin.take().unwrap();
+        install_prompt(OsStr::new("bash"), &mut input).unwrap();
+        writeln!(
+            input,
+            ": allowed-marker\n: ignored-marker\n : private-marker\nexit"
+        )
+        .unwrap();
+        drop(input);
+        let result = shell.wait_with_output().unwrap();
+        assert!(result.status.success());
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let output = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        for (command, count) in [
+            (": allowed-marker", 1),
+            (": ignored-marker", 0),
+            (" : private-marker", 0),
+        ] {
+            let marker = format!("fixture:command:{}\x07", STANDARD.encode(command));
+            assert_eq!(output.matches(&marker).count(), count, "{command}");
+        }
     }
 }

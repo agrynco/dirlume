@@ -89,6 +89,21 @@ pub struct RemoteListing {
     pub entries: Vec<crate::local::Entry>,
     pub omitted: usize,
 }
+#[derive(Deserialize, Serialize)]
+pub struct ListRequest {
+    #[serde(flatten)]
+    pub path: RemotePath,
+    #[serde(default)]
+    pub paged: bool,
+    pub after: Option<String>,
+}
+#[derive(Deserialize, Serialize)]
+pub struct ListPage {
+    #[serde(flatten)]
+    pub listing: RemoteListing,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+}
 pub const BYTE_PAGE_SIZE: u64 = 1024;
 
 #[derive(Deserialize, Serialize)]

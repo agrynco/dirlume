@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -46,9 +46,10 @@ test("the resolved product version is stamped into both manifests and lockfiles"
   for (const path of paths) await copyFile(new URL(`../${path}`, import.meta.url), join(directory, path));
 
   const resolved = "99.88.77";
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./build-version.mjs", import.meta.url)), "prepare"], {
+  const prepare = () => spawnSync(process.execPath, [fileURLToPath(new URL("./build-version.mjs", import.meta.url)), "prepare"], {
     cwd: directory, env: { ...process.env, DIRLUME_PRODUCT_VERSION: resolved }, encoding: "utf8",
   });
+  const result = prepare();
   assert.equal(result.status, 0, result.stderr);
   const [npm, npmLock, tauri, cargo, cargoLock] = await Promise.all(paths.map((path) => readFile(join(directory, path), "utf8")));
   assert.equal(JSON.parse(npm).version, resolved);
@@ -56,5 +57,7 @@ test("the resolved product version is stamped into both manifests and lockfiles"
   assert.equal(JSON.parse(npmLock).packages[""].version, resolved);
   assert.equal(JSON.parse(tauri).version, resolved);
   assert.match(cargo, /^version = "99\.88\.77"$/m);
+  await writeFile(join(directory, "package-lock.json"), JSON.stringify({ version: "0.0.0" }));
+  assert.match(prepare().stderr, /lockfiles must match/);
   assert.match(cargoLock, /\[\[package\]\]\r?\nname = "dirlume"\r?\nversion = "99\.88\.77"/);
 });

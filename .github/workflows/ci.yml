@@ -120,6 +120,9 @@ jobs:
         run: node scripts/build-version.mjs prepare
       - name: Install frontend dependencies
         run: npm ci
+      - name: Verify editor line endings and workspace resource ownership
+        if: github.event.action != 'closed'
+        run: node --test scripts/text-format.test.mjs scripts/workspace-resources.test.mjs
       - name: Check package and release versions
         run: node scripts/package.mjs check
       - name: Build and type-check React

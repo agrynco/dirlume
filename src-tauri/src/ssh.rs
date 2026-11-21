@@ -49,6 +49,47 @@ fn wait<T, E: std::fmt::Display>(
     })
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum SftpFailure {
+    PermissionDenied,
+    Other(String),
+}
+pub(crate) type SftpResult<T> = std::result::Result<T, SftpFailure>;
+impl From<openssh_sftp_client::Error> for SftpFailure {
+    fn from(error: openssh_sftp_client::Error) -> Self {
+        match error {
+            openssh_sftp_client::Error::SftpError(
+                openssh_sftp_client::error::SftpErrorKind::PermDenied,
+                _,
+            ) => Self::PermissionDenied,
+            other => Self::Other(message(other)),
+        }
+    }
+}
+impl From<std::io::Error> for SftpFailure {
+    fn from(error: std::io::Error) -> Self {
+        Self::Other(message(error))
+    }
+}
+impl From<String> for SftpFailure {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+impl From<&str> for SftpFailure {
+    fn from(error: &str) -> Self {
+        Self::Other(error.to_owned())
+    }
+}
+impl From<SftpFailure> for String {
+    fn from(error: SftpFailure) -> Self {
+        match error {
+            SftpFailure::PermissionDenied => "SSH permission denied.".to_owned(),
+            SftpFailure::Other(detail) => detail,
+        }
+    }
+}
+
 #[derive(Debug)]
 enum HandshakeError {
     Transport(russh::Error),
@@ -211,24 +252,23 @@ impl Connection {
         password: Option<Zeroizing<String>>,
         reuse: bool,
         read_only: bool,
-        ordinary: impl FnOnce() -> Result<T>,
-        elevated: impl FnOnce(&mut Session) -> Result<T>,
+        ordinary: impl FnOnce() -> SftpResult<T>,
+        elevated: impl FnOnce(&mut Session) -> SftpResult<T>,
     ) -> Result<(T, bool)> {
         let denied = if password.is_none() {
             match ordinary() {
-                Err(error)
-                    if reuse
-                        && error.starts_with("Sftp server reported error kind PermDenied,") =>
-                {
-                    Some(error)
+                Err(SftpFailure::PermissionDenied) if reuse => {
+                    Some(String::from(SftpFailure::PermissionDenied))
                 }
-                result => return result.map(|value| (value, false)),
+                result => return result.map(|value| (value, false)).map_err(Into::into),
             }
         } else {
             None
         };
         self.sudo
-            .run(self, password, read_only, elevated)?
+            .run(self, password, read_only, |session| {
+                elevated(session).map_err(Into::into)
+            })?
             .map(|value| (value, true))
             .ok_or_else(|| {
                 denied.unwrap_or_else(|| "Authorize this SSH operation with sudo.".to_owned())
@@ -239,7 +279,7 @@ impl Connection {
         &self,
         password: Option<Zeroizing<String>>,
         read_only: bool,
-        operation: impl Fn(&mut Session) -> Result<T>,
+        operation: impl Fn(&mut Session) -> SftpResult<T>,
     ) -> Result<T> {
         self.retry_with_sudo(
             password,
@@ -251,7 +291,7 @@ impl Connection {
         .map(|(value, _)| value)
     }
 
-    fn list(&self, segments: &[String]) -> Result<RemoteListing> {
+    fn list(&self, segments: &[String]) -> SftpResult<RemoteListing> {
         let mut session = self.listing.lock().map_err(message)?;
         if session.is_closed() {
             *session = self.open()?;

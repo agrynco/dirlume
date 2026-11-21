@@ -21,16 +21,12 @@ use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    diagnostics, ftp, ftp_transfer, kswitcher, local, local_transfer,
+    diagnostics, ftp, kswitcher, local, local_transfer,
     protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
     remote_transfer, ssh, terminal, watch,
 };
 
-pub(crate) type Result<T> = std::result::Result<T, String>;
-
-pub(crate) fn message(error: impl std::fmt::Display) -> String {
-    error.to_string()
-}
+pub(crate) use crate::{message, Result};
 
 #[tauri::command]
 async fn open_tool_window(
@@ -104,6 +100,7 @@ async fn open_tool_window(
     config.minimizable = true;
     config.closable = true;
     let mut builder = WebviewWindowBuilder::from_config(app, &config).map_err(message)?;
+    let is_comparison = comparison.is_some();
     if let Some(comparison) = comparison {
         builder = builder
             .parent(&main)
@@ -113,7 +110,22 @@ async fn open_tool_window(
         let page = serde_json::to_string(&page).map_err(message)?;
         builder = builder.initialization_script(format!("window.__dirlumeOptionsPage = {page};"));
     }
-    builder.build().map_err(message)?;
+    let window = builder.build().map_err(message)?;
+    if is_comparison {
+        // The main workspace retains both files until this native window is destroyed.
+        let (closed, receiver) = tokio::sync::oneshot::channel();
+        let closed = Mutex::new(Some(closed));
+        window.on_window_event(move |event| {
+            if matches!(event, WindowEvent::Destroyed) {
+                if let Some(sender) = closed.lock().ok().and_then(|mut sender| sender.take()) {
+                    let _ = sender.send(());
+                }
+            }
+        });
+        if app.get_webview_window(window.label()).is_some() {
+            let _ = receiver.await;
+        }
+    }
     Ok(())
 }
 
@@ -460,15 +472,56 @@ impl Connection {
     }
 
     async fn list(&self, segments: Vec<String>) -> Result<RemoteListing> {
-        let response = self
-            .request("v1/list", RemotePath { segments }, Duration::from_secs(20))
-            .await?;
-        const MAX_LISTING: usize = 32 * 1024 * 1024;
-        let bytes = collect_response(response, MAX_LISTING + 1).await?;
-        if bytes.len() > MAX_LISTING {
-            return Err("The server returned too many directory entries.".to_owned());
+        let mut request = crate::protocol::ListRequest {
+            path: RemotePath { segments },
+            paged: true,
+            after: None,
+        };
+        let mut result = RemoteListing {
+            entries: Vec::new(),
+            omitted: 0,
+        };
+        loop {
+            let response = self
+                .request("v1/list", &request, Duration::from_secs(20))
+                .await?;
+            const MAX_LISTING: usize = 32 * 1024 * 1024;
+            let bytes = collect_response(response, MAX_LISTING + 1).await?;
+            if bytes.len() > MAX_LISTING {
+                return Err("The server returned too many directory entries.".to_owned());
+            }
+            let page: crate::protocol::ListPage =
+                serde_json::from_slice(&bytes).map_err(message)?;
+            let paged = page.next.is_some() || request.after.is_some();
+            if paged
+                && page
+                    .listing
+                    .entries
+                    .windows(2)
+                    .any(|pair| pair[0].name >= pair[1].name)
+                || page.next.as_ref().is_some_and(|next| {
+                    next.is_empty() || request.after.as_ref().is_some_and(|after| next <= after)
+                })
+                || page.listing.entries.iter().any(|entry| {
+                    request
+                        .after
+                        .as_ref()
+                        .is_some_and(|after| entry.name <= *after)
+                        || page.next.as_ref().is_some_and(|next| entry.name > *next)
+                })
+            {
+                return Err("The server returned an invalid directory page.".to_owned());
+            }
+            result.omitted = result
+                .omitted
+                .checked_add(page.listing.omitted)
+                .ok_or("Invalid directory entry count.")?;
+            result.entries.extend(page.listing.entries);
+            request.after = page.next;
+            if request.after.is_none() {
+                return Ok(result);
+            }
         }
-        serde_json::from_slice(&bytes).map_err(message)
     }
 
     fn download_file(
@@ -830,7 +883,7 @@ fn transfer_target(
     Ok(destination)
 }
 
-fn upload_remote<S: remote_transfer::Session>(
+fn upload_remote<S: remote_transfer::UploadSession>(
     mut remote: S,
     request: &TransferRequest,
     name: &str,
@@ -919,38 +972,7 @@ async fn transfer_item(
         progress(Path::new(name), 0, None).map_err(message)?;
 
         let mut ask = |conflict| session.ask(conflict, &output);
-        if let Some(ftp_destination) = ftp_destination {
-            if request.moving
-                || !matches!(
-                    request.policy,
-                    local_transfer::Policy::Ask
-                        | local_transfer::Policy::Skip
-                        | local_transfer::Policy::Overwrite
-                )
-            {
-                return Err("Choose a supported FTP copy option.".to_owned());
-            }
-            let source = source
-                .as_deref()
-                .ok_or("Choose a local source for the FTP upload.")?;
-            let mut ftp = ftp_destination.open()?;
-            let target = ftp_transfer::upload_destination(
-                &mut ftp,
-                &request.destination,
-                name,
-                request.multiple,
-            )?;
-            let complete = ftp_transfer::upload(
-                &mut ftp,
-                source,
-                &target,
-                request.policy,
-                &mut progress,
-                &mut ask,
-            )?;
-            return Ok(transfer_outcome(complete));
-        }
-        if ssh_destination.is_some() {
+        if ftp_destination.is_some() || ssh_destination.is_some() {
             let protocol = if ssh_destination.is_some() {
                 "SSH"
             } else {
@@ -970,6 +992,16 @@ async fn transfer_item(
                 .as_deref()
                 .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
             if let Some(connection) = ssh_destination {
+                return upload_remote(
+                    connection.open()?,
+                    &request,
+                    name,
+                    source,
+                    &mut progress,
+                    &mut ask,
+                );
+            }
+            if let Some(connection) = ftp_destination {
                 return upload_remote(
                     connection.open()?,
                     &request,
@@ -1016,7 +1048,7 @@ async fn transfer_item(
             let mut ftp = ftp_source
                 .ok_or("Connect to the FTP server first.")?
                 .open()?;
-            return ftp_transfer::download(&mut ftp, segments, &target, &options, progress, ask)
+            return remote_transfer::download(&mut ftp, segments, &target, &options, progress, ask)
                 .map(transfer_outcome);
         }
         if let Some(connection) = ssh_source {
@@ -1323,7 +1355,7 @@ mod server_download_tests {
 
 pub(crate) const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Encoding {
     #[default]
@@ -1360,7 +1392,7 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
         .read_to_end(&mut bytes)
         .map_err(message)?;
     if bytes.len() as u64 > TEXT_LIMIT {
-        return Err("Text files can be at most 8 MiB.".to_owned());
+        return Err("Text files can be at most 8 MiB.".into());
     }
     let (text, encoding) = if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
         (
@@ -1565,7 +1597,9 @@ async fn read_preview_image(
                 let length = remote_transfer::Entry::size(&entry)
                     .ok_or("The SSH server did not report the file size.")?;
                 check_preview_image_size(length)?;
-                session.read_limited(&segments, 0, length)
+                session
+                    .read_limited(&segments, 0, length)
+                    .map_err(Into::into)
             })
             .await?
         }
@@ -1628,7 +1662,7 @@ pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
         }
     }
     if buffer.len() as u64 > TEXT_LIMIT {
-        return Err("Text files can be at most 8 MiB.".to_owned());
+        return Err("Text files can be at most 8 MiB.".into());
     }
     Ok(buffer)
 }
@@ -1663,22 +1697,22 @@ fn ftp_text_revision(entry: &suppaftp::list::File, bytes: &[u8]) -> String {
 
 fn ssh_text_revision(entry: &ssh::Entry, bytes: &[u8]) -> String {
     let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
-    format!("{entry:?}:{}", URL_SAFE_NO_PAD.encode(digest))
+    format!("{:?}:{}", entry.revision(), URL_SAFE_NO_PAD.encode(digest))
 }
 
 fn load_ssh_text(
     session: &mut ssh::Session,
     segments: &[String],
-) -> Result<(TextDocument, ssh::Entry)> {
+) -> ssh::SftpResult<(TextDocument, ssh::Entry)> {
     let before = session.regular(segments)?;
     let length = remote_transfer::Entry::size(&before)
         .ok_or("The SSH server did not report the file size.")?;
     if length > TEXT_LIMIT {
-        return Err("Text files can be at most 8 MiB.".to_owned());
+        return Err("Text files can be at most 8 MiB.".into());
     }
     let bytes = session.read_limited(segments, 0, length)?;
     if session.regular(segments)? != before {
-        return Err("The SSH file changed while it was being opened.".to_owned());
+        return Err("The SSH file changed while it was being opened.".into());
     }
     let mut document = decode_text(bytes.as_slice())?;
     document.revision = Some(ssh_text_revision(&before, &bytes));
@@ -1744,14 +1778,14 @@ async fn save_ssh_text(
             let (document, original) = load_ssh_text(session, &segments)?;
             let changed = "The SSH file changed on the server. Reopen it before saving.";
             if document.revision.as_deref() != Some(revision.as_str()) {
-                return Err(changed.to_owned());
+                return Err(changed.into());
             }
             let bytes = encode_text(document.encoding, &text)?;
             session.replace_text(&segments, &original, &bytes, |session| {
                 if load_ssh_text(session, &segments)?.0.revision == document.revision {
                     Ok(())
                 } else {
-                    Err(changed.to_owned())
+                    Err(changed.into())
                 }
             })?;
             let revision = session
@@ -1773,7 +1807,7 @@ fn load_ftp_text(session: &mut ftp::Session, segments: &[String]) -> Result<Text
     let before = session.regular(segments)?;
     let length = before.size() as u64;
     if length > TEXT_LIMIT {
-        return Err("Text files can be at most 8 MiB.".to_owned());
+        return Err("Text files can be at most 8 MiB.".into());
     }
     let bytes = session.read_limited(segments, 0, length, length)?;
     if session.regular(segments)? != before {
@@ -1859,25 +1893,92 @@ async fn save_ftp_text(
 async fn save_text(directory: String, name: String, original: String, text: String) -> Result<()> {
     blocking(move || {
         let path = selected(&directory, &name).map_err(message)?;
-        let document = load_text(&path)?;
-        if document.text != original {
-            return Err("The file changed on disk. Reopen it before saving.".to_owned());
-        }
-        let buffer = encode_text(document.encoding, &text)?;
-        let metadata = fs::metadata(&path).map_err(message)?;
-        let mut staged =
-            tempfile::NamedTempFile::new_in(local::absolute(&directory).map_err(message)?)
-                .map_err(message)?;
-        staged.write_all(&buffer).map_err(message)?;
-        staged
-            .as_file()
-            .set_permissions(metadata.permissions())
-            .map_err(message)?;
-        staged.as_file().sync_all().map_err(message)?;
-        staged.persist(path).map_err(message)?;
-        Ok(())
+        save_local_text(&path, &original, &text)
     })
     .await
+}
+
+fn save_local_text(path: &Path, original: &str, text: &str) -> Result<()> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    static SAVES: [Mutex<()>; 64] = [const { Mutex::new(()) }; 64];
+    let mut hash = DefaultHasher::new();
+    same_file::Handle::from_path(path)
+        .map_err(message)?
+        .hash(&mut hash);
+    let _guard = SAVES[(hash.finish() % SAVES.len() as u64) as usize]
+        .lock()
+        .map_err(message)?;
+    let metadata = fs::symlink_metadata(path).map_err(message)?;
+    let revision = local_transfer::FileRevision::capture(path, &metadata).map_err(message)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(message)?;
+    let document = load_text(path)?;
+    if document.text != original {
+        return Err("The file changed on disk. Reopen it before saving.".to_owned());
+    }
+    let parent = path.parent().ok_or("Choose a parent folder.")?;
+    let workspace = local::staging_directory(parent).map_err(message)?;
+    let mut staged = tempfile::NamedTempFile::new_in(workspace.path()).map_err(message)?;
+    #[cfg(windows)]
+    local::preserve_access(path, staged.path(), &metadata).map_err(message)?;
+    staged
+        .write_all(&encode_text(document.encoding, text)?)
+        .map_err(message)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o6000 != 0 {
+            return Err("Edit this file with a tool that supports special permissions.".into());
+        }
+        local::preserve_access(path, staged.path(), &metadata).map_err(message)?;
+    }
+    staged.as_file().sync_all().map_err(message)?;
+    let current = load_text(path)?;
+    if current.text != original || current.encoding != document.encoding {
+        return Err("The file changed on disk. Reopen it before saving.".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let current = fs::symlink_metadata(path).map_err(message)?;
+        if (current.ctime(), current.ctime_nsec()) != (metadata.ctime(), metadata.ctime_nsec()) {
+            return Err("The file changed on disk. Reopen it before saving.".into());
+        }
+    }
+    revision.verify(path).map_err(message)?;
+    #[cfg(unix)]
+    staged.persist(path).map_err(message)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+        let wide = |path: &Path| {
+            path.as_os_str()
+                .encode_wide()
+                .chain(Some(0))
+                .collect::<Vec<_>>()
+        };
+        let staged = staged.into_temp_path();
+        let target = wide(path);
+        let replacement = wide(&staged);
+        // ReplaceFile merges security and named streams from the destination.
+        if unsafe {
+            ReplaceFileW(
+                target.as_ptr(),
+                replacement.as_ptr(),
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        } == 0
+        {
+            return Err(message(io::Error::last_os_error()));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2081,6 +2182,7 @@ pub fn run() {
         crate::archive_create::create_archive,
         crate::archive_create::cancel_archive,
         crate::archives::open_archive,
+        crate::archives::close_archive,
         crate::archives::list_archive,
         crate::archives::read_archive_text,
         crate::archives::read_archive_bytes,
@@ -2176,5 +2278,49 @@ mod settings_archive_tests {
         assert!(read_settings_archive_file(&path).is_err());
         fs::write(&path, [0xff]).unwrap();
         assert!(read_settings_archive_file(&path).is_err());
+    }
+}
+
+#[cfg(test)]
+mod local_save_tests {
+    use super::*;
+    #[test]
+    fn competing_saves_accept_only_one_writer() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("note.txt");
+        fs::write(&path, "original").unwrap();
+        let start = std::sync::Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let worker = |value| {
+                start.wait();
+                save_local_text(&path, "original", value)
+            };
+            let left = scope.spawn(move || worker("left"));
+            let right = scope.spawn(move || worker("right"));
+            [left.join().unwrap(), right.join().unwrap()]
+        });
+        assert_eq!(
+            results.iter().filter(|item| item.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert!(matches!(
+            fs::read_to_string(path).unwrap().as_str(),
+            "left" | "right"
+        ));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_private_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("private");
+        fs::write(&path, "first").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        save_local_text(&path, "first", "second").unwrap();
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }

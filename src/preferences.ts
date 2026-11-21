@@ -506,6 +506,7 @@ export function readPreferences(): Preferences {
 let portableSettings = false;
 let portableSnapshot: string | undefined;
 let pendingPortableWrite = Promise.resolve();
+let writeQueue = pendingPortableWrite;
 
 export async function restorePortablePreferences(main: boolean) {
   if (!windowsClient || !isTauri()) return null;
@@ -536,7 +537,8 @@ export function persistPreferences(preferences: Preferences) {
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;
   portableSnapshot = snapshot;
-  pendingPortableWrite = pendingPortableWrite.then(() => api.savePortablePreferences(settings)).catch((error: unknown) => {
+  pendingPortableWrite = writeQueue.then(() => api.savePortablePreferences(settings));
+  writeQueue = pendingPortableWrite.catch((error: unknown) => {
     if (portableSnapshot === snapshot) portableSnapshot = undefined;
     window.dispatchEvent(new CustomEvent("dirlume-portable-settings-error", {
       detail: error instanceof Error ? error.message : String(error),
