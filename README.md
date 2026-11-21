@@ -12,6 +12,8 @@ Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appe
 
 Set **Window background** on that page to choose a solid color for the backdrop behind the file panes and modern toolbars. **Reset window background** restores the base scheme's backdrop.
 
+Clear **Show status bar** in **Options → Appearance → Window** to give the workspace more room. The resize grip stays at the bottom-right, confirmations appear briefly above the lower toolbar, and errors stay visible until dismissed.
+
 Use **Manage custom color schemes** on the same page to rename a saved scheme or delete an inactive one without changing the current appearance. A custom scheme currently applied by **System** is protected from deletion. Deleting an inactive favorite restores the matching built-in Light or Dark favorite. Use **Apply** or **Done** to save the changes.
 
 Check **Keep current fonts** to capture the font families and base sizes in use. The retained fonts apply when switching schemes in Options, in the title bar, or through System appearance. Clear the checkbox to use the selected scheme's fonts again. Per-view zoom settings stay in place.
@@ -110,7 +112,7 @@ In **New folder**, enable **Process multiple names** to separate names with comm
 
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
 
-The shell receives keystrokes while its input has focus. The status bar reminds you to click a file pane to use its shortcuts, or click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
+The shell receives keystrokes while its input has focus. A hint in the status bar, or beneath the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 
 Type in the command line to see matching history and completions for the active local folder. On Windows, PowerShell supplies completions, including options for Windows tools and installed Git and .NET commands. On macOS and Linux, Dirlume uses available Bash or Zsh completions and can also complete executable names and paths. Use **↑/↓** to choose a suggestion, **Tab** or **Enter** to insert it, and **Esc** to dismiss the list. **Enter** runs the draft when no suggestion is selected. **Shift+Enter** runs it with the list open.
 

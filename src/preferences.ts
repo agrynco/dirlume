@@ -280,6 +280,7 @@ export interface Preferences {
   systemLightScheme: string;
   systemDarkScheme: string;
   showTitlebarScheme: boolean;
+  showStatusBar: boolean;
   activeScheme: string | null;
   schemes: Scheme[];
   retainedFonts?: RetainedFonts;
@@ -429,6 +430,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   systemDarkScheme: { group: "appearance", portable: true,
     read: (value, get) => readSystemScheme(value, get("schemes"), "dark"), acceptsReference: customSchemeReference },
   showTitlebarScheme: { group: "appearance", portable: true, read: (value) => value === true },
+  showStatusBar: { group: "appearance", portable: true, read: (value) => value !== false },
   viewFontSizes: { group: "appearance", portable: true, read: readViewFontSizes },
   shortcutSchemes: { group: "shortcuts", portable: true, read: (value, _get, version) => readShortcutSchemes(value, version) },
   activeShortcutScheme: { group: "shortcuts", portable: true, read: (value, get) => get("shortcutSchemes").find(({ id }) => id === value)?.id ?? null },
