@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from 
 import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "./Button";
-import { formatDate, type PaneState, type Side, type SortColumn } from "./panes";
+import type { PaneState, Side, SortColumn } from "./panes";
 import { isNameField, panelFields, type PanelColumn, type PanelField, type PanelModeId } from "./panelModes";
 
 const sorts: Partial<Record<PanelField, SortColumn>> = {
@@ -43,6 +43,8 @@ export function columnGroupTrack(groups: PanelColumn[][], index: number): CSSPro
 }
 
 const autoWidths: Partial<Record<PanelField, number>> = { size: 9, bytes: 12, date: 13, time: 9, links: 5 };
+export const measuredColumnFields = ["size", "bytes", "date", "time"] as const;
+export type MeasuredColumnField = typeof measuredColumnFields[number];
 
 export function panelColumnTracks(columns: PanelColumn[]) {
   const names = columns.filter(({ field }) => isNameField(field)).length;
@@ -53,7 +55,7 @@ export function panelColumnTracks(columns: PanelColumn[]) {
     const chars = Number(width) || autoWidths[field];
     if (!chars) return [];
     const padded = `calc(${chars}ch + 8px)`;
-    const expression = width === "0" && (field === "date" || field === "time")
+    const expression = width === "0" && measuredColumnFields.some((candidate) => candidate === field)
       ? `var(--file-${field}-width, ${padded})` : isNameField(field)
         ? `max(0px, calc(${padded} - ${minimumPerName}))` : padded;
     return [{ i, chars, expression }];
@@ -68,18 +70,22 @@ export function panelColumnTracks(columns: PanelColumn[]) {
     }
     const slot = fixed.find((item) => item.i === i);
     if (slot) {
-      const extra = `min(${slot.expression}, max(0px, calc((100% - ${nameMinimum}) * ${slot.chars / totalFixed})))`;
+      const available = `(100% - ${nameMinimum})`;
+      const proportional = `calc(${available} * ${slot.chars / totalFixed})`;
+      const remaining = `calc(${available} - (${used}) + ${slot.expression})`;
+      const extra = `min(${slot.expression}, max(0px, ${proportional}, ${remaining}))`;
       return isNameField(field) ? `calc(${minimumPerName} + ${extra})` : extra;
     }
     return isNameField(field) ? `minmax(${minimumPerName}, 1fr)` : "minmax(0, 1fr)";
   }).join(" ");
 }
 
-export function FileColumns({ container, groups, columns, tracks, visibility, sort, onSort, onVisibility }: {
+export function FileColumns({ container, groups, columns, tracks, samples, visibility, sort, onSort, onVisibility }: {
   container: Ref<HTMLDivElement>;
   groups: PanelColumn[][];
   columns: PanelColumn[];
   tracks: string;
+  samples: Partial<Record<MeasuredColumnField, readonly string[]>>;
   visibility: ColumnVisibility;
   sort: PaneState["sort"];
   onSort: (column: SortColumn) => void;
@@ -128,10 +134,10 @@ export function FileColumns({ container, groups, columns, tracks, visibility, so
       </div>)}
     </div>
     <div ref={widthProbes} className="file-column-probes" aria-hidden="true">
-      {(["date", "time"] as const).map((field) => {
-        const date = new Date(2088, 10, 28, 11, 48).getTime() / 1000;
-        return <div key={field} data-column={field}><span>{t(panelFields[field])}</span><span>{formatDate(date, field)}</span></div>;
-      })}
+      {measuredColumnFields.map((field) => <div key={field} data-column={field}>
+        <span className="file-column-probe-heading">{t(friendlyLabel(field))}</span>
+        {samples[field]?.map((label) => <span key={label} className="file-column-probe-value">{label}</span>)}
+      </div>)}
     </div>
     {menu && <ColumnMenu anchor={menu} choices={choices} fallback={() => nameColumn.current?.querySelector("button")}
       onClose={() => setMenu(null)} />}
