@@ -136,7 +136,7 @@ export async function testCommandIcons(page, native = false) {
   await environment.click();
   await files.waitFor();
   assert.equal(await commands.isVisible(), false);
-  await files.focus();
+  await page.waitForFunction(() => document.activeElement?.id === "left-files");
   const other = await openMainMenu(page, "Options");
   assert.equal(await other.locator(".main-menu-action-icon").count(), 0);
   await page.keyboard.press("Escape");
