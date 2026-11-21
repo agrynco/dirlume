@@ -55,6 +55,37 @@ try {
     await button(options, "Import settings").click();
   };
 
+  await page.setViewportSize({ width: 1800, height: 770 });
+  await button(options, "Main File Panels").click();
+  const visibility = check(options, "Hide action button icons");
+  const panelLayout = options.getByRole("combobox", { name: "Panel layout", exact: true });
+  const buttonWidth = options.getByRole("combobox", { name: "Action button width", exact: true });
+  const actionBar = page.locator(".actionbar");
+  assert.equal(await visibility.isChecked(), false);
+  await panelLayout.selectOption("twin");
+  await button(options, "Apply").click();
+  assert.ok(await actionBar.locator("button > svg:visible").count() > 0);
+  await visibility.check();
+  for (const layout of ["standard", "twin", "classic"]) {
+    await panelLayout.selectOption(layout);
+    for (const width of ["compact", "full"]) {
+      await buttonWidth.selectOption(width);
+      await button(options, "Apply").click();
+      assert.equal(await actionBar.locator("button > svg").count(), 0);
+      assert.match(await actionBar.locator("button").last().getAttribute("data-tooltip"), /Terminal/);
+      assert.equal(await actionBar.locator("button").last().locator("span").textContent(), "Terminal");
+    }
+  }
+  await panelLayout.selectOption("standard");
+  await buttonWidth.selectOption("compact");
+  await button(options, "Done").click();
+  await page.setViewportSize({ width: 1100, height: 770 });
+  await page.reload();
+  assert.equal((await readPreferences()).hideActionButtonIcons, true);
+  await actionBar.locator("button").last().waitFor();
+  assert.equal(await actionBar.locator("button > svg").count(), 0);
+  await openOptions();
+
   await button(options, "Export settings").click();
   assert.equal(await button(exportDialog, "Export").isDisabled(), true);
   await check(exportDialog, local.name).check();
@@ -82,6 +113,11 @@ try {
   assert.deepEqual(settingsFile.schemes, []);
   assert.equal(Object.hasOwn(settingsFile.groups.general, "kswitcher"), false);
   assert.deepEqual(settingsFile.groups.shortcuts.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
+  assert.equal(settingsFile.groups.filePanels.hideActionButtonIcons, true);
+  await button(options, "Main File Panels").click();
+  await visibility.uncheck();
+  await button(options, "Apply").click();
+  assert.ok(await actionBar.locator("button > svg").count() > 0);
 
   await startImport(JSON.stringify(standalone));
   assert.equal(await check(importDialog, standalone.name).isChecked(), true);
@@ -100,7 +136,8 @@ try {
 
   const other = { ...evening, id: "other", name: "Imported second", colors: { canvas: "#212c33" } };
   const changed = { ...local, id: "source-local", colors: { canvas: "#fafafa" } };
-  const mixed = archive({ ...settingsFile.groups, general: { language: "uk" }, filePanels: { layout: "twin" } }, [changed, other]);
+  const mixed = archive({ ...settingsFile.groups, general: { language: "uk" },
+    filePanels: { layout: "twin", hideActionButtonIcons: settingsFile.groups.filePanels.hideActionButtonIcons } }, [changed, other]);
   await startImport(mixed);
   for (const group of ["General", "Appearance", "Keyboard shortcuts", "Terminal", "Viewer"]) await check(importDialog, group).uncheck();
   await check(importDialog, other.name).uncheck();
@@ -114,6 +151,7 @@ try {
   await button(confirm, "Replace and import").click();
   const after = await readPreferences();
   assert.equal(after.layout, "twin");
+  assert.equal(after.hideActionButtonIcons, true);
   assert.equal(after.language, before.language);
   assert.equal(after.mainMenuAlignment, "right");
   assert.equal(after.activeScheme, standalone.id);
