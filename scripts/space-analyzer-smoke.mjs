@@ -153,6 +153,13 @@ try {
   await files.press("Control+Shift+d");
   await local.waitForFunction(() => window.finishOldSpace);
   await row(analyzer, "branch").waitFor();
+  const rootsBeforeSwap = await local.evaluate(() => window.spaceCalls.filter(({ segments }) => segments.length === 0).length);
+  await button(analyzer, "Stop").press("Control+u");
+  await analyzer.and(local.locator(".space-analyzer-right")).waitFor();
+  await button(analyzer, "Stop").waitFor();
+  assert.equal(await local.evaluate(() => window.spaceCalls.filter(({ segments }) => segments.length === 0).length), rootsBeforeSwap);
+  await button(analyzer, "Stop").press("Control+u");
+  await analyzer.and(local.locator(".space-analyzer-left")).waitFor();
   await button(analyzer, "Stop").click();
   await analyzer.getByRole("status").getByText("Partial results").waitFor();
   await local.evaluate(() => { window.holdSpace = false; });

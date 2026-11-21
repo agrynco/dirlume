@@ -64,6 +64,7 @@ async function assertDivider(page, side) {
 }
 
 async function checkViews(page) {
+  const swap = await page.evaluate(() => /Mac/i.test(navigator.userAgent) ? "Meta+u" : "Control+u");
   const heading = (name) => preview(page, "right").getByRole("heading", { name, exact: true });
   const sourceButton = control(toolbar(page), "Source");
   const renderButton = control(toolbar(page), "Rendered");
@@ -77,6 +78,11 @@ async function checkViews(page) {
   assert.equal(await toggle(page).getAttribute("aria-pressed"), "true");
   assert.equal(await list(page, "right").count(), 0);
   await page.keyboard.press("ArrowDown");
+  await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).waitFor();
+  await list(page, "left").press(swap);
+  await preview(page, "left").getByText(front["02-beta.txt"], { exact: true }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+  await list(page, "right").press(swap);
   await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).waitFor();
   await assertDivider(page, "left");
   assert.equal(await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).isVisible(), true);

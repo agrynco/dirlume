@@ -234,6 +234,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   const commands = [left, right];
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
+  if (commands.includes("swap") && (leftScope === "compare" || rightScope === "compare")) return true;
   return (leftScope === "text" || rightScope === "text" || leftScope === "viewer" || rightScope === "viewer") &&
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));
 }
@@ -290,6 +291,7 @@ export interface Preferences {
   shortcutSchemes: ShortcutScheme[];
   viewFontSizes: ViewFontSizes;
   viewerContentWidth?: number;
+  viewerMarkdownContentWidth?: number | "full";
   terminalResizeRows: number;
 }
 
@@ -443,6 +445,8 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
   viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
+  viewerMarkdownContentWidth: { group: "viewer", portable: true, read: (value) => value === "full" ? "full" :
+    readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
 };
 
 export const preferenceKeys = Object.keys(preferenceDefinitions) as (keyof Preferences)[];

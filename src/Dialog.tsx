@@ -21,12 +21,14 @@ export function saveDialogSize(key: string, size: Dimensions) {
   try { localStorage.setItem(sizePrefix + key, JSON.stringify(size)); } catch { /* The current size still applies. */ }
 }
 
-export function Dialog({ title, children, footer, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, helpTopic }: {
+export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownCapture,
+  wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, helpTopic }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
   onClose?: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
+  onKeyDownCapture?: KeyboardEventHandler<HTMLDialogElement>;
   wide?: boolean;
   resizeKey?: string;
   standalone?: boolean;
@@ -77,6 +79,9 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
     <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
       style={size} data-tone={tone} data-help-topic={helpTopic} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
+      }}
+      onKeyDownCapture={(event) => {
+        if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDownCapture?.(event);
       }}
       onPointerDown={(event) => {
         if (dismissOnOutside && event.button === 0 && event.target === event.currentTarget) {

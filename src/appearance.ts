@@ -145,7 +145,10 @@ export function fileColor({ name, directory, hidden, system }: Pick<Entry, "name
 export type Color = {
   [Group in keyof typeof colorGroups]: keyof (typeof colorGroups)[Group]["colors"];
 }[keyof typeof colorGroups] | keyof typeof viewerColors | keyof typeof mermaidColors | SurfaceColor;
-export const viewerColors = { "viewer-bg": "Viewer background" } as const;
+export const viewerColors = {
+  "viewer-bg": "Viewer background",
+  "viewer-outside-bg": "Outside reading area background",
+} as const;
 export const mermaidColors = {
   "mermaid-node-bg": "Block background",
   "mermaid-node-ink": "Block text",

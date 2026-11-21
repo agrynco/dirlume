@@ -109,6 +109,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [settingsArchive, setSettingsArchive] = useState<SettingsArchiveAction | null>(null);
   const [loadingArchive, setLoadingArchive] = useState(false);
   const [archiveError, setArchiveError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [buildVersion, setBuildVersion] = useState("");
   const { shortcutSchemes, activeShortcutScheme } = preferences;
   const activeScheme = shortcutSchemes.find(({ id }) => id === activeShortcutScheme);
@@ -126,6 +127,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
     ] :
       feature === "viewer" ? ["Reading area", "Max width (px)", "Maximum content width (px)", "Full width", "Mermaid diagrams",
+        "Markdown reading width", "Markdown max width (px)", "Use shared width", "Custom width",
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
       feature === "terminal" ? ["Resize step (rows)", "Paste on right-click", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Installed fonts", "Size (px)", "font size",
@@ -201,7 +203,16 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   }
 
   function apply() {
-    if (hasChanges && !invalidModes.length && !invalidSettings) onChange(applyPreferences(preferences));
+    if (invalidModes.length || invalidSettings) return false;
+    if (!hasChanges) return true;
+    try {
+      onChange(applyPreferences(preferences));
+      setSaveError("");
+      return true;
+    } catch (error) {
+      setSaveError(errorText(describeError(error)));
+      return false;
+    }
   }
 
   async function startImport() {
@@ -324,6 +335,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   return <SettingsSearchTerms value={terms}>
     <Dialog title={t("Options")} helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
       wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
+      {saveError && <p className="dialog-error settings-save-error" role="alert">
+        {t("Could not save settings. Try again, or close Options to discard unapplied changes.")} {saveError}
+      </p>}
       <div className="settings-archive-actions">
         <Button type="button" disabled={loadingArchive} onClick={() => void startImport()}>{t("Import settings")}</Button>
         <Button type="button" disabled={loadingArchive} onClick={() => setSettingsArchive({ kind: "export" })}>{t("Export settings")}</Button>
@@ -338,7 +352,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       })}><RotateCcw /> {t("Reset")}</Button>}
       {(standalone || modePage) && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
       <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={apply}>{t("Apply")}</Button>
-      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => { apply(); close(); }}>{t("Done")}</Button>
+      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => { if (apply()) close(); }}>{t("Done")}</Button>
     </>}>
       <div className="settings-layout">
         <aside className="settings-sidebar">

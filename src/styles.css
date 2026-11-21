@@ -851,7 +851,17 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .environment-source { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 8px; margin-block: 5px 9px; }
 .environment-source dt { color: var(--muted); }
 .environment-source dd { margin: 0; overflow-wrap: anywhere; }
-.environment-form, .environment-form label, .environment-copy details label { display: grid; gap: 5px; }
+.environment-form { display: grid; gap: 12px; min-height: 0; overflow-wrap: anywhere; }
+.dialog:has(> .environment-form) > :is(.dialog-heading, .dialog-footer) { flex: none; }
+.environment-field-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.environment-field-row > label { flex: 2 1 12em; min-width: min(100%, 12em); }
+.environment-field-row > label:first-child { flex: 3 1 13em; }
+.environment-field-row :is(input, select) { min-width: 0; width: 100%; }
+.environment-form .environment-source {
+  grid-template-columns: min(40%, 10em) minmax(0, 1fr); margin: 0;
+  padding-block-start: 12px; border-top: 1px solid var(--line);
+}
+.environment-copy details label { display: grid; gap: 5px; }
 .environment-form textarea, .environment-copy textarea { min-height: 4em; width: 100%; resize: vertical; font-family: var(--text-font); }
 .environment-form .environment-check, .environment-check { display: flex; align-items: center; gap: 5px; }
 .environment-copy { max-height: 38vh; overflow: auto; list-style: none; padding: 0; }
@@ -1119,6 +1129,7 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .dialog button.alert-confirm:focus-visible { outline-offset: 2px; }
 .field { display: grid; gap: 5px; }
 .settings-archive-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-end: auto; }
+.settings-save-error { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .settings-archive-items { display: grid; min-width: 0; gap: 6px; padding: 6px 10px 10px; border: 1px solid var(--line); border-radius: var(--radius); }
 .settings-archive-items legend { padding-inline: 4px; font-weight: 600; }
 .new-file-encoding { margin-top: 12px; }
@@ -1327,6 +1338,7 @@ button.color-swatch {
 .unit-setting { display: flex; flex-wrap: wrap; row-gap: 5px; }
 .unit-setting > span { white-space: nowrap; }
 .unit-setting > input { margin-inline-start: auto; max-width: 100%; }
+.unit-setting > select { margin-inline-start: auto; max-width: 100%; }
 .view-font-setting.unit-setting > input { width: 94px; }
 
 .shortcut-scheme-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--line); }
@@ -1394,10 +1406,25 @@ button.color-swatch {
   --document-font: var(--hex-font);
   --document-size: var(--hex-size);
 }
-.text-window[data-reading="true"] :is(.text-view, .code-surface) {
-  max-width: var(--viewer-content-width, none);
-  width: calc(100% - 28px);
-  align-self: center;
+.text-window[data-editing="false"] {
+  --reading-width: var(--viewer-content-width, 100%);
+  --reading-inset: max(0px, calc((100% - var(--reading-width)) / 2));
+}
+.text-window[data-editing="false"] :is(.text-view, .code-surface) {
+  margin-inline: 0;
+  border-inline: 0;
+  border-radius: 0;
+}
+.text-window[data-editing="false"] :is(.text-view, .cm-scroller) { scrollbar-gutter: stable both-edges; }
+.text-window[data-editing="false"][data-limited-width] .code-surface { background: transparent; }
+.text-window[data-editing="false"][data-limited-width] :is(.text-view, .cm-scroller, .markdown) {
+  --reading-bg: var(--document-bg, var(--text-bg));
+  background: linear-gradient(var(--reading-bg), var(--reading-bg)) center / min(100%, var(--reading-width)) 100% no-repeat
+    var(--viewer-outside-bg, var(--reading-outside, transparent));
+}
+.text-window[data-editing="false"] .cm-scroller { padding-inline: var(--reading-inset); }
+.text-window[data-editing="false"] .text-view {
+  padding-inline: calc(11px + var(--reading-inset));
 }
 .markdown code { font: var(--view-font-size, var(--viewer-size))/1.65 var(--viewer-font); tab-size: 4; }
 .text-view { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1442,6 +1469,10 @@ button.color-swatch {
 .text-window .markdown {
   background: var(--markdown-bg); color: var(--markdown-ink);
   font-family: var(--markdown-font); font-size: var(--view-font-size, var(--markdown-size));
+}
+.text-window[data-editing="false"][data-limited-width] .markdown {
+  --reading-bg: var(--markdown-bg);
+  --reading-outside: var(--markdown-bg);
 }
 .text-window .markdown code { font-family: var(--markdown-code-font); font-size: var(--view-font-size, var(--markdown-size)); }
 .text-window .markdown-link { color: var(--markdown-link); }

@@ -1,6 +1,148 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+
+export async function testViewerReadingArea(page, source) {
+  const plain = "reader.txt";
+  const code = "reader.rs";
+  const markdown = "reader.md";
+  const short = "reader-short.txt";
+  const cells = Array(12).fill('<span style="white-space: nowrap">Long Column Heading</span>').join(" | ");
+  const rule = Array(12).fill("---").join(" | ");
+  await Promise.all([
+    writeFile(join(source, plain), "A plain line for testing the reading area.\n".repeat(250)),
+    writeFile(join(source, code), "fn reading_area() {}\n".repeat(250)),
+    writeFile(join(source, markdown), `# Reading area fixture\n\n| ${cells} |\n| ${rule} |\n\n` + "Test paragraph.\n\n".repeat(250)),
+    writeFile(join(source, short), "A short document.\n"),
+  ]);
+  const button = (parent, name) => parent.getByRole("button", { name, exact: true });
+  const viewer = (name) => page.getByRole("region", { name, exact: true });
+  const files = page.getByRole("listbox", { name: "left files", exact: true });
+  const tabs = page.getByRole("navigation", { name: "Open documents", exact: true });
+  async function open(name) {
+    const row = page.locator(`#left-files [role="option"][data-tooltip="${name}"]`);
+    await row.click();
+    await page.keyboard.press("F3");
+    await viewer(name).waitFor();
+    return viewer(name);
+  }
+  async function close(document) {
+    await button(document, "Close document").click();
+    await document.waitFor({ state: "hidden" });
+    if (!await files.isVisible()) await button(tabs, "Files").click();
+    await files.waitFor();
+  }
+  const plainViewer = await open(plain);
+  const tool = await openOptionsWindow(page, () => button(plainViewer, "Viewer options").click());
+  const options = tool.getByRole("dialog", { name: "Options", exact: true });
+  const search = options.getByRole("searchbox", { name: "Search settings" });
+  await search.fill("Outside reading area background");
+  await search.press("Enter");
+  const outside = options.getByLabel("Outside reading area background hex", { exact: true });
+  await outside.fill("#a7437d");
+  const sharedWidth = options.getByRole("spinbutton", { name: "Max width (px)", exact: true });
+  await sharedWidth.fill("420");
+  const apply = () => button(options, "Apply").click();
+  await apply();
+  const readingWidths = options.getByRole("combobox", { name: "Markdown reading width" });
+  assert.equal(await readingWidths.inputValue(), "inherit");
+  await search.fill("Markdown reading width");
+  await search.press("Enter");
+  await readingWidths.selectOption("custom");
+  await options.getByRole("spinbutton", { name: "Markdown max width (px)" }).fill("530");
+  await closeToolWindow(tool, () => button(options, "Done").click());
+
+  const sourceScroll = ".cm-scroller";
+  async function checkScroll(document, selector, width) {
+    const viewport = document.locator(selector);
+    await viewport.waitFor();
+    await page.waitForFunction((selector) => {
+      const view = window.document.querySelector(".text-window:not([hidden]) " + selector);
+      return view && view.scrollHeight > view.clientHeight + 100;
+    }, selector);
+    const bounds = await viewport.evaluate((view) => {
+      const rect = view.getBoundingClientRect();
+      const window = view.closest(".text-window").getBoundingClientRect();
+      const style = getComputedStyle(view);
+      return {
+        right: window.right - rect.right, outside: style.backgroundColor, backgroundSize: style.backgroundSize,
+        column: view.querySelector(".markdown-content")?.getBoundingClientRect().width,
+      };
+    });
+    assert.ok(bounds.right <= 2, `${selector} must scroll at the right edge of Viewer.`);
+    assert.equal(bounds.outside, "rgb(167, 67, 125)");
+    assert.ok(bounds.backgroundSize.includes(`${width}px`), JSON.stringify(bounds));
+    if (bounds.column !== undefined) assert.equal(bounds.column, width);
+    const scrollTop = () => viewport.evaluate((view) => view.scrollTop);
+    await viewport.focus();
+    await page.keyboard.press("PageDown");
+    await page.waitForFunction((selector) => window.document.querySelector(".text-window:not([hidden]) " + selector)?.scrollTop > 0, selector);
+    const box = await viewport.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const previous = await scrollTop();
+    await page.mouse.wheel(0, 180);
+    await page.waitForFunction(({ selector, previous }) =>
+      window.document.querySelector(".text-window:not([hidden]) " + selector)?.scrollTop > previous, { selector, previous });
+    const { gutter, clientHeight } = await viewport.evaluate((view) => ({
+      gutter: (view.offsetWidth - view.clientWidth) / 2, clientHeight: view.clientHeight,
+    }));
+    if (gutter > 2) {
+      const middle = await viewport.evaluate((view) => {
+        view.scrollTo(0, (view.scrollHeight - view.clientHeight) / 2);
+        return view.scrollTop;
+      });
+      const x = box.x + box.width - gutter / 2;
+      await page.mouse.move(x, box.y + clientHeight / 2);
+      await page.mouse.down();
+      await page.mouse.move(x, box.y + clientHeight * .68, { steps: 8 });
+      await page.mouse.up();
+      assert.ok(await scrollTop() > middle, `${selector} should scroll when its scrollbar is dragged.`);
+    }
+    return viewport;
+  }
+
+  await checkScroll(plainViewer, sourceScroll, 420);
+  await button(plainViewer.locator(".text-toolbar").first(), "Hex").click();
+  const hex = await checkScroll(plainViewer, ".hex-view", 420);
+  assert.ok(await hex.evaluate((view) => view.scrollWidth > view.clientWidth && (view.scrollLeft = view.scrollWidth) > 0));
+  await close(plainViewer);
+  const codeViewer = await open(code);
+  await checkScroll(codeViewer, sourceScroll, 420);
+  await codeViewer.locator(".syntax-keyword").first().waitFor();
+  await close(codeViewer);
+  const markdownViewer = await open(markdown);
+  const rendered = await checkScroll(markdownViewer, ".markdown", 530);
+  assert.ok(await rendered.evaluate((view) => view.scrollWidth > view.clientWidth));
+  await button(markdownViewer, "Source").click();
+  await checkScroll(markdownViewer, sourceScroll, 420);
+  await button(markdownViewer, "Preview").click();
+  const reopened = await openOptionsWindow(page, () => button(markdownViewer, "Viewer options").click());
+  const restored = reopened.getByRole("dialog", { name: "Options", exact: true });
+  const mode = restored.getByRole("combobox", { name: "Markdown reading width" });
+  await mode.selectOption("inherit");
+  await button(restored, "Apply").click();
+  await rendered.evaluate((view) => {
+    if (view.querySelector(".markdown-content").getBoundingClientRect().width !== 420) {
+      throw new Error("Markdown must inherit the shared reading width after Apply.");
+    }
+  });
+  await mode.selectOption("full");
+  await closeToolWindow(reopened, () => button(restored, "Done").click());
+  assert.equal(await rendered.evaluate((view) => getComputedStyle(view).backgroundImage), "none");
+  await close(markdownViewer);
+  const shortViewer = await open(short);
+  const scroll = shortViewer.locator(sourceScroll);
+  assert.ok(await scroll.evaluate((view) => view.scrollHeight <= view.clientHeight &&
+    getComputedStyle(view).backgroundColor === "rgb(167, 67, 125)"));
+  const resetTool = await openOptionsWindow(page, () => button(shortViewer, "Viewer options").click());
+  const reset = resetTool.getByRole("dialog", { name: "Options", exact: true });
+  await button(reset, "Reset outside reading area background").click();
+  await closeToolWindow(resetTool, () => button(reset, "Done").click());
+  assert.equal(await scroll.evaluate((view) => getComputedStyle(view).backgroundColor), "rgba(0, 0, 0, 0)");
+  await close(shortViewer);
+  console.log("Verified edge scrollbars, reading widths, and the outside background in all Viewer modes.");
+}
 
 export async function testMarkdown(page, source, wheelFont) {
   const catalogue = join(source, "catalogue.md");

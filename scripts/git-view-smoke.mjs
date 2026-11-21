@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
@@ -54,6 +55,7 @@ try {
     };
   });
   await page.goto("http://dirlume.test/");
+  const swapKey = await page.evaluate(() => /Mac/i.test(navigator.userAgent) ? "Meta+u" : "Control+u");
   const button = (scope, name) => scope.getByRole("button", { name, exact: true });
   const right = page.locator("#right-files");
   const git = button(page, "Git View");
@@ -74,6 +76,21 @@ try {
   await button(history, "Load more").click();
   await history.getByRole("button", { name: /Old commit/ }).waitFor();
   const filter = branches.getByRole("searchbox", { name: "Filter branches" });
+  await filter.fill("mai");
+  await filter.press(swapKey);
+  await branches.and(page.locator(".git-pane-left")).waitFor();
+  assert.equal(await filter.inputValue(), "mai");
+  assert.ok(await filter.evaluate((field) => document.activeElement === field));
+  await history.getByText("Full commit body").waitFor();
+  await history.getByRole("button", { name: /Old commit/ }).press(swapKey);
+  await branches.and(page.locator(".git-pane-right")).waitFor();
+  await button(page, "Swap panes").click();
+  await branches.and(page.locator(".git-pane-left")).waitFor();
+  const commands = await openMainMenu(page, "Commands");
+  await commands.getByRole("menuitem", { name: "Swap panes", exact: true }).click();
+  await branches.and(page.locator(".git-pane-right")).waitFor();
+  assert.equal(await page.evaluate(() => window.gitEvents.length), 1);
+
   await filter.fill("topic");
   assert.equal(await branches.getByRole("option").count(), 2);
   await filter.press("ArrowDown");
@@ -84,6 +101,8 @@ try {
   assert.equal(await history.getByText("Stale local topic").count(), 0);
   await page.keyboard.press("F5");
   assert.equal(await page.getByRole("dialog", { name: "Copy" }).count(), 0);
+  await filter.press(swapKey);
+  await branches.and(page.locator(".git-pane-left")).waitFor();
   await button(branches, "Close Git View").click();
   await page.waitForFunction(() => document.activeElement?.id === "right-files");
   assert.equal(await right.getAttribute("aria-activedescendant"), selected);
@@ -109,7 +128,23 @@ try {
   const events = await page.evaluate(() => window.gitEvents);
   assert.match(events[0], /nested$/);
   assert.match(events[1], /repo ł$/);
-  console.log("Verified Git View, paged history, commit details, stale branch selection, and pane restoration.");
+  for (const binding of [["Ctrl+Alt+J"], []]) {
+    await page.evaluate((swap) => {
+      const key = "dirlume.preferences.v1";
+      const current = JSON.parse(localStorage.getItem(key));
+      localStorage.setItem(key, JSON.stringify({ ...current, activeShortcutScheme: "fixture-swap",
+        shortcutSchemes: [{ id: "fixture-swap", name: "Fixture swap", bindings: { swap } }] }));
+    }, binding);
+    await page.reload();
+    await right.getByRole("option", { name: /^note\.txt/ }).click();
+    await git.click();
+    await branches.and(page.locator(".git-pane-right")).waitFor();
+    await filter.press(swapKey);
+    assert.equal(await branches.and(page.locator(".git-pane-right")).count(), 1);
+    await filter.press("Control+Alt+j");
+    assert.equal(await branches.and(page.locator(binding.length ? ".git-pane-left" : ".git-pane-right")).count(), 1);
+  }
+  console.log("Verified Git View, paged history, commit details, state-preserving swaps, shortcut customization, and pane restoration.");
 } finally {
   await browser.close();
 }

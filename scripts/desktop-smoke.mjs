@@ -9,7 +9,7 @@ import { testFtp } from "./ftp-smoke.mjs";
 import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testSystemTheme } from "./system-theme-smoke.mjs";
-import { testMarkdown } from "./markdown-smoke.mjs";
+import { testMarkdown, testViewerReadingArea } from "./markdown-smoke.mjs";
 import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
@@ -42,7 +42,7 @@ import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
-import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
@@ -60,6 +60,7 @@ const src = join(temp, "from");
 const dst = join(temp, "to");
 const diagnostics = join(temp, "diagnostics");
 const diagnosticsFile = join(diagnostics, "diagnostics.jsonl");
+const highlightsDirectory = join(temp, "release-highlights");
 const attributes = join(temp, "attributes");
 await mkdir(src);
 await mkdir(dst);
@@ -116,6 +117,7 @@ async function startDesktop() {
       DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
       DIRLUME_SSH_TEST_CONFIG: join(temp, "ssh-config"),
       DIRLUME_TEST_DIAGNOSTICS_DIR: diagnostics,
+      DIRLUME_TEST_HIGHLIGHTS_DIR: highlightsDirectory,
     },
   });
   let startupError = "";
@@ -135,6 +137,15 @@ async function startDesktop() {
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
   page.setDefaultTimeout(8000);
+  await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+  const release = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("installed_release"));
+  if (release.showOnStartup) {
+    const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
+    for (const highlight of release.highlights) await whatsNew.getByText(highlight, { exact: true }).waitFor();
+    await whatsNew.getByRole("button", { name: "Close", exact: true }).click();
+    await whatsNew.waitFor({ state: "hidden" });
+    assert.equal(await readFile(join(highlightsDirectory, release.version), "utf8"), "");
+  }
   return page;
 }
 
@@ -1491,6 +1502,7 @@ try {
   await commandLine.waitFor();
   await commandLine.press("Control+o");
   await left.waitFor({ state: "hidden" });
+  assert.ok(await page.getByRole("button", { name: "Swap panes", exact: true }).isDisabled());
   await toggleTerminal.click();
   await commandLine.waitFor();
   await left.waitFor();
@@ -1533,6 +1545,17 @@ try {
     document.querySelector(".xterm-accessibility-tree")?.textContent?.includes(text), text);
   const waitForDirectory = (path) => page.waitForFunction((path) =>
     document.querySelector(".terminal-card header span")?.textContent?.toLowerCase() === path.toLowerCase(), path);
+  const driveRoot = parse(src).root;
+  await input.pressSequentially(`cd ${driveRoot}`);
+  await input.press("Enter");
+  await waitForDirectory(driveRoot);
+  await page.waitForFunction((path) => document.querySelector("#left-path")?.dataset.path.toLowerCase() === path.toLowerCase() &&
+    document.querySelector("#left-files")?.getAttribute("aria-busy") === "false", driveRoot);
+  assert.equal(await panePath("right"), dst);
+  await input.pressSequentially("cd 'missing-dirlume-terminal-fixture'; Write-Output ('unchanged-' + (Get-Location).Path)");
+  await input.press("Enter");
+  await waitForTerminalText("unchanged-" + driveRoot);
+  assert.equal(await panePath("left"), driveRoot);
   const subfolder = join(src, "terminal ' [folder]");
   await mkdir(subfolder);
   await navigate("left", subfolder);
@@ -2247,6 +2270,8 @@ try {
   await testNativeQuickView(page, temp);
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
+  await testViewerReadingArea(page, attributes);
+  await testMarkdownOptionsDismissal(page, attributes);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

@@ -16,6 +16,8 @@ The JSON archive includes portable preferences such as panel modes and keyboard 
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
+Press **Ctrl+U** (**Command+U** on macOS) or choose **Commands → Swap panes** to exchange the workspace panes while keeping the active view and its selection. This works with files, processes, Quick View, Space Analyzer, and environment variables. In Git View it exchanges **Branches** and **Commit history** for the current session. In **Side-by-side** comparison it exchanges the files, including unsaved edits, and the merge actions follow the displayed sides. Change or disable **Swap panes** in **Options → Keyboard shortcuts**.
+
 Local copies can preserve timestamps and access rights, follow symbolic links, and filter filenames using `*` and `?`. **Process multiple destinations** copies the selection to each listed folder.
 
 Drop files or folders from your system file manager onto a local, FTP, or SSH pane to open the transfer dialog. Local drops also offer a move. Dragging between Dirlume's panes uses the same transfer flow.
@@ -62,7 +64,7 @@ Choose a **Shortcut scheme** to switch the full set of bindings. **New scheme** 
 
 Use **Settings** in the viewer or editor toolbar to open its section directly. The controls show the inherited font family and pixel size when no override is set. New installations use **GoMono Nerd Font Mono** at **18 px**.
 
-**Viewer → Reading area** controls the background and maximum width of text, hex, and Markdown. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
+**Viewer → Reading area** controls the shared maximum width and the background beside a narrower reading column. The document scrolls at the right edge of the Viewer. Under **Viewer → Markdown**, rendered Markdown can use the shared width, a custom width, or full width. Markdown in **Source** uses the shared width. **Viewer → Mermaid diagrams** controls the default block background, text, and border colors. The document header displays the encoding and, in source view, the syntax selector.
 
 Drag the Options title bar to position it independently of the main window. Drag any edge or corner to resize it. When Options reopens, it restores the last window size, section, search, and scroll position. The preview below the settings shows draft colors and fonts before you apply them. Click a color swatch to choose a hue and shade or enter a HEX value. Editing a built-in color creates a custom scheme. Hover over a control to see details such as an icon's action, a shortcut that is missing from the control, or the full text of a clipped value. On Windows, file panels and the process table share a cache of Shell icons for executables and registered file types.
 
@@ -100,7 +102,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
-Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH panel sets the working directory when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
+Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
 
 The shell receives keystrokes while its input has focus. The status bar reminds you to click a file pane to use its shortcuts, or click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 

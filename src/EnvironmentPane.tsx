@@ -54,8 +54,16 @@ function ValueDialog({ scope, info, kind, name, close, changed }: {
   const [confirmReplacement, setConfirmReplacement] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const nameField = useRef<HTMLInputElement>(null);
+  const valueField = useRef<HTMLTextAreaElement>(null);
   const editable = kind !== "inspect";
   const pathReplacement = !!expected && pathName(draftName);
+
+  useLayoutEffect(() => {
+    if (kind === "edit" && loaded && document.activeElement === nameField.current) {
+      valueField.current?.focus();
+    }
+  }, [kind, loaded]);
 
   useEffect(() => {
     if (kind === "new") return;
@@ -105,35 +113,37 @@ function ValueDialog({ scope, info, kind, name, close, changed }: {
   return <Dialog title={t(kind === "inspect" ? "Inspect environment variable" : kind === "edit" ? "Edit environment variable" : "New environment variable")}
     onClose={busy ? undefined : close} helpTopic="terminal" footer={<>
       <Button onClick={close} disabled={busy}>{t(editable ? "Cancel" : "Close")}</Button>
-      {editable && <Button type="submit" form={form} disabled={!loaded || busy || !draftName || !!review ||
+      {editable && <Button className="primary" type="submit" form={form} disabled={!loaded || busy || !draftName || !!review ||
         pathReplacement && !replacePath || kind === "new" && !!expected && !confirmReplacement}>{t("Save")}</Button>}
     </>}>
-    <form id={form} className="environment-form" onSubmit={(event) => void submit(event)}>
+    <form id={form} className="dialog-body environment-form" onSubmit={(event) => void submit(event)}>
+      <div className="environment-field-row">
+        <label className="field">{t("Variable name")}<input ref={nameField} value={draftName} readOnly={kind !== "new" || busy}
+          data-initial-focus={editable || undefined}
+          onChange={(event) => {
+            setName(event.target.value);
+            setReview(null);
+            setExpected(null);
+            setConfirmReplacement(false);
+            setReplacePath(false);
+          }} /></label>
+        {info.expandable && loaded && <label className="field">{t("Value type")}<select value={valueKind} disabled={!editable || busy}
+          onChange={(event) => setKind(event.target.value as EnvironmentKind)}>
+          <option value="literal">{t("String")}</option><option value="expandable">{t("Expandable string")}</option>
+        </select></label>}
+      </div>
+      {loaded && <label className="field">{t("Value")}<textarea ref={valueField} spellCheck={false} value={draft} readOnly={!editable || busy}
+        onChange={(event) => setDraft(event.target.value)} /></label>}
       <Source scope={scope} info={info} value={expected} />
-      <label>{t("Variable name")}<input value={draftName} readOnly={kind !== "new" || busy}
-        data-initial-focus={kind === "new" || undefined}
-        onChange={(event) => {
-          setName(event.target.value);
-          setReview(null);
-          setExpected(null);
-          setConfirmReplacement(false);
-          setReplacePath(false);
-        }} /></label>
-      {loaded && <label>{t("Value")}<textarea spellCheck={false} value={draft} readOnly={!editable || busy}
-        data-initial-focus={kind === "edit" || undefined} onChange={(event) => setDraft(event.target.value)} /></label>}
-      {info.expandable && loaded && <label>{t("Value type")}<select value={valueKind} disabled={!editable || busy}
-        onChange={(event) => setKind(event.target.value as EnvironmentKind)}>
-        <option value="literal">{t("String")}</option><option value="expandable">{t("Expandable string")}</option>
-      </select></label>}
       {review && <div className="environment-review">
-        <label>{t("Current saved value")}<textarea readOnly value={review.value} /></label>
+        <label className="field">{t("Current saved value")}<textarea readOnly value={review.value} /></label>
         <Button type="button" onClick={() => {
           setExpected(review); setReview(null); setConfirmReplacement(true); setError("");
         }}>{t("Use current definition for review")}</Button>
       </div>}
       {pathReplacement && editable && <label className="environment-check"><input type="checkbox" checked={replacePath}
         onChange={(event) => setReplacePath(event.target.checked)} />{t("Replace the entire destination PATH definition.")}</label>}
-      {error && <p role="alert">{error}</p>}
+      {error && <p className="dialog-error" role="alert">{error}</p>}
       {!loaded && !error && <p role="status">{t("Loading environment variable…")}</p>}
     </form>
   </Dialog>;

@@ -164,6 +164,10 @@ function disconnect(place: NetworkPlace) {
   void close(place.id).catch(() => {});
 }
 
+function swapSides<T>(panes: Record<Side, T>): Record<Side, T> {
+  return { left: panes.right, right: panes.left };
+}
+
 export default function App({ initialPreferences, portableUpdateError, portableSettingsError }: {
   initialPreferences: Preferences;
   portableUpdateError?: string | null;
@@ -183,8 +187,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
   const [spaceAnalyzer, setSpaceAnalyzer] = useState<{ side: Side; place: SpacePlace } | null>(null);
-  const [gitView, setGitView] = useState<{ side: Side; path: string } | null>(null);
+  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
+  const [swappedPanes, setSwappedPanes] = useState(false);
   const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
   const [environmentRevision, setEnvironmentRevision] = useState(0);
   const spaceSide = spaceAnalyzer?.side;
@@ -237,7 +242,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
-  const pendingListings = useRef<Partial<Record<Side, AbortController>>>({});
+  const pendingListings = useRef<Partial<Record<Side, { controller: AbortController; background: boolean }>>>({});
+  const terminalListings = useRef<Partial<Record<Side, number>>>({});
   const nextSession = useRef(0);
   const measureId = useRef(0);
   const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
@@ -253,7 +259,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const pane = panes[active];
   const catalog = pane.place?.kind === "connections" ? pane.place : null;
   const other = panes[opposite(active)];
-  const canSwapPanes = !showingEnvironment && !gitView && !previewSide && !spaceSide && !panes.left.loading && !panes.right.loading && !busy;
+  const panesAvailable = !panelsHidden && activeDocument === null;
+  const canSwapPanes = panesAvailable && (gitView !== null || !panes.left.loading && !panes.right.loading && !busy);
   const showingSortMenu = modal?.kind === "sortMenu" ? modal.side : undefined;
   const leftSort = useFileSortMetadata(panes.left, preferences.sortSettings, showingSortMenu === "left");
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
@@ -382,20 +389,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   const invalidateListing = useCallback((side: Side) => {
     ++request.current[side];
-    pendingListings.current[side]?.abort();
+    pendingListings.current[side]?.controller.abort();
     delete pendingListings.current[side];
     return request.current[side];
   }, []);
 
-  const beginListing = useCallback((side: Side) => {
+  const beginListing = useCallback((side: Side, background = false) => {
     const ticket = invalidateListing(side);
     const controller = new AbortController();
-    pendingListings.current[side] = controller;
+    pendingListings.current[side] = { controller, background };
     return { ticket, signal: controller.signal };
   }, [invalidateListing]);
 
-  function cancelLoading(side: Side) {
-    if (!latest.current[side].loading) return false;
+  function cancelLoading(side: Side, pending = latest.current[side].loading) {
+    if (!pending) return false;
     const addressRevision = invalidateListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined, addressRevision }));
     return true;
@@ -414,7 +421,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (background && (pendingListings.current[side] || latest.current[side].sudoListing ||
         (dialog?.kind === "smb" && dialog.side === side && dialog.navigation))) return false;
     if (action !== "refresh" && !background) cancelScan(side);
-    const { ticket, signal } = beginListing(side);
+    const { ticket, signal } = beginListing(side, background);
     if (!background) updatePane(side, (pane) => ({
       ...pane, loading: true, loadingPath: placePath(place), error: "", elevationPath: undefined,
       deniedSshListing: elevated ? pane.deniedSshListing : undefined,
@@ -931,10 +938,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function closeGitView() {
     if (!gitView) return;
-    const { side } = gitView;
+    const { source } = gitView;
     setGitView(null);
-    setActive(side);
-    requestAnimationFrame(() => focus(side));
+    setActive(source);
+    requestAnimationFrame(() => focus(source));
   }
 
   function showEnvironment(side: Side, mode: EnvironmentMode | null) {
@@ -1561,6 +1568,31 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return session;
   }
 
+  function followShellDirectory(session: TerminalSession, path: string) {
+    if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active]) return;
+    const current = latest.current[active];
+    const place = current.place;
+    if (!place || (session.kind === "local" ? place.kind !== "local" :
+      place.kind !== "ssh" || place.id !== session.connection)) return;
+
+    const fromShell = terminalListings.current[active] === request.current[active];
+    const pending = pendingListings.current[active];
+    if (pending && !pending.background && !fromShell) return;
+    const absolute = session.kind === "local" && windowsClient ? /^[a-z]:[\\/]|^[\\/]{2}[^\\/]/i.test(path) : path.startsWith("/");
+    if (!absolute) return;
+    if (path === placePath(place)) {
+      if (fromShell && pending) cancelLoading(active, true);
+      return;
+    }
+    const destination = place.kind === "ssh" ? { ...place, segments: path.split("/").filter(Boolean) } : filesystemPlace(path);
+    const listing = load(active, destination);
+    const ticket = request.current[active];
+    terminalListings.current[active] = ticket;
+    void listing.finally(() => {
+      if (terminalListings.current[active] === ticket) delete terminalListings.current[active];
+    });
+  }
+
   const followTerminal = useEffectEvent(() => { openTerminal(false); });
   useEffect(() => {
     if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
@@ -1719,10 +1751,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     scans.current[active] = id;
     const names = measureEntries.map(({ name }) => name);
     updatePane(active, (pane) => ({ ...pane, measuring: names }));
+    const measuringSide = (): Side | undefined =>
+      scans.current.left === id ? "left" : scans.current.right === id ? "right" : undefined;
     const output = new Channel<SizeResult>();
     output.onmessage = (result) => {
-      if (scans.current[active] !== id) return;
-      updatePane(active, (pane) => pane.measuring.includes(result.name) ? ({
+      const side = measuringSide();
+      if (!side) return;
+      updatePane(side, (pane) => pane.measuring.includes(result.name) ? ({
         ...pane, sizes: new Map(pane.sizes).set(result.name, result),
         measuring: pane.measuring.filter((name) => name !== result.name),
       }) : pane);
@@ -1730,12 +1765,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const source = ftp ? { kind: "ftp" as const, connection: ftp.id, segments: ftp.segments }
       : { kind: "local" as const, directory: local!.path };
     void api.measureFolders(id, source, names, output).catch((error: unknown) => {
-      if (scans.current[active] === id) setStatus({ text: describeError(error), error: true });
+      if (measuringSide()) setStatus({ text: describeError(error), error: true });
     }).finally(() => {
       output.onmessage = () => {};
-      if (scans.current[active] === id) {
-        scans.current[active] = null;
-        updatePane(active, (pane) => ({ ...pane, measuring: [] }));
+      const side = measuringSide();
+      if (side) {
+        scans.current[side] = null;
+        updatePane(side, (pane) => ({ ...pane, measuring: [] }));
       }
     });
   }
@@ -1753,7 +1789,41 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }));
   }
 
+  function swapPanes() {
+    if (!canSwapPanes) return;
+    if (gitView) {
+      setGitView({ ...gitView, side: opposite(gitView.side) });
+      return;
+    }
+    const sides = ["left", "right"] as const;
+    if (sides.some((side) => pendingListings.current[side] && !pendingListings.current[side]?.background)) return;
+    for (const side of sides) if (pendingListings.current[side]) invalidateListing(side);
+
+    const next = opposite(active);
+    const focused = document.activeElement;
+    const movedFocus = focused instanceof HTMLElement && focused.closest(".workspace .pane") ? focused : null;
+    setSwappedPanes((swapped) => !swapped);
+    setPanes(swapSides);
+    setProcessPanels(swapSides);
+    setEnvironmentPanels(swapSides);
+    setQuickViewSource((side) => side === null ? null : opposite(side));
+    setSpaceAnalyzer((analyzer) => analyzer && { ...analyzer, side: opposite(analyzer.side) });
+    setRowRename((rename) => rename && { ...rename, side: opposite(rename.side) });
+    connected.current = swapSides(connected.current);
+    failedFtp.current = { left: failedFtp.current.right, right: failedFtp.current.left };
+    selectionAnchor.current = swapSides(selectionAnchor.current);
+    scans.current = swapSides(scans.current);
+    setActive(opposite(focusedSide));
+    const id = next + (environmentActive ? "-environment" : "-files");
+    requestAnimationFrame(() =>
+      (movedFocus?.isConnected ? movedFocus : document.getElementById(id))?.focus({ preventScroll: true }));
+  }
+
   function perform(command: Command, groupStep = 0) {
+    if (command === "swap") {
+      swapPanes();
+      return;
+    }
     if (command === "environmentVariables") {
       if (panesAvailable && !gitView && !spaceSide) showEnvironment(active, environmentPanels[active] ? null : "root");
       return;
@@ -1767,7 +1837,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           if (pendingListings.current[side] && !panes[side].loading) invalidateListing(side);
         }
         setQuickViewSource(null);
-        setGitView({ side: active, path: local.path });
+        setGitView({ side: active, source: active, path: local.path });
       }
       return;
     }
@@ -1872,18 +1942,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         if (document.activeElement === commandInput.current) setActive(opposite(active));
         else focus(opposite(active));
         break;
-      case "swap": {
-        if (!canSwapPanes || pendingListings.current.left || pendingListings.current.right) break;
-        cancelScan("left");
-        cancelScan("right");
-        setPanes((current) => ({ left: current.right, right: current.left }));
-        setProcessPanels((current) => ({ left: current.right, right: current.left }));
-        connected.current = { left: connected.current.right, right: connected.current.left };
-        failedFtp.current = { left: failedFtp.current.right, right: failedFtp.current.left };
-        selectionAnchor.current = { left: selectionAnchor.current.right, right: selectionAnchor.current.left };
-        focus(opposite(active));
-        break;
-      }
       case "address": {
         document.getElementById(`${active}-path`)?.dispatchEvent(new Event("dirlume-edit-path"));
         break;
@@ -2058,6 +2116,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       bindingMatches(shortcuts[command], shortcut)) ?? (["hidden", "attributes", "copyFullPath"] as const).find((command) =>
       commands[command].key === physical && shortcuts[command].includes(physical));
     if (activeDocument !== null) return;
+    if (command === "swap") {
+      if (canSwapPanes) {
+        event.preventDefault();
+        if (!event.repeat) perform(command);
+      }
+      return;
+    }
     if (environmentActive) {
       const fromEnvironmentList = target.id === active + "-environment";
       if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft"].includes(command) ||
@@ -2133,7 +2198,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
-  const panesAvailable = !panelsHidden && activeDocument === null;
   const filesAvailable = panesAvailable && !gitView && !environmentActive && !processPanels[active] && !pane.loading;
   const canToggleQuickView = panesAvailable && !showingEnvironment && !gitView && !spaceSide &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
@@ -2286,7 +2350,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <main className="workspace" hidden={panelsHidden}
         style={{ "--left-pane-width": `${split}fr`, "--right-pane-width": `${100 - split}fr` } as CSSProperties}>
         {(["left", "right"] as const).map((side) => (
-          <Pane key={side} side={side} active={active === side} covered={showingGit || !!environmentPanels[side] || side === previewSide || side === spaceSide} layout={preferences.layout} showHidden={preferences.hidden}
+          <Pane key={swappedPanes ? opposite(side) : side} side={side}
+            active={active === side} covered={showingGit || !!environmentPanels[side] || side === previewSide || side === spaceSide}
+            layout={preferences.layout} showHidden={preferences.hidden}
             pane={panes[side]} entries={entries[side]} locations={locations}
             preserveScroll={showingGit || !!environmentPanels[side] || side === spaceSide}
             onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
@@ -2346,7 +2412,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         ))}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
-          return mode && <Suspense key={side} fallback={<section className={"pane environment-pane environment-" + side}>
+          return mode && <Suspense key={swappedPanes ? opposite(side) : side} fallback={<section className={"pane environment-pane environment-" + side}>
             <p className="pane-empty" role="status">{t("Loading environment variables…")}</p>
           </section>}>
             <EnvironmentPane side={side} active={active === side} mode={mode} oppositeMode={environmentPanels[opposite(side)]}
@@ -2364,7 +2430,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {spaceAnalyzer && <Suspense fallback={<section className={"pane space-analyzer space-analyzer-" + spaceAnalyzer.side}>
           <p className="pane-empty" role="status">{t("Scanning…")}</p>
         </section>}>
-          <SpaceAnalyzer key={spaceAnalyzer.side} side={spaceAnalyzer.side} place={spaceAnalyzer.place}
+          <SpaceAnalyzer key={placePath(spaceAnalyzer.place)} side={spaceAnalyzer.side} place={spaceAnalyzer.place}
             resolvePlace={resolveSpacePlace} onClose={closeSpaceAnalyzer}
             onReveal={(place, reveal) => revealSpace(spaceAnalyzer.side, place, reveal)} />
         </Suspense>}
@@ -2405,7 +2471,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {documents.map(({ id, file, editing, position, back, forward }) => (
           <TextWindow key={JSON.stringify([id, placePath(file.place), file.name])}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
-            viewerContentWidth={preferences.viewerContentWidth} colors={scheme?.colors}
+            viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
+            colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
@@ -2445,7 +2512,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
             }))}
-            onCommandSubmitted={recordCommand} onClose={() => { dropTerminal(key); showCommandLine(); }} />
+            onCommandSubmitted={recordCommand} onDirectoryChange={(path) => followShellDirectory(session, path)}
+            onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
       </Suspense>
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
@@ -2704,7 +2772,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           void openSavedConnection(modal.side, modal.profile, modal.verification);
         }} />}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
-        previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} onClose={() => setModal(null)} />}
+        previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap} onClose={() => setModal(null)} />}
       {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {

@@ -128,6 +128,8 @@ export async function testCompareLayouts(page, root) {
   assert.equal(await first.count(), 1);
   assert.deepEqual(await first.locator(".diff-number").allTextContents(), ["1", "1"]);
   assert.deepEqual(await active.locator(".diff-text").allTextContents(), ["switch = 100;", longLine, "switch = 999;"]);
+  await list.press("Control+u");
+  assert.deepEqual(await list.locator(".comparison-head span[data-tooltip]").allTextContents(), ["original.txt", "revised.txt"]);
   await list.press("F8");
   assert.equal(await active.getAttribute("data-change"), "2");
   await list.press("F7");
@@ -160,12 +162,25 @@ export async function testCompareLayouts(page, root) {
   await row("right", "revised.txt").click();
   window = await compare();
   dialog = currentDialog();
-  await dialog.getByRole("button", { name: "Apply to right", exact: true }).click();
+  list = differences();
+  await layout().selectOption("side-by-side");
+  await list.press("Control+u");
+  assert.deepEqual(await list.locator(".comparison-head span[data-tooltip]").allTextContents(), ["revised.txt", "original.txt"]);
+  assert.deepEqual(await list.locator('[data-change="1"] mark').allTextContents(), ["999", "100"]);
+  await dialog.getByRole("button", { name: "Apply to left", exact: true }).click();
   await dialog.getByRole("checkbox", { name: "Edit files", exact: true }).check();
-  for (const [side, text] of [["Left", "left edit"], ["Right", "right edit"]]) {
+  for (const [side, text] of [["Left", "right edit"], ["Right", "left edit"]]) {
     await dialog.getByRole("region", { name: `${side} file` }).locator(".cm-content").press("Control+End");
     await window.keyboard.insertText("\n" + text);
   }
+  await window.keyboard.press("Control+u");
+  const leftEditor = dialog.getByRole("region", { name: "Left file" });
+  const rightEditor = dialog.getByRole("region", { name: "Right file" });
+  await leftEditor.getByText("original.txt *", { exact: true }).waitFor();
+  await leftEditor.getByText("left edit", { exact: true }).waitFor();
+  await rightEditor.getByText("revised.txt *", { exact: true }).waitFor();
+  await rightEditor.getByText("right edit", { exact: true }).waitFor();
+  await window.waitForFunction(() => document.activeElement?.closest(".comparison-editor")?.getAttribute("aria-label") === "Left file");
   await window.keyboard.press("Escape");
   const save = window.getByRole("dialog", { name: "Unsaved changes", exact: true });
   const rightSave = save.getByRole("group", { name: /^Right file/ });
@@ -176,5 +191,5 @@ export async function testCompareLayouts(page, root) {
   assert.equal(await readFile(join(left, "original.txt"), "utf8"), original + "\nleft edit");
   assert.equal(await readFile(join(right, "revised.txt"), "utf8"), revised);
   assert.equal(await readFile(copy, "utf8"), revised.replace("switch = 999;", "switch = 100;\n" + longLine) + "\nright edit");
-  console.log("Verified applying a comparison change, editing both sides, overwriting one original, and saving the other side to a new file.");
+  console.log("Verified comparison pane swaps, merge direction, unsaved edit and focus preservation, and correct save targets.");
 }

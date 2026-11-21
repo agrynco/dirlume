@@ -321,6 +321,58 @@ pub async fn close_terminal(id: u32, state: State<'_, Terminals>) -> Result<()> 
     .await
 }
 
+#[cfg(all(test, unix))]
+#[test]
+fn reports_directory_changes_at_the_unix_shell_prompt() {
+    use std::process::{Command, Stdio};
+
+    let (shell, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("/bin/zsh", &["-f", "-i"])
+    } else {
+        ("/bin/bash", &["--noprofile", "--norc", "-i"])
+    };
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().canonicalize().unwrap();
+    let next = root.join("test directory");
+    std::fs::create_dir(&next).unwrap();
+    let token = "Dirlume-directory-fixture";
+    let mut child = Command::new(shell)
+        .args(args)
+        .current_dir(&root)
+        .env("DIRLUME_PROMPT_TOKEN", token)
+        .env("HISTFILE", "/dev/null")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    assert!(install_prompt(shell.as_ref(), &mut stdin).unwrap());
+    writeln!(stdin, "cd -- 'test directory'").unwrap();
+    writeln!(stdin, "cd -- 'missing directory'").unwrap();
+    writeln!(stdin, "exit 0").unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let prompt = format!("\x1b]2;{token}:0:");
+    let directories: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .split(&prompt)
+        .skip(1)
+        .map(|marker| {
+            let encoded = marker.split_once('\x07').unwrap().0;
+            String::from_utf8(STANDARD.decode(encoded).unwrap()).unwrap()
+        })
+        .collect();
+    assert_eq!(
+        directories,
+        [
+            root.to_string_lossy().into_owned(),
+            next.to_string_lossy().into_owned(),
+            next.to_string_lossy().into_owned(),
+        ]
+    );
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -330,8 +382,9 @@ mod tests {
     };
     use tauri::ipc::InvokeResponseBody;
 
-    #[test]
-    fn reports_powershell_submission_from_the_real_pty() {
+    const PROMPT_TOKEN: &str = "Dirlume-terminal-fixture";
+
+    fn open_fixture(directory: &str) -> (Arc<Mutex<Terminal>>, mpsc::Receiver<Vec<u8>>) {
         let (send, receive) = mpsc::channel();
         let output = Channel::new(move |body| {
             if let InvokeResponseBody::Json(body) = body {
@@ -342,12 +395,11 @@ mod tests {
             }
             Ok(())
         });
-        let fixture = tempfile::tempdir().unwrap();
         let (terminal, _) = create(
             OpenTerminal {
                 id: 1,
-                directory: local::display_path(fixture.path()).unwrap(),
-                prompt_token: "Dirlume-terminal-fixture".to_owned(),
+                directory: directory.to_owned(),
+                prompt_token: PROMPT_TOKEN.to_owned(),
                 rows: 25,
                 cols: 120,
                 refresh_environment: false,
@@ -356,36 +408,65 @@ mod tests {
             output,
         )
         .unwrap();
-        let read_until = |marker: &str, found: &dyn Fn(&str) -> bool| {
-            let expires = Instant::now() + Duration::from_secs(12);
-            let mut bytes = Vec::new();
-            let mut answered = 0;
-            while let Ok(chunk) =
-                receive.recv_timeout(expires.saturating_duration_since(Instant::now()))
-            {
-                bytes.extend(chunk);
-                let output = String::from_utf8_lossy(&bytes);
-                let reports = output.matches("\x1b[6n").count();
-                if reports > answered {
+        (terminal, receive)
+    }
+
+    fn read_until(
+        terminal: &Arc<Mutex<Terminal>>,
+        receive: &mpsc::Receiver<Vec<u8>>,
+        found: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        let expires = Instant::now() + Duration::from_secs(15);
+        let mut bytes = Vec::new();
+        let mut responses = [
+            ("\x1b[6n", b"\x1b[1;1R".as_slice(), 0),
+            ("\x1b[c", b"\x1b[?1;2c".as_slice(), 0),
+        ];
+        while let Ok(chunk) =
+            receive.recv_timeout(expires.saturating_duration_since(Instant::now()))
+        {
+            bytes.extend(chunk);
+            let output = String::from_utf8_lossy(&bytes);
+            for (query, reply, answered) in &mut responses {
+                let requests = output.matches(*query).count();
+                if requests > *answered {
                     let mut terminal = terminal.lock().unwrap();
-                    for _ in answered..reports {
-                        terminal.writer.write_all(b"\x1b[1;1R").unwrap();
+                    for _ in *answered..requests {
+                        terminal.writer.write_all(reply).unwrap();
                     }
                     terminal.writer.flush().unwrap();
-                    answered = reports;
-                }
-                if found(&output) {
-                    return;
+                    *answered = requests;
                 }
             }
-            panic!(
-                "Prompt or history marker missing: {marker}; received: {:?}",
-                String::from_utf8_lossy(&bytes[..bytes.len().min(2200)])
+            if found(&output) {
+                return None;
+            }
+        }
+        Some(String::from_utf8_lossy(&bytes[..bytes.len().min(2200)]).into_owned())
+    }
+
+    #[test]
+    fn reports_powershell_submission_from_the_real_pty() {
+        let fixture = tempfile::tempdir().unwrap();
+        let directory = local::display_path(fixture.path()).unwrap();
+        let initial_prompt = format!("{PROMPT_TOKEN}:1:");
+        let mut attempt = 1;
+        let (terminal, receive) = loop {
+            let (terminal, receive) = open_fixture(&directory);
+            let Some(output) = read_until(&terminal, &receive, |output| {
+                output.contains(&initial_prompt)
+            }) else {
+                break (terminal, receive);
+            };
+            // A hosted Windows runner can stall while ConPTY negotiates its initial cursor position.
+            // Retry only the startup handshake. The submission assertion still requires a live shell.
+            assert!(
+                attempt < 3 && output.contains("\x1b[6n"),
+                "Initial PowerShell prompt missing on attempt {attempt}; received: {output:?}"
             );
+            eprintln!("Retrying ConPTY startup after attempt {attempt}: {output:?}");
+            attempt += 1;
         };
-        read_until("initial prompt", &|output| {
-            output.contains("Dirlume-terminal-fixture:1:")
-        });
         let submitted = "Write-Output 'terminal-history-fixture'";
         {
             let mut terminal = terminal.lock().unwrap();
@@ -396,11 +477,15 @@ mod tests {
         let submitted_marker = format!("Dirlume-terminal-fixture:command:1:{command}\x07");
         let prompt_marker = format!(":1:{command}\x07");
         // ConPTY can coalesce the submission and prompt title updates for a fast command.
-        read_until("submitted command", &|output| {
+        let missed = read_until(&terminal, &receive, |output| {
             output.contains(&submitted_marker)
                 || output.split("\x1b]").any(|title| {
                     title.contains("Dirlume-terminal-fixture:2:") && title.contains(&prompt_marker)
                 })
         });
+        assert!(
+            missed.is_none(),
+            "Submitted command marker missing: {missed:?}"
+        );
     }
 }
