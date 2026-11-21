@@ -7,7 +7,7 @@ import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { X } from "lucide-react";
 import { FileContextMenu } from "./FileContextMenu";
-import { api, describeError, windowsClient, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
+import { api, describeError, windowsClient, type ShellCompletionEnvironment, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
 import { bindingMatches, eventShortcut } from "./preferences";
@@ -144,6 +144,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let installedPrompt = false;
     let editable: TerminalDraft | null = null;
     let sshSearchPath: string | null = null;
+    let shellEnvironment: ShellCompletionEnvironment | undefined;
     let editorSupported = false;
     const sessionHistory: string[] = [];
     let revision = 0;
@@ -221,7 +222,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         (windows ? line.toLowerCase() : line).startsWith(prefix)))].slice(0, 5) : [];
       const completion = remote
         ? sshSearchPath === null ? Promise.resolve(null) : api.completeSshTerminal(session.id, current.text, current.caret, directory, sshSearchPath)
-        : api.completeCommand(current.text, current.caret, directory, session.refreshEnvironment);
+        : api.completeCommand(current.text, current.caret, directory, session.refreshEnvironment, shellEnvironment);
       const batch = await completion.catch(() => null);
       requesting = false;
       if (requested === revision && pasteSettings.current.visible && !closed && !stopped) {
@@ -240,10 +241,14 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         term.modes.applicationCursorKeysMode, term.modes.bracketedPasteMode);
       if (replacement) {
         editable = replacement.draft;
-        send(replacement.data, false);
+        const trailingQuote = windows && option.directory && option.text.startsWith("'") && option.text.endsWith("'");
+        const arrow = term.modes.applicationCursorKeysMode ? "\x1bOD" : "\x1b[D";
+        if (trailingQuote) editable = { ...editable, caret: editable.caret - 1 };
+        send(replacement.data + (trailingQuote ? arrow : ""), false);
       }
       hideSuggestions();
       term.focus();
+      if (replacement && windows && option.directory) completionTimer = window.setTimeout(() => void completeDraft(), 160);
     };
     dismissSuggestions.current = hideSuggestions;
     term.textarea?.addEventListener("blur", hideSuggestions);
@@ -336,6 +341,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         currentDirectory = directory ? decode(directory) : null;
         editorSupported = windows ? editor === "powershell" : editor === "bash" || editor === "zsh";
         sshSearchPath = remote && searchPath !== undefined ? decode(searchPath) : null;
+        if (windows) shellEnvironment = searchPath ? JSON.parse(decode(searchPath)) as ShellCompletionEnvironment : undefined;
       } catch { return true; }
       setShellDirectory(currentDirectory ?? "");
       // ConPTY can deliver the prompt redraw for a canceled edit after the next keystroke.

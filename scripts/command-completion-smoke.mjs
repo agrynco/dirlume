@@ -1,14 +1,48 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { basename, join, parse } from "node:path";
+
+async function makeDockerFixture(directory) {
+  const folder = join(directory, "docker-fixture");
+  await mkdir(folder);
+  const source = join(folder, "Program.cs");
+  await writeFile(source, `using System;
+using System.IO;
+using System.Threading;
+class Program {
+  static int Main(string[] args) {
+    if (args.Length != 6 || String.Join(" ", args, 0, 5) != "container ls --all --no-trunc --format" ||
+        args[5] != "{\\"ID\\":{{json .ID}},\\"Names\\":{{json .Names}}}") return 2;
+    string context = Environment.GetEnvironmentVariable("DOCKER_CONTEXT");
+    if (context == "fixture-offline" || context == "fixture-slow") {
+      string root = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+      File.WriteAllText(Path.Combine(root, context + ".seen"), "1");
+      if (context == "fixture-offline") return 1;
+      Thread.Sleep(650);
+    } else if (context != "fixture-active") return 2;
+    Console.WriteLine("{\\"ID\\":\\"aabbccddeeff0011223344556677889900112233445566778899aabbccddeeff\\",\\"Names\\":\\"web-api\\"}");
+    Console.WriteLine("{\\"ID\\":\\"bbccddeeff0011223344556677889900112233445566778899aabbccddeeff00\\",\\"Names\\":\\"worker\\"}");
+    return 0;
+}
+}`);
+  const target = join(folder, "docker.exe");
+  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "Add-Type -Path $env:DIRLUME_TEST_DOCKER_SOURCE -OutputAssembly $env:DIRLUME_TEST_DOCKER_TARGET -OutputType ConsoleApplication"], {
+    windowsHide: true, stdio: "pipe", env: { ...process.env, DIRLUME_TEST_DOCKER_SOURCE: source, DIRLUME_TEST_DOCKER_TARGET: target },
+  });
+  return folder;
+}
 
 export async function testCommandCompletion(page, root) {
   const cwd = join(root, "completion");
   await mkdir(cwd);
-  await mkdir(join(cwd, "completion folder"));
+  const childFolder = join(cwd, "completion folder", "Child Folder");
+  await mkdir(childFolder, { recursive: true });
+  await writeFile(join(cwd, "completion folder", "Child File.txt"), "");
   await writeFile(join(cwd, "completion file.txt"), "");
+  const docker = await makeDockerFixture(root);
   const git = (...args) => execFileSync("git", args, { cwd, stdio: "ignore", windowsHide: true });
   git("init", "-q");
   git("-c", "user.name=Dirlume", "-c", "user.email=dirlume@example.invalid",
@@ -109,6 +143,80 @@ export async function testCommandCompletion(page, root) {
   await terminalOptions.getByRole("option", { name: "checkout", exact: true }).click();
   await screen.getByText(/git checkout --quiet/).waitFor();
   await terminalInput.press("Control+c");
+  const terminalOption = (name) => terminalOptions.getByRole("option", { name, exact: true });
+  const atPrompt = () => page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
+  const cancel = async () => { await terminalInput.press("Control+c"); await atPrompt(); };
+  await atPrompt();
+  const drive = parse(process.env.SystemRoot ?? cwd).root;
+  const knownRootFolder = basename(process.env.SystemRoot ?? cwd.split(/\\/).slice(0, 2).join("\\"));
+  const rootFolder = (await readdir(drive)).find((name) => name.toLowerCase() === knownRootFolder.toLowerCase());
+  assert.ok(rootFolder);
+  await terminalInput.pressSequentially("cd " + drive);
+  await terminalOption(rootFolder).waitFor({ timeout: 15000 });
+  await terminalOption(rootFolder).locator("svg").waitFor();
+  await terminalInput.pressSequentially(rootFolder.slice(0, 3));
+  await terminalOption(rootFolder).waitFor();
+  assert.ok((await terminalOptions.getByRole("option").allTextContents()).every((name) => name.toLowerCase().startsWith(rootFolder.slice(0, 3).toLowerCase())));
+  await cancel();
+
+  await terminalInput.pressSequentially("cd comp");
+  await terminalOption("completion folder").click();
+  await terminalOption("Child Folder").waitFor();
+  assert.equal(await terminalOption("Child File.txt").count(), 0);
+  await terminalInput.pressSequentially("Child");
+  await terminalOption("Child Folder").waitFor();
+  await terminalInput.press("ArrowDown");
+  await terminalInput.press("Enter");
+  await terminalOptions.waitFor({ state: "hidden" });
+  await terminalInput.press("Enter");
+  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, childFolder);
+
+  const remember = async (line) => {
+    await terminalInput.pressSequentially(line);
+    await terminalInput.press("Enter");
+    await page.waitForFunction((expected) => JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]")
+      .some(({ text }) => text === expected), line);
+    await atPrompt();
+  };
+  await remember(`$env:Path = '${docker.replaceAll("'", "''")};' + $env:Path; $env:DOCKER_CONTEXT = 'fixture-active'`);
+  await terminalInput.pressSequentially("docker cont");
+  await terminalOption("container").waitFor();
+  await terminalInput.press("Tab");
+  await terminalInput.press("Space");
+  await terminalOption("logs").waitFor();
+  await terminalOption("inspect").waitFor();
+  await terminalInput.pressSequentially("lo");
+  await terminalOption("logs").waitFor();
+  assert.equal(await terminalOption("inspect").count(), 0);
+  await terminalInput.press("ArrowDown");
+  await terminalInput.press("Enter");
+  await terminalInput.pressSequentially(" web");
+  await terminalOption("web-api").click();
+  await terminalOptions.waitFor({ state: "hidden" });
+  await screen.getByText(/docker container logs web-api/).waitFor();
+  await cancel();
+
+  await terminalInput.pressSequentially("docker container inspect aabb");
+  await terminalOption(/^aabbccddeeff/).waitFor();
+  await terminalInput.press("Escape");
+  await terminalOptions.waitFor({ state: "hidden" });
+  await cancel();
+  await remember("$env:DOCKER_CONTEXT = 'fixture-offline'");
+  await terminalInput.pressSequentially("docker container logs web");
+  const dockerObserved = (name) => page.waitForFunction(async ({ docker, name }) =>
+    (await window.__TAURI_INTERNALS__.invoke("list_directory", { path: docker })).entries.some((entry) => entry.name === name),
+    { docker, name });
+  await dockerObserved("fixture-offline.seen");
+  await terminalOptions.waitFor({ state: "hidden" });
+  await cancel();
+  await remember("$env:DOCKER_CONTEXT = 'fixture-slow'");
+  await terminalInput.pressSequentially("docker container logs web");
+  await dockerObserved("fixture-slow.seen");
+  await cancel();
+  await terminalInput.pressSequentially("cd ..\\..\\comp");
+  await terminalOption("completion folder").waitFor();
+  assert.equal(await terminalOption("web-api").count(), 0);
+  await cancel();
   await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
-  console.log("Verified Windows terminal completion examples, dismissal, and replacement with the caret inside the draft.");
+  console.log("Verified Windows terminal completion for drive roots, nested folders, Docker commands and active-context containers.");
 }

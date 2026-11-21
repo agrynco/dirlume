@@ -1,7 +1,7 @@
 {
   "version": "0.1.19",
   "highlights": [
-    "Get command and path suggestions as you type in local and Dirlume SSH terminals.",
+    "Get command and path suggestions in local and Dirlume SSH terminals, including folders and Docker containers in PowerShell.",
     "Browse binaries in Quick View and recognize headers and embedded text in a scrollable character dump.",
     "Open images with F3, zoom around the pointer, and browse the visible images in the same tab.",
     "Rotate and crop local PNG and JPEG images with F4 and save the result as a copy.",
