@@ -472,6 +472,8 @@ export const api = {
     }, output }),
   completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean) =>
     invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment } }),
+  completeSshTerminal: (id: number, line: string, caret: number, directory: string, searchPath: string) =>
+    invoke<CommandCompletion>("complete_ssh_terminal", { id, request: { line, caret, directory, searchPath } }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),

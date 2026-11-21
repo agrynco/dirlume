@@ -241,6 +241,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const commandInput = useRef<HTMLTextAreaElement>(null);
   const [historyItems, setHistoryItems] = useState(readCommandHistory);
   const commandTexts = useMemo(() => historyItems.map(({ text }) => text), [historyItems]);
+  const localTerminalHistory = useMemo(() => historyItems.filter(({ source }) => source === "local").map(({ text }) => text), [historyItems]);
+  const commandLineHistory = useMemo(() => historyItems.filter(({ source }) => source !== "ssh").map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
   const startupError = portableUpdateError ?? portableSettingsError;
@@ -1779,10 +1781,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function recordCommand(text: string) {
+  function recordCommand(text: string, source: "local" | "ssh") {
     if (!text.trim()) return;
     const date = Date.now();
-    setHistoryItems((history) => [{ text, date }, ...history].slice(0, historyLimit));
+    setHistoryItems((history) => [{ text, date, source }, ...history].slice(0, historyLimit));
     historyIndex.current = -1;
   }
 
@@ -1799,7 +1801,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setPendingCommands((commands) => ({
       ...commands, [session.id]: [...(commands[session.id] ?? []), { command: commandLine, directory: placePath(terminalPlace) }],
     }));
-    recordCommand(commandLine);
+    recordCommand(commandLine, session.kind);
     setCommandLine("");
   }
 
@@ -2607,6 +2609,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
             visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
+            history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
             focusHint={preferences.showStatusBar ? undefined : terminalFocusHint}
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
@@ -2616,7 +2619,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
             }))}
-            onCommandSubmitted={recordCommand} onDirectoryChange={(path) => followShellDirectory(session, path)}
+            onCommandSubmitted={(text) => recordCommand(text, session.kind)} onDirectoryChange={(path) => followShellDirectory(session, path)}
             onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
       </Suspense>
@@ -2629,7 +2632,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </Button>
         <span data-tooltip={pane.place ? placePath(pane.place) : undefined}>{pane.place ? placePath(pane.place) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] ? null : local?.path ?? null}
-          history={commandTexts} refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
+          history={terminalPlace?.kind === "ssh" ? [] : commandLineHistory}
+          refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
       </form>
       <div className="actionbar-row" hidden={!showFileActions}>

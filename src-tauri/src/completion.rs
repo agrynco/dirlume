@@ -87,7 +87,6 @@ struct Context {
     prefix: String,
     index: usize,
     length: usize,
-    #[cfg(not(windows))]
     byte_caret: usize,
 }
 
@@ -126,8 +125,12 @@ fn unquote(word: &str, escape: char) -> String {
 }
 
 fn context(line: &str, caret: usize) -> Option<Context> {
+    shell_context(line, caret, cfg!(windows))
+}
+
+fn shell_context(line: &str, caret: usize, windows: bool) -> Option<Context> {
     let byte_caret = byte_at_utf16(line, caret)?;
-    let escape = if cfg!(windows) { '`' } else { '\\' };
+    let escape = if windows { '`' } else { '\\' };
     let mut words = Vec::new();
     let mut start = None;
     let mut quote = None;
@@ -176,7 +179,6 @@ fn context(line: &str, caret: usize) -> Option<Context> {
         prefix: unquote(&line[current.start..byte_caret], escape),
         index,
         length,
-        #[cfg(not(windows))]
         byte_caret,
     })
 }
@@ -190,22 +192,124 @@ fn starts_with(value: &str, prefix: &str) -> bool {
 }
 
 fn shell_word(value: &str) -> String {
-    if !(cfg!(windows) && value.starts_with('@'))
+    quote_word(value, cfg!(windows))
+}
+
+fn quote_word(value: &str, windows: bool) -> String {
+    if !(windows && value.starts_with('@'))
         && value.chars().all(|letter| {
             letter.is_alphanumeric()
                 || "_./-:+,=@%~".contains(letter)
-                || (cfg!(windows) && letter == '\\')
+                || (windows && letter == '\\')
         })
     {
         return value.to_owned();
     }
-    if cfg!(windows) {
+    if windows {
         return format!("'{}'", value.replace('\'', "''"));
     }
     if let Some(tail) = value.strip_prefix("~/") {
         return format!("~/'{}'", tail.replace('\'', "'\\''"));
     }
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCompletionRequest {
+    line: String,
+    caret: usize,
+    directory: String,
+    search_path: String,
+}
+
+#[tauri::command]
+pub async fn complete_ssh_terminal(
+    id: u32,
+    request: RemoteCompletionRequest,
+    terminals: State<'_, terminal::Terminals>,
+) -> Result<CompletionBatch> {
+    if request.line.len() > MAX_DRAFT
+        || request.line.contains(['\0', '\r', '\n'])
+        || !request.directory.starts_with('/')
+        || request.directory.len() > MAX_DRAFT
+        || request.directory.contains('\0')
+        || request.search_path.len() > MAX_DRAFT
+        || request.search_path.contains('\0')
+    {
+        return Ok(CompletionBatch::default());
+    }
+    let Some(context) = shell_context(&request.line, request.caret, false) else {
+        return Ok(CompletionBatch::default());
+    };
+    let terminal = terminals.remote(id)?;
+    let shell = include_str!("completion/bash.sh");
+    let fallback = include_str!("completion/ssh-paths.sh");
+    let directory_only = context
+        .words
+        .first()
+        .is_some_and(|word| matches!(word.as_str(), "cd" | "pushd"));
+    let parts = [
+        format!(
+            "CDPATH= cd -- {} || exit",
+            crate::ssh::quote(&request.directory)
+        ),
+        "unset ENV BASH_ENV".to_owned(),
+        format!("export PATH={}", crate::ssh::quote(&request.search_path)),
+        format!(
+            "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {}",
+            crate::ssh::quote(fallback),
+            context.byte_caret,
+            crate::ssh::quote(&request.line),
+            if directory_only { "directory" } else { "any" },
+            if request.line.contains(['$', '`']) {
+                "''".to_owned()
+            } else {
+                crate::ssh::quote(shell)
+            },
+            context
+                .words
+                .iter()
+                .chain(std::iter::once(&context.prefix))
+                .map(|word| crate::ssh::quote(word))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    ];
+    let output = terminal.complete(&parts.join("\n")).await?;
+    let mut seen = BTreeSet::new();
+    let matches = output
+        .split(|&byte| byte == 0)
+        .filter_map(|value| {
+            let (source, value) = value.split_first()?;
+            let value = std::str::from_utf8(value).ok()?;
+            let (label, trailing_space) = match source {
+                b'N' => value
+                    .strip_suffix(' ')
+                    .map_or((value, false), |label| (label, true)),
+                b'P' => (value, false),
+                _ => return None,
+            };
+            if label.is_empty() || label.chars().any(char::is_control) || !seen.insert(label) {
+                return None;
+            }
+            let mut text = quote_word(label, false);
+            if trailing_space {
+                text.push(' ');
+            }
+            Some(Suggestion {
+                label: label.to_owned(),
+                text,
+                directory: label.ends_with('/'),
+            })
+        })
+        .take(MAX_MATCHES)
+        .collect();
+    Ok(CompletionBatch {
+        index: context.index,
+        length: context.length,
+        matches,
+    })
 }
 
 fn paths(cwd: &Path, prefix: &str, directories_only: bool) -> Vec<Suggestion> {

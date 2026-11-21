@@ -2,8 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent
 import { api, windowsClient, type CommandCompletion } from "./api";
 import { t } from "./i18n";
 import { EditableDropdown } from "./EditableDropdown";
-
-type Option = { label: string; text: string; index: number; length: number; history?: boolean };
+import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
 
 export function CommandField({ input, draft, directory, history, refreshEnvironment, onChange }: {
   input: RefObject<HTMLTextAreaElement | null>;
@@ -46,17 +45,8 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   const recent = showHistory ? [...new Set(history)].slice(0, 30) : suggesting && caret === draft.length
     ? [...new Set(history.filter((line) => (windowsClient ? line.toLowerCase() : line).startsWith(prefix)))].slice(0, 5)
     : [];
-  const options: Option[] = recent.map((line) => ({ label: line, text: line, index: 0, length: draft.length, history: true }));
   const batch = suggesting && native?.query === query ? native.result : null;
-  if (batch && batch.index >= 0 && batch.length >= 0 && batch.index + batch.length <= draft.length) {
-    const seen = new Set(recent);
-    for (const { label, text } of batch.matches) {
-      const result = draft.slice(0, batch.index) + text + draft.slice(batch.index + batch.length);
-      if (!label || seen.has(result)) continue;
-      seen.add(result);
-      options.push({ label, text, index: batch.index, length: batch.length });
-    }
-  }
+  const options = commandSuggestions(draft, recent, batch);
   const open = showHistory || options.length > 0;
   const activeOption = options[selected];
 
@@ -84,7 +74,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     setSelected(-1);
   }
 
-  function choose(option: Option) {
+  function choose(option: CommandSuggestion) {
     setShowHistory(false);
     const value = draft.slice(0, option.index) + option.text + draft.slice(option.index + option.length);
     const next = option.index + option.text.length;
@@ -123,8 +113,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     if (!open || event.shiftKey) return;
     if (event.key === "Escape") dismiss();
     else if (!options.length) return;
-    else if (event.key === "ArrowDown") setSelected((selected + 1) % options.length);
-    else if (event.key === "ArrowUp") setSelected(selected < 0 ? options.length - 1 : (selected - 1 + options.length) % options.length);
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") setSelected(moveSuggestion(event.key, selected, options.length));
     else if (event.key === "Tab") choose(activeOption ?? options[0]);
     else if (event.key === "Enter" && activeOption) choose(activeOption);
     else return;
@@ -151,13 +140,6 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
         }}
         onKeyDown={keyDown} />
     </EditableDropdown>
-    {open && <div className="command-suggestions" role="listbox" id={id} aria-label={t("Command suggestions")}>
-      {options.map((option, index) => <div key={`${option.index}:${option.text}`} id={`${id}-${index}`}
-        role="option" aria-selected={index === selected} data-tooltip={option.label}
-        onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)}>
-        <span>{option.label}</span>{option.history && <small>{t("History")}</small>}
-      </div>)}
-      {!options.length && <div className="history-empty" role="status">{t("No previous entries.")}</div>}
-    </div>}
+    {open && <CommandSuggestions id={id} options={options} selected={selected} choose={choose} />}
   </div>;
 }

@@ -34,7 +34,7 @@ pub(crate) use terminal::{open_shell, RemoteTerminal};
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 

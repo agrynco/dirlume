@@ -57,16 +57,29 @@ function global:prompt {
         [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($location.ProviderPath))
     }
     $global:DirlumePromptCount++
-    [Console]::Title = '{0}:{1}:{2}:{3}:{4}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path, $global:DirlumeCommandCount, $global:DirlumeLatestCommand
+    $editor = if ($global:DirlumeTracksSubmissions) { 'powershell' }
+    [Console]::Title = '{0}:{1}:{2}:{3}:{4}:{5}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumePromptCount, $path, $global:DirlumeCommandCount, $global:DirlumeLatestCommand, $editor
     $text
 }
 "#;
 
-#[cfg(any(not(windows), test))]
-fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<bool> {
-    let marker = r#"printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')""#;
-    let init = match std::path::Path::new(shell).file_name().and_then(std::ffi::OsStr::to_str) {
-        Some("bash") => [
+pub(crate) fn unix_prompt(shell: &str, remote: bool) -> String {
+    let editor = if matches!(shell, "bash" | "zsh") {
+        shell
+    } else {
+        ""
+    };
+    let search_path = if remote {
+        r#" "$(printf '%s' "$PATH" | /usr/bin/base64 | /usr/bin/tr -d '\n')""#
+    } else {
+        ""
+    };
+    let marker = format!(
+        r#"printf '\033]2;%s:0:%s:::{editor}{}\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')"{search_path}"#,
+        if remote { ":%s" } else { "" }
+    );
+    match shell {
+        "bash" => [
             r#"__dirlume_history() { local command id pattern='^[[:blank:]]*([0-9]+)[ *] (.*)$';"#,
             r#"command=$(HISTTIMEFORMAT= builtin history 1; printf .); command=${command%.}; command=${command%$'\n'};"#,
             r#"if [[ ! $command =~ $pattern || -z ${BASH_REMATCH[2]} ]]; then return; fi;"#,
@@ -74,15 +87,25 @@ fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::R
             r#"local previous=${__dirlume_history_id-}; __dirlume_history_id=$id; [[ $1 != baseline && ${__dirlume_history_ready-} && $previous != "$id" && -o history ]] || return;"#,
             r#"printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$command" | base64 | tr -d '\n')"; };"#,
             r#"__dirlume_prompt() { local status=$?; __dirlume_history "$__dirlume_prompt_mode"; __dirlume_history_ready=1;"#,
-            marker,
+            &marker,
             r#"; return "$status"; };"#,
             r#"if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then __dirlume_prompt_mode=baseline; PS0='$(__dirlume_history submitted)'"${PS0-}"; else __dirlume_prompt_mode=prompt; fi;"#,
             r#"if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a '* ]]; then PROMPT_COMMAND+=(__dirlume_prompt); else PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__dirlume_prompt"; fi"#,
         ].join(" "),
-        Some("zsh") => r#"__dirlume_prompt() { printf '\033]2;%s:0:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')"; }; __dirlume_history() { printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$1" | base64 | tr -d '\n')"; }; precmd_functions+=(__dirlume_prompt); preexec_functions+=(__dirlume_history)"#.to_owned(),
-        Some("sh" | "dash" | "ksh") => format!("PS1='$(__dirlume_prompt)'\"$PS1\"; __dirlume_prompt() {{ {marker}; }}"),
-        _ => return Ok(false),
+        "zsh" => format!(r#"__dirlume_prompt() {{ {marker}; }}; __dirlume_history() {{ printf '\033]2;%s:command:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$1" | base64 | tr -d '\n')"; }}; precmd_functions+=(__dirlume_prompt); preexec_functions+=(__dirlume_history)"#),
+        _ => format!("PS1='$(__dirlume_prompt)'\"$PS1\"; __dirlume_prompt() {{ {marker}; }}"),
+    }
+}
+
+#[cfg(any(not(windows), test))]
+fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::Result<bool> {
+    let Some(shell @ ("bash" | "zsh" | "sh" | "dash" | "ksh")) = std::path::Path::new(shell)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+    else {
+        return Ok(false);
     };
+    let init = unix_prompt(shell, false);
     writeln!(writer, "{init}")?;
     writer.flush()?;
     Ok(true)
@@ -117,6 +140,13 @@ impl Terminals {
             .get(&id)
             .cloned()
             .ok_or_else(|| "This terminal session has closed.".to_owned())
+    }
+
+    pub(crate) fn remote(&self, id: u32) -> Result<Arc<ssh::RemoteTerminal>> {
+        match self.get(id)? {
+            SharedTerminal::Ssh(terminal) => Ok(terminal),
+            SharedTerminal::Local(_) => Err("This terminal is not an SSH session.".to_owned()),
+        }
     }
 }
 
@@ -359,7 +389,7 @@ fn reports_directory_changes_at_the_unix_shell_prompt() {
         .split(&prompt)
         .skip(1)
         .map(|marker| {
-            let encoded = marker.split_once('\x07').unwrap().0;
+            let encoded = marker.split_once(':').unwrap().0;
             String::from_utf8(STANDARD.decode(encoded).unwrap()).unwrap()
         })
         .collect();
@@ -475,7 +505,7 @@ mod tests {
         }
         let command = STANDARD.encode(submitted);
         let submitted_marker = format!("Dirlume-terminal-fixture:command:1:{command}\x07");
-        let prompt_marker = format!(":1:{command}\x07");
+        let prompt_marker = format!(":1:{command}:");
         // ConPTY can coalesce the submission and prompt title updates for a fast command.
         let missed = read_until(&terminal, &receive, |output| {
             output.contains(&submitted_marker)

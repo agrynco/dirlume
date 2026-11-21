@@ -187,7 +187,8 @@ while ($null -ne ($line = [Console]::ReadLine())) {
             $candidates = $candidates | Where-Object { $_.ResultType -notin 'ProviderItem','ProviderContainer' };
         }
         $items = @($candidates | Select-Object -First 100 | ForEach-Object {
-            @{ label = $_.ListItemText; text = $_.CompletionText; directory = ($_.ResultType -eq 'ProviderContainer') }
+            $label = if ($_.ResultType -eq 'ParameterName') { $_.CompletionText } else { $_.ListItemText };
+            @{ label = $label; text = $_.CompletionText; directory = ($_.ResultType -eq 'ProviderContainer') }
         });
         $reply = @{ index = $result.ReplacementIndex; length = $result.ReplacementLength; matches = $items };
         [Console]::WriteLine((ConvertTo-Json -InputObject $reply -Compress -Depth 4));

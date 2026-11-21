@@ -1021,6 +1021,11 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-suggestions [aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .command-suggestions [role="option"] span { color: inherit; max-width: none; }
 .command-suggestions small { flex: none; color: var(--muted); }
+.terminal-card .command-suggestions {
+  position: fixed; width: max-content; font: var(--terminal-size)/1.35 var(--terminal-font); color: var(--ink);
+  box-shadow: 0 4px 12px var(--overlay);
+}
+.terminal-card .command-suggestions [role="option"] span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(1turn); } }
 
