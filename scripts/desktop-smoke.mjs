@@ -1950,7 +1950,7 @@ try {
     await sampleForFonts.click();
     await page.keyboard.press(shortcut);
     assert.equal(await sampleSurface.evaluate((surface) => getComputedStyle(surface).fontSize), expected);
-    assert.equal(await actionBarDisplay(), "none");
+    await page.locator(".actionbar").waitFor({ state: "hidden" });
     await page.keyboard.press("F1");
     await page.getByRole("dialog", { name: "Help", exact: true })
       .getByRole("heading", { name: shortcut === "F3" ? "Viewer" : "Editor", exact: true }).waitFor();
