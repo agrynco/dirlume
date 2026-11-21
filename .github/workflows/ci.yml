@@ -146,6 +146,9 @@ jobs:
       - name: Verify current marked row colors and keyboard navigation
         if: github.event.action != 'closed'
         run: node scripts/marked-cursor-smoke.mjs
+      - name: Verify right-click selection and held context menus
+        if: github.event.action != 'closed'
+        run: node scripts/right-click-selection-smoke.mjs
       - name: Verify independent text surface appearance
         if: github.event.action != 'closed'
         run: node scripts/text-appearance-smoke.mjs

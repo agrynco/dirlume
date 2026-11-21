@@ -1,5 +1,7 @@
 // English message keys also serve as the default text. The translations are Ukrainian and Russian.
 export const translations: Readonly<Record<string, readonly [uk: string, ru: string]>> = {
+  "Right-click selection": ["Позначення правою кнопкою", "Отметка правой кнопкой"],
+  "Release to open the context menu": ["Відпустіть, щоб відкрити контекстне меню", "Отпустите, чтобы открыть контекстное меню"],
   "Deletion progress": ["Перебіг видалення", "Ход удаления"],
   "Deletion results": ["Результати видалення", "Результаты удаления"],
   "Deletion cancelled": ["Видалення скасовано", "Удаление отменено"],

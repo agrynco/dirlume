@@ -303,6 +303,7 @@ export interface Preferences {
   schemes: Scheme[];
   retainedFonts?: RetainedFonts;
   hidden: boolean;
+  rightClickSelection: boolean;
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
   provider: Provider;
@@ -479,6 +480,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   actionButtonWidth: { group: "filePanels", portable: true, read: (value) => value === "full" ? "full" : "compact" },
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
+  rightClickSelection: { group: "filePanels", portable: true, read: (value) => value === true },
   refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value === true },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
