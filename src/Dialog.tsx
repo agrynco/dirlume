@@ -48,14 +48,21 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
     const container = contextHelp && focused?.closest<HTMLElement>("dialog, [data-pane-side], .text-window, .terminal-card");
     return () => {
       dialog?.close();
-      if (focused instanceof HTMLElement && focused.isConnected &&
-          (!contextHelp || focused.getClientRects().length && !focused.closest("[inert], [hidden], :disabled"))) {
-        focused.focus({ preventScroll: contextHelp });
-      } else if (container instanceof HTMLElement && container.isConnected) {
-        const target = container.querySelector<HTMLElement>("[data-help-return]") ??
-          container.querySelector<HTMLElement>("[tabindex=\"0\"], button:enabled");
-        target?.focus({ preventScroll: true });
+      if (!contextHelp) {
+        if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+        return;
       }
+      requestAnimationFrame(() => {
+        if (document.querySelector("dialog[data-context-help]")) return;
+        if (focused instanceof HTMLElement && focused.isConnected && focused.getClientRects().length &&
+            !focused.closest("[inert], [hidden], :disabled")) {
+          focused.focus({ preventScroll: true });
+        } else if (container instanceof HTMLElement && container.isConnected) {
+          const target = container.querySelector<HTMLElement>("[data-help-return]") ??
+            container.querySelector<HTMLElement>("[tabindex=\"0\"], button:enabled");
+          target?.focus({ preventScroll: true });
+        }
+      });
     };
   }, [contextHelp]);
   useLayoutEffect(() => {
