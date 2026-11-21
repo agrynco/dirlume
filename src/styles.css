@@ -66,6 +66,8 @@
   --panel-selected-ink: var(--panel-ink);
   --panel-inactive-selection: var(--active-neutral);
   --panel-marked: #f2b84b;
+  --panel-current-marked-bg: #30564a;
+  --panel-current-marked-outline: #81dcca;
   --dialog-bg: var(--surface);
   --dialog-header: var(--raised);
   --dialog-input: var(--canvas);
@@ -138,6 +140,8 @@
   --active-neutral: #e6edf0;
   --folder: #855b22;
   --panel-marked: #a65300;
+  --panel-current-marked-bg: #c7e6da;
+  --panel-current-marked-outline: #006e5f;
   --file-source: #1f5092;
   --file-text: #45565d;
   --file-document: #8b315f;
@@ -177,6 +181,8 @@
   --active-neutral: #2b3650;
   --folder: #efc787;
   --panel-marked: #f5c26b;
+  --panel-current-marked-bg: #40527b;
+  --panel-current-marked-outline: #a8beff;
 }
 
 [data-theme="classic-blue"] {
@@ -201,6 +207,8 @@
   --active-neutral: #202099;
   --folder: #ffdc97;
   --panel-marked: #ffe45e;
+  --panel-current-marked-bg: #005b64;
+  --panel-current-marked-outline: #dcfaff;
   --panel-bg: #000080;
   --panel-header: #000080;
   --pane-frame: #00ffff;
@@ -1994,6 +2002,8 @@ button.color-swatch {
   --panel-selected-ink: #1d2140;
   --panel-inactive-selection: #f0f1f9;
   --panel-marked: #7c3aed;
+  --panel-current-marked-bg: #d8d2fa;
+  --panel-current-marked-outline: #494bbd;
   --file-source: #3346c4;
   --file-text: #4a4d6e;
   --file-document: #a3307e;
@@ -2049,6 +2059,8 @@ button.color-swatch {
   --panel-selected-ink: #effff9;
   --panel-inactive-selection: #11261f;
   --panel-marked: #ffd166;
+  --panel-current-marked-bg: #165244;
+  --panel-current-marked-outline: #6af3cb;
   --file-source: #93c5fd;
   --file-text: #cfe3dc;
   --file-document: #f5b8d0;
@@ -2098,6 +2110,8 @@ button.color-swatch {
   --panel-selected-ink: #ffffff;
   --panel-inactive-selection: #241c50;
   --panel-marked: #ffcf5c;
+  --panel-current-marked-bg: #6046a8;
+  --panel-current-marked-outline: #e0b2ff;
   --file-source: #a5b4ff;
   --file-text: #ddd6fe;
   --file-document: #ff9ccb;
@@ -2149,6 +2163,8 @@ button.color-swatch {
   --panel-selected-ink: #ffffff;
   --panel-inactive-selection: #11264a;
   --panel-marked: #ffd166;
+  --panel-current-marked-bg: #204c83;
+  --panel-current-marked-outline: #87c4ff;
   --file-source: #a5b4fc;
   --file-text: #dbe7fb;
   --file-document: #f9a8d4;
@@ -2199,6 +2215,8 @@ button.color-swatch {
   --panel-selected-ink: #2a1d16;
   --panel-inactive-selection: #f5eee6;
   --panel-marked: #e8590c;
+  --panel-current-marked-bg: #ffd3b8;
+  --panel-current-marked-outline: #a23409;
   --file-source: #2f5bb7;
   --file-text: #5a4a40;
   --file-document: #b4235a;
@@ -2254,6 +2272,8 @@ button.color-swatch {
   --panel-selected-ink: #fff8f0;
   --panel-inactive-selection: #25272c;
   --panel-marked: #ff7a8a;
+  --panel-current-marked-bg: #594020;
+  --panel-current-marked-outline: #ffb769;
   --file-source: #8ab4ff;
   --file-text: #ddd8d1;
   --file-document: #ff9fc4;
@@ -2432,4 +2452,19 @@ button.color-swatch {
 [data-theme="graphite"] .pane.active .file-row[data-current="true"] {
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent-fill) 24%, var(--panel-bg)), color-mix(in srgb, var(--accent-alt) 10%, var(--panel-bg)));
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.pane.active[data-layout] .file-row.marked[data-current="true"], .preview-file-current-marked {
+  background: var(--panel-current-marked-bg);
+  outline: 2px solid var(--panel-current-marked-outline);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+.preview-file-current-marked { color: var(--panel-selected-ink); }
+.preview-file-current-marked svg { color: var(--panel-marked); }
+.pane.active[data-layout] .file-row.marked[data-current="true"] .file-name {
+  color: var(--panel-selected-ink);
+}
+.pane.active[data-layout="classic"] .file-row.marked[data-current="true"] .file-name {
+  color: color-mix(in srgb, var(--panel-marked) 55%, var(--panel-selected-ink));
 }

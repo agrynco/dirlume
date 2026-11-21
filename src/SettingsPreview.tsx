@@ -1,6 +1,6 @@
 import { t } from "./i18n";
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
-import { File, Folder, FolderTree } from "lucide-react";
+import { Check, File, Folder, FolderTree } from "lucide-react";
 import { applyAppearance, colorKeysForSurface, fileColor, fontGroups, resolveAppearance, useSystemTheme, type Surface } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { shortcutBindings, showShortcut, type Preferences } from "./preferences";
@@ -14,7 +14,7 @@ const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "recordin
 const hiddenSample = { name: ".env", hidden: true };
 const systemSample = { name: "System Volume Information", directory: true, hidden: true, system: true };
 
-function Samples({ hidden, all }: { hidden: boolean; all: boolean }) {
+function Samples({ hidden, all, showMarkedCursor }: { hidden: boolean; all: boolean; showMarkedCursor?: boolean }) {
   const files = all ? fileSamples : ["main.rs", "notes.md", "photo.png"];
   const samples: Parameters<typeof fileColor>[0][] = files.map((name) => ({ name }));
   if (all || hidden) samples.push(hiddenSample);
@@ -24,9 +24,11 @@ function Samples({ hidden, all }: { hidden: boolean; all: boolean }) {
       {!all && <div className="preview-folder"><Folder /> {t("Project")}</div>}
       {samples.map((entry, index) => {
         const color = fileColor(entry);
-        return <div className={`preview-file${!all && index === 1 ? " preview-file-selected" : ""}`} key={entry.name}>
-          {entry.directory ? <Folder /> : <File />}
-          <span style={color && (all || index !== 1) ? { color: `var(--${color})` } : undefined}>{entry.name}</span>
+        const currentMarked = showMarkedCursor && index === 2;
+        const selection = currentMarked ? " preview-file-current-marked" : !all && index === 1 ? " preview-file-selected" : "";
+        return <div className={`preview-file${selection}`} key={entry.name}>
+          {currentMarked ? <Check /> : entry.directory ? <Folder /> : <File />}
+          <span style={color && !selection ? { color: `var(--${color})` } : undefined}>{entry.name}</span>
         </div>;
       })}
     </div>
@@ -61,7 +63,7 @@ function SurfacePreview({ surface, preferences }: { surface: Surface; preference
 }
 
 function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences: Preferences }) {
-  const background = ["danger-action", "accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
+  const background = ["panel-current-marked-bg", "danger-action", "accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
     "dialog-header", "dialog-bg", "mermaid-node-bg", "panel-header", "panel-bg", "raised", "surface", "canvas"]
     .find((color) => pick.colors.some((item) => item === color));
   const foreground = ["panel-marked", "on-danger-action", "on-accent", "panel-selected-ink", ...pick.colors.filter((color) => color.startsWith("file-")),
@@ -75,7 +77,8 @@ function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences:
     fontSize: (pick.view && preferences.viewFontSizes[pick.view]) || (pick.font && `var(--${pick.font}-size)`),
     borderColor: pick.colors.includes("accent") ? "var(--accent)" : "var(--line)",
   };
-  return <div className="preview-picked-element" style={style}>{pickLabel(pick)}</div>;
+  return <div className={`preview-picked-element${pick.row === "currentMarked" ? " preview-file-current-marked" : ""}`}
+    style={pick.row === "currentMarked" ? { ...style, color: "var(--panel-selected-ink)" } : style}>{pickLabel(pick)}</div>;
 }
 
 export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage; preferences: Preferences; pick?: AppearancePick }) {
@@ -126,7 +129,7 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
             <>
               <div className="preview-toolbar"><FolderTree />{t("Project")}<span className="preview-toolbar-action">{t("Connect")}</span></div>
               <div className={page === "fonts" ? "preview-fonts" : undefined}>
-                <Samples hidden={preferences.hidden} all={false} />
+                <Samples hidden={preferences.hidden} all={false} showMarkedCursor={page === "panels" || page === "filePanels"} />
                 {page === "fonts" && <CodeSample />}
               </div>
             </>
