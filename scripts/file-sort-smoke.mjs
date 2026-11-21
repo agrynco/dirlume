@@ -3,6 +3,7 @@ import { link, mkdir, rename, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const modes = [
   "name", "baseName", "extension", "modified", "size", "unsorted", "created", "accessed", "changed",
@@ -27,21 +28,27 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
   const active = () => page.getByRole("dialog", { name: "Sort by", exact: true });
   const name = (id) => active().locator(`[data-sort-mode="${id}"]`);
   const names = () => left().locator(".file-row").evaluateAll((rows) => rows.map((row) => row.dataset.tooltip));
-  const select = (id) => name(id).click();
+  const select = async (id) => {
+    await name(id).click();
+    await waitForSortClose("left");
+  };
   const address = await editPaneAddress(page, "left");
   await address.fill(folder);
   await address.press("Enter");
   const row = (label) => left().locator(`[data-tooltip="${label}"]`);
   await row("alpha-2.md").waitFor();
-  const main = () => page.getByRole("menubar", { name: "Main menu" });
   async function openSort(side = "Left") {
-    await main().getByRole("menuitem", { name: side, exact: true }).click();
-    await main().getByRole("menu", { name: side, exact: true }).getByRole("menuitem", { name: "Sort modes", exact: true }).click();
+    const menu = await openMainMenu(page, side);
+    await menu.getByRole("menuitem", { name: "Sort modes", exact: true }).click();
     await active().waitFor();
   }
-  async function closeSort() {
-    await page.keyboard.press("Escape");
+  async function waitForSortClose(side) {
     await active().waitFor({ state: "hidden" });
+    await page.waitForFunction((side) => document.activeElement?.id === side + "-files", side);
+  }
+  async function closeSort(side = "left") {
+    await page.keyboard.press("Escape");
+    await waitForSortClose(side);
   }
   async function expectStart(expected) {
     await page.waitForFunction((expected) => {
@@ -52,7 +59,7 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
   const currentSort = () => active().locator("[data-sort-mode][aria-checked=true]").getAttribute("aria-label");
   await openSort("Right");
   const originalRightSort = await currentSort();
-  await closeSort();
+  await closeSort("right");
   await left().focus();
   await left().press("Control+F12");
   await active().waitFor();
@@ -69,7 +76,6 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
   await name("extension").press("*");
   await expectStart(["..", "z-directory", "alpha-2.zz"]);
   await closeSort();
-  await left().evaluate((pane) => { if (document.activeElement !== pane) throw new Error("File pane did not regain focus"); });
 
   await openSort();
   await select("baseName");
@@ -139,7 +145,7 @@ export async function testFileSort({ page, root, startDesktop, exitDesktop }) {
   await expectStart(["..", "a spaced.txt", "alpha-2.zz"]);
   await openSort("Right");
   assert.equal(await currentSort(), originalRightSort);
-  await closeSort();
+  await closeSort("right");
   if (startDesktop && exitDesktop) {
     await exitDesktop(page);
     page = await startDesktop();

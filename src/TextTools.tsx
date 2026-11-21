@@ -1,7 +1,7 @@
 import { errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
-import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
@@ -12,10 +12,10 @@ import { HexViewer } from "./HexViewer";
 import { isMarkdownFile, type MarkdownPosition } from "./markdown";
 import type { TaskMarker } from "./MarkdownPreview";
 import { useMarkdownSearch } from "./MarkdownSearch";
-import { MainMenu, type MainMenuHandle, type MenuAction, type MenuGroup } from "./MainMenu";
+import { MainMenu, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
-import type { BaseTheme, Palette } from "./appearance";
+import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
 import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
 import { normalized } from "./textFormat";
@@ -30,14 +30,13 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, fontSizes, viewerContentWidth, colors,
+export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, colors,
   onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
   theme: BaseTheme;
   shortcuts: Bindings;
-  menuRef?: Ref<MainMenuHandle>;
   fontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   colors?: Palette;
@@ -104,7 +103,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
   const fontView = preview && !hex ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];
   useFontZoom(section, shortcuts.zoomFont, fontView, onZoom);
-  const light = theme === "light";
+  const light = isLightTheme(theme);
 
   useLayoutEffect(() => {
     if (active) section.current?.focus({ preventScroll: true });
@@ -354,7 +353,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, menuRef, f
       <header className="document-heading">
         <div className="document-menu">
           <MainMenu key={sourceVisible ? "source" : markdownViewer ? "markdown" : "other"}
-            groups={menuGroups} shortcut={key("menu")} ref={menuRef} label="Document menu" />
+            groups={menuGroups} label="Document menu" />
           <Button type="button" aria-label={t(editing ? "Editor options" : "Viewer options")} onClick={onOptions}>
             <Settings2 aria-hidden="true" /> {t("Options")}
           </Button>

@@ -34,13 +34,14 @@ import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-s
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
 import { testDocumentWatch } from "./document-watch-smoke.mjs";
-import { testHeaderMenus } from "./menu-header-smoke.mjs";
+import { openMainMenu, revealMainMenu, testHeaderMenus } from "./menu-header-smoke.mjs";
 import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
+import { testNativeQuickView } from "./quick-view-smoke.mjs";
 import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -589,8 +590,7 @@ try {
   const destination = copySetup.getByRole("combobox", { name: "Destination", exact: true });
   const destinationSuggestions = copySetup.getByRole("listbox", { name: "Destination suggestions", exact: true });
   await filePane.getByRole("option", { name: /^notes\.txt/ }).click();
-  const commandsMenu = page.getByRole("menubar").getByRole("menuitem", { name: "Commands", exact: true });
-  await commandsMenu.click();
+  await openMainMenu(page, "Commands");
   const copyPath = page.getByRole("menuitem", { name: "Copy full path", exact: true });
   assert.equal(await copyPath.getAttribute("aria-disabled"), null);
   assert.equal(await copyPath.locator("kbd").textContent(), "Ctrl+Shift+C");
@@ -612,15 +612,17 @@ try {
     await page.locator(".statusbar").getByText("Path copied to the clipboard.", { exact: true }).waitFor();
     await expectClipboard(join(src, "notes.txt"));
     await filePane.getByRole("option", { name: /^drag-folder/ }).click();
-    await commandsMenu.click();
+    await openMainMenu(page, "Commands");
     await copyPath.click();
     await expectClipboard(join(src, "drag-folder"));
     await filePane.getByRole("option", { name: /^notes\.txt/ }).click();
   }
-  await page.getByRole("menubar").getByRole("menuitem", { name: "Left", exact: true }).focus();
+  await (await revealMainMenu(page)).getByRole("menuitem", { name: "Left", exact: true }).focus();
   await leftList.focus();
   await page.keyboard.press("F5");
-  await copySetup.getByRole("button", { name: "Choose a file destination", exact: true }).waitFor();
+  const browseDestination = copySetup.getByRole("button", { name: "Choose a file destination", exact: true });
+  await browseDestination.waitFor();
+  assert.equal(await browseDestination.evaluate((button) => button.previousElementSibling?.matches(".editable-dropdown")), true);
   await destination.fill(join(temp, "t"));
   await destinationSuggestions.getByRole("option", { name: "to", exact: true }).waitFor();
   await destination.press("Tab");
@@ -1994,11 +1996,13 @@ try {
   const group = (name) => menubar.getByRole("menuitem", { name, exact: true });
   const menu = (name) => menubar.getByRole("menu", { name, exact: true });
   const fileList = page.getByRole("listbox", { name: "left files", exact: true });
-  assert.deepEqual(await menubar.getByRole("menuitem").allTextContents(), ["Left", "Files", "Commands", "Options", "Right", "Help"]);
   await fileList.focus();
   await page.keyboard.press("Alt");
-  await menu("Left").waitFor();
+  await menubar.waitFor();
+  assert.deepEqual(await menubar.getByRole("menuitem").allTextContents(), ["Left", "Files", "Commands", "Options", "Right", "Help"]);
+  await group("Left").focus();
   await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowDown");
   const helpItems = menu("Help").getByRole("menuitem");
   assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "About", "Open error log"]);
   const errorLogAction = helpItems.filter({ hasText: "Open error log" });
@@ -2007,7 +2011,7 @@ try {
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
   assert.equal(await fileList.evaluate((list) => document.activeElement === list), true);
-  await group("Help").click();
+  await openMainMenu(page, "Help");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   const about = page.getByRole("dialog", { name: "About", exact: true });
@@ -2022,7 +2026,7 @@ try {
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
   const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
-  await group("Help").click();
+  await openMainMenu(page, "Help");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
@@ -2030,18 +2034,18 @@ try {
   await errorLogViewer.waitFor();
   await page.keyboard.press("Escape");
   await errorLogViewer.waitFor({ state: "hidden" });
-  await group("Help").click();
+  await openMainMenu(page, "Help");
   await errorLogAction.click();
   await errorLogViewer.waitFor();
   await page.keyboard.press("Escape");
   await errorLogViewer.waitFor({ state: "hidden" });
-  await group("Files").click();
+  await openMainMenu(page, "Files");
   const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });
   assert.match(await attributesAction.getAttribute("data-tooltip"), /Ctrl\+A/);
   if (process.env.DIRLUME_MENU_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_MENU_SCREENSHOT, scale: "css" });
   await page.keyboard.press("Escape");
   await menu("Files").waitFor({ state: "hidden" });
-  await group("Commands").click();
+  await openMainMenu(page, "Commands");
   const updateAction = menu("Commands").getByRole("menuitem", { name: "Check for updates", exact: true });
   await updateAction.click();
   const updateStatus = page.getByRole("dialog", { name: "Check for updates", exact: true });
@@ -2057,6 +2061,46 @@ try {
     await windowSection.click();
     return settings;
   }
+  // The modern themes share rounded panes and must keep text readable on every surface.
+  const contrast = (foreground, background) => {
+    const [light, dark] = [foreground, background].map((rgb) => rgb.match(/\d+/g).slice(0, 3).map((value) => {
+      const channel = Number(value) / 255;
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0)).sort((a, b) => b - a);
+    return (light + 0.05) / (dark + 0.05);
+  };
+  const modernAppearance = await openAppearance();
+  for (const [modernTheme, colorScheme] of [["lavender", "light"], ["emerald", "dark"], ["aurora", "dark"], ["midnight", "dark"],
+    ["sunrise", "light"], ["graphite", "dark"]]) {
+    await modernAppearance.getByLabel("Color scheme", { exact: true }).selectOption(modernTheme);
+    await modernAppearance.locator(`.preview-frame[data-theme=${modernTheme}]`).waitFor();
+    await modernAppearance.getByRole("button", { name: "Apply", exact: true }).click();
+    const modernRoot = page.locator(`html[data-theme=${modernTheme}][data-look=modern]`);
+    await modernRoot.waitFor();
+    const modern = await modernRoot.evaluate((root) => {
+      const probe = document.createElement("span");
+      probe.hidden = true;
+      document.body.append(probe);
+      const value = (name) => {
+        probe.style.color = `var(--${name})`;
+        return getComputedStyle(probe).color;
+      };
+      const pairs = [["panel-ink", "panel-bg"], ["panel-muted", "panel-bg"], ["panel-selected-ink", "panel-selection"],
+        ["ink", "surface"], ["dialog-ink", "dialog-bg"], ["text-ink", "text-bg"],
+        ...["source", "text", "document", "image", "media", "archive", "config", "executable", "hidden", "system"]
+          .flatMap((group) => [[`file-${group}`, "panel-bg"], [`file-${group}`, "hover"]])].map(([ink, background]) => [value(ink), value(background)]);
+      probe.remove();
+      return { pairs, colorScheme: getComputedStyle(root).colorScheme,
+        radius: getComputedStyle(root.querySelector("#left-pane")).borderTopLeftRadius };
+    });
+    assert.equal(modern.colorScheme, colorScheme);
+    assert.equal(modern.radius, "14px");
+    for (const [foreground, background] of modern.pairs) {
+      assert.ok(contrast(foreground, background) >= 4.5, `${modernTheme}: ${foreground} on ${background} must be readable`);
+    }
+  }
+  await closeToolWindow(optionsPage, () => modernAppearance.getByRole("button", { name: "Done", exact: true }).click());
+  console.log("Verified the Lavender, Emerald, Aurora, Midnight blue, Sunrise, and Graphite themes.");
   const themeRoot = () => page.locator("html[data-theme=classic-blue]");
   const appearance = await openAppearance();
   await appearance.getByLabel("Color scheme", { exact: true }).selectOption("classic-blue");
@@ -2064,6 +2108,7 @@ try {
   assert.equal(await themeRoot().count(), 0);
   await appearance.getByRole("button", { name: "Apply", exact: true }).click();
   await themeRoot().waitFor();
+  assert.equal(await page.locator("html[data-look]").count(), 0);
   const { paneColors, pairs } = await themeRoot().evaluate((root) => {
     const probe = document.createElement("span");
     probe.hidden = true;
@@ -2173,6 +2218,7 @@ try {
   await testSystemTheme(page);
   await testScreenColor(page);
   page = await testFileSort({ page, startDesktop, exitDesktop, root: temp });
+  await testNativeQuickView(page, temp);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

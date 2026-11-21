@@ -24,6 +24,7 @@ import { QuickSearch, useQuickSearch } from "./QuickSearch";
 interface PaneProps {
   side: Side;
   active: boolean;
+  covered?: boolean;
   layout: PanelLayout;
   modeId: PanelModeId;
   mode: PanelMode;
@@ -107,7 +108,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
+export function Pane({ side, active, covered, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, onRemote, onFtp, onSsh, onSmb, sourceBindings, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo }: PaneProps) {
@@ -354,7 +355,7 @@ export function Pane({ side, active, layout, modeId, mode, sortAvailable, sortPe
     return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
   }, undefined) : undefined;
   return (
-    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)}
+    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered}
       data-panel-mode={catalog || processView ? undefined : modeId}
       data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}

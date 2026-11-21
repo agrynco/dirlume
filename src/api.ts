@@ -254,6 +254,8 @@ export const api = {
   mcpDecision: (id: string, approved: boolean) => invoke<void>("mcp_decision", { id, approved }),
   mcpResult: (id: string, output: { result?: unknown; error?: string }) => invoke<void>("mcp_result", { id, output }),
   buildVersion: () => invoke<string>("build_version"),
+  readSettingsArchive: (title: string) => invoke<string | null>("read_settings_archive", { title }),
+  writeSettingsArchive: (title: string, contents: string) => invoke<boolean>("write_settings_archive", { title, contents }),
   readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
@@ -438,6 +440,12 @@ export function readPlaceText(file: NamedFile, sudoPassword?: string) {
   if (place.kind === "archive") return api.readArchiveText(place.id, segments);
   if (place.kind === "ssh") return api.readSshText(place.id, segments, sudoPassword);
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
+}
+
+export function readPlacePreviewImage({ place, name }: NamedFile) {
+  const source = place.kind === "local" ? { kind: place.kind, directory: place.path, name }
+    : { kind: place.kind, id: place.id, segments: [...place.segments, name] };
+  return invoke<ArrayBuffer>("read_preview_image", { source });
 }
 
 export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {

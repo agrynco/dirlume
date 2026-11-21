@@ -5,9 +5,9 @@ import { reportFrontendError } from "./diagnostics";
 import { isTauri } from "@tauri-apps/api/core";
 import { folderGroups, type FolderGroup } from "./folderShortcuts";
 import { api, windowsClient, type QuickLocation } from "./api";
-import { defaultPanelModes, isPanelMode, panelModeDigits, panelModeIds, panelModeNames, readPanelModes, type PanelModeId, type PanelModes } from "./panelModes";
+import { isPanelMode, panelModeDigits, panelModeIds, panelModeNames, readPanelModes, type PanelModeId, type PanelModes } from "./panelModes";
 
-import { defaultSortSettings, isSortMode, readSortSettings, sortModeIds, sortModes, type SortMode, type SortSettings } from "./fileSort";
+import { isSortMode, readSortSettings, sortModeIds, sortModes, type SortMode, type SortSettings } from "./fileSort";
 
 type SortModeCommand = `sortMode-${SortMode}`;
 const sortModeCommands = Object.fromEntries(sortModeIds.map((mode) =>
@@ -82,6 +82,7 @@ export const commands = {
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },
   view: { label: "View text or measure folder", key: "F3" },
+  quickView: { label: "Quick View", key: "Ctrl+Q" },
   cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
@@ -203,7 +204,7 @@ export function commandLabel(command: Command) {
 }
 
 export function commandScope(command: Command) {
-  if (command === "help" || command === "menu") return "global";
+  if (command === "help" || command === "menu" || command === "menuAlternate") return "global";
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText") return "terminal";
   if (command.endsWith("Sources")) return "sources";
@@ -293,6 +294,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
+export const preferenceBindingVersion = 7;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -300,10 +302,11 @@ export const wheelBindings = ["Ctrl+Wheel", "Meta+Wheel", "Alt+Wheel", "Shift+Wh
 export const defaultBindings = Object.fromEntries<readonly string[]>(commandNames.map((command) => {
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
-    command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" &&
+    command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" && command !== "quickView" &&
     !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
-  return [command, [key, alternateDefaults[command]?.key].filter((value): value is string => Boolean(value))];
+  const alternate = mac && (command === "shrinkLeft" || command === "growLeft") ? commands[command].key : alternateDefaults[command]?.key;
+  return [command, [key, alternate].filter((value): value is string => Boolean(value))];
 })) as Bindings;
 
 export function shortcutBindings(preferences: Preferences) {
@@ -334,7 +337,7 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
     const configuredAlternate = typeof alternateValue === "string" && !(command === "refresh" && version < 4 && alternateValue === "F2");
     return [
       { command, key: useSaved ? value : defaultBindings[command][0], configured: useSaved },
-      { command, key: configuredAlternate ? alternateValue : alternate?.key, configured: configuredAlternate },
+      { command, key: configuredAlternate ? alternateValue : defaultBindings[command][1], configured: configuredAlternate },
     ];
   });
   const accepted = new Set<(typeof candidates)[number]>();
@@ -369,70 +372,119 @@ function readMenuAlignment(value: unknown): MenuPosition | undefined {
   return value === "left" || value === "center" || value === "right" ? value : undefined;
 }
 
+export const preferenceGroups = {
+  general: "General",
+  appearance: "Appearance",
+  shortcuts: "Keyboard shortcuts",
+  filePanels: "Main File Panels",
+  terminal: "Terminal",
+  viewer: "Viewer",
+} as const;
+
+export type PreferenceGroup = keyof typeof preferenceGroups;
+type PreferenceValues = Record<string, unknown>;
+type ReadPreference = <K extends keyof Preferences>(key: K) => Preferences[K];
+type PreferenceDefinition<K extends keyof Preferences> = {
+  group: PreferenceGroup;
+  portable: boolean | "items";
+  read: (value: unknown, get: ReadPreference, bindingVersion: number) => Preferences[K];
+  acceptsReference?: (value: unknown) => boolean;
+};
+
+function readViewFontSizes(value: unknown): ViewFontSizes {
+  const saved = preferenceValues(value);
+  const sizes: ViewFontSizes = {};
+  for (const view of viewFontKeys) if (validViewFontSize(saved[view])) sizes[view] = saved[view];
+  return sizes;
+}
+
+function readInteger(value: unknown, min: number, max: number): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : undefined;
+}
+
+function customSchemeReference(value: unknown) {
+  return typeof value === "string" && /^custom:.+$/.test(value);
+}
+
+export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefinition<K> } = {
+  language: { group: "general", portable: true, read: readLanguage },
+  mainMenuAlignment: { group: "general", portable: true, read: (value) => readMenuAlignment(value) ?? "center" },
+  provider: { group: "general", portable: true, read: (value) => value === "kswitcher" ? "kswitcher" : "server" },
+  kswitcher: { group: "general", portable: false, read: (value) => typeof value === "string" ? value : "" },
+  theme: { group: "appearance", portable: true, read: readTheme },
+  schemes: { group: "appearance", portable: "items", read: readSchemes },
+  activeScheme: { group: "appearance", portable: true,
+    read: (value, get) => get("schemes").find(({ id }) => id === value)?.id ?? null,
+    acceptsReference: (value) => value === null || typeof value === "string" && value.length > 0 },
+  systemLightScheme: { group: "appearance", portable: true,
+    read: (value, get) => readSystemScheme(value, get("schemes"), "light"), acceptsReference: customSchemeReference },
+  systemDarkScheme: { group: "appearance", portable: true,
+    read: (value, get) => readSystemScheme(value, get("schemes"), "dark"), acceptsReference: customSchemeReference },
+  showTitlebarScheme: { group: "appearance", portable: true, read: (value) => value === true },
+  viewFontSizes: { group: "appearance", portable: true, read: readViewFontSizes },
+  shortcutSchemes: { group: "shortcuts", portable: true, read: (value, _get, version) => readShortcutSchemes(value, version) },
+  activeShortcutScheme: { group: "shortcuts", portable: true, read: (value, get) => get("shortcutSchemes").find(({ id }) => id === value)?.id ?? null },
+  layout: { group: "filePanels", portable: true, read: (value) =>
+    typeof value === "string" && Object.hasOwn(panelLayouts, value) ? value as PanelLayout : "standard" },
+  sortSettings: { group: "filePanels", portable: true, read: readSortSettings },
+  panelModes: { group: "filePanels", portable: true, read: readPanelModes },
+  selectedPanelModes: { group: "filePanels", portable: true, read: (value) => {
+    const { left, right } = preferenceValues(value);
+    return { left: isPanelMode(left) ? left : "full", right: isPanelMode(right) ? right : "full" };
+  } },
+  actionButtonWidth: { group: "filePanels", portable: true, read: (value) => value === "full" ? "full" : "compact" },
+  hidden: { group: "filePanels", portable: true, read: (value) => value === true },
+  refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
+  terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
+  terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
+  viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
+};
+
+export const preferenceKeys = Object.keys(preferenceDefinitions) as (keyof Preferences)[];
+
+function preferenceValues(value: unknown): PreferenceValues {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as PreferenceValues : {};
+}
+
+export function migratePreferenceValues(value: unknown): PreferenceValues {
+  const saved = { ...preferenceValues(value) };
+  const legacyAlignment = readMenuAlignment(saved.menuPosition);
+  if (legacyAlignment && !readMenuAlignment(saved.mainMenuAlignment)) saved.mainMenuAlignment = legacyAlignment;
+
+  const bindingVersion = typeof saved.bindingDefaults === "number" ? saved.bindingDefaults : 0;
+  if (!Array.isArray(saved.shortcutSchemes) && saved.shortcuts) {
+    const bindings = readBindings(preferenceValues(saved.shortcuts), bindingVersion);
+    const custom = commandNames.some((command) => bindings[command].length !== defaultBindings[command].length ||
+      bindings[command].some((key, index) => key !== defaultBindings[command][index]));
+    if (custom) {
+      saved.activeShortcutScheme = "my-shortcuts";
+      saved.shortcutSchemes = [{ id: saved.activeShortcutScheme, name: "My shortcuts", bindings }];
+    }
+  }
+  return saved;
+}
+
+export function normalizePreferences(value: unknown): Preferences {
+  const saved = migratePreferenceValues(value);
+  const version = typeof saved.bindingDefaults === "number" ? saved.bindingDefaults : 0;
+  const settings = {} as Preferences;
+  function get<K extends keyof Preferences>(key: K): Preferences[K] {
+    if (!Object.hasOwn(settings, key)) {
+      const definition = preferenceDefinitions[key] as PreferenceDefinition<K>;
+      settings[key] = definition.read(saved[key], get, version);
+    }
+    return settings[key];
+  }
+  for (const key of preferenceKeys) get(key);
+  return settings;
+}
+
 export function readPreferences(): Preferences {
-  const defaults: Preferences = {
-    theme: "system", layout: "standard", actionButtonWidth: "compact", activeScheme: null, schemes: [], provider: "server", hidden: false, refreshEnvironment: true, kswitcher: "",
-    mainMenuAlignment: "center", activeShortcutScheme: null, shortcutSchemes: [],
-    sortSettings: defaultSortSettings,
-    panelModes: defaultPanelModes, selectedPanelModes: { left: "full", right: "full" },
-    viewFontSizes: {}, language: "en", systemLightScheme: "light", systemDarkScheme: "dark", showTitlebarScheme: false,
-    terminalResizeRows: 1, terminalPasteOnRightClick: true,
-  };
   try {
-    const saved = JSON.parse(localStorage.getItem(preferenceKey) ?? "null") as
-      (Partial<Preferences> & { menuPosition?: unknown; shortcuts?: Record<string, unknown>; bindingDefaults?: number }) | null;
-    if (!saved) return defaults;
-    const schemes = readSchemes(saved.schemes);
-    const bindingVersion = saved.bindingDefaults ?? 0;
-    const shortcutSchemes = readShortcutSchemes(saved.shortcutSchemes, bindingVersion);
-    let activeShortcutScheme = shortcutSchemes.find(({ id }) => id === saved.activeShortcutScheme)?.id ?? null;
-    if (!Array.isArray(saved.shortcutSchemes) && saved.shortcuts) {
-      const bindings = readBindings(saved.shortcuts, bindingVersion);
-      if (commandNames.some((command) => bindings[command].length !== defaultBindings[command].length ||
-          bindings[command].some((key, index) => key !== defaultBindings[command][index]))) {
-        activeShortcutScheme = "my-shortcuts";
-        shortcutSchemes.push({ id: activeShortcutScheme, name: "My shortcuts", bindings });
-      }
-    }
-    const viewFontSizes: ViewFontSizes = {};
-    for (const view of viewFontKeys) {
-      const size = saved.viewFontSizes?.[view];
-      if (validViewFontSize(size)) viewFontSizes[view] = size;
-    }
-    return {
-      language: readLanguage(saved.language),
-      theme: readTheme(saved.theme),
-      layout: typeof saved.layout === "string" && Object.hasOwn(panelLayouts, saved.layout) ? saved.layout as PanelLayout : "standard",
-      sortSettings: readSortSettings(saved.sortSettings),
-      panelModes: readPanelModes(saved.panelModes),
-      selectedPanelModes: {
-        left: isPanelMode(saved.selectedPanelModes?.left) ? saved.selectedPanelModes.left : "full",
-        right: isPanelMode(saved.selectedPanelModes?.right) ? saved.selectedPanelModes.right : "full",
-      },
-      actionButtonWidth: saved.actionButtonWidth === "full" || saved.actionButtonWidth === "compact"
-        ? saved.actionButtonWidth : defaults.actionButtonWidth,
-      mainMenuAlignment: readMenuAlignment(saved.mainMenuAlignment) ?? readMenuAlignment(saved.menuPosition) ?? defaults.mainMenuAlignment,
-      systemLightScheme: readSystemScheme(saved.systemLightScheme, schemes, "light"),
-      systemDarkScheme: readSystemScheme(saved.systemDarkScheme, schemes, "dark"),
-      showTitlebarScheme: saved.showTitlebarScheme === true,
-      activeScheme: schemes.find(({ id }) => id === saved.activeScheme)?.id ?? null,
-      schemes,
-      provider: saved.provider === "kswitcher" ? "kswitcher" : "server",
-      hidden: saved.hidden === true,
-      refreshEnvironment: saved.refreshEnvironment !== false,
-      terminalPasteOnRightClick: saved.terminalPasteOnRightClick !== false,
-      kswitcher: typeof saved.kswitcher === "string" ? saved.kswitcher : "",
-      activeShortcutScheme,
-      shortcutSchemes,
-      viewFontSizes,
-      terminalResizeRows: typeof saved.terminalResizeRows === "number" && Number.isInteger(saved.terminalResizeRows) &&
-        saved.terminalResizeRows >= 1 && saved.terminalResizeRows <= maxTerminalResizeRows ? saved.terminalResizeRows : 1,
-      viewerContentWidth: typeof saved.viewerContentWidth === "number" && Number.isInteger(saved.viewerContentWidth) &&
-        saved.viewerContentWidth >= minViewerContentWidth && saved.viewerContentWidth <= maxViewerContentWidth ? saved.viewerContentWidth : undefined,
-    };
+    return normalizePreferences(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
   } catch (error) {
     reportFrontendError("load_preferences", error);
-    return defaults;
+    return normalizePreferences(null);
   }
 }
 
@@ -462,7 +514,8 @@ export function flushPortablePreferences() {
 }
 
 export function persistPreferences(preferences: Preferences) {
-  const settings = { ...preferences, bindingDefaults: 7 };
+  const settings = Object.fromEntries(preferenceKeys.map((key) => [key, preferences[key]]));
+  settings.bindingDefaults = preferenceBindingVersion;
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;

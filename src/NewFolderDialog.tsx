@@ -1,8 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { ChevronDown } from "lucide-react";
 import { api, describeError, isPermissionError, windowsClient, type FolderLinkType } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { EditableDropdown } from "./EditableDropdown";
 import { errorText, t } from "./i18n";
 import { PathField } from "./PathField";
 import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
@@ -104,16 +104,16 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
       <div className="dialog-body">
         <div className="field">
           <label htmlFor={nameId}>{t("Name")}</label>
-          <div className="folder-name-field">
+          <EditableDropdown trigger={{
+            popupId: historyId, expanded: historyOpen, label: t("Folder name history"), shortcut: showShortcut(historyShortcut[0]),
+            disabled: waiting || !history.length, keepFieldFocus: false, onClick: () => {
+              if (historyOpen) closeHistory();
+              else setHistoryOpen(true);
+            },
+          }}>
             <input id={nameId} ref={input} data-initial-focus type="text" required autoComplete="off" value={name}
               disabled={waiting} onChange={(event) => setName(event.target.value)} />
-            <Button type="button" className="icon-button" aria-label={t("Folder name history")} shortcut={showShortcut(historyShortcut[0])}
-              aria-expanded={historyOpen} aria-controls={historyOpen ? historyId : undefined} aria-haspopup="listbox"
-              disabled={waiting || !history.length} onClick={() => {
-                if (historyOpen) closeHistory();
-                else setHistoryOpen(true);
-              }}><ChevronDown /></Button>
-          </div>
+          </EditableDropdown>
           {historyOpen && <div id={historyId} ref={list} className="folder-name-history" role="listbox"
             aria-label={t("Folder name history")} onKeyDown={(event) => {
               if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

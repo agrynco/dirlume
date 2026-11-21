@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     ipc::Channel, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -161,6 +162,79 @@ pub(crate) async fn blocking<T: Send + 'static>(
 #[tauri::command]
 fn build_version() -> &'static str {
     crate::BUILD_VERSION
+}
+
+const SETTINGS_ARCHIVE_LIMIT: u64 = 4 * 1024 * 1024;
+
+fn read_settings_archive_file(path: &Path) -> Result<String> {
+    if !fs::metadata(path).map_err(message)?.is_file() {
+        return Err("The settings file is invalid.".to_owned());
+    }
+    let file = fs::File::open(path).map_err(message)?;
+    let mut bytes = Vec::new();
+    file.take(SETTINGS_ARCHIVE_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(message)?;
+    if bytes.len() as u64 > SETTINGS_ARCHIVE_LIMIT {
+        return Err("The settings file is too large.".to_owned());
+    }
+    String::from_utf8(bytes).map_err(|_| "The settings file is invalid.".to_owned())
+}
+
+fn write_settings_archive_file(path: &Path, contents: &str) -> Result<()> {
+    if contents.len() as u64 > SETTINGS_ARCHIVE_LIMIT {
+        return Err("The settings file is too large.".to_owned());
+    }
+    let directory = path.parent().ok_or("Choose a parent folder.")?;
+    let mut file = tempfile::NamedTempFile::new_in(directory).map_err(message)?;
+    file.write_all(contents.as_bytes()).map_err(message)?;
+    file.as_file().sync_all().map_err(message)?;
+    file.persist(path).map_err(message)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn read_settings_archive(window: tauri::Window, title: String) -> Result<Option<String>> {
+    blocking(move || {
+        let dialog = window.dialog().file();
+        #[cfg(any(windows, target_os = "macos"))]
+        let dialog = dialog.set_parent(&window);
+        let Some(path) = dialog
+            .set_title(title)
+            .add_filter("JSON", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = path.into_path().map_err(message)?;
+        read_settings_archive_file(&path).map(Some)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn write_settings_archive(
+    window: tauri::Window,
+    title: String,
+    contents: String,
+) -> Result<bool> {
+    blocking(move || {
+        let Some(path) = window
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title(title)
+            .set_file_name("dirlume-settings.json")
+            .add_filter("JSON", &["json"])
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = path.into_path().map_err(message)?;
+        write_settings_archive_file(&path, &contents)?;
+        Ok(true)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1395,6 +1469,115 @@ async fn read_server_text(
     decode_text(bytes.as_slice())
 }
 
+const PREVIEW_IMAGE_LIMIT: usize = 16 * 1024 * 1024;
+
+pub(crate) fn check_preview_image_size(length: u64) -> Result<()> {
+    if length > PREVIEW_IMAGE_LIMIT as u64 {
+        return Err("Quick View supports images up to 16 MiB.".into());
+    }
+    Ok(())
+}
+
+fn load_preview_image(path: &Path) -> Result<Vec<u8>> {
+    let file = open_regular_file(path)?;
+    check_preview_image_size(file.metadata().map_err(message)?.len())?;
+    let mut bytes = Vec::new();
+    file.take(PREVIEW_IMAGE_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(message)?;
+    check_preview_image_size(bytes.len() as u64)?;
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod preview_image_tests {
+    use super::{load_preview_image, PREVIEW_IMAGE_LIMIT};
+    use std::fs;
+
+    #[test]
+    fn returns_file_bytes_and_rejects_directories_and_oversized_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preview.png");
+        let bytes = b"\x89PNG\r\n\x1a\n";
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(load_preview_image(&path).unwrap(), bytes);
+        assert!(load_preview_image(directory.path()).is_err());
+
+        let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(PREVIEW_IMAGE_LIMIT as u64 + 1).unwrap();
+        drop(file);
+        assert_eq!(
+            load_preview_image(&path).unwrap_err(),
+            "Quick View supports images up to 16 MiB."
+        );
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum PreviewImageSource {
+    Local { directory: String, name: String },
+    Server { id: u32, segments: Vec<String> },
+    Ftp { id: u32, segments: Vec<String> },
+    Ssh { id: u32, segments: Vec<String> },
+    Archive { id: u32, segments: Vec<String> },
+}
+
+#[tauri::command]
+async fn read_preview_image(
+    source: PreviewImageSource,
+    servers: State<'_, Connections>,
+    ftp: State<'_, ftp::FtpState>,
+    ssh: State<'_, ssh::SshState>,
+    archives: State<'_, crate::archives::Archives>,
+) -> Result<tauri::ipc::Response> {
+    let bytes = match source {
+        PreviewImageSource::Local { directory, name } => {
+            blocking(move || load_preview_image(&selected(&directory, &name).map_err(message)?))
+                .await?
+        }
+        PreviewImageSource::Server { id, segments } => {
+            let response = servers
+                .get(id)?
+                .request(
+                    "v1/download",
+                    RemotePath { segments },
+                    Duration::from_secs(45),
+                )
+                .await?;
+            collect_response(response, PREVIEW_IMAGE_LIMIT + 1).await?
+        }
+        PreviewImageSource::Ftp { id, segments } => {
+            let connection = ftp.connection(id)?;
+            blocking(move || {
+                let mut session = connection.open()?;
+                let length = session.regular(&segments)?.size() as u64;
+                check_preview_image_size(length)?;
+                session.read_limited(&segments, 0, length, length)
+            })
+            .await?
+        }
+        PreviewImageSource::Ssh { id, segments } => {
+            let connection = ssh.connection(id)?;
+            blocking(move || {
+                let mut session = connection.open()?;
+                let entry = session.regular(&segments)?;
+                let length = remote_transfer::Entry::size(&entry)
+                    .ok_or("The SSH server did not report the file size.")?;
+                check_preview_image_size(length)?;
+                session.read_limited(&segments, 0, length)
+            })
+            .await?
+        }
+        PreviewImageSource::Archive { id, segments } => {
+            let archive = archives.get(id)?;
+            blocking(move || archive.lock().map_err(message)?.preview_image(&segments)).await?
+        }
+    };
+    check_preview_image_size(bytes.len() as u64)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 async fn read_bytes(directory: String, name: String, offset: u64) -> Result<BytePage> {
     blocking(move || {
@@ -1832,6 +2015,8 @@ pub fn run() {
         diagnostics::report_diagnostic,
         diagnostics::error_log,
         build_version,
+        read_settings_archive,
+        write_settings_archive,
         open_tool_window,
         set_appearance_picker,
         crate::updates::check_for_update,
@@ -1924,6 +2109,7 @@ pub fn run() {
         read_ssh_bytes,
         save_ssh_text,
         read_text,
+        read_preview_image,
         resolve_text_link,
         open_web_link,
         read_server_text,
@@ -1957,4 +2143,28 @@ pub fn run() {
         })
         .run(context)
         .expect("cannot start Dirlume");
+}
+
+#[cfg(test)]
+mod settings_archive_tests {
+    use super::{read_settings_archive_file, write_settings_archive_file, SETTINGS_ARCHIVE_LIMIT};
+    use std::fs;
+
+    #[test]
+    fn round_trips_utf8_and_preserves_the_previous_file_when_export_is_too_large() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("settings.json");
+        let original = r#"{"name":"Вечір"}"#;
+        let updated = r#"{"name":"Après-midi"}"#;
+        write_settings_archive_file(&path, original).unwrap();
+        assert_eq!(read_settings_archive_file(&path).unwrap(), original);
+        write_settings_archive_file(&path, updated).unwrap();
+        let oversized = "x".repeat(SETTINGS_ARCHIVE_LIMIT as usize + 1);
+        assert!(write_settings_archive_file(&path, &oversized).is_err());
+        assert_eq!(read_settings_archive_file(&path).unwrap(), updated);
+        fs::write(&path, oversized).unwrap();
+        assert!(read_settings_archive_file(&path).is_err());
+        fs::write(&path, [0xff]).unwrap();
+        assert!(read_settings_archive_file(&path).is_err());
+    }
 }

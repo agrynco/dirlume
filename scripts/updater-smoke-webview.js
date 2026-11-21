@@ -43,14 +43,30 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
     }
     pointer("pointerout");
   }
+  async function revealMainMenu() {
+    const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
+    if (bar.hidden) {
+      const pane = await waitFor("the left file pane", () => document.getElementById("left-files"));
+      pane.focus();
+      pane.dispatchEvent(new KeyboardEvent("keydown", { key: "F9", bubbles: true, cancelable: true }));
+      await waitFor("the main menu to become visible", () => !bar.hidden);
+    }
+    return bar;
+  }
   async function checkHeaderMenus() {
     const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
+    if (!bar.hidden) throw new Error("The installed app displayed the main menu at startup.");
     for (const side of ["Right", "Left"]) {
+      await revealMainMenu();
       const control = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === side);
       control.click();
       await waitFor(`the ${side} menu to open`, () => control.getAttribute("aria-expanded") === "true");
-      bar.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0 }));
-      await waitFor(`the ${side} menu to close`, () => control.getAttribute("aria-expanded") === "false");
+      if (side === "Right") {
+        bar.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", button: 0 }));
+      } else {
+        document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      }
+      await waitFor(`the ${side} menu to close`, () => bar.hidden && control.getAttribute("aria-expanded") === "false");
     }
   }
   async function checkPanelModes() {
@@ -212,10 +228,11 @@ async (upgraded, reject, portable, replacementFailure, checkClipboard, checkScre
       await record("the independent Options window");
       document.querySelector('.topbar button[aria-label="Options"]').click();
       await invoke("updater_fixture_options_window");
+      const bar = await revealMainMenu();
       const updates = await waitFor("the manual update command", () => {
-        const commands = [...document.querySelectorAll(".main-menu [data-menu-group]")].find((button) => button.textContent === "Commands");
+        const commands = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === "Commands");
         if (commands?.getAttribute("aria-expanded") === "false") commands.click();
-        return [...document.querySelectorAll(".main-menu [data-menu-item]")].find((button) => button.textContent === "Check for updates");
+        return [...bar.querySelectorAll("[data-menu-item]")].find((button) => button.textContent === "Check for updates");
       });
       updates.click();
       await waitFor("the up-to-date message", () => [...document.querySelectorAll("dialog[open] p")].some((text) => text.textContent === "Dirlume is up to date."));

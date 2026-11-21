@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { openMainMenu } from "./menu-header-smoke.mjs";
 
 export async function testNewFileEncoding(page, root) {
   const fileList = page.getByRole("listbox", { name: "left files", exact: true });
@@ -18,9 +19,8 @@ export async function testNewFileEncoding(page, root) {
   async function openNewFile(fromMenu = false) {
     await fileList.focus();
     if (fromMenu) {
-      const bar = page.getByRole("menubar", { name: "Main menu", exact: true });
-      await bar.getByRole("menuitem", { name: "Files", exact: true }).click();
-      await bar.getByRole("menu", { name: "Files", exact: true }).getByRole("menuitem", { name: "New file", exact: true }).click();
+      const menu = await openMainMenu(page, "Files");
+      await menu.getByRole("menuitem", { name: "New file", exact: true }).click();
     } else await fileList.press("Shift+F4");
     await dialog.waitFor();
   }

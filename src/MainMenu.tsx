@@ -30,15 +30,17 @@ type MenuItem = MenuAction | (Omit<MenuAction, "run"> & { items: MenuAction[] })
 export type MenuGroup = { label: string; items: MenuItem[] };
 export type MainMenuHandle = { open: () => void };
 
-export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
+export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByDefault = false }: {
   groups: MenuGroup[];
-  shortcut: string;
+  shortcut?: string;
   ref?: Ref<MainMenuHandle>;
   label?: string;
+  hiddenByDefault?: boolean;
 }) {
   const bar = useRef<HTMLElement>(null);
   const priorFocus = useRef<HTMLElement | null>(null);
   const [active, setActive] = useState(0);
+  const [visible, setVisible] = useState(!hiddenByDefault);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [cursor, setCursor] = useState(0);
   const [submenu, setSubmenu] = useState<{ item: number; cursor: number } | null>(null);
@@ -46,6 +48,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
   function close(restore: boolean) {
     setExpanded(null);
     setSubmenu(null);
+    if (hiddenByDefault) setVisible(false);
     if (restore) {
       if (priorFocus.current?.isConnected) priorFocus.current.focus();
       else if (bar.current?.contains(document.activeElement) && document.activeElement instanceof HTMLElement) {
@@ -63,10 +66,18 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
 
   useImperativeHandle(ref, () => ({
     open: () => {
-      if (expanded === null) open(active);
-      else close(true);
+      if (hiddenByDefault && !visible) {
+        const focused = document.activeElement;
+        priorFocus.current = focused instanceof HTMLElement ? focused : null;
+        setVisible(true);
+      } else if (hiddenByDefault || expanded !== null) close(true);
+      else open(active);
     },
-  }), [active, expanded]);
+  }), [active, expanded, hiddenByDefault, visible]);
+
+  useLayoutEffect(() => {
+    if (hiddenByDefault && visible) bar.current?.querySelector<HTMLElement>('[data-menu-group][tabindex="0"]')?.focus();
+  }, [hiddenByDefault, visible]);
 
   useLayoutEffect(() => {
     if (expanded !== null) {
@@ -114,7 +125,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
   }, [expanded, submenuIndex]);
 
   useEffect(() => {
-    if (expanded === null) return;
+    if (!visible || (!hiddenByDefault && expanded === null)) return;
     function outside(event: PointerEvent) {
       const group = event.target instanceof Element ? event.target.closest(".main-menu-group") : null;
       // The menubar stretches across the header. Only its controls and dropdowns are menu content.
@@ -122,7 +133,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
     }
     document.addEventListener("pointerdown", outside, true);
     return () => document.removeEventListener("pointerdown", outside, true);
-  }, [expanded]);
+  }, [expanded, hiddenByDefault, visible]);
 
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     const { key } = event;
@@ -130,7 +141,9 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
     const moveCursor = (position: number, count: number) => key === "Home" ? 0 : key === "End" ? count - 1 :
       (position + count + (key === "ArrowUp" ? -1 : 1)) % count;
     const vertical = key === "ArrowUp" || key === "ArrowDown" || key === "Home" || key === "End";
-    if (submenu && submenuItem && "items" in submenuItem) {
+    if (key === "Escape" && hiddenByDefault) {
+      close(true);
+    } else if (submenu && submenuItem && "items" in submenuItem) {
       if (key === "Escape" || key === "ArrowLeft") setSubmenu(null);
       else if (vertical) setSubmenu({ ...submenu, cursor: moveCursor(submenu.cursor, submenuItem.items.length) });
       else if (key === "Enter" || key === " ") { event.stopPropagation(); return; }
@@ -162,12 +175,12 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu" }: {
   }
 
   return (
-    <nav ref={bar} className="main-menu" role="menubar" aria-label={t(label)}
+    <nav ref={bar} className="main-menu" role="menubar" aria-label={t(label)} hidden={!visible}
       onFocusCapture={(event) => {
         const from = event.relatedTarget;
         if (from instanceof HTMLElement && !event.currentTarget.contains(from)) priorFocus.current = from;
       }}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setExpanded(null); }}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close(false); }}
       onKeyDown={keyDown}>
       {groups.map(({ label, items }, index) => {
         const shown = expanded === index;

@@ -6,7 +6,13 @@ Choose English, Ukrainian, or Russian in **Options → General → Language**. A
 
 Choose **Classic blue** in **Options → Appearance → Window → Color scheme** for vivid blue file panes, cyan borders, yellow column headings, and a teal selection. You can use it as the base for a custom scheme.
 
+**Lavender**, **Emerald**, **Aurora**, **Midnight blue**, **Sunrise**, and **Graphite** give the window a modern look: rounded file panes on a soft gradient or glowing background, chip-style drive and key buttons, and the main window font in the file lists. Lavender and Sunrise are light schemes, the other four are dark. Sunrise (warm ivory with a coral accent) and Graphite (neutral charcoal with an amber accent) are a matching pair with plainer backgrounds. They look closest to their design in the **Twin panels** layout and work with every layout. A font set in **Appearance → Fonts** still takes precedence.
+
 Set **Favorite light scheme** and **Favorite dark scheme** in **Options → Appearance → Window**. **System** follows the operating system's appearance, and the sun or moon button switches between your favorites. Enable the optional list with **Show color scheme switcher in the title bar**. On Windows, drag the unused area of the title bar to move the window or double-click it to maximize or restore it.
+
+Use **Export settings** in **Options** to save selected settings groups and custom color schemes to a JSON file. To share only a palette, select its scheme. On another installation, use **Import settings** to choose what to apply from the file. Dirlume asks for confirmation before replacing a local color scheme. Imported schemes are available under **Options → Appearance → Window → Color scheme**.
+
+The JSON archive includes portable preferences such as panel modes and keyboard shortcuts. Dirlume migrates supported older files and skips settings it no longer recognizes. The KSwitcher installation folder is configured locally in **Options → General**.
 
 The two panes have independent folder navigation, sorting, filtering, and file selection. Local panes refresh automatically when files change. Copy or move selected files and folders from a destination dialog with live progress and cancellation. Moves across volumes copy each file before removing its source. With the default **Ask** option, Dirlume prompts when it reaches an existing file or folder. Choose **Overwrite** for a file, **Merge** for a folder, or **Skip** or **Cancel**. A remembered decision applies to subsequent conflicts of the same type in that transfer.
 
@@ -59,7 +65,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Default keys | Action |
 | --- | --- |
 | F1 | Open the offline Help guide in the current interface language. |
-| Alt or F9 | Open the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to return to the previous control. |
+| Alt or F9 | Show or hide the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to hide the menu and return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. On Windows, select a drive by letter to open the other pane's local folder on that drive, or open the drive root. |
@@ -103,6 +109,8 @@ On Windows, **Options → Terminal → Automatically refresh environment variabl
 **Compare files** opens a separate window. Use **Previous** and **Next** to select a change, then **Apply to left** or **Apply to right** to transfer it. Turn on **Edit files** to work directly in both panes. When closing with unsaved edits, choose **Overwrite original** or **Save as** for each changed file.
 
 Viewers and editors use the same syntax highlighting and let you change the detected language or choose plain text. Customize syntax colors in **Options → Appearance → Text tools**. Markdown preview renders fenced Mermaid diagrams. Use **HTML formatting** in the viewer toolbar to toggle support for inline spans that specify `white-space: nowrap` in table cells. The setting applies to the open viewer tab. The **Open documents** bar switches between the files view and open documents. Dirlume restores local browsing history, selection, layout, and viewer/editor windows at startup. Unsaved changes require confirmation before closing the editor or exiting.
+
+Press **Ctrl+Q** or select **Quick View** in the main toolbar to preview the current file in the opposite pane while browsing. Toggle it again to restore that pane. **Ctrl+Left** and **Ctrl+Right** move the divider. Use **Rendered** and **Source** in the toolbar for Markdown and HTML. Rendered HTML runs no scripts and loads no external resources. For PNG, JPEG, GIF, WebP, and BMP images up to 16 MiB, use the buttons to zoom, fit, or rotate the preview.
 
 In **New file** (**Shift+F4**), choose UTF-8, UTF-8 with BOM, UTF-16 LE, or UTF-16 BE. UTF-8 is the default. The editor preserves the chosen encoding when saving or reopening the file.
 
@@ -149,6 +157,8 @@ node scripts/server-smoke.mjs
 ```
 
 On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature. To include the FTP smoke test locally, install `pyftpdlib==2.2.0` in Python and set `DIRLUME_FTP_PYTHON` to that Python executable. Use a UI automation build so the fixture keeps its FTP profiles separate.
+
+For Windows memory investigations, [measure WebView2 by PID and process role](docs/webview2-memory.md).
 
 ## Archives
 
