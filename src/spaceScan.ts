@@ -47,20 +47,24 @@ export interface SpaceNode {
 
 export interface SpaceResult {
   root: SpaceNode;
-  nodes: ReadonlyMap<number, SpaceNode>;
+  nodes: readonly SpaceNode[];
   supportsAllocation: boolean;
   phase: "scanning" | "complete" | "partial" | "error";
   error: string;
 }
 
+// Files have no descendants. Keep their empty child list shared across large scans.
+const noChildren: SpaceNode[] = [];
+Object.freeze(noChildren);
+
 function node(id: number, name: string, directory: boolean, parent: SpaceNode | null): SpaceNode {
-  return { id, name, directory, parent, children: [], logical: 0, allocated: 0, missingLogical: 0,
+  return { id, name, directory, parent, children: directory ? [] : noChildren, logical: 0, allocated: 0, missingLogical: 0,
     missingAllocated: 0, pending: directory ? 1 : 0, partial: false, shared: false, error: "" };
 }
 
 export function initialSpaceResult(place: SpacePlace): SpaceResult {
   const root = node(0, folderLabel(place), true, null);
-  return { root, nodes: new Map([[0, root]]), supportsAllocation: place.kind === "local", phase: "scanning", error: "" };
+  return { root, nodes: [root], supportsAllocation: place.kind === "local", phase: "scanning", error: "" };
 }
 
 export function spaceLocation(root: SpacePlace, entry: SpaceNode): { place: SpacePlace; reveal?: string } {
@@ -98,7 +102,7 @@ async function scanLocalSpace(
   if (signal.aborted) return;
   const id = crypto.getRandomValues(new Uint32Array(2)).join("-");
   let result = initialSpaceResult(place);
-  let nodes = new Map(result.nodes);
+  let nodes = [result.root];
   let files = 0;
   let knownAllocations = 0;
   let lastReport = -Infinity;
@@ -116,7 +120,7 @@ async function scanLocalSpace(
 
   function update(change: SpaceChange) {
     if ("closed" in change) {
-      const entry = nodes.get(change.closed)!;
+      const entry = nodes[change.closed];
       entry.error = change.error ?? "";
       for (let p: SpaceNode | null = entry; p; p = p.parent) {
         p.pending--;
@@ -124,9 +128,9 @@ async function scanLocalSpace(
       }
       return;
     }
-    const parent = nodes.get(change.parent)!;
-    const child = node(nodes.size, change.name, change.directory, parent);
-    nodes.set(child.id, child);
+    const parent = nodes[change.parent];
+    const child = node(nodes.length, change.name, change.directory, parent);
+    nodes.push(child);
     parent.children.push(child);
     if (!child.directory) {
       files++;
@@ -159,7 +163,7 @@ async function scanLocalSpace(
       if (signal.aborted) { cancel(); return; }
       // A failed MFT read restarts with an empty tree and a fresh sequence of node IDs.
       result = initialSpaceResult(place);
-      nodes = new Map(result.nodes);
+      nodes = [result.root];
       result.nodes = nodes;
       files = knownAllocations = 0;
       publish();
@@ -209,7 +213,7 @@ export async function scanSpace(
 ) {
   if (rootPlace.kind === "local") return scanLocalSpace(rootPlace, signal, report);
   const result = initialSpaceResult(rootPlace);
-  const nodes = new Map(result.nodes);
+  const nodes = [result.root];
   result.nodes = nodes;
   const jobs = [{ entry: result.root, place: rootPlace as SpacePlace }];
   const identities = new Set<string>();
@@ -241,8 +245,8 @@ export async function scanSpace(
           continue;
         }
         names.add(file.name);
-        const child = node(nodes.size, file.name, file.directory, entry);
-        nodes.set(child.id, child);
+        const child = node(nodes.length, file.name, file.directory, entry);
+        nodes.push(child);
         entry.children.push(child);
         if (file.directory) {
           children.push({ entry: child, place: childPlace(place, file.name) as SpacePlace });

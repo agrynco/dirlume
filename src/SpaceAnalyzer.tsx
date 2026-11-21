@@ -218,8 +218,8 @@ export default function SpaceAnalyzer({ side, place, onClose, onReveal, resolveP
   const metric = result.supportsAllocation ? metricChoice ?? "allocated" : "logical";
   const scanning = result.phase === "scanning";
   const incomplete = result.phase === "partial" || unavailable(result.root, metric) > 0;
-  const folder = result.nodes.get(zoom) ?? result.root;
-  const entry = result.nodes.get(selected) ?? result.root;
+  const folder = result.nodes[zoom] ?? result.root;
+  const entry = result.nodes[selected] ?? result.root;
 
   useLayoutEffect(() => { closeButton.current?.focus(); }, []);
   useEffect(() => {

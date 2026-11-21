@@ -11,9 +11,10 @@ use windows_sys::Win32::{
         ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_NO_MORE_FILES,
     },
     Storage::FileSystem::{
-        FileIdExtdDirectoryInfo, GetFileInformationByHandleEx, GetVolumeInformationByHandleW,
-        FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_ATTRIBUTE_SPARSE_FILE, FILE_ID_EXTD_DIR_INFO,
+        FileIdExtdDirectoryInfo, FileStorageInfo, GetFileInformationByHandleEx,
+        GetVolumeInformationByHandleW, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FILE_ID_EXTD_DIR_INFO,
+        FILE_STORAGE_INFO,
     },
 };
 
@@ -23,7 +24,33 @@ use super::{
     Ordering, Output, Path, PathBuf,
 };
 
-pub(super) fn local_ntfs(root: &Path) -> Option<(u32, u64)> {
+pub(super) struct Volume {
+    serial: u32,
+    root_id: u64,
+    workers: usize,
+}
+
+fn worker_count(file: &std::fs::File) -> usize {
+    // FileStorageInfo carries the volume's FILE_FS_SECTOR_SIZE_INFORMATION flags.
+    const SSINFO_FLAGS_NO_SEEK_PENALTY: u32 = 0x04;
+    let mut info = FILE_STORAGE_INFO::default();
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileStorageInfo,
+            (&mut info as *mut FILE_STORAGE_INFO).cast(),
+            size_of_val(&info) as u32,
+        )
+    };
+    let limit = if ok != 0 && info.Flags & SSINFO_FLAGS_NO_SEEK_PENALTY != 0 {
+        16
+    } else {
+        4
+    };
+    thread::available_parallelism().map_or(2, |n| n.get().min(limit))
+}
+
+pub(super) fn local_ntfs(root: &Path) -> Option<Volume> {
     if platform::mount(root).ok()?.1 {
         return None;
     }
@@ -45,7 +72,12 @@ pub(super) fn local_ntfs(root: &Path) -> Option<(u32, u64)> {
     if ok == 0 || !name.iter().copied().eq("NTFS".encode_utf16()) {
         return None;
     }
-    directory_identity(&file).ok()
+    let (serial, root_id) = directory_identity(&file).ok()?;
+    Some(Volume {
+        serial,
+        root_id,
+        workers: worker_count(&file),
+    })
 }
 
 pub(super) fn unsupported(error: &io::Error) -> bool {
@@ -212,12 +244,12 @@ fn parse_page(
     }
 }
 
-pub(super) fn scan(
-    root: &Path,
-    (volume, index): (u32, u64),
-    out: &mut Output<'_>,
-) -> io::Result<()> {
-    let workers = thread::available_parallelism().map_or(2, |n| n.get().clamp(1, 4));
+pub(super) fn scan(root: &Path, volume: Volume, out: &mut Output<'_>) -> io::Result<()> {
+    let Volume {
+        serial,
+        root_id,
+        workers,
+    } = volume;
     let stop = out.stop;
     thread::scope(|scope| {
         let (tx, results) = mpsc::sync_channel(workers * 2);
@@ -230,7 +262,7 @@ pub(super) fn scan(
             scope.spawn(move || {
                 let mut buffer = vec![0u64; 8192];
                 for job in queue {
-                    let result = enumerate(&job, volume, &mut buffer, stop, &tx);
+                    let result = enumerate(&job, serial, &mut buffer, stop, &tx);
                     if tx
                         .send(Message::Done {
                             worker,
@@ -248,7 +280,7 @@ pub(super) fn scan(
         let mut pending = vec![Job {
             parent: 0,
             path: root.to_owned(),
-            index: u128::from(index),
+            index: u128::from(root_id),
         }];
         loop {
             out.check()?;
@@ -278,7 +310,7 @@ pub(super) fn scan(
                                 allocated,
                                 index,
                             } => {
-                                let identity = (index != 0).then_some((u64::from(volume), index));
+                                let identity = (index != 0).then_some((u64::from(serial), index));
                                 out.entry(parent, name, false, Some(size), allocated, identity)?;
                             }
                         }

@@ -1,0 +1,8 @@
+{
+  "version": "0.1.18",
+  "highlights": [
+    "Space Analyzer scans local NTFS folders in parallel without administrator access and uses up to 16 readers on solid-state drives.",
+    "When Windows grants access to the Master File Table, Space Analyzer uses it to scan a whole NTFS volume.",
+    "File sizes appear in the tree and treemap as the scan runs. You can stop the scan and explore the results already collected."
+  ]
+}
