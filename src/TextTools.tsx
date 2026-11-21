@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
+import { DiagnosticLog } from "./DiagnosticLog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
 import { isMarkdownFile, type MarkdownPosition } from "./markdown";
@@ -31,7 +32,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors,
+export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors, diagnosticLog,
   onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
   file: NamedFile;
   editing: boolean;
@@ -42,6 +43,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
   colors?: Palette;
+  diagnosticLog?: boolean;
   onZoom: ZoomViewFont;
   onOptions: () => void;
   onSwitchMode: () => void;
@@ -59,6 +61,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const [preview, setPreview] = useState(!editing && isMarkdownFile(file.name));
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
+  const [diagnosticSource, setDiagnosticSource] = useState(false);
   const [syntax, setSyntax] = useState("auto");
   const [syntaxInfo, setSyntaxInfo] = useState<{ detected: string | undefined; unavailable: boolean }>();
   const [choosingSyntax, setChoosingSyntax] = useState(false);
@@ -95,7 +98,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const markdownVisible = Boolean(document && preview && !hex);
   const markdownViewer = markdownVisible && !editing;
   const contentWidth = markdownViewer ? viewerMarkdownContentWidth ?? viewerContentWidth : viewerContentWidth;
-  const sourceVisible = Boolean(document && !preview && !hex);
+  const diagnosticVisible = Boolean(document && diagnosticLog && !diagnosticSource && !hex);
+  const sourceVisible = Boolean(document && !preview && !hex && !diagnosticVisible);
   const search = useMarkdownSearch(markdownContent, markdownScroll, searchOpen ? searchQuery.trim() : "",
     active && markdownViewer, markdownSource, htmlFormatting);
   const byteSize = useMemo(() => {
@@ -286,7 +290,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     if (sourceVisible) {
       sourceActions.current?.selectAll();
     } else {
-      const contents = markdownContent ?? section.current?.querySelector(".hex-view");
+      const contents = markdownContent ?? section.current?.querySelector(".diagnostic-log:not([hidden]), .hex-view");
       if (contents) window.getSelection()?.selectAllChildren(contents);
     }
   }
@@ -408,6 +412,10 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           </Button>
         </>}
         {isMarkdown && document && !hex && <Button onClick={() => setPreview(!preview)}>{preview ? t("Source") : t("Preview")}</Button>}
+        {diagnosticLog && document && !hex && <div className="diagnostic-view-controls" role="group" aria-label={t("Error log view")}>
+          <Button type="button" aria-pressed={!diagnosticSource} onClick={() => setDiagnosticSource(false)}>{t("Entries")}</Button>
+          <Button type="button" aria-pressed={diagnosticSource} onClick={() => setDiagnosticSource(true)}>{t("Source")}</Button>
+        </div>}
         {isMarkdown && document && preview && !hex && (
           <Button type="button" aria-pressed={htmlFormatting} onClick={() => setHtmlFormatting((enabled) => !enabled)}>
             {t("HTML formatting")}
@@ -445,9 +453,10 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
             onOpenDocument={(target, newTab, next) => onOpenDocument(target, newTab, next, markdownScroll.current?.scrollTop ?? 0)} onError={setError} />
           </Suspense>
         )}
-        <div className="source-surface" hidden={preview || hex}>
+        {diagnosticVisible && <DiagnosticLog source={document.text} />}
+        <div className="source-surface" hidden={!sourceVisible}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
-            <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && !preview && !hex}
+            <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>

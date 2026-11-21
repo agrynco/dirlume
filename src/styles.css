@@ -1557,6 +1557,41 @@ button.color-swatch {
 }
 .markdown code { font: var(--view-font-size, var(--viewer-size))/1.65 var(--viewer-font); tab-size: 4; }
 .text-view { white-space: pre-wrap; overflow-wrap: anywhere; }
+.diagnostic-view-controls { display: flex; gap: 4px; }
+.diagnostic-log { container-type: inline-size; white-space: normal; }
+.diagnostic-log > p { margin: 0; }
+.diagnostic-entry { border-block-end: 1px solid var(--line); }
+.diagnostic-entry > summary {
+  display: grid;
+  grid-template-columns: 1em minmax(27ch, 1.15fr) minmax(12ch, 1fr) minmax(11ch, .9fr) minmax(0, 7ch);
+  align-items: baseline;
+  column-gap: .75em;
+  padding: .35em .45em;
+  list-style: none;
+  cursor: pointer;
+}
+.diagnostic-entry > summary::-webkit-details-marker { display: none; }
+.diagnostic-entry > summary:hover { background: color-mix(in srgb, var(--document-ink) 6%, transparent); }
+.diagnostic-entry > summary:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; border-radius: 3px; }
+.diagnostic-entry code, .diagnostic-entry pre { font: inherit; }
+.diagnostic-entry :is(.diagnostic-chevron, .diagnostic-code svg) { width: 1em; height: 1em; vertical-align: -.14em; }
+.diagnostic-entry .diagnostic-chevron { align-self: center; }
+.diagnostic-entry[open] .diagnostic-chevron { transform: rotate(90deg); }
+.diagnostic-code[data-panic] { font-weight: 700; }
+.diagnostic-code svg { margin-inline-end: .4em; }
+.diagnostic-details { padding: .35em .45em .85em 2.15em; }
+.diagnostic-details :is(dl, dd, ol, p, pre) { margin: 0; min-width: 0; }
+.diagnostic-details dl > div { display: grid; grid-template-columns: minmax(0, 16ch) minmax(0, 1fr); gap: 0 1em; }
+.diagnostic-details pre { white-space: pre-wrap; }
+.diagnostic-details h3 { margin: .7em 0 .25em; font-size: 1em; }
+.diagnostic-details ol { padding-inline-start: 3ch; }
+@container (max-width: 43em) {
+  .diagnostic-entry > summary { grid-template-columns: 1em minmax(0, 1fr) minmax(0, 1fr); }
+  .diagnostic-entry > summary > :is(time, .diagnostic-malformed) { grid-column: 2 / -1; }
+  .diagnostic-operation, .diagnostic-os { grid-column: 2; }
+  .diagnostic-details dl > div { grid-template-columns: minmax(0, 1fr); }
+  .diagnostic-details dd { padding-inline-start: 1ch; }
+}
 .source-surface { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .hex-toolbar form { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .hex-toolbar { flex-wrap: wrap; }

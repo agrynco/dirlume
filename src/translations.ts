@@ -1,5 +1,16 @@
 // English message keys also serve as the default text. The translations are Ukrainian and Russian.
 export const translations: Readonly<Record<string, readonly [uk: string, ru: string]>> = {
+  "Error log view": ["Режим перегляду журналу", "Режим просмотра журнала"],
+  "Entries": ["Записи", "Записи"],
+  "Diagnostic entries": ["Діагностичні записи", "Диагностические записи"],
+  "Malformed entry": ["Пошкоджений запис", "Повреждённая запись"],
+  "Line {0}": ["Рядок {0}", "Строка {0}"],
+  "OS {0}": ["ОС {0}", "ОС {0}"],
+  "Recent actions": ["Нещодавні дії", "Недавние действия"],
+  "No recent actions were recorded.": ["Нещодавніх дій не записано.", "Недавние действия не записаны."],
+  "Unknown operation": ["Невідома операція", "Неизвестная операция"],
+  "Unknown time": ["Невідомий час", "Неизвестное время"],
+  "Open Source to inspect this value.": ["Відкрийте вихідний текст, щоб переглянути це значення.", "Откройте исходный текст, чтобы посмотреть это значение."],
   "Choose syntax": ["Вибрати синтаксис", "Выбрать синтаксис"],
   "Search syntax": ["Шукати синтаксис", "Искать синтаксис"],
   "No matching syntax": ["Відповідного синтаксису немає", "Нет подходящего синтаксиса"],
