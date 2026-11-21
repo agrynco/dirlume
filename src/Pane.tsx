@@ -357,6 +357,7 @@ export function Pane({ side, active, covered, layout, modeId, mode, sortAvailabl
   return (
     <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered}
       data-panel-mode={catalog || processView ? undefined : modeId}
+      data-help-topic={processView ? "processes" : search ? "search" : catalog ? "remote" : "files"}
       data-drop-pane={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>

@@ -5,8 +5,9 @@ import { applyAppearance, isLightTheme, resolveAppearance, useSystemTheme } from
 import { reportFrontendError } from "./diagnostics";
 import { saveDialogSize } from "./Dialog";
 import { HelpDialog } from "./HelpDialog";
+import { useHelpShortcut } from "./contextHelp";
 import { setLanguage, t } from "./i18n";
-import { bindingMatches, eventShortcut, persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
+import { persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
 import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
@@ -19,8 +20,8 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   optionsPage?: FeaturePage;
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
-  const [help, setHelp] = useState(false);
   const shortcuts = shortcutBindings(preferences);
+  const [help, setHelp] = useHelpShortcut(shortcuts.help, comparison ? "compare" : "general");
   const { scheme, theme } = resolveAppearance(preferences, useSystemTheme());
   const title = t(comparison ? "Compare files" : "Options");
   const windowHandle = getCurrentWindow();
@@ -73,17 +74,11 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
     if (comparison) void reportDirty(false).finally(() => windowHandle.destroy()).catch(() => {});
     else void windowHandle.close();
   };
-  if (comparison) return <CompareDialog {...comparison} standalone
-    previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange}
-    onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} />;
-
-  return <div onKeyDownCapture={(event) => {
-    if (event.defaultPrevented || event.nativeEvent.isComposing || !bindingMatches(shortcuts.help, eventShortcut(event)) ||
-        (event.target instanceof Element && event.target.closest("[data-shortcut-capture]"))) return;
-    event.preventDefault();
-    setHelp(true);
-  }}>
-    <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {
+  return <>
+    {comparison ? <CompareDialog {...comparison} standalone
+      previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange}
+      onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} /> :
+      <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {
       const next = readPreferences();
       for (const key of Object.keys(draft) as (keyof Preferences)[]) {
         if (JSON.stringify(draft[key]) !== JSON.stringify(preferences[key])) Object.assign(next, { [key]: draft[key] });
@@ -92,7 +87,7 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
       setLanguage(next.language);
       setPreferences(next);
       return next;
-    }} />
-    {help && <HelpDialog initialTopic="general" language={preferences.language} onClose={() => setHelp(false)} />}
-  </div>;
+    }} />}
+    {help && <HelpDialog initialTopic={help} language={preferences.language} onClose={() => setHelp(null)} />}
+  </>;
 }

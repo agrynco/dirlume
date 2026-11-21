@@ -54,6 +54,12 @@ export async function testCompareLayouts(page, root) {
   const active = list.locator(".diff-block.current");
 
   await list.waitFor();
+  await layout().press("F1");
+  const help = window.getByRole("dialog", { name: "Help", exact: true });
+  await help.locator('.help-contents [aria-current="location"][href="#help-compare"]').waitFor();
+  await window.keyboard.press("Escape");
+  await help.waitFor({ state: "hidden" });
+  assert.equal(await layout().evaluate((element) => element === document.activeElement), true);
   await layout().selectOption("side-by-side");
   await connectors.check();
   await whitespace.check();

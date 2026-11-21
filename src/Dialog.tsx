@@ -3,6 +3,7 @@ import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { ResizeMarker, WindowResizeMarker } from "./ResizeGrip";
+import type { HelpTopic } from "./helpContent";
 
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
@@ -20,7 +21,7 @@ export function saveDialogSize(key: string, size: Dimensions) {
   try { localStorage.setItem(sizePrefix + key, JSON.stringify(size)); } catch { /* The current size still applies. */ }
 }
 
-export function Dialog({ title, children, footer, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone }: {
+export function Dialog({ title, children, footer, onClose, onKeyDown, wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, helpTopic }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -32,6 +33,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
   suspended?: boolean;
   dismissOnOutside?: boolean;
   tone?: "warning";
+  helpTopic?: HelpTopic;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -73,7 +75,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, wide = fal
 
   return (
     <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
-      style={size} data-tone={tone} aria-labelledby={heading} onKeyDown={(event) => {
+      style={size} data-tone={tone} data-help-topic={helpTopic} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
       onPointerDown={(event) => {

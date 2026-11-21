@@ -31,6 +31,7 @@ import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import { HelpDialog, type HelpTopic } from "./HelpDialog";
+import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
@@ -132,10 +133,12 @@ function isTerminalInput(target: EventTarget | null) {
   return target instanceof Element && target.closest(".terminal-surface") !== null;
 }
 
-function contextHelpTopic(modal: Modal["kind"] | undefined, target: Element | null, editing: boolean | undefined): HelpTopic {
+function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | undefined): HelpTopic {
   if (modal === "settings") return "general";
-  if (modal === "search") return "search";
-  if (target?.closest(".terminal-card, .command-bar")) return "terminal";
+  if (modal === "search" || modal === "compare") return modal;
+  if (modal === "connect" || modal === "smb" || modal === "connectionEditor") return "remote";
+  if (modal === "createArchive" || modal === "archivePassword") return "archives";
+  if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename") return "operations";
   return editing === undefined ? "files" : editing ? "editor" : "viewer";
 }
 
@@ -182,7 +185,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [modal, setModal] = useState<Modal | null>(null);
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
-  const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
   const checkingUpdates = useRef(false);
@@ -268,9 +270,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const otherFileServer = !other.search && isFileServer(other.place);
   const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
-  const helpShortcut = shortcuts.help;
-  const modalKind = modal?.kind;
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
+  const [helpTopic, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
 
   const checkUpdates = useCallback(async (manual: boolean) => {
     if (manual) {
@@ -301,22 +302,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setModal(updateNotice);
     setUpdateNotice(null);
   }, [updateNotice, modal, helpTopic]);
-
-  useLayoutEffect(() => {
-    if (!helpShortcut.length) return;
-    function openHelp(event: WindowEventMap["keydown"]) {
-      if (event.defaultPrevented || event.isComposing || !bindingMatches(helpShortcut, eventShortcut(event))) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (isTerminalInput(target) || target?.closest("[data-shortcut-capture]")) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.repeat) return;
-      const topic = contextHelpTopic(modalKind, target, editingDocument);
-      setHelpTopic((current) => current ?? topic);
-    }
-    document.addEventListener("keydown", openHelp, true);
-    return () => document.removeEventListener("keydown", openHelp, true);
-  }, [helpShortcut, modalKind, editingDocument]);
 
   useEffect(() => {
     if (!shortcuts.menuAlternate.includes("Alt")) return;
@@ -1775,7 +1760,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": openSettings(); break;
-      case "help": setHelpTopic(contextHelpTopic(undefined, document.activeElement, editingDocument)); break;
+      case "help": setHelpTopic(topicForControl(document.activeElement, contextHelpTopic(undefined, editingDocument))); break;
       case "menu": mainMenu.current?.open(); break;
       case "close": void getCurrentWindow().close().catch((error: unknown) => setStatus({ text: describeError(error), error: true })); break;
       case "leftLocations":
@@ -2099,10 +2084,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           </div>}
           <Button className="icon-button" aria-label={t("Quick View")} aria-pressed={quickViewSource !== null}
             shortcut={keyLabel("quickView")} disabled={!canToggleQuickView} onClick={() => perform("quickView")}><ScanEye /></Button>
-          <Button className="toolbar-button topbar-connect" aria-label={t("Connect")} shortcut={keyLabel("connect")} onClick={() => perform("connect")}>
+          <Button className="toolbar-button topbar-connect" data-help-topic="remote" aria-label={t("Connect")} shortcut={keyLabel("connect")} onClick={() => perform("connect")}>
             <Server /> <span>{t("Connect")}</span>
           </Button>
-          <Button className="icon-button" aria-label={t("Find files")} shortcut={keyLabel("search")}
+          <Button className="icon-button" data-help-topic="search" aria-label={t("Find files")} shortcut={keyLabel("search")}
             disabled={activeDocument !== null || !!processPanels[active] || !pane.place || pane.place.kind === "smbRoot" || pane.loading}
             onClick={() => perform("search")}><Search /></Button>
           <span className="separator" />
@@ -2110,7 +2095,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             disabled={!canSwapPanes} onClick={() => perform("swap")}><ArrowLeftRight /></Button>
           <Button className="icon-button" aria-label={t("Show hidden files")} aria-pressed={preferences.hidden}
             shortcut={keyLabel("hidden")} onClick={() => perform("hidden")}>{preferences.hidden ? <Eye /> : <EyeOff />}</Button>
-          <Button className="icon-button" aria-label={t("Toggle terminal")} aria-pressed={terminalVisible}
+          <Button className="icon-button" data-help-topic="terminal" aria-label={t("Toggle terminal")} aria-pressed={terminalVisible}
             shortcut={keyLabel("toggleTerminal")} disabled={activeDocument !== null} onClick={toggleTerminal}><TerminalIcon /></Button>
           <Button className="icon-button" aria-label={t(isLightTheme(theme) ? "Switch to favorite dark scheme" : "Switch to favorite light scheme")}
             onClick={() => setPreferences((current) => selectAppearance(current,
@@ -2272,7 +2257,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
         {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
       </div>}
-      <form className="command-bar" hidden={terminalVisible} onSubmit={submitCommand}>
+      <form className="command-bar" data-help-topic="terminal" hidden={terminalVisible} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>

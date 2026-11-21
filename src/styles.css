@@ -866,6 +866,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .help-reading h3 { margin: 0 0 8px; font-size: 1.2em; }
 .help-reading h4 { margin: 18px 0 6px; font-size: 1em; }
 .help-reading p, .help-keys, .help-keys dd { margin: 0; }
+.help-reading p a { color: var(--accent); text-decoration: underline; }
 .help-keys > div { display: grid; grid-template-columns: minmax(9em, 35%) 1fr; gap: 8px; margin-block: 4px; }
 .help-keys kbd { font-size: .85em; }
 .transfer-source { display: grid; min-width: 0; gap: 3px; }

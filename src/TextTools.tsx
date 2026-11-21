@@ -331,7 +331,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
 
   return (
     <section ref={section} style={{ ...viewFontStyle(fontSize), "--viewer-content-width": viewerContentWidth ? `${viewerContentWidth}px` : undefined } as CSSProperties}
-      hidden={!active} className="text-window" data-editing={editing} data-reading={!editing || preview}
+      hidden={!active} className="text-window" data-help-topic={editing ? "editor" : "viewer"} data-editing={editing} data-reading={!editing || preview}
       aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
@@ -712,7 +712,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, onC
   const columns = { "--comparison-columns": `minmax(0, ${ratio}fr) var(--comparison-gutter) minmax(0, ${100 - ratio}fr)` } as CSSProperties;
   const failure = error || (result && "error" in result ? result.error : "");
   return <>
-    <Dialog title={t("Compare files")} wide standalone={standalone} onClose={requestClose} onKeyDown={(event) => {
+    <Dialog title={t("Compare files")} helpTopic="compare" wide standalone={standalone} onClose={requestClose} onKeyDown={(event) => {
       const shortcut = eventShortcut(event);
       const previous = bindingMatches(previousShortcut, shortcut);
       if (previous || bindingMatches(nextShortcut, shortcut)) {
