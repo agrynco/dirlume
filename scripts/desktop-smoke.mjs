@@ -1962,7 +1962,10 @@ try {
   if (await terminalButton.getAttribute("aria-pressed") === "false") await terminalButton.click();
   const helpTerminalInput = page.locator(".xterm-helper-textarea");
   await helpTerminalInput.press("F1");
-  assert.equal(await help.isVisible(), false);
+  await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await help.waitFor({ state: "hidden" });
+  assert.equal(await helpTerminalInput.evaluate((element) => document.activeElement === element), true);
   await terminalButton.click();
   await page.getByRole("combobox", { name: "Command line", exact: true }).press("F1");
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
@@ -1971,6 +1974,16 @@ try {
   await showOptions();
   const shortcutOptions = optionsDialog;
   const shortcutSearch = shortcutOptions.getByRole("searchbox", { name: "Search settings" });
+  await shortcutSearch.fill("");
+  const helpAppearance = shortcutOptions.getByRole("button", { name: "Appearance", exact: true });
+  await helpAppearance.press("F1");
+  const optionsHelp = optionsPage.getByRole("dialog", { name: "Help", exact: true });
+  await optionsHelp.locator('.help-contents [aria-current="location"][href="#help-appearance"]').waitFor();
+  await optionsHelp.locator('.help-reading a[href="#help-window"]').press("Enter");
+  await optionsHelp.locator('.help-contents [aria-current="location"][href="#help-window"]').waitFor();
+  await optionsPage.keyboard.press("Escape");
+  await optionsHelp.waitFor({ state: "hidden" });
+  assert.equal(await helpAppearance.evaluate((element) => element === document.activeElement), true);
   await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   await shortcutOptions.getByRole("button", { name: "Change F1 for Help", exact: true }).click();

@@ -20,6 +20,7 @@ import {
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, type FeaturePage } from "./featureOptions";
+import type { HelpTopic } from "./helpContent";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
@@ -40,6 +41,13 @@ const appearancePages = [
   { id: "fonts" as const, label: "Fonts", terms: [...Object.values(fontGroups).map(({ label }) => label), "family size installed"] },
   { id: "viewFonts" as const, label: "View font sizes", terms: [...Object.values(viewFonts).map(({ label }) => label), "zoom wheel"] },
 ];
+
+function optionsHelpTopic(page: Page): HelpTopic {
+  if (page === "filePanels" || page === "sortGroups" || isPanelMode(page)) return "files";
+  if (page === "files") return "fileTypes";
+  if (page === "text") return "textTools";
+  return page;
+}
 
 function readOptionsLocation(): OptionsLocation {
   const defaults: OptionsLocation = { page: "general", query: "", expanded: true, scrollTop: 0 };
@@ -309,7 +317,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
 
   return <SettingsSearchTerms value={terms}>
-    <Dialog title={t("Options")} onClose={close} wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
+    <Dialog title={t("Options")} helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
+      wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
       <div className="settings-archive-actions">
         <Button type="button" disabled={loadingArchive} onClick={() => void startImport()}>{t("Import settings")}</Button>
         <Button type="button" disabled={loadingArchive} onClick={() => setSettingsArchive({ kind: "export" })}>{t("Export settings")}</Button>
@@ -343,20 +352,20 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 else if (showShortcuts) select("shortcuts");
               }} />
           </label>
-          {onPick && <Button ref={pickButton} type="button" className="icon-button" aria-label={t("Pick an element")}
+          {onPick && <Button ref={pickButton} type="button" className="icon-button" data-help-topic="appearance" aria-label={t("Pick an element")}
             tooltip={t("Pick an element")} disabled={picking} onClick={() => { void pick(); }}><Crosshair /></Button>}
           </div>
           {pickError && <p role="alert" className="dialog-error">{t("Could not start the appearance picker.")}</p>}
           <nav className="settings-tree" aria-label={t("Options sections")}>
-            {showGeneral && <Button type="button" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
-            {featureMatches.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
+            {showGeneral && <Button type="button" data-help-topic="general" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
+            {featureMatches.map((id) => <Button key={id} type="button" data-help-topic={optionsHelpTopic(id)} aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
             </Button>)}
-            {showSortGroups && <Button type="button" aria-pressed={!selection && page === "sortGroups"} onClick={() => select("sortGroups")}>
+            {showSortGroups && <Button type="button" data-help-topic="files" aria-pressed={!selection && page === "sortGroups"} onClick={() => select("sortGroups")}>
               {t("Sort groups")}
             </Button>}
             {modesMatch.length > 0 && <>
-              <Button type="button" aria-expanded={modesExpanded || searching} aria-controls="options-panel-modes"
+              <Button type="button" data-help-topic="files" aria-expanded={modesExpanded || searching} aria-controls="options-panel-modes"
                 onClick={() => {
                   if (!modePage || selection) { select(modesMatch[0]); setModesExpanded(true); }
                   else setModesExpanded(!modesExpanded);
@@ -364,14 +373,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 {modesExpanded || searching ? <ChevronDown /> : <ChevronRight />} {t("Panel modes")}
               </Button>
               <div id="options-panel-modes" className="settings-tree-branch" hidden={!modesExpanded && !searching}>
-                {modesMatch.map((id) => <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>
+                {modesMatch.map((id) => <Button key={id} type="button" data-help-topic="files" aria-pressed={!selection && page === id} onClick={() => select(id)}>
                   {panelModeName(id, preferences.panelModes)}
                 </Button>)}
               </div>
             </>}
             {appearanceMatches.length > 0 && (
               <>
-                <Button type="button" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
+                <Button type="button" data-help-topic="appearance" aria-expanded={expanded || searching} aria-controls="options-appearance-pages"
                   onClick={() => {
                     if (!isAppearance || selection) { select(appearanceMatches[0].id); setExpanded(true); }
                     else setExpanded(!expanded);
@@ -380,12 +389,12 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </Button>
                 <div id="options-appearance-pages" className="settings-tree-branch" hidden={!expanded && !searching}>
                   {appearanceMatches.map(({ id, label }) => (
-                    <Button key={id} type="button" aria-pressed={!selection && page === id} onClick={() => select(id)}>{t(label)}</Button>
+                    <Button key={id} type="button" data-help-topic={optionsHelpTopic(id)} aria-pressed={!selection && page === id} onClick={() => select(id)}>{t(label)}</Button>
                   ))}
                 </div>
               </>
             )}
-            {showShortcuts && <Button type="button" aria-pressed={!selection && page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
+            {showShortcuts && <Button type="button" data-help-topic="shortcuts" aria-pressed={!selection && page === "shortcuts"} onClick={() => select("shortcuts")}>{t("Keyboard shortcuts")}</Button>}
             {!searching && onPick && <>
               <Button type="button" aria-expanded={historyExpanded} aria-controls="options-picker-history"
                 onClick={() => setHistoryExpanded(!historyExpanded)}>

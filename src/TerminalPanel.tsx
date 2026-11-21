@@ -342,7 +342,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   }, [theme, scheme]);
 
   return (
-    <section className="terminal-card" aria-label={t("Terminal")} hidden={!visible}>
+    <section className="terminal-card" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
       <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}><h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2><span data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
