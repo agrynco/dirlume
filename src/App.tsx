@@ -9,7 +9,7 @@ import { CommandField } from "./CommandField";
 import { clampSplit, SplitDivider } from "./SplitDivider";
 import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
-import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Copy, Eye, EyeOff, FileDiff,
   FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
@@ -57,7 +57,8 @@ import type { FeaturePage } from "./featureOptions";
 import { applyAppearance, isLightTheme, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
 import { ImageDocument } from "./ImageDocument";
-import { imageType } from "./ImageViewport";
+import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
+import { canEditImage, imageType } from "./ImageViewport";
 import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import {
@@ -96,6 +97,8 @@ type DocumentTab = DocumentWindow & {
   back?: MarkdownLocation[];
   forward?: MarkdownLocation[];
   imageIndex?: number;
+  imageEditorOpened?: boolean;
+  imageRevision?: number;
 };
 
 function sameRenameLocation(current: Place | null, place: RenameLocation) {
@@ -223,6 +226,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
   const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
   const dirtyDocuments = useRef(new Set<number>());
+  const imageEditors = useRef(new Map<number, ImageEditorHandle>());
+  const exitPending = useRef(false);
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
@@ -709,6 +714,39 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return true;
   }, []);
 
+  async function confirmExit(update?: AppUpdate) {
+    if (update) { installUpdate(update); return; }
+    exitConfirmed.current = true;
+    try {
+      await getCurrentWindow().close();
+    } catch (error) {
+      exitConfirmed.current = false;
+      setModal(null);
+      setStatus({ text: describeError(error), error: true });
+    }
+  }
+
+  async function requestExit(update?: AppUpdate) {
+    if (exitPending.current) return;
+    exitPending.current = true;
+    try {
+      setModal(null);
+      for (const id of dirtyDocuments.current) {
+        const editor = imageEditors.current.get(id);
+        if (editor && !await editor.confirmClose()) {
+          if (update) setModal({ kind: "update", update });
+          return;
+        }
+      }
+      if (Array.from(dirtyDocuments.current).some((id) => !imageEditors.current.has(id))) setModal({ kind: "exit", update });
+      else await confirmExit(update);
+    } finally {
+      exitPending.current = false;
+    }
+  }
+
+  const requestWindowExit = useEffectEvent(() => { void requestExit(); });
+
   useEffect(() => {
     if (!isTauri()) return;
     const dirtyListener = listen<{ label: string; dirty: boolean }>("dirlume:comparison-dirty", ({ payload }) => {
@@ -724,7 +762,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (askToSaveComparison()) { event.preventDefault(); return; }
       if (!exitConfirmed.current && dirtyDocuments.current.size) {
         event.preventDefault();
-        setModal({ kind: "exit" });
+        requestWindowExit();
       }
     });
     return () => {
@@ -920,15 +958,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, []);
 
   function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side) {
-    const existing = documents.find((item) => item.editing === editing && sameDocumentFile(item.file, file));
+    const image = !!imageType(file.name);
+    const existing = documents.find((item) => (image || item.editing === editing) && sameDocumentFile(item.file, file));
     const id = existing?.id ?? ++nextDocument.current;
-    const imageOrigin = !editing && imageType(file.name) ? origin : undefined;
+    const imageOrigin = image ? origin : undefined;
     const imageIndex = imageOrigin ? imagesInPane(imageOrigin, file).findIndex((candidate) => sameDocumentFile(candidate, file)) : undefined;
+    const canEdit = editing && (!image || canEditImage(file));
     if (!existing) {
-      setDocuments((current) => [...current, { id, file, editing, position, imageOrigin, imageIndex }]);
-    } else if (position || imageOrigin) {
+      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex }]);
+    } else if (position || image) {
       setDocuments((current) => current.map((tab) => tab.id === id
-        ? { ...tab, position: position ?? tab.position, imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex }
+        ? { ...tab, position: position ?? tab.position, imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex,
+          editing: canEdit, imageEditorOpened: image && (tab.imageEditorOpened || tab.editing) }
         : tab));
     }
     selectDocument(id);
@@ -962,8 +1003,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setDocuments(remaining);
     dirtyDocuments.current.delete(id);
     if (activeDocument === id) {
-      const { file, editing } = documents[index];
-      selectDocument(!editing && imageType(file.name) ? null : documents[index - 1]?.id ?? null);
+      selectDocument(imageType(documents[index].file.name) ? null : documents[index - 1]?.id ?? null);
     }
   }
 
@@ -2204,7 +2244,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || writableTextPlace(file.place))) openDocument(file, command === "edit", undefined, active);
+        if (file && (command === "view" || imageType(file.name) || writableTextPlace(file.place))) openDocument(file, command === "edit", undefined, active);
         break;
       }
       case "compare": {
@@ -2325,7 +2365,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   ] as const) : ([
     { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
-    { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !writableTextPlace(currentFile.place) },
+    { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !(imageType(currentFile.name) || writableTextPlace(currentFile.place)) },
     { command: "copy", label: local || fileServer || archive ? "Copy" : "Download", Icon: local || fileServer || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp) || !!pane.search || !current || busy },
@@ -2607,17 +2647,48 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
-        {documents.map(({ id, file, editing, position, back, forward, imageOrigin, imageIndex }) => {
+        {documents.map(({ id, file, editing, position, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0 }) => {
           const documentKey = JSON.stringify([id, placePath(file.place), file.name]);
-          if (!editing && imageType(file.name)) {
+          if (imageType(file.name)) {
             const candidates = activeDocument === id ? imagesInPane(imageOrigin ?? active, file) : [];
             const index = candidates.findIndex((image) => sameDocumentFile(file, image));
             const current = index >= 0 ? index : Math.max(0, imageIndex ?? 0);
-            return <ImageDocument key={documentKey} file={file} active={activeDocument === id} shortcuts={shortcuts}
-              previous={candidates[current - 1]} next={candidates[index >= 0 ? current + 1 : current]}
-              onNavigate={(image) => setDocuments((current) => current.map((tab) => tab.id === id
-                ? { ...tab, file: image, imageIndex: candidates.indexOf(image) } : tab))}
-              onClose={() => closeDocument(id)} />;
+            const documentActive = activeDocument === id;
+            const editable = file.place.kind === "local" && canEditImage(file);
+            const mode = (editing: boolean) => {
+              const existing = editing && documents.find((tab) => tab.id !== id &&
+                (tab.imageEditorOpened || tab.editing) && sameDocumentFile(tab.file, file));
+              const target = existing ? existing.id : id;
+              setDocuments((current) => current.map((tab) => tab.id === target ? { ...tab, editing, imageEditorOpened: true } : tab));
+              if (target !== id) selectDocument(target);
+            };
+            function afterConfirmation(run: () => void) {
+              const editor = imageEditors.current.get(id);
+              if (!editor) run();
+              else void editor.confirmClose().then((confirmed) => { if (confirmed) run(); });
+            }
+            const close = () => afterConfirmation(() => closeDocument(id));
+            return <Fragment key={documentKey}>
+              {!editing && <ImageDocument key={imageRevision} file={file} active={documentActive} shortcuts={shortcuts} revision={imageRevision}
+                previous={candidates[current - 1]} next={candidates[index >= 0 ? current + 1 : current]}
+                onNavigate={(image) => afterConfirmation(() => {
+                  dirtyDocuments.current.delete(id);
+                  setDocuments((current) => current.map((tab) => tab.id === id
+                    ? { ...tab, file: image, imageIndex: candidates.indexOf(image), imageEditorOpened: false } : tab));
+                })} onEdit={() => mode(true)} onClose={close} />}
+              {(editing || imageEditorOpened) && editable && file.place.kind === "local" && <ImageEditor
+                ref={(handle) => { if (handle) imageEditors.current.set(id, handle); else imageEditors.current.delete(id); }}
+                directory={file.place.path} name={file.name} active={documentActive && editing} shortcuts={shortcuts} revision={imageRevision}
+                onSwitch={() => mode(false)} onClose={close} onDirty={(dirty) => {
+                  if (dirty) dirtyDocuments.current.add(id);
+                  else dirtyDocuments.current.delete(id);
+                }} onSaved={(replaced) => {
+                  if (replaced) setDocuments((current) => current.map((tab) => sameDocumentFile(tab.file, file)
+                    ? { ...tab, imageRevision: (tab.imageRevision ?? 0) + 1 } : tab));
+                  for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
+                  setStatus({ text: replaced ? t("The original image was replaced.") : t("Image copy saved."), error: false });
+                }} />}
+            </Fragment>;
           }
           return (
           <TextWindow key={documentKey}
@@ -2745,15 +2816,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             "Some editors have unsaved changes. Discard them and exit Dirlume?")}</p></div>
           <footer className="dialog-footer">
             <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Keep working")}</Button>
-            <Button type="button" className="alert-confirm" onClick={() => {
-              if (modal.update) { installUpdate(modal.update); return; }
-              exitConfirmed.current = true;
-              void getCurrentWindow().close().catch((error: unknown) => {
-                exitConfirmed.current = false;
-                setModal(null);
-                setStatus({ text: describeError(error), error: true });
-              });
-            }}>{t(modal.update ? "Discard changes and update" : "Discard changes and exit")}</Button>
+            <Button type="button" className="alert-confirm" onClick={() => void confirmExit(modal.update)}>
+              {t(modal.update ? "Discard changes and update" : "Discard changes and exit")}</Button>
           </footer>
         </Dialog>
       )}
@@ -2770,7 +2834,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <footer className="dialog-footer">
             <Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Later")}</Button>
             <Button type="button" className="primary" onClick={() => {
-              if (modal.update.kind === "install" && dirtyDocuments.current.size) setModal({ kind: "exit", update: modal.update });
+              if (modal.update.kind === "install" && dirtyDocuments.current.size) void requestExit(modal.update);
               else installUpdate(modal.update);
             }}>{t(modal.update.kind === "debian" ? "Download Debian package" : "Install and restart")}</Button>
           </footer>

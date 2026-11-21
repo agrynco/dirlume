@@ -1,5 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
+import type { ImageTransform, Size } from "./imageCrop";
 
 export interface Entry extends Partial<PanelMetadata> {
   name: string;
@@ -460,6 +461,12 @@ export const api = {
     invoke<void>("save_text", { directory, name, original, text }),
   saveTextAs: (path: string, encoding: TextEncoding, text: string) =>
     invoke<void>("save_text_as", { path, encoding, text }),
+  openImageEdit: (directory: string, name: string) =>
+    invoke<Size & { id: string; canReplace: boolean }>("open_image_edit", { directory, name }),
+  readImageEdit: (id: string) => invoke<ArrayBuffer>("read_image_edit", { id }),
+  saveImageEdit: (id: string, target: string | null, edit: ImageTransform) =>
+    invoke<void>("save_image_edit", { id, target, edit }),
+  closeImageEdit: (id: string) => invoke<void>("close_image_edit", { id }),
   openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
   hasKSwitcherBridge: (directory: string) => invoke<boolean>("has_kswitcher_bridge", { directory }),
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
