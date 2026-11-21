@@ -92,14 +92,28 @@ try {
   await openOptions();
 
   await button(options, "Export settings").click();
-  assert.equal(await button(exportDialog, "Export").isDisabled(), true);
-  await check(exportDialog, local.name).check();
-  await check(exportDialog, evening.name).check();
+  const groupChecks = exportDialog.getByRole("group", { name: "Settings groups", exact: true }).getByRole("checkbox");
+  const allChecks = exportDialog.getByRole("checkbox");
+  const assertDefaultSelection = async () => {
+    assert.ok(await allChecks.evaluateAll((inputs) => inputs.length > 0 && inputs.every((input) => input.checked)));
+    assert.equal(await button(exportDialog, "Export").isDisabled(), false);
+  };
+  await assertDefaultSelection();
+  const groupCount = await groupChecks.count();
   await page.evaluate(() => { window.cancelSave = true; });
   await button(exportDialog, "Export").click();
   await button(exportDialog, "Export").waitFor();
   assert.equal(await exported(), undefined);
   await page.evaluate(() => { window.cancelSave = false; });
+  await button(exportDialog, "Export").click();
+  await exportDialog.waitFor({ state: "hidden" });
+  const fullFile = await exported();
+  assert.equal(Object.keys(fullFile.groups).length, groupCount);
+  assert.deepEqual(fullFile.schemes.map(({ id }) => id), [local.id, evening.id]);
+
+  await button(options, "Export settings").click();
+  await assertDefaultSelection();
+  for (const group of await groupChecks.all()) await group.uncheck();
   await button(exportDialog, "Export").click();
   await exportDialog.waitFor({ state: "hidden" });
   const themeFile = await exported();
@@ -110,6 +124,9 @@ try {
   assert.deepEqual(themeFile.schemes[1].colors, evening.colors);
 
   await button(options, "Export settings").click();
+  await assertDefaultSelection();
+  for (const item of await allChecks.all()) await item.uncheck();
+  assert.equal(await button(exportDialog, "Export").isDisabled(), true);
   for (const group of ["General", "Appearance", "Keyboard shortcuts", "Main File Panels", "Terminal", "Viewer"]) {
     await check(exportDialog, group).check();
   }
@@ -229,6 +246,10 @@ try {
   });
   await page.reload();
   await openOptions();
+  await button(options, "Export settings").click();
+  await assertDefaultSelection();
+  assert.equal(await exportDialog.getByRole("group", { name: "Color schemes", exact: true }).count(), 0);
+  await button(exportDialog, "Cancel").click();
   await startImport(JSON.stringify(themeFile));
   await button(importDialog, "Import").click();
   assert.deepEqual((await readPreferences()).schemes, themeFile.schemes);
@@ -243,7 +264,74 @@ try {
   assert.deepEqual(restored.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
   assert.equal(restored.viewerContentWidth, 630);
   assert.equal(restored.viewerMarkdownContentWidth, "full");
-  console.log("Verified selective settings export and import, theme and shortcut round trips, legacy migration, retired settings, replacement confirmation, restart, and cancel and error handling.");
+  const localBefore = restored.schemes.find(({ id }) => id === local.id);
+  const openManagement = async () => {
+    const search = options.getByRole("searchbox", { name: "Search settings" });
+    await search.fill("Scheme to manage");
+    await search.press("Enter");
+  };
+  await page.emulateMedia({ colorScheme: "light" });
+  await openManagement();
+  const managed = options.getByRole("combobox", { name: "Scheme to manage" });
+  const name = options.getByRole("textbox", { name: "Scheme name", exact: true });
+  const deletion = dialog("Delete color scheme");
+  const deleteScheme = () => button(options, "Delete scheme").click();
+  const favorite = (mode) => options.getByRole("combobox", { name: `Favorite ${mode} scheme`, exact: true });
+  const appearance = () => page.locator("html").getAttribute("data-theme");
+  await scheme.selectOption("light");
+  await managed.selectOption(local.id);
+  await name.fill("Daylight custom");
+  assert.equal(await scheme.inputValue(), "light");
+  await button(options, "Apply").click();
+  assert.equal(await appearance(), "light");
+  assert.deepEqual((await readPreferences()).schemes.find(({ id }) => id === local.id), { ...localBefore, name: "Daylight custom" });
+  await managed.selectOption(evening.id);
+  await deleteScheme();
+  await deletion.getByText(evening.name, { exact: true }).waitFor();
+  await button(deletion, "Keep scheme").click();
+  assert.equal(await managed.getByRole("option", { name: evening.name }).count(), 1);
+
+  await scheme.selectOption(`custom:${local.id}`);
+  await managed.selectOption(local.id);
+  assert.equal(await button(options, "Delete scheme").isDisabled(), true);
+  await name.fill("Daylight renamed");
+  await favorite("light").selectOption(`custom:${local.id}`);
+  await favorite("dark").selectOption(`custom:${evening.id}`);
+  await check(options, "Show color scheme switcher in the title bar").check();
+  await button(options, "Apply").click();
+  assert.equal((await readPreferences()).activeScheme, local.id);
+  assert.equal(await page.locator(".topbar-scheme").getByRole("option", { name: "Daylight renamed" }).count(), 1);
+  await scheme.selectOption("system");
+  assert.ok(await button(options, "Delete scheme").isDisabled());
+  await managed.selectOption(evening.id);
+  await deleteScheme();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await deletion.getByText("Switch to another color scheme before deleting this one.", { exact: true }).waitFor();
+  assert.equal(await button(deletion, "Delete scheme").isDisabled(), true);
+  await button(deletion, "Keep scheme").click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await deleteScheme();
+  await button(deletion, "Delete scheme").click();
+  await button(options, "Done").click();
+  await page.reload();
+  const afterDeletion = await readPreferences();
+  assert.equal(afterDeletion.theme, "system");
+  assert.equal(afterDeletion.systemLightScheme, `custom:${local.id}`);
+  assert.equal(afterDeletion.systemDarkScheme, "dark");
+  assert.deepEqual(afterDeletion.schemes, [{ ...localBefore, name: "Daylight renamed" }]);
+  await openOptions();
+  await button(options, "Export settings").click();
+  assert.ok(await check(exportDialog, "Daylight renamed").isVisible());
+  assert.equal(await check(exportDialog, evening.name).count(), 0);
+  await button(exportDialog, "Cancel").click();
+  await openManagement();
+  await scheme.selectOption("light");
+  await name.fill("Unapplied rename");
+  await deleteScheme();
+  await button(deletion, "Delete scheme").click();
+  await page.keyboard.press("Escape");
+  assert.deepEqual(await readPreferences(), afterDeletion);
+  console.log("Verified settings archive round trips and independent color scheme management, deletion protection, and favorite fallback.");
 } finally {
   await browser.close();
 }

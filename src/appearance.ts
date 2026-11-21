@@ -241,6 +241,8 @@ export type Palette = Partial<Record<Color, string>>;
 export type Fonts = Partial<Record<FontGroup, Font>>;
 
 export interface Scheme {
+  // Draft-only name suggested for a scheme created while editing appearance.
+  suggestedName?: string;
   id: string;
   name: string;
   base: BaseTheme;
