@@ -2152,7 +2152,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           setModal({
             kind: permanentDelete || archive ? "delete" : command, path: placePath(writable), remote: fileServer, archive,
             names: selected.map(({ name }) => name),
-            directories: fileServer ? selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name) : undefined,
+            directories: selected.filter((entry) => entry.directory && !entry.link).map(({ name }) => name),
           });
         }
         break;
@@ -2921,6 +2921,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                 ? remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false))
                 : api.operate(modal.path, { kind: modal.kind, name }));
             } catch (error) {
+              // A single failed file has no completed items to replay. Keep its recovery actions available.
+              if (!remote && modal.names.length === 1 && !modal.directories?.length) {
+                throw error instanceof Error && error.cause !== undefined ? error.cause : error;
+              }
               setStatus({ text: describeError(error), error: true });
               setModal(null);
               return;
