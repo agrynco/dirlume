@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
@@ -15,6 +15,10 @@ const front = {
   "09-large.exe": null,
   "10-utf16.txt": "UTF-16 file remains readable.",
   "11-large-text.txt": null,
+  "12-middle.png": null,
+  "13-last.png": null,
+  "14-first.png": null,
+  "15-corrupt.png": null,
 };
 const binaryHeader = [0x4d, 0x5a, 0, 1, 9, 13, 10, 0xb3, 46, 116, 101, 120, 116];
 const largeBytes = 9 * 1024 * 1024 + 3;
@@ -24,7 +28,10 @@ const endMarker = "END";
 const back = {
   "01-another.txt": "First file on the right.",
   "02-remember.txt": "Selected file on the right.",
+  "03-right.png": null,
 };
+const viewerOrder = ["14-first.png", "12-middle.png", "13-last.png", "15-corrupt.png", "05-image.png"];
+const modified = (name) => Date.UTC(2025, 0, 1, 0, 0, viewerOrder.length - viewerOrder.indexOf(name));
 const toolbar = (page) => page.locator(".top-actions");
 const toggle = (page) => toolbar(page).getByRole("button", { name: "Quick View", exact: true });
 const list = (page, side) => page.getByRole("listbox", { name: side + " files", exact: true });
@@ -32,16 +39,16 @@ const row = (page, side, name) => list(page, side).locator('.file-row[data-toolt
 const preview = (page, side) => page.locator(".quick-view-" + side);
 const control = (surface, name) => surface.getByRole("button", { name, exact: true });
 
-async function pngFixture(page) {
-  const encoded = await page.evaluate(() => {
+async function pngFixture(page, width = 520, height = 260) {
+  const encoded = await page.evaluate(({ width, height }) => {
     const canvas = document.createElement("canvas");
-    canvas.width = 520;
-    canvas.height = 260;
+    canvas.width = width;
+    canvas.height = height;
     const context = canvas.getContext("2d");
     context.fillStyle = "#25aac4";
-    context.fillRect(0, 0, 520, 260);
+    context.fillRect(0, 0, width, height);
     return canvas.toDataURL("image/png").split(",")[1];
-  });
+  }, { width, height });
   return Buffer.from(encoded, "base64");
 }
 
@@ -192,6 +199,97 @@ async function checkViews(page) {
   await right.waitFor({ state: "hidden" });
 }
 
+async function checkImageDocuments(page) {
+  const document = page.locator(".image-document:not([hidden])");
+  const image = (name) => document.getByRole("img", { name, exact: true });
+  const heading = (name) => document.getByRole("heading", { name, exact: true });
+  const nav = (name) => control(document, name);
+  const open = async (side, name) => {
+    await row(page, side, name).click();
+    await list(page, side).press("F3");
+    await heading(name).waitFor();
+  };
+  await row(page, "left", "12-middle.png").click();
+  await list(page, "left").press("Control+F5");
+  await open("left", "12-middle.png");
+  await document.getByText("1,600 × 900 px", { exact: true }).waitFor();
+  const fit = (await image("12-middle.png").boundingBox()).width;
+  assert.ok(fit < 1600);
+  await nav("Actual size").click();
+  assert.equal(Math.round((await image("12-middle.png").boundingBox()).width), 1600);
+  const viewport = document.locator(".quick-view-image-canvas");
+  const scroll = () => viewport.evaluate((element) => ({ x: element.scrollLeft, y: element.scrollTop,
+    maxX: element.scrollWidth - element.clientWidth, maxY: element.scrollHeight - element.clientHeight }));
+  const before = await scroll();
+  const rect = await viewport.boundingBox();
+  const dx = before.x < before.maxX / 2 ? -96 : 96;
+  const dy = before.y < before.maxY / 2 ? -64 : 64;
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy, { steps: 4 });
+  await page.mouse.up();
+  const after = await scroll();
+  assert.ok((after.x - before.x) * dx < 0 && (after.y - before.y) * dy < 0,
+    JSON.stringify({ before, after, rect }));
+  const pointer = { x: rect.x + rect.width * 0.43, y: rect.y + rect.height * 0.42 };
+  const imagePoint = (bounds) => ({ x: (pointer.x - bounds.x) / bounds.width, y: (pointer.y - bounds.y) / bounds.height });
+  const original = imagePoint(await image("12-middle.png").boundingBox());
+  await page.mouse.move(pointer.x, pointer.y);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -120);
+  await page.keyboard.up("Control");
+  await document.getByText("125%", { exact: true }).waitFor();
+  const zoomed = imagePoint(await image("12-middle.png").boundingBox());
+  assert.ok(Math.abs(original.x - zoomed.x) < 0.002 && Math.abs(original.y - zoomed.y) < 0.002);
+  await nav("Fit").click();
+  await page.waitForFunction((initial) => Math.abs(document.querySelector(".image-document:not([hidden]) img").getBoundingClientRect().width - initial) < 1, fit);
+  await nav("Next image").click();
+  await image("13-last.png").waitFor();
+  assert.equal(await page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: /^View / }).count(), 1);
+  await document.press("ArrowLeft");
+  await image("12-middle.png").waitFor();
+  await document.press("ArrowLeft");
+  await image("14-first.png").waitFor();
+  assert.equal(await nav("Previous image").isDisabled(), true);
+  for (const name of ["12-middle.png", "13-last.png", "15-corrupt.png"]) {
+    await document.press("ArrowRight");
+    await heading(name).waitFor();
+  }
+  await document.getByText("Could not display this image.", { exact: true }).waitFor();
+  assert.equal(await image("13-last.png").count(), 0);
+  await document.press("F4");
+  await document.getByLabel("Hexadecimal contents").waitFor();
+  await document.press("F4");
+  await document.getByText("Could not display this image.", { exact: true }).waitFor();
+  await document.press("ArrowRight");
+  await image("05-image.png").waitFor();
+  assert.equal(await nav("Next image").isDisabled(), true);
+  await document.press("ArrowLeft");
+  await heading("15-corrupt.png").waitFor();
+  await document.press("Escape");
+  await page.waitForFunction(() => document.activeElement?.id === "left-files");
+  assert.equal(await row(page, "left", "15-corrupt.png").getAttribute("data-current"), "true");
+  await list(page, "left").press("Control+F5");
+  const pane = page.locator("#left-pane");
+  await control(pane, "Filter folder").click();
+  await pane.getByRole("textbox", { name: "Filter left folder", exact: true }).fill("1");
+  await open("left", "15-corrupt.png");
+  assert.equal(await nav("Previous image").isDisabled(), true);
+  for (const name of ["13-last.png", "12-middle.png", "14-first.png"]) {
+    await document.press("ArrowRight");
+    await image(name).waitFor();
+  }
+  assert.equal(await nav("Next image").isDisabled(), true);
+  await document.press("Escape");
+  await control(pane, "Close filter").click();
+  await open("right", "03-right.png");
+  await image("03-right.png").waitFor();
+  assert.equal(await nav("Previous image").isDisabled(), true);
+  assert.equal(await nav("Next image").isDisabled(), true);
+  await document.press("F10");
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+}
+
 export async function testNativeQuickView(page, root) {
   const left = join(root, "quick-view-left");
   const right = join(root, "quick-view-right");
@@ -199,6 +297,7 @@ export async function testNativeQuickView(page, root) {
   await mkdir(right);
   await mkdir(join(left, "folder"));
   const png = await pngFixture(page);
+  const largePng = await pngFixture(page, 1600, 900);
   const image = join(left, "05-image.png");
   for (const [name, text] of Object.entries(front)) {
     const path = join(left, name);
@@ -216,10 +315,12 @@ export async function testNativeQuickView(page, root) {
       } finally { await file.close(); }
       continue;
     }
-    await writeFile(path, name === "05-image.png" ? png : name === "10-utf16.txt" ? Buffer.from("\ufeff" + text, "utf16le") :
-      text ?? Buffer.from(binaryHeader));
+    const value = name === "05-image.png" ? png : name === "15-corrupt.png" ? "Invalid image" :
+      name.endsWith(".png") ? largePng : name === "10-utf16.txt" ? Buffer.from("\ufeff" + text, "utf16le") : text ?? Buffer.from(binaryHeader);
+    await writeFile(path, value);
+    if (viewerOrder.includes(name)) await utimes(path, new Date(modified(name)), new Date(modified(name)));
   }
-  for (const [name, text] of Object.entries(back)) await writeFile(join(right, name), text);
+  for (const [name, text] of Object.entries(back)) await writeFile(join(right, name), text ?? largePng);
   for (const [side, path] of [["left", left], ["right", right]]) {
     const address = await editPaneAddress(page, side);
     await address.fill(path);
@@ -229,6 +330,7 @@ export async function testNativeQuickView(page, root) {
     if (sort.column !== "name" || !sort.asc) await list(page, side).press("Control+F3");
   }
   await checkViews(page);
+  await checkImageDocuments(page);
   assert.deepEqual(await readFile(image), png);
   console.log("Verified native Windows Quick View for text, Markdown, sandboxed HTML and image files in both panes.");
 }
@@ -240,20 +342,21 @@ export async function testBrowserQuickView(userAgent) {
     page.setDefaultTimeout(8000);
     page.on("pageerror", (error) => console.error(error));
     const png = [...await pngFixture(page)];
+    const largePng = [...await pngFixture(page, 1600, 900)];
     let externalRequests = 0;
     await page.route("https://external.invalid/**", (route) => { externalRequests++; return route.abort(); });
     await page.route("http://dirlume.test/**", (route) => {
       const path = new URL(route.request().url()).pathname;
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
-    await page.addInitScript(({ front, back, png, binaryHeader, largeBytes, middleByte, middleMarker, endMarker }) => {
+    await page.addInitScript(({ front, back, png, largePng, imageTimes, binaryHeader, largeBytes, middleByte, middleMarker, endMarker }) => {
       if (location.hostname !== "dirlume.test") return;
       const path = /Windows/i.test(navigator.userAgent) ? "C:\\fixture\\" : "/fixture/";
       const panel = (name) => ({ place: { kind: "local", path: path + name, parent: null } });
       localStorage.setItem("dirlume.workspace.v1", JSON.stringify({
         panels: { left: panel("left"), right: panel("right") }, active: "left", split: 50, documents: [],
       }));
-      const file = (name) => ({ name, directory: name === "folder", link: false, size: 12, modified: null });
+      const file = (name) => ({ name, directory: name === "folder", link: false, size: 12, modified: imageTimes[name] ?? null });
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args) => {
@@ -283,12 +386,16 @@ export async function testBrowserQuickView(userAgent) {
               return block ? block[1][offset - block[0]] : 0;
             }) };
           }
-          if (command === "read_preview_image") return new Uint8Array(png).buffer;
+          if (command === "read_preview_image") {
+            const name = args.source.name;
+            return new Uint8Array(name === "05-image.png" ? png : name === "15-corrupt.png" ? [0, 1] : largePng).buffer;
+          }
           if (command === "file_icons") return [];
           return null;
         },
       };
-    }, { front, back, png, binaryHeader, largeBytes, middleByte, middleMarker, endMarker });
+    }, { front, back, png, largePng, imageTimes: Object.fromEntries(viewerOrder.map((name) => [name, modified(name)])),
+      binaryHeader, largeBytes, middleByte, middleMarker, endMarker });
     await page.goto("http://dirlume.test/");
     await checkViews(page);
     assert.equal(externalRequests, 0);
@@ -303,6 +410,7 @@ export async function testBrowserQuickView(userAgent) {
     assert.equal(await right.getByText("Outdated contents", { exact: true }).count(), 0);
     assert.equal(await right.getByText("Could not read this file: Permission denied", { exact: true }).isVisible(), true);
     await toggle(page).click();
+    await checkImageDocuments(page);
 
     await page.getByRole("button", { name: "Options", exact: true }).click();
     const options = page.getByRole("dialog", { name: "Options", exact: true });
@@ -328,7 +436,7 @@ export async function testBrowserQuickView(userAgent) {
     assert.equal(await toggle(page).getAttribute("aria-pressed"), "false");
     await toggle(page).click();
     await right.getByText(front["01-alpha.txt"], { exact: true }).waitFor();
-    console.log("Verified both Quick View directions, browsing state, divider, read-only formats, stale reads, and remappable shortcuts.");
+    console.log("Verified both Quick View directions, read-only formats, stale reads, remappable shortcuts, and Image Viewer navigation and zoom.");
   } finally {
     await browser.close();
   }

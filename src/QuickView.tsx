@@ -2,19 +2,15 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Maximize, RotateCcw, RotateCw, ScanEye, ZoomIn, ZoomOut } from "lucide-react";
 import { describeError, readPlaceBytes, readPlacePreviewImage, readPlaceText, type BytePage, type NamedFile } from "./api";
 import { BinaryPreview, looksBinary } from "./BinaryPreview";
+import { ImageViewport, imageType, useImageViewport } from "./ImageViewport";
 import { Button } from "./Button";
 import { errorText, t } from "./i18n";
 import { isMarkdownFile } from "./markdown";
 import { ReadOnlyMarkdown } from "./MarkdownPreview";
 import type { Side } from "./panes";
 
-const imageTypes: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp",
-};
-
 type PreviewContent = { kind: "image"; url: string } | { kind: "text"; text: string } |
   { kind: "binary"; page: BytePage } | { kind: "error"; message: string };
-type Size = { width: number; height: number };
 
 function renderedHtml(source: string, light: boolean) {
   const template = document.createElement("template");
@@ -61,52 +57,18 @@ function HtmlPreview({ name, text, light, onFocusFiles }: {
 }
 
 function ImagePreview({ name, url }: { name: string; url: string }) {
-  const [natural, setNatural] = useState<Size>();
-  const [viewport, setViewport] = useState<Size>({ width: 1, height: 1 });
-  const [turns, setTurns] = useState(0);
-  const [zoom, setZoom] = useState<number | null>(null);
-  const [failed, setFailed] = useState(false);
-  const canvas = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const element = canvas.current;
-    if (!element) return;
-    const measure = () => setViewport({ width: element.clientWidth, height: element.clientHeight });
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    measure();
-    return () => observer.disconnect();
-  }, []);
-
-  const width = turns % 2 ? natural?.height : natural?.width;
-  const height = turns % 2 ? natural?.width : natural?.height;
-  const fit = width && height ? Math.min(1, Math.max(1, viewport.width - 16) / width, Math.max(1, viewport.height - 16) / height) : 1;
-  const scale = zoom ?? fit;
-  function changeZoom(factor: number) {
-    setZoom(Math.max(Math.min(1 / 16, fit), Math.min(16, scale * factor)));
-  }
-
-  if (failed) return <p className="pane-empty" role="status">{t("Could not display this image.")}</p>;
+  const view = useImageViewport();
+  if (view.failed) return <p className="pane-empty" role="status">{t("Could not display this image.")}</p>;
   return <>
     <div className="quick-view-image-tools" role="group" aria-label={t("Image controls")}>
-      <Button className="icon-button" aria-label={t("Zoom out")} disabled={!natural} onClick={() => changeZoom(0.8)}><ZoomOut /></Button>
-      <Button className="icon-button" aria-label={t("Zoom in")} disabled={!natural} onClick={() => changeZoom(1.25)}><ZoomIn /></Button>
-      <Button className="icon-button" aria-label={t("Fit to pane")} disabled={!natural} onClick={() => setZoom(null)}><Maximize /></Button>
+      <Button className="icon-button" aria-label={t("Zoom out")} disabled={!view.natural} onClick={() => view.zoomBy(0.8)}><ZoomOut /></Button>
+      <Button className="icon-button" aria-label={t("Zoom in")} disabled={!view.natural} onClick={() => view.zoomBy(1.25)}><ZoomIn /></Button>
+      <Button className="icon-button" aria-label={t("Fit to pane")} disabled={!view.natural} onClick={view.fitToWindow}><Maximize /></Button>
       <span className="separator" />
-      <Button className="icon-button" aria-label={t("Rotate counterclockwise")} disabled={!natural}
-        onClick={() => setTurns((current) => (current + 3) % 4)}><RotateCcw /></Button>
-      <Button className="icon-button" aria-label={t("Rotate clockwise")} disabled={!natural}
-        onClick={() => setTurns((current) => (current + 1) % 4)}><RotateCw /></Button>
+      <Button className="icon-button" aria-label={t("Rotate counterclockwise")} disabled={!view.natural} onClick={() => view.rotate(-1)}><RotateCcw /></Button>
+      <Button className="icon-button" aria-label={t("Rotate clockwise")} disabled={!view.natural} onClick={() => view.rotate(1)}><RotateCw /></Button>
     </div>
-    <div className="quick-view-image-canvas" ref={canvas} tabIndex={0}>
-      <div className="quick-view-image" style={{ width: (width ?? 0) * scale, height: (height ?? 0) * scale }}>
-        <img alt={name} src={url} draggable={false} style={{
-          width: (natural?.width ?? 0) * scale, height: (natural?.height ?? 0) * scale,
-          transform: `translate(-50%, -50%) rotate(${turns * 90}deg)`,
-        }} onLoad={({ currentTarget }) => setNatural({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight })}
-        onError={() => setFailed(true)} />
-      </div>
-    </div>
+    <ImageViewport name={name} url={url} view={view} />
   </>;
 }
 
@@ -122,8 +84,7 @@ function PreviewFile({ file, source, light, onFocusFiles }: {
   useEffect(() => {
     let disposed = false;
     let url: string | undefined;
-    const extension = /\.([^.]+)$/.exec(target.name)?.[1].toLowerCase();
-    const type = extension && Object.hasOwn(imageTypes, extension) ? imageTypes[extension] : undefined;
+    const type = imageType(target.name);
     // Delay the read slightly while the cursor moves through several files in succession.
     const timer = window.setTimeout(async () => {
       try {
