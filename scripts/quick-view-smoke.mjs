@@ -301,8 +301,13 @@ async function checkImageEditor(page, side, name, capture = false) {
   await editor.press("]");
   await size(editor, "800 × 1,200");
   await control(editor, "Crop").click();
+  await control(editor, "Actual size").click();
+  await editor.locator(".document-status").getByText("100%", { exact: true }).waitFor();
+  await editor.locator(".quick-view-image-canvas").evaluate((canvas) => canvas.scrollTo(0, 0));
   const overlay = editor.locator(".image-crop-overlay");
   const frame = await overlay.boundingBox();
+  assert.equal(frame.width, 800);
+  assert.equal(frame.height, 1200);
   const screen = (x, y) => [frame.x + x * frame.width / 800, frame.y + y * frame.height / 1200];
   await page.mouse.move(...screen(20, 20));
   await page.mouse.down();
@@ -316,6 +321,7 @@ async function checkImageEditor(page, side, name, capture = false) {
   await page.mouse.up();
   assert.ok(Math.abs(Number(await field("Crop left").inputValue()) - 52) <= 2);
   assert.ok(Math.abs(Number(await field("Crop top").inputValue()) - 57) <= 2);
+  await control(editor, "Fit").click();
   const ratio = editor.getByRole("combobox", { name: "Aspect ratio", exact: true });
   await ratio.selectOption("Custom");
   await field("Ratio width").fill("5");

@@ -6,6 +6,7 @@ const themes = ["dark", "light", "slate", "classic-blue", "lavender", "emerald",
 const names = ["01-first.txt", "02-second.txt", "03-third.txt", "04-last.txt"];
 const background = "Current marked row background";
 const outline = "Current marked row outline";
+const markModifier = process.platform === "darwin" ? "Meta" : "Control";
 
 const style = (row) => row.evaluate((item) => {
   const css = getComputedStyle(item);
@@ -54,8 +55,8 @@ try {
     const current = (side) => page.locator(`#${side}-files .file-row.marked[data-current=true]`);
     const activeCursor = () => page.locator(".pane.active .file-row.marked[data-current=true]");
     const schemes = page.locator(".topbar-scheme");
-    for (const index of names.keys()) await row(index).click({ modifiers: ["Control"] });
-    await row(0, "right").click({ modifiers: ["Control"] });
+    for (const index of names.keys()) await row(index).click({ modifiers: [markModifier] });
+    await row(0, "right").click({ modifiers: [markModifier] });
 
     for (const theme of themes) {
       await schemes.selectOption(theme);
@@ -74,7 +75,7 @@ try {
       assert.notEqual((await style(row(0))).line, "2px solid");
     }
 
-    await row(3).click({ modifiers: ["Control"] });
+    await row(3).click({ modifiers: [markModifier] });
     await row(2).click();
     await left.press("ArrowDown");
     assert.equal(await activeCursor().count(), 0);
