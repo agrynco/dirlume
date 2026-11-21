@@ -44,6 +44,26 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
     }
     pointer("pointerout");
   }
+  async function checkOptionalStatusBar() {
+    const workspace = document.querySelector(".workspace");
+    const fullHeight = workspace.getBoundingClientRect().height;
+    function apply(showStatusBar) {
+      const oldValue = localStorage.getItem(preferenceKey);
+      const newValue = JSON.stringify({ ...JSON.parse(oldValue ?? "{}"), showStatusBar });
+      localStorage.setItem(preferenceKey, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key: preferenceKey, oldValue, newValue }));
+    }
+    apply(false);
+    const grip = await waitFor("the resize marker in File actions", () => document.querySelector(".actionbar-row > .window-resize-marker"));
+    const hitArea = grip.getBoundingClientRect();
+    const actions = grip.parentElement.querySelector(".actionbar").getBoundingClientRect();
+    if (document.querySelector(".statusbar") || workspace.getBoundingClientRect().height < fullHeight + 27 ||
+      actions.right > hitArea.left + 1 || Math.abs(hitArea.right - innerWidth) > 2 || Math.abs(hitArea.bottom - innerHeight) > 2) {
+      throw new Error("Hiding the status bar did not reclaim its space and preserve a separate resize area.");
+    }
+    apply(true);
+    await waitFor("the restored status bar and resize marker", () => document.querySelector(".statusbar > .window-resize-marker"));
+  }
   async function revealMainMenu() {
     const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
     if (bar.hidden) {
@@ -280,6 +300,7 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
         Math.abs(status.right - marker.right) > 2 || Math.abs(status.bottom - marker.bottom) > 2) {
         throw new Error("The main window resize marker was not decorative and flush with the status bar.");
       }
+      await checkOptionalStatusBar();
       const refresh = await waitFor("the pane refresh control", () => document.querySelector('#left-pane button[aria-label="Refresh folder"]:enabled'));
       await checkTooltip(refresh, "Refresh folder");
       const locations = document.querySelector("#left-pane .location-trigger");

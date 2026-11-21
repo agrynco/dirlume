@@ -42,6 +42,7 @@ import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
+import { testNativeOptionalStatusBar } from "./status-bar-smoke.mjs";
 import { checkResizeMarker, closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -197,6 +198,7 @@ try {
   assert.equal(await page.locator(".window-controls").getAttribute("data-tauri-drag-region"), "false");
   await testHeaderMenus(page, true);
   await testCommandIcons(page, true);
+  await testNativeOptionalStatusBar(page);
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
   async function dragHorizontally(handle, delta) {
     const bounds = await handle.boundingBox();
