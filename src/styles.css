@@ -1119,6 +1119,7 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .dialog button.alert-confirm:focus-visible { outline-offset: 2px; }
 .field { display: grid; gap: 5px; }
 .settings-archive-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-end: auto; }
+.settings-save-error { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .settings-archive-items { display: grid; min-width: 0; gap: 6px; padding: 6px 10px 10px; border: 1px solid var(--line); border-radius: var(--radius); }
 .settings-archive-items legend { padding-inline: 4px; font-weight: 600; }
 .new-file-encoding { margin-top: 12px; }
