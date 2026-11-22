@@ -168,11 +168,20 @@ async function testBrowserTerminalDirectory() {
         }), { left, right });
       const leftFiles = page.locator("#left-files");
       await leftFiles.focus();
-      await page.locator(".command-bar > span").getByText(left, { exact: true }).waitFor();
-      await leftFiles.press("F12");
+      const commandBar = page.locator(".command-bar");
+      await commandBar.locator(":scope > span").getByText(left, { exact: true }).waitFor();
+      await commandBar.getByRole("button", { name: "Terminal", exact: true }).click();
       const terminal = page.getByRole("region", { name: "Terminal", exact: true });
       const header = terminal.locator(".terminal-location");
-      await header.getByText(left, { exact: true }).waitFor();
+      await header.getByText(left, { exact: true }).waitFor().catch(async (error) => {
+        const state = await page.locator(".app").evaluate((app) => ({
+          layout: app.className,
+          directory: app.querySelector(".command-bar > span")?.textContent,
+          terminal: app.querySelector(".terminal-card:not([hidden])")?.textContent,
+          sessions: window.terminalStarts ?? 0,
+        }));
+        throw new Error(`Terminal did not start in ${left} with ${platform}. ${JSON.stringify(state)}`, { cause: error });
+      });
       await page.locator("#right-files").focus();
       await header.getByText(right, { exact: true }).waitFor();
       const field = page.getByRole("combobox", { name: "Command line", exact: true });
