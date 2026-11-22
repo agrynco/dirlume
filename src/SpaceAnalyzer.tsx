@@ -228,6 +228,34 @@ function tilesIn(tiles: Tile[], x = 0, y = 0, width = 100, height = 100) {
   }
 }
 
+function TreemapTileLabel({ name, size }: { name: string; size: string }) {
+  const label = useRef<HTMLSpanElement>(null);
+  const value = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const container = label.current;
+    const text = value.current;
+    if (!container || !text) return;
+
+    const fitLabel = () => {
+      const available = container.getBoundingClientRect();
+      const needed = text.getBoundingClientRect();
+      const fitsSize = available.width >= needed.width && available.height >= needed.height;
+      if (!fitsSize) container.dataset.fit = "none";
+      else container.dataset.fit = available.height >= needed.height * 2 ? "both" : "size";
+    };
+
+    fitLabel();
+    const resize = new ResizeObserver(fitLabel);
+    resize.observe(container);
+    resize.observe(text);
+    return () => resize.disconnect();
+  }, []);
+
+  return <span ref={label} className="space-tile-label" aria-hidden="true">
+    <strong>{name}</strong><span ref={value}>{size}</span>
+  </span>;
+}
+
 function Treemap({ folder, metric, selected, select, browse, showTree }: {
   folder: SpaceNode;
   metric: Metric;
@@ -248,17 +276,19 @@ function Treemap({ folder, metric, selected, select, browse, showTree }: {
       <span title={folder.name}>{folder.name}</span><strong>{formatSize(folder[metric])}</strong>
     </div>
     {tiles.length ? <div className="space-map-canvas" aria-label={t("Treemap")}>
-      {tiles.map(({ entry, size, style }) => <Button key={entry?.id ?? "more"} className="space-tile" style={style}
-        data-folder={entry?.directory || undefined} data-selected={entry?.id === selected || undefined}
-        aria-label={t("{0}, {1}", entry?.name ?? t("More items"), formatSize(size))}
-        tooltip={entry?.name ?? t("More items")} onClick={() => {
-          if (!entry) showTree();
-          else if (entry.directory) browse(entry);
-          else select(entry.id);
-        }}>
-        <strong>{entry?.name ?? t("More items")}</strong>
-        <span>{formatSize(size)}</span>
-      </Button>)}
+      {tiles.map(({ entry, size, style }) => {
+        const name = entry?.name ?? t("More items");
+        const formatted = formatSize(size);
+        return <Button key={entry?.id ?? "more"} className="space-tile" style={style}
+          data-folder={entry?.directory || undefined} data-selected={entry?.id === selected || undefined}
+          aria-label={t("{0}, {1}", name, formatted)} onClick={() => {
+            if (!entry) showTree();
+            else if (entry.directory) browse(entry);
+            else select(entry.id);
+          }}>
+          <TreemapTileLabel name={name} size={formatted} />
+        </Button>;
+      })}
     </div> : <p className="pane-empty">{t("No space to display.")}</p>}
   </div>;
 }

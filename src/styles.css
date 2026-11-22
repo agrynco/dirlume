@@ -873,14 +873,22 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .space-map-heading > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space-map-canvas { flex: 1; min-height: 0; position: relative; margin: 6px; }
 .space-tile {
-  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 3px; position: absolute;
-  min-width: 0; min-height: 0; overflow: hidden; padding: 5px; border-radius: 0; border: 1px solid var(--panel-bg);
+  position: absolute; min-width: 0; min-height: 0; overflow: hidden; padding: 0; border: 0; border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--panel-bg);
   color: var(--panel-ink); background: color-mix(in srgb, var(--accent) 13%, var(--panel-bg)); text-align: start;
 }
 .space-tile[data-folder] { background: color-mix(in srgb, var(--accent) 22%, var(--panel-bg)); }
-.space-tile:is(:hover, :focus-visible, [data-selected]) { z-index: 1; background: var(--panel-selection); color: var(--panel-selected-ink); }
+.space-tile:is(:hover:not(:disabled), :focus-visible, [data-selected]) { z-index: 1; background: var(--panel-selection); color: var(--panel-selected-ink); }
 .space-tile:focus-visible { outline-offset: -2px; }
-.space-tile > :is(strong, span) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-tile-label {
+  position: absolute; inset: 5px;
+  display: flex; flex-direction: column; align-items: flex-start;
+  line-height: 1.25; white-space: nowrap;
+}
+.space-tile-label > strong { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.space-tile-label > span { flex: none; width: max-content; }
+.space-tile-label:not([data-fit="both"]) > strong { display: none; }
+.space-tile-label:not([data-fit="both"], [data-fit="size"]) > span { visibility: hidden; }
 .space-footer { margin-top: auto; border-top: 1px solid var(--line); }
 .space-error {
   flex: none; max-height: 35%; overflow: auto; margin: 0; padding: 5px 8px;
