@@ -13,10 +13,12 @@ const controlHelpTopics = {
   paneStatus: { title: "Pane details and progress", keys: [] },
   paneViews: { title: "File pane view", keys: [] },
   spaceAnalyzer: { title: "Space Analyzer", keys: ["analyzeSpace"] },
+  diskInformation: { title: "Disk information", keys: ["diskInformation"] },
   spaceScope: { title: "Analysis scope", keys: [] },
   spacePath: { title: "Scan path", keys: [] },
   spaceTree: { title: "Tree", keys: [] },
   spaceTreemap: { title: "Treemap", keys: [] },
+  spaceSunburst: { title: "Sunburst", keys: [] },
   spaceMetric: { title: "Size metric", keys: [] },
   spaceActions: { title: "Scan controls and results", keys: [] },
   quickView: { title: "Quick View", keys: ["quickView"] },
@@ -59,7 +61,7 @@ export type HelpTopic = keyof typeof helpTopics;
 export const helpGroups: readonly { title?: string; topics: readonly HelpTopic[] }[] = [
   { topics: ["workspace", "files", "operations", "archives", "search", "quickView", "viewer", "editor", "terminal", "terminalShortcuts", "compare", "remote", "processes", "gitView", "environment"] },
   { title: "File pane controls", topics: ["paneNavigation", "paneAddress", "paneSources", "paneFilter", "paneViews", "paneColumns", "paneSelection", "paneStatus", "actionDialogs"] },
-  { title: "Space Analyzer controls", topics: ["spaceAnalyzer", "spaceScope", "spacePath", "spaceTree", "spaceTreemap", "spaceMetric", "spaceActions"] },
+  { title: "Space Analyzer controls", topics: ["diskInformation", "spaceAnalyzer", "spaceScope", "spacePath", "spaceTree", "spaceTreemap", "spaceSunburst", "spaceMetric", "spaceActions"] },
   { title: "Options", topics: ["general", "appearance", "window", "panels", "fileTypes", "dialogs", "textTools", "fonts", "viewFonts", "shortcuts"] },
 ];
 

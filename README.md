@@ -66,6 +66,8 @@ In the local **Space Analyzer → Tree**, right-click a file or folder for its a
 
 Open **Space Analyzer** in either pane from the Left or Right menu, the free-space control, or **left Ctrl+5** on the number row. Each pane keeps its own scan and selection. The breadcrumbs show the selected folder or file's parent. Choose a breadcrumb within the scan to reveal its folder, or choose a folder above the root to scan it. In a local or matching SSH terminal, successful directory changes follow the same rules. In Tree, **Tab** switches panes and marked items take precedence for file actions. Choose a file panel mode such as **Full** to browse the current folder and keep the selected file. **Close** or **Esc** restores the previous file view.
 
+Choose **Disk information** from the Left or Right menu, or press **Ctrl+Shift+L**, to see the current local folder's volume or filesystem-backed share. **Scan volume** or **Scan share** opens Space Analyzer at that root. **Sunburst** shows two levels of storage use. Its item list supports keyboard selection and **Shift+F10** for context actions. Right-click a Sunburst sector or Treemap tile to reveal that exact item in the other pane or use the available local file actions. Selecting a view saves it as the default for future scans.
+
 The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
 
 Set **Main menu position** under **Options → General**. Set **Action button width** under **Options → Main File Panels** to switch between compact and full-width buttons. Turn on **Hide action button icons** for a text-only File actions bar in any panel layout.

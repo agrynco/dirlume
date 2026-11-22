@@ -50,6 +50,7 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { SearchDialog } from "./SearchDialog";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { DeletionDialog } from "./DeletionDialog";
+import { DiskInformation } from "./DiskInformation";
 import type { Deletion } from "./api";
 import { Settings } from "./Settings";
 import { SortCriteriaDialog, SortMenu } from "./FileSortMenu";
@@ -72,7 +73,7 @@ import {
   type DeniedSshListing, type FilePaneView, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
-  compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences } from "./preferences";
+  compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -100,7 +101,7 @@ type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
 type RowRename = { side: Side; place: RenameLocation; name: string; treeKey?: string };
 type AnalysisPane = {
   id: number; root: SpacePlace; location: { place: SpacePlace; reveal?: string };
-  navigation: SpaceNavigation;
+  navigation: SpaceNavigation; initialView: SpaceAnalyzerView;
 };
 type DocumentTab = DocumentWindow & {
   position?: MarkdownPosition;
@@ -214,6 +215,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
   const [analysisPanes, setAnalysisPanes] = useState<Record<Side, AnalysisPane | null>>({ left: null, right: null });
+  const [diskPanes, setDiskPanes] = useState<Record<Side, string | null>>({ left: null, right: null });
   const analysisHandles = useRef<Record<Side, SpaceAnalyzerHandle | null>>({ left: null, right: null });
   const nextAnalysis = useRef(0);
   const treeNavigation = useRef<Record<Side, number>>({ left: 0, right: 0 });
@@ -226,6 +228,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [environmentRevision, setEnvironmentRevision] = useState(0);
   const active = quickViewSource ?? focusedSide;
   const analysis = analysisPanes[active];
+  const diskActive = diskPanes[active] !== null;
   const showingAnalysis = Boolean(analysisPanes.left || analysisPanes.right);
   const environmentActive = environmentPanels[active] !== null;
   const showingEnvironment = environmentPanels.left !== null || environmentPanels.right !== null;
@@ -875,11 +878,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       analysisHandles.current[side]?.focus();
       return;
     }
-    document.getElementById(side + (environmentPanels[side] ? "-environment" : "-files"))?.focus();
+    document.getElementById(side + (diskPanes[side] ? "-disk-information" : environmentPanels[side] ? "-environment" : "-files"))?.focus();
   }
 
   function paneCovered(side: Side) {
-    return !!gitView || environmentPanels[side] !== null || side === previewSide || !!analysisPanes[side];
+    return !!gitView || environmentPanels[side] !== null || side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
   }
 
   function closeSourceMenu(restoreFocus: boolean) {
@@ -903,6 +906,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (gitView) setGitView(null);
     if (environmentPanels[side]) setEnvironmentPanels((panels) => ({ ...panels, [side]: null }));
     if (analysisPanes[side]) setAnalysisPanes((current) => ({ ...current, [side]: null }));
+    if (diskPanes[side]) setDiskPanes((current) => ({ ...current, [side]: null }));
     if (side === previewSide) setQuickViewSource(null);
   }
 
@@ -1160,12 +1164,33 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return shared ? { ...place, id: shared.id } : place;
   }, []);
 
-  function openSpaceAnalyzer(side: Side, place: SpacePlace, focusTree = true) {
+  function diskPath(side: Side) {
+    const place = analysisPanes[side]?.location.place ?? treeFolder(side) ?? panes[side].place;
+    return place?.kind === "local" ? place.path : null;
+  }
+
+  function openDiskInformation(side: Side) {
+    const path = diskPath(side);
+    if (!path || !canSelectPanelMode(side)) return;
+    if (diskPanes[side]) { focus(side); return; }
+    setAnalysisPanes((current) => ({ ...current, [side]: null }));
+    setDiskPanes((current) => ({ ...current, [side]: path }));
+    setActive(side);
+  }
+
+  function closeDiskInformation(side: Side) {
+    setDiskPanes((current) => ({ ...current, [side]: null }));
+    focusRevealedSide(side);
+  }
+
+  function openSpaceAnalyzer(side: Side, place: SpacePlace, moveFocus = true, defaultView: SpaceAnalyzerView = "tree") {
     if (pendingListings.current[side]) invalidateListing(side);
     setQuickViewSource(null);
-    const next = { id: ++nextAnalysis.current, root: place, location: { place }, navigation: { segments: [], focus: focusTree } };
+    if (diskPanes[side]) setDiskPanes((current) => ({ ...current, [side]: null }));
+    const next = { id: ++nextAnalysis.current, root: place, location: { place }, navigation: { segments: [], focus: moveFocus },
+      initialView: preferences.spaceAnalyzerView ?? defaultView };
     setAnalysisPanes((current) => ({ ...current, [side]: next }));
-    if (focusTree) setActive(side);
+    if (moveFocus) setActive(side);
   }
 
   function closeSpaceAnalyzer(side: Side) {
@@ -1182,7 +1207,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return;
     }
     setAnalysisPanes((panes) => panes[side]?.id !== current.id ? panes : ({
-      ...panes, [side]: { ...current, location: { place }, navigation: { segments, focus: focusTree } },
+      ...panes, [side]: { ...current, location: { place }, navigation: { segments, focus: focusTree, revealTree: focusTree } },
     }));
   }
 
@@ -1956,7 +1981,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function followShellDirectory(session: TerminalSession, path: string) {
-    if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active]) return;
+    if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active] || diskActive) return;
     const place = terminalPlace;
     if (!place || (session.kind === "local" ? place.kind !== "local" :
       place.kind !== "ssh" || place.id !== session.connection)) return;
@@ -2215,6 +2240,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (!await load(side, place, "push", reveal)) return;
       closeSpaceAnalyzer(side);
     }
+    if (diskPanes[side]) closeDiskInformation(side);
     setPreferences((before) => before.selectedPanelModes[side] === id ? before : ({
       ...before, selectedPanelModes: { ...before.selectedPanelModes, [side]: id },
     }));
@@ -2239,13 +2265,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setEnvironmentPanels(swapSides);
     setQuickViewSource((side) => side === null ? null : opposite(side));
     setAnalysisPanes(swapSides);
+    setDiskPanes(swapSides);
     setRowRename((rename) => rename && { ...rename, side: opposite(rename.side) });
     connected.current = swapSides(connected.current);
     failedFtp.current = { left: failedFtp.current.right, right: failedFtp.current.left };
     selectionAnchor.current = swapSides(selectionAnchor.current);
     scans.current = swapSides(scans.current);
     setActive(opposite(focusedSide));
-    const id = next + (environmentActive ? "-environment" : "-files");
+    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : "-files");
     requestAnimationFrame(() => {
       if (movedFocus?.isConnected) movedFocus.focus({ preventScroll: true });
       else if (analysisHandles.current[next]) analysisHandles.current[next]?.focus();
@@ -2300,6 +2327,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       else if (filesAvailable && canAnalyze(pane.place)) openSpaceAnalyzer(active, pane.place);
       return;
     }
+    if (command === "diskInformation") {
+      openDiskInformation(active);
+      return;
+    }
     if (analysis && (command === "copy" || command === "move" || command === "recycle" || command === "recycleAlternate" || command === "delete")) {
       analysisHandles.current[active]?.runAction(command === "recycleAlternate" ? "recycle" : command);
       return;
@@ -2348,7 +2379,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (!panelsHidden) setModal({ kind: "folderShortcuts", side: active, screen: { kind: "groups" } });
       return;
     }
-    if (analysis && !["switchPane", "settings", "help", "menu", "close", "shrinkLeft", "growLeft", "terminal", "commandHistory", "previousCommand"].includes(command)) return;
+    if ((analysis || diskActive) && !["switchPane", "settings", "help", "menu", "close", "shrinkLeft", "growLeft", "terminal", "commandHistory", "previousCommand"].includes(command)) return;
     if (processPanels[active]) {
       if (command === "recycle") {
         document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-end-processes"));
@@ -2598,9 +2629,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }
       return;
     }
-    if (target.closest(".space-analyzer")) {
-      if (command && (command === "analyzeSpace" || command === "menu" || command === "help" || command === "close" || command === "toggleTerminal" || command === "terminal" ||
-          command === "switchPane" && target.getAttribute("role") === "treegrid" ||
+    if (target.closest(".space-analyzer, .disk-information")) {
+      if (command && (command === "analyzeSpace" || command === "diskInformation" || command === "menu" || command === "help" || command === "close" || command === "toggleTerminal" || command === "terminal" ||
+          command === "switchPane" && (target.getAttribute("role") === "treegrid" || target.id.endsWith("-disk-information")) ||
           commandPanelMode(command) || folderGroupCommand(command))) {
         event.preventDefault();
         if (!event.repeat) perform(command);
@@ -2643,7 +2674,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   const currentFile = fileFor(active);
-  const fileActions = analysis ? ([
+  const fileActions = diskActive ? [] : analysis ? ([
     { command: "copy", label: "Copy", Icon: Copy, disabled: analysis.root.kind !== "local" || busy },
     { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: analysis.root.kind !== "local" || busy },
     { command: "recycle", label: "Trash", Icon: Trash2, disabled: analysis.root.kind !== "local" || busy },
@@ -2664,7 +2695,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
-  const filesAvailable = panesAvailable && !analysis && !gitView && !environmentActive && !processPanels[active] && !pane.loading;
+  const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !processPanels[active] && !pane.loading;
   const canToggleQuickView = panesAvailable && !showingEnvironment && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
   const canToggleGitView = panesAvailable && !showingEnvironment && (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
@@ -2687,7 +2718,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function paneMenu(side: Side): MenuGroup {
     const target = panes[side];
-    const available = panesAvailable && !gitView && !environmentPanels[side] && side !== previewSide && !analysisPanes[side] && !target.loading;
+    const available = panesAvailable && !paneCovered(side) && !target.loading;
     function inPane(command: "back" | "forward" | "parent" | "refresh", disabled: boolean) {
       return {
         ...menuCommand(command, !available || disabled),
@@ -2706,7 +2737,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           id,
           label: panelModeName(id, preferences.panelModes),
           translated: true,
-          checked: !analysisPanes[side] && preferences.selectedPanelModes[side] === id,
+          checked: !analysisPanes[side] && !diskPanes[side] && preferences.selectedPanelModes[side] === id,
           shortcut: keyLabel(panelModeCommand(id)),
           disabled: !canSelectPanelMode(side),
           run: () => setPanelMode(side, id),
@@ -2716,6 +2747,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             if (analysisPanes[side]) focus(side);
             else if (canAnalyze(target.place)) openSpaceAnalyzer(side, target.place);
           } },
+        { ...menuCommand("diskInformation", !canSelectPanelMode(side) || !diskPath(side)),
+          checked: Boolean(diskPanes[side]), run: () => openDiskInformation(side) },
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
         menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
@@ -2839,7 +2872,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             fileView={trees[side].enabled ? "tree" : "list"} onFileView={(view) => void setFilePaneView(side, view)}
             onTreeBranch={(entry) => toggleTreeBranch(side, entry)} folderSizes={folderSizes[side]}
             onFolderSizes={() => setFolderSizesEnabled((before) => ({ ...before, [side]: !before[side] }))}
-            preserveScroll={showingGit || !!environmentPanels[side] || !!analysisPanes[side]}
+            preserveScroll={showingGit || !!environmentPanels[side] || !!analysisPanes[side] || !!diskPanes[side]}
             onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
             sortAvailable={!sorts[side].pending && sorts[side].canSort(sortMode(panes[side].sort.column))} sortPending={sorts[side].pending}
@@ -2915,6 +2948,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <GitView side={gitView.side} path={gitView.path} refresh={gitRefresh}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
+        {(["left", "right"] as const).map((side) => diskPanes[side] && <DiskInformation key={side + diskPanes[side]}
+          side={side} path={diskPanes[side]} active={active === side} onFocus={() => setActive(side)}
+          onClose={() => closeDiskInformation(side)} onScan={(root) => openSpaceAnalyzer(side, localPath(root), true, "sunburst")} />)}
         {(["left", "right"] as const).map((side) => {
           const analyzer = analysisPanes[side];
           return analyzer && <Suspense key={analyzer.id} fallback={<section className={"pane space-analyzer space-analyzer-" + side}>
@@ -2922,6 +2958,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           </section>}>
             <SpaceAnalyzer ref={(view) => { analysisHandles.current[side] = view; }} side={side} place={analyzer.root}
               currentFolder={analyzer.location.place} navigation={analyzer.navigation} active={active === side} layout={preferences.layout}
+              initialView={analyzer.initialView} onViewChoice={(view) => setPreferences((current) => ({ ...current, spaceAnalyzerView: view }))}
               shortcuts={shortcuts} fileRevision={fileRevision} operationsAvailable={!busy && !modal}
               rightClickSelection={preferences.rightClickSelection}
               onItemAction={(items, command) => spaceItemAction(side, items, command)}

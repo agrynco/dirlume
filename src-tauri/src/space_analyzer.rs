@@ -294,6 +294,32 @@ pub async fn space_mount(path: String) -> Result<Mount, String> {
     .await
 }
 
+#[derive(Serialize)]
+pub struct VolumeInformation {
+    path: String,
+    share: bool,
+    label: Option<String>,
+    filesystem: Option<String>,
+    capacity: Option<crate::disk_space::DiskSpace>,
+}
+
+#[tauri::command]
+pub async fn volume_information(path: String) -> Result<VolumeInformation, String> {
+    crate::desktop::blocking(move || {
+        let path = local::absolute(&path).map_err(|error| error.to_string())?;
+        let (root, share) = platform::mount(path).map_err(|error| error.to_string())?;
+        let (label, filesystem) = platform::volume_details(&root);
+        Ok(VolumeInformation {
+            path: local::display_path(&root).map_err(|error| error.to_string())?,
+            share,
+            label,
+            filesystem,
+            capacity: crate::disk_space::query(path).ok(),
+        })
+    })
+    .await
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;
@@ -307,9 +333,10 @@ mod platform {
         path::{Component, Prefix},
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        GetDriveTypeW, GetFileInformationByHandle, GetVolumePathNameW, BY_HANDLE_FILE_INFORMATION,
-        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+        GetDriveTypeW, GetFileInformationByHandle, GetVolumeInformationW, GetVolumePathNameW,
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES,
     };
 
     pub(super) fn open_directory(path: &Path) -> io::Result<File> {
@@ -373,6 +400,36 @@ mod platform {
         const DRIVE_REMOTE: u32 = 4;
         let share = unsafe { GetDriveTypeW(output.as_ptr()) } == DRIVE_REMOTE;
         Ok((root, share))
+    }
+
+    pub(super) fn volume_details(root: &Path) -> (Option<String>, Option<String>) {
+        let root = wide(root);
+        let mut label = [0u16; 261];
+        let mut filesystem = [0u16; 261];
+        // SAFETY: the root is NUL-terminated, and the output buffers have the specified lengths.
+        let found = unsafe {
+            GetVolumeInformationW(
+                root.as_ptr(),
+                label.as_mut_ptr(),
+                label.len() as u32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                filesystem.as_mut_ptr(),
+                filesystem.len() as u32,
+            )
+        };
+        if found == 0 {
+            return (None, None);
+        }
+        let read = |buffer: &[u16]| {
+            let length = buffer
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(buffer.len());
+            (length > 0).then(|| String::from_utf16_lossy(&buffer[..length]))
+        };
+        (read(&label), read(&filesystem))
     }
 
     #[test]
@@ -458,6 +515,89 @@ mod platform {
         let root = unsafe { CStr::from_ptr(info.f_mntonname.as_ptr()) }.to_bytes();
         let kind = unsafe { CStr::from_ptr(info.f_fstypename.as_ptr()) }.to_bytes();
         Ok((PathBuf::from(OsStr::from_bytes(root)), kind == b"smbfs"))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn volume_details(root: &Path) -> (Option<String>, Option<String>) {
+        let Some(id) = mount_id(root) else {
+            return (None, None);
+        };
+        let Ok(mounts) = fs::read_to_string("/proc/self/mountinfo") else {
+            return (None, None);
+        };
+        for line in mounts.lines() {
+            let Some((fields, volume)) = line.split_once(" - ") else {
+                continue;
+            };
+            let mut fields = fields.split_ascii_whitespace();
+            if fields.next().and_then(|value| value.parse::<u64>().ok()) != Some(id) {
+                continue;
+            }
+            let device = fields.nth(1);
+            let mut volume = volume.split_ascii_whitespace();
+            let filesystem = volume.next().map(str::to_owned);
+            let label = device.and_then(|device| {
+                let info = fs::read_to_string(format!("/run/udev/data/b{device}")).ok()?;
+                info.lines().find_map(|line| {
+                    line.strip_prefix("E:ID_FS_LABEL=")
+                        .filter(|label| !label.is_empty())
+                        .map(str::to_owned)
+                })
+            });
+            return (label, filesystem);
+        }
+        (None, None)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn volume_details(root: &Path) -> (Option<String>, Option<String>) {
+        use std::ffi::CStr;
+
+        let kind = filesystem(root).ok().map(|info| {
+            // SAFETY: statfs returns a NUL-terminated filesystem name.
+            unsafe { CStr::from_ptr(info.f_fstypename.as_ptr()) }
+                .to_string_lossy()
+                .into_owned()
+        });
+        let Ok(path) = CString::new(root.as_os_str().as_bytes()) else {
+            return (None, kind);
+        };
+        let mut attributes = libc::attrlist {
+            bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+            reserved: 0,
+            commonattr: 0,
+            volattr: libc::ATTR_VOL_INFO | libc::ATTR_VOL_NAME,
+            dirattr: 0,
+            fileattr: 0,
+            forkattr: 0,
+        };
+        let mut data = [0u8; 1024];
+        // SAFETY: both pointers are live for the call, and the supplied buffer size is correct.
+        let found = unsafe {
+            libc::getattrlist(
+                path.as_ptr(),
+                (&mut attributes as *mut libc::attrlist).cast(),
+                data.as_mut_ptr().cast(),
+                data.len(),
+                0,
+            )
+        } == 0;
+        let label = found
+            .then(|| {
+                let offset = i32::from_ne_bytes(data[4..8].try_into().unwrap());
+                let length = u32::from_ne_bytes(data[8..12].try_into().unwrap()) as usize;
+                let start = 4usize.checked_add_signed(offset as isize)?;
+                let name = CStr::from_bytes_until_nul(data.get(start..start.checked_add(length)?)?)
+                    .ok()?;
+                (!name.is_empty()).then(|| name.to_string_lossy().into_owned())
+            })
+            .flatten();
+        (label, kind)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn volume_details(_: &Path) -> (Option<String>, Option<String>) {
+        (None, None)
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

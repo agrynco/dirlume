@@ -2461,6 +2461,7 @@ pub fn run() {
         list_directory,
         disk_space,
         crate::space_analyzer::space_mount,
+        crate::space_analyzer::volume_information,
         crate::space_analyzer::scan_local_space,
         crate::space_analyzer::cancel_space_scan,
         crate::git_view::git_repository,
