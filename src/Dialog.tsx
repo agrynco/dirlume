@@ -45,7 +45,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   useLayoutEffect(() => {
     const dialog = ref.current;
     const focused = document.activeElement;
-    const container = contextHelp && focused?.closest<HTMLElement>("dialog, [data-pane-side], .text-window, .terminal-card");
+    const container = contextHelp ? focused?.closest<HTMLElement>("dialog, [data-pane-side], .text-window, .terminal-card") : null;
     return () => {
       dialog?.close();
       if (!contextHelp) {
@@ -55,16 +55,14 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
       const afterClose = document.activeElement;
       requestAnimationFrame(() => {
         if (document.querySelector("dialog[data-context-help]")) return;
-        if (focused instanceof HTMLElement && focused.isConnected && focused.getClientRects().length &&
-            !focused.closest("[inert], [hidden], :disabled")) {
-          const active = document.activeElement;
-          if (active !== afterClose && active !== document.body && active?.isConnected) return;
-          focused.focus({ preventScroll: true });
-        } else if (container instanceof HTMLElement && container.isConnected) {
-          const target = container.querySelector<HTMLElement>("[data-help-return]") ??
-            container.querySelector<HTMLElement>("[tabindex=\"0\"], button:enabled");
-          target?.focus({ preventScroll: true });
-        }
+        const opener = focused instanceof HTMLElement && focused.isConnected && focused.getClientRects().length &&
+          !focused.closest("[inert], [hidden], :disabled") ? focused : null;
+        const scope = container?.isConnected ? container : null;
+        const fallback = opener ? null : scope?.querySelector<HTMLElement>("[data-help-return]");
+        const active = document.activeElement;
+        if (!fallback && active !== afterClose && active !== document.body && active?.isConnected) return;
+        const target = opener ?? fallback ?? scope?.querySelector<HTMLElement>("[tabindex=\"0\"], button:enabled");
+        target?.focus({ preventScroll: true });
       });
     };
   }, [contextHelp]);
