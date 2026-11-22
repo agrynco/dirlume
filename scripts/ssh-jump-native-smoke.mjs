@@ -90,12 +90,14 @@ export async function testNativeJumpHosts(page, temp, destination, config, resta
     await copy("right", "download-from-jumps.txt");
     await row("left", "download-from-jumps.txt").waitFor();
     assert.equal(await readFile(join(source, "download-from-jumps.txt"), "utf8"), "download through both hops");
-    await list("right").press("F12");
-    const shell = page.locator(".xterm-helper-textarea");
+    const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+    if (!await terminal.isVisible()) await list("right").press("F12");
+    await terminal.getByRole("heading", { name: "SSH terminal", exact: true }).waitFor();
+    const shell = terminal.locator(".xterm-helper-textarea");
     await shell.focus();
     await page.keyboard.type("jump-shell-echo");
-    await page.locator(".xterm-rows").getByText("jump-shell-echo", { exact: false }).waitFor();
-    await button(page, "Close terminal").click();
+    await terminal.locator(".xterm-rows").getByText("jump-shell-echo", { exact: false }).waitFor();
+    await button(terminal, "Close terminal").click();
 
     await list("right").press("Control+Shift+Digit1");
     const shortcut = dialog("Folder shortcuts");
