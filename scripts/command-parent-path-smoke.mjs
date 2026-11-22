@@ -40,14 +40,25 @@ async function fixture(browser, userAgent, directory, parent, bindings) {
 
 async function expectPath(page, side, name, shortcut, expected, location) {
   const command = commandLine(page);
+  const files = list(page, side);
+  const selected = row(page, side, name);
+  await page.waitForFunction(({ side, location }) => document.getElementById(`${side}-path`)?.dataset.path === location &&
+    document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false", { side, location });
+  await selected.click();
   await command.fill("echo replace now");
   await command.evaluate((input) => input.setSelectionRange(5, 12));
-  await row(page, side, name).click();
-  await list(page, side).press(shortcut);
+  await files.focus();
+  await page.waitForFunction((side) => document.activeElement?.id === `${side}-files` &&
+    document.getElementById(`${side}-pane`)?.classList.contains("active"), side);
+  await files.press(shortcut);
   await page.waitForFunction((expected) => {
     const command = document.querySelector('.command-bar textarea');
     return command?.value === expected && document.activeElement === command;
-  }, `echo ${expected} now`);
+  }, `echo ${expected} now`).catch(async (error) => {
+    const value = await command.inputValue();
+    const focus = await page.evaluate(() => document.activeElement?.id || document.activeElement?.getAttribute("aria-label"));
+    throw new Error(`${side} ${location}, ${shortcut}: expected ${expected}, got ${value}, focus ${focus}.`, { cause: error });
+  });
   assert.equal(await page.locator(".command-bar > span").textContent(), location);
 }
 
