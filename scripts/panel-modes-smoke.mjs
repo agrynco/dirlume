@@ -136,8 +136,9 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   await list("right").focus();
   const leftMenu = await openMainMenu(page, "Left");
   assert.deepEqual(await leftMenu.getByRole("menuitemradio").evaluateAll((items) =>
-    items.map((item) => item.querySelector(".main-menu-choice").textContent)),
+    items.slice(0, 7).map((item) => item.querySelector(".main-menu-choice").textContent)),
   ["Brief", "Medium", "Full", "Wide", "File owners", "File links", "Alternative full"]);
+  await leftMenu.getByRole("menuitemradio", { name: "Space Analyzer", exact: true }).waitFor();
   assert.equal(await leftMenu.getByRole("menuitemradio", { name: "Full", exact: true }).getAttribute("aria-checked"), "true");
   await leftMenu.getByRole("menuitemradio", { name: "Brief", exact: true }).click();
   await waitMode("left", "brief");
