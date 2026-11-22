@@ -516,7 +516,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .process-table.file-list { width: 100%; table-layout: fixed; border-spacing: 0; padding: 0; }
 .process-table :is(th, td) { padding: 4px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .process-table th { position: sticky; top: 0; z-index: 1; padding-block: 2px; padding-inline-end: 9px; overflow: visible; text-align: left; background: var(--panel-header); border-block: 1px solid var(--line); }
-.process-table :is(td, th):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.process-table :is(td, th):not(:first-child, .process-col-executable, .process-cell-executable) { text-align: right; font-variant-numeric: tabular-nums; }
 .process-table :is(.process-col-executable, .process-cell-executable) { text-align: left; }
 .process-table th button { max-width: 100%; padding: 3px 4px; font-size: .88em; overflow: hidden; text-overflow: ellipsis; }
 .process-table .file-column-resize { position: absolute; z-index: 1; inset: 0 0 0 auto; width: 8px; cursor: col-resize; touch-action: none; }
