@@ -18,7 +18,7 @@ export function SplitDivider({ label, className, value, onResize }: {
     if (bounds && bounds.width > gutter) onResize(clampSplit((event.clientX - bounds.left - gutter / 2) / (bounds.width - gutter) * 100));
   }
 
-  return <div className={className} role="separator" aria-label={label} aria-orientation="vertical"
+  return <div className={className} role="separator" data-help-topic="workspace" aria-label={label} aria-orientation="vertical"
     aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(value)} tabIndex={0}
     onDoubleClick={() => onResize(50)}
     onPointerDown={(event) => {

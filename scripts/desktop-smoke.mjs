@@ -16,7 +16,7 @@ import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
-import { editPaneAddress } from "./pane-address-smoke.mjs";
+import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { testCommandCompletion } from "./command-completion-smoke.mjs";
@@ -25,12 +25,12 @@ import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
-import { testTerminalPaste } from "./terminal-paste-smoke.mjs";
+import { testNativeTerminalMenu, testTerminalPaste } from "./terminal-paste-smoke.mjs";
 import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-picker-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
 import { testFilenameRendering } from "./filename-rendering-smoke.mjs";
 import { testInlineRename } from "./inline-rename-smoke.mjs";
-import { testAlertDialogStyles, testPermanentDelete } from "./permanent-delete-smoke.mjs";
+import { testAlertDialogStyles, testBatchDeletion, testPermanentDelete } from "./permanent-delete-smoke.mjs";
 import { testScreenColor } from "./screen-color-smoke.mjs";
 import { testDocumentMode } from "./document-mode-smoke.mjs";
 import { testDocumentWatch } from "./document-watch-smoke.mjs";
@@ -43,6 +43,7 @@ import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
 import { testNativeOptionalStatusBar } from "./status-bar-smoke.mjs";
+import { appendDiagnosticFixture, checkDiagnosticLog } from "./diagnostic-log-smoke.mjs";
 import { checkResizeMarker, closeToolWindow, keepSuggestedColorSchemeName, openOptionsWindow, testMarkdownOptionsDismissal } from "./tool-window-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test uses Windows WebView2.");
@@ -199,6 +200,7 @@ try {
   await testHeaderMenus(page, true);
   await testCommandIcons(page, true);
   await testNativeOptionalStatusBar(page);
+  await testNativeTerminalMenu(page);
   const paneDivider = page.getByRole("separator", { name: "Pane divider" });
   async function dragHorizontally(handle, delta) {
     const bounds = await handle.boundingBox();
@@ -319,7 +321,8 @@ try {
     await page.locator("#left-pane").getByRole("alert").waitFor();
     await page.evaluate((secret) => {
       const error = new TypeError(secret);
-      window.dispatchEvent(new ErrorEvent("error", { error, message: secret }));
+      const filename = document.querySelector('script[type="module"][src]').src;
+      window.dispatchEvent(new ErrorEvent("error", { error, message: secret, filename, lineno: 1, colno: 1 }));
       window.dispatchEvent(new ErrorEvent("error", { error, message: secret }));
     }, secret);
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -333,7 +336,15 @@ try {
     assert.equal(nativeErrors.length, 1, "The IPC failure and UI error use one log entry.");
     assert.equal(nativeErrors[0].recentActions.length, 32);
     assert.ok(nativeErrors[0].recentActions.every(({ operation }) => operation === "list_directory"));
-    assert.equal(records.filter(({ code }) => code === "type_error").length, 1);
+    const frontendErrors = records.filter(({ code }) => code === "type_error");
+    assert.equal(frontendErrors.length, 1);
+    const { build, origin, source, surface } = frontendErrors[0].frontend;
+    assert.ok(build);
+    assert.equal(origin, "window_error");
+    assert.equal(surface, "main");
+    assert.match(source.asset, /^index-[\w-]{8}\.js$/);
+    assert.equal(source.line, 1);
+    assert.equal(source.column, 1);
     assert.ok(!diagnosticsBeforeRestart.includes(secret), "Diagnostic records contain safe codes and operation names only.");
   }
   const fontSize = (selector) => page.locator(selector).evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
@@ -367,6 +378,12 @@ try {
   const branchFolder = join(src, "breadcrumb-branch");
   const branchLeaf = join(branchFolder, "breadcrumb-leaf");
   await mkdir(branchLeaf, { recursive: true });
+  await writeFile(join(branchLeaf, "focus-fixture.txt"), "address focus fixture");
+  for (const side of ["left", "right"]) {
+    await navigate(side, branchLeaf);
+    await checkAddressFocusLoss(page, side, branchLeaf, "focus-fixture.txt", "breadcrumb-branch");
+  }
+  await navigate("right", dst);
   await navigate("left", branchLeaf);
   const leftBreadcrumbs = page.getByRole("navigation", { name: "left path breadcrumbs" });
   const currentCrumb = leftBreadcrumbs.locator('[aria-current="location"]');
@@ -518,7 +535,8 @@ try {
   const shortcutConflict = () => optionsPage.getByRole("dialog", { name: "Shortcut conflict" });
   await shortcutConflict().getByText("Home is assigned to First item.", { exact: true }).waitFor();
   await shortcutConflict().getByRole("button", { name: "Reassign shortcut", exact: true }).click();
-  await options.getByRole("button", { name: "Change ← for First item", exact: true }).waitFor();
+  await options.getByRole("button", { name: "Change ← for Previous page or first item", exact: true }).waitFor();
+  await options.getByRole("button", { name: "Add shortcut for First item", exact: true }).waitFor();
   await options.getByRole("button", { name: "Change F2 for Save text", exact: true }).waitFor();
   assert.equal(await options.getByRole("button", { name: "Change Home for First item", exact: true }).count(), 0);
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
@@ -1296,7 +1314,8 @@ try {
   await left.getByRole("option", { name: /^locked-by-process.txt/ }).click();
   await page.keyboard.press("Shift+Delete");
   await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click();
-  await deleteDialog.getByRole("button", { name: "Find locking processes", exact: true }).click();
+  const blockedRemoval = page.getByRole("dialog", { name: "Item is in use", exact: true });
+  await blockedRemoval.getByRole("button", { name: "Find locking processes", exact: true }).click();
   const lockDialog = page.getByRole("dialog", { name: "Processes using these files", exact: true });
   await lockDialog.getByRole("option", { name: new RegExp(`PID ${lockedBy.pid}\\)`) }).waitFor();
   await lockDialog.getByRole("button", { name: "Select all", exact: true }).click();
@@ -1304,7 +1323,7 @@ try {
   await endProcesses.getByRole("button", { name: "End process", exact: true }).click();
   await lockDialog.getByText("Windows found no processes using these files.").waitFor();
   await lockDialog.getByRole("button", { name: "Close", exact: true }).click();
-  await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await blockedRemoval.getByRole("button", { name: "Retry", exact: true }).click();
   await left.getByRole("option", { name: /^locked-by-process.txt/ }).waitFor({ state: "detached" });
 
   if (process.env.DIRLUME_CROSS_VOLUME_TEST_ROOT) {
@@ -1445,7 +1464,7 @@ try {
   const terminal = page.getByRole("region", { name: "Terminal", exact: true });
   const toggleTerminal = page.getByRole("button", { name: "Toggle terminal", exact: true });
   const terminalInput = page.locator(".xterm-helper-textarea");
-  const terminalFocusHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
+  const terminalFocusHint = page.locator(".statusbar").getByRole("status").filter({ hasText: "File shortcuts paused. Click a file pane to use them." });
   const paneHeight = () => left.evaluate((pane) => pane.getBoundingClientRect().height);
   const compactHeight = await paneHeight();
   await page.locator("#left-files").press("Control+ArrowRight");
@@ -1719,6 +1738,11 @@ try {
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
   const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
+  const waitForColumnWidth = (side, column, width) => page.waitForFunction(({ selector, width }) =>
+    document.querySelector(selector)?.getBoundingClientRect().width === width,
+  { selector: `#${side}-pane .col-${column}`, width });
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await page.locator("#right-files .file-time").filter({ hasText: /\d{1,2}:\d{2}/ }).first().waitFor();
   assert.equal(await page.locator(".file-columns [role=separator]").count(), 0);
   const leftSize = await columnWidth("left", "size");
   const rightSize = await columnWidth("right", "size");
@@ -1774,16 +1798,16 @@ try {
   assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
-  assert.equal(await columnWidth("left", "size"), leftSize);
-  assert.equal(await columnWidth("right", "size"), rightSize);
+  await waitForColumnWidth("left", "size", leftSize);
+  await waitForColumnWidth("right", "size", rightSize);
   await rightHeader().getByRole("button", { name: "Date", exact: true }).waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "time"), rightTime);
+  await waitForColumnWidth("right", "time", rightTime);
   await rightHeader().locator(".col-time button svg").waitFor();
   await rightHeader().getByRole("button", { name: "Name", exact: true }).press("Shift+F10");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Date", exact: true, checked: false }).click();
   await page.keyboard.press("Escape");
   await columnMenu().waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "modified"), rightModified);
+  await waitForColumnWidth("right", "modified", rightModified);
   assert.equal(await panePath("left"), src);
   assert.equal(await panePath("right"), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
@@ -1814,7 +1838,7 @@ try {
   const ukrainianTopics = ukrainianHelp.getByRole("navigation", { name: "Зміст" }).getByRole("link");
   const topicLinks = await ukrainianTopics.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
   await ukrainianHelp.getByRole("link", { name: "Термінал", exact: true }).click();
-  assert.match(await ukrainianHelp.locator("#help-terminal p").innerText(), /інтерактивну оболонку/);
+  assert.match(await ukrainianHelp.locator("#help-terminal").innerText(), /інтерактивну оболонку/);
   await optionsPage.keyboard.press("Escape");
   assert.equal(await ukrainianSearch.inputValue(), "Шрифти");
   assert.equal(await ukrainianSearch.evaluate((field) => field === document.activeElement), true);
@@ -1848,7 +1872,7 @@ try {
   await russianHelp.getByRole("heading", { name: "Основные файловые панели", exact: true }).waitFor();
   assert.deepEqual(await russianHelp.getByRole("navigation", { name: "Оглавление" }).getByRole("link")
     .evaluateAll((links) => links.map((link) => link.getAttribute("href"))), topicLinks);
-  assert.match(await russianHelp.locator("#help-files p").innerText(), /Введите путь/i);
+  assert.match(await russianHelp.locator("#help-files").innerText(), /Введите путь/i);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Найти файлы", exact: true }).click();
   const russianFind = page.getByRole("dialog", { name: "Найти файлы", exact: true });
@@ -1955,6 +1979,8 @@ try {
     await page.getByRole("dialog", { name: "Help", exact: true })
       .getByRole("heading", { name: shortcut === "F3" ? "Viewer" : "Editor", exact: true }).waitFor();
     await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "Help", exact: true }).waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.closest(".text-window:not([hidden])"));
     await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
     await sampleSurface.waitFor({ state: "hidden" });
@@ -1982,7 +2008,7 @@ try {
       const link = contents.locator(`a[href="${href}"]`);
       await link.click();
       assert.equal(await help.locator(`${href} h3`).innerText(), await link.innerText());
-      assert.match(await help.locator(`${href} p`).innerText(), /\S/);
+      assert.match(await help.locator(`${href} p`).first().innerText(), /\S/);
     }
     await page.keyboard.press("Escape");
   } finally {
@@ -1996,7 +2022,7 @@ try {
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await help.waitFor({ state: "hidden" });
-  assert.equal(await helpTerminalInput.evaluate((element) => document.activeElement === element), true);
+  await page.waitForFunction(() => document.activeElement?.matches(".xterm-helper-textarea"));
   await terminalButton.click();
   await page.getByRole("combobox", { name: "Command line", exact: true }).press("F1");
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
@@ -2014,7 +2040,9 @@ try {
   await optionsHelp.locator('.help-contents [aria-current="location"][href="#help-window"]').waitFor();
   await optionsPage.keyboard.press("Escape");
   await optionsHelp.waitFor({ state: "hidden" });
-  assert.equal(await helpAppearance.evaluate((element) => element === document.activeElement), true);
+  const appearanceFocus = await helpAppearance.elementHandle();
+  try { await optionsPage.waitForFunction((element) => element === document.activeElement, appearanceFocus); }
+  finally { await appearanceFocus.dispose(); }
   await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   await shortcutOptions.getByRole("button", { name: "Change F1 for Help", exact: true }).click();
@@ -2083,11 +2111,13 @@ try {
   await help.getByRole("navigation", { name: "Table of contents" }).waitFor();
   await page.keyboard.press("Escape");
   const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
+  await appendDiagnosticFixture(diagnosticsFile);
   await openMainMenu(page, "Help");
   await page.keyboard.press("End");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
   await page.keyboard.press("Enter");
   await errorLogViewer.waitFor();
+  await checkDiagnosticLog(errorLogViewer, diagnosticsFile);
   await page.keyboard.press("Escape");
   await errorLogViewer.waitFor({ state: "hidden" });
   await openMainMenu(page, "Help");
@@ -2264,6 +2294,7 @@ try {
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
   await testOsTimestamps(page, temp);
   await testPermanentDelete(page, temp);
+  await testBatchDeletion(page, temp);
   await testInlineRename(page, temp);
   await testLockingProcessPane(page, temp);
   await testProcessColumns(page);
@@ -2274,7 +2305,7 @@ try {
   await testSystemTheme(page);
   await testScreenColor(page);
   page = await testFileSort({ page, startDesktop, exitDesktop, root: temp });
-  await testNativeQuickView(page, temp);
+  await testNativeQuickView(page, temp, diagnosticsFile);
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);

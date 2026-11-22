@@ -391,7 +391,7 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
       if (seed !== null) setQuickSearch(seed);
       else {
         const next = matches("upRow") ? index - 1 : matches("downRow") ? index + 1 :
-          matches("firstRow") ? 0 : matches("lastRow") ? rows.length - 1 : null;
+          matches("firstRow") || matches("leftRow") ? 0 : matches("lastRow") || matches("rightRow") ? rows.length - 1 : null;
         if (next === null || !rows.length) return;
         selectVariable(rows[Math.min(rows.length - 1, Math.max(0, next))].name);
       }
@@ -401,7 +401,7 @@ export default function EnvironmentPane({ side, active, mode, oppositeMode, shor
   }
 
   return <section className={"pane environment-pane environment-" + side + (active ? " active" : "")}
-    aria-labelledby={title} data-help-topic="terminal" data-pane-side={side} onFocus={onFocus} onKeyDown={keyDown}>
+    aria-labelledby={title} data-help-topic="environment" data-pane-side={side} onFocus={onFocus} onKeyDown={keyDown}>
     <header className="pane-heading"><span className="pane-title" id={title}><Braces />{scopeName(mode)}</span>
       {scope && <Button className="icon-button" aria-label={t("Parent folder")} onClick={() => navigate("root")}><ArrowUp /></Button>}
       <Button onClick={onClose}>{t("Back to files")}</Button>

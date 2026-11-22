@@ -1,5 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
+import type { ImageTransform, Size } from "./imageCrop";
 
 export interface Entry extends Partial<PanelMetadata> {
   name: string;
@@ -12,6 +13,13 @@ export interface Entry extends Partial<PanelMetadata> {
   connection?: SavedConnection;
   description?: string | null;
   allocationId?: string;
+  tree?: {
+    parent: Extract<Place, { kind: "local" }>;
+    segments: readonly string[];
+    expanded: boolean;
+    loading: boolean;
+    error?: string;
+  };
 }
 
 export type FileFlag = "readOnly" | "archive" | "hidden" | "system" | "compressed" | "encrypted" | "notIndexed" | "ownerWritable";
@@ -256,7 +264,8 @@ export type TerminalOutput = { event: "data"; data: string } | { event: "closed"
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
   ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });
-export type CommandCompletion = { index: number; length: number; matches: { label: string; text: string; directory: boolean }[] };
+export type CommandCompletion = { index: number; length: number; exclusive?: boolean; matches: { label: string; text: string; directory: boolean }[] };
+export type ShellCompletionEnvironment = Record<string, string | null>;
 export interface SizeResult {
   name: string;
   bytes: number;
@@ -267,6 +276,18 @@ export type Operation =
   | { kind: "open" | "create_folder" | "recycle" | "delete"; name: string }
   | { kind: "create_file"; name: string; encoding?: TextEncoding }
   | { kind: "rename"; name: string; new_name: string };
+
+export type Deletion = { directory: string; names: string[]; permanent: boolean; relativePaths?: string[][] };
+export type DeletionCounts = { completed: number; skipped: number; failed: number; unprocessed: number };
+export type DeletionSelection = { files: number; folders: number; bytes: number; incomplete: boolean; availableBefore: number | null };
+export type DeletionProgress = { path: string; currentTotal: number; currentProcessed: number; counts: DeletionCounts };
+export type DeletionEvent =
+  | { phase: "preparing"; path: string; selection: DeletionSelection }
+  | { phase: "removing"; progress: DeletionProgress; selection: DeletionSelection }
+  | { phase: "locked"; token: number; path: string };
+export type DeletionResult = { selection: DeletionSelection; counts: DeletionCounts; cancelled: boolean;
+  availableAfter: number | null; failures: { path: string; message: string }[] };
+export type DeletionDecision = "retry" | "skip" | "skipRemaining";
 
 export type TransferSource =
   | { kind: "local"; directory: string; name: string }
@@ -303,6 +324,7 @@ export interface BytePage {
   length: number;
   data: number[];
 }
+export const fileBytePageSize = 1024;
 
 export interface ProcessId {
   pid: number;
@@ -336,7 +358,7 @@ export const api = {
   readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
-  checkForUpdate: () => invoke<AppUpdate | null>("check_for_update"),
+  checkForUpdate: (trigger: "automatic" | "manual") => invoke<AppUpdate | null>("check_for_update", { trigger }),
   installedRelease: () => invoke<InstalledRelease>("installed_release"),
   acknowledgeRelease: () => invoke<void>("acknowledge_release"),
   openToolWindow: (title: string, size?: { width: number; height: number }, comparison?: { left: NamedFile; right: NamedFile },
@@ -366,7 +388,7 @@ export const api = {
   fileIcons: (items: { directory: string; name: string }[]) => invoke<(string | null)[]>("file_icons", { items }),
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
   lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),
-  windowsItemMenu: (directory: string, name?: string) => invoke<void>("windows_item_menu", { directory, name }),
+  windowsItemMenu: (directory: string, name?: string) => invoke<boolean>("windows_item_menu", { directory, name }),
   openElevated: (directory: string) => invoke<void>("open_elevated", { directory }),
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
@@ -444,8 +466,8 @@ export const api = {
     invoke<TextDocument>("save_ssh_text", { id, segments, revision, text, sudoPassword }),
   listServer: (id: number, segments: string[]) =>
     invoke<Listing>("list_server", { id, segments }),
-  readText: (directory: string, name: string) =>
-    invoke<TextDocument>("read_text", { directory, name }),
+  readText: (directory: string, name: string, surface?: TextReadSurface) =>
+    invoke<TextDocument>("read_text", { directory, name, surface }),
   resolveTextLink: (directory: string, destination: string) =>
     invoke<{ directory: string; name: string }>("resolve_text_link", { directory, destination }),
   openWebLink: (href: string) => invoke<void>("open_web_link", { href }),
@@ -459,6 +481,12 @@ export const api = {
     invoke<void>("save_text", { directory, name, original, text }),
   saveTextAs: (path: string, encoding: TextEncoding, text: string) =>
     invoke<void>("save_text_as", { path, encoding, text }),
+  openImageEdit: (directory: string, name: string) =>
+    invoke<Size & { id: string; canReplace: boolean }>("open_image_edit", { directory, name }),
+  readImageEdit: (id: string) => invoke<ArrayBuffer>("read_image_edit", { id }),
+  saveImageEdit: (id: string, target: string | null, edit: ImageTransform) =>
+    invoke<void>("save_image_edit", { id, target, edit }),
+  closeImageEdit: (id: string) => invoke<void>("close_image_edit", { id }),
   openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
   hasKSwitcherBridge: (directory: string) => invoke<boolean>("has_kswitcher_bridge", { directory }),
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
@@ -470,8 +498,10 @@ export const api = {
       refreshEnvironment: session.refreshEnvironment,
       ssh: session.kind === "ssh" ? { connection: session.connection, segments: session.segments } : undefined,
     }, output }),
-  completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean) =>
-    invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment } }),
+  completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean, shellEnvironment?: ShellCompletionEnvironment) =>
+    invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment, shellEnvironment } }),
+  completeSshTerminal: (id: number, line: string, caret: number, directory: string, searchPath: string) =>
+    invoke<CommandCompletion>("complete_ssh_terminal", { id, request: { line, caret, directory, searchPath } }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),
@@ -480,6 +510,11 @@ export const api = {
     invoke<void>("measure_folders", { id, source, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
   beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
+  deleteSelection: (id: number, selection: Deletion, onProgress: Channel<DeletionEvent>) =>
+    invoke<DeletionResult>("delete_selection", { id, ...selection, onProgress }),
+  cancelDeletion: (id: number) => invoke<void>("cancel_deletion", { id }),
+  resolveDeletion: (id: number, token: number, decision: DeletionDecision) =>
+    invoke<void>("resolve_deletion", { id, token, decision }),
   cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
   finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
   resolveTransfer: (id: number, decision: "overwrite" | "skip", remember: boolean) =>
@@ -524,13 +559,21 @@ export async function connectFtpLocation(profileId: string, segments?: string[])
   return { place, listing };
 }
 
-export function readPlaceText(file: NamedFile, sudoPassword?: string) {
+type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp";
+
+export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: TextReadSurface) {
   const { place, name } = file;
-  if (place.kind === "local") return api.readText(place.path, name);
+  if (place.kind === "local") return api.readText(place.path, name, surface);
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.readArchiveText(place.id, segments);
   if (place.kind === "ssh") return api.readSshText(place.id, segments, sudoPassword);
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
+}
+
+export function readPlacePreviewText({ place, name }: NamedFile) {
+  return place.kind === "local" ? invoke<TextDocument | { page: BytePage }>("read_text", {
+    directory: place.path, name, surface: "quick_view",
+  }) : readPlaceText({ place, name });
 }
 
 export function readPlacePreviewImage({ place, name }: NamedFile) {
@@ -571,11 +614,11 @@ export function writableTextPlace(place: TextPlace) {
 
 let nextDirectoryWatch = 0;
 
-export function watchDirectory(path: string, onChange: () => void, name?: string) {
+export function watchDirectory(path: string, onChange: () => void, name?: string, recursive = false) {
   const id = ++nextDirectoryWatch;
   const changes = new Channel<null>();
   changes.onmessage = onChange;
-  const ready = invoke<void>("watch_directory", { id, path, name: name ?? null, changes });
+  const ready = invoke<void>("watch_directory", { id, path, name: name ?? null, recursive, changes });
   return {
     ready,
     stop: () => {

@@ -20,7 +20,7 @@ import {
 } from "./preferences";
 import { viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
-import type { HelpTopic } from "./helpContent";
+import type { HelpTopic } from "./helpTopics";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
 
@@ -510,9 +510,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 onChange={(rows) => onChange({ ...preferences, terminalResizeRows: rows ?? 1 })} />
             </label>
             <label className="field-checkbox"><SettingSearchLabel label="Paste on right-click" />
-              <input type="checkbox" checked={preferences.terminalPasteOnRightClick}
+              <input type="checkbox" checked={preferences.terminalPasteOnRightClick} aria-describedby="terminal-right-click-note"
                 onChange={(event) => onChange({ ...preferences, terminalPasteOnRightClick: event.target.checked })} />
             </label>
+            <p id="terminal-right-click-note">{t("When off, right-click opens the terminal menu with Copy, Paste, and Select All.")}</p>
             {windowsClient && <label className="field-checkbox"><SettingSearchLabel label="Automatically refresh environment variables" />
               <input type="checkbox" checked={preferences.refreshEnvironment}
                 onChange={(event) => onChange({ ...preferences, refreshEnvironment: event.target.checked })} />
@@ -521,6 +522,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           {page === "filePanels" && <div className="dialog-body settings-general">
             <label className="field-checkbox"><SettingSearchLabel label="Show hidden files" />
               <input type="checkbox" checked={preferences.hidden} onChange={(event) => onChange({ ...preferences, hidden: event.target.checked })} />
+            </label>
+            <label className="field-checkbox"><SettingSearchLabel label="Right-click selection" />
+              <input type="checkbox" checked={preferences.rightClickSelection} onChange={(event) =>
+                onChange({ ...preferences, rightClickSelection: event.target.checked })} />
             </label>
             <label className="setting"><SettingSearchLabel label="Panel layout" aliases={Object.values(panelLayouts)} />
               <select value={preferences.layout} onChange={(event) => onChange({ ...preferences, layout: event.target.value as PanelLayout })}>

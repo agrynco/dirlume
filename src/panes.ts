@@ -3,6 +3,7 @@ import { locale, t } from "./i18n";
 import { connectionEntries } from "./savedConnections";
 
 export type Side = "left" | "right";
+export type FilePaneView = "list" | "tree";
 import { compareFileEntries, defaultFileSort, sortMode, type FileSort, type SortMode, type SortSettings } from "./fileSort";
 import type { PanelMetadata } from "./api";
 export type { SortColumn } from "./fileSort";
@@ -27,6 +28,8 @@ interface SearchResults {
   previous: Pick<PaneState, "selected" | "marked" | "filter">;
 }
 
+export type PaneBackgroundSize = SizeResult & { pending?: boolean; unavailable?: boolean };
+
 export interface PaneState {
   place: Place | null;
   entries: Entry[];
@@ -34,6 +37,7 @@ export interface PaneState {
   revealedHidden?: string;
   marked: string[];
   sizes: ReadonlyMap<string, SizeResult>;
+  backgroundSizes?: ReadonlyMap<string, PaneBackgroundSize>;
   measuring: string[];
   history: Place[];
   position: number;
@@ -64,7 +68,9 @@ export function hasParentRow(place: Place | null) {
 }
 
 export function folderMeasurement(pane: PaneState, entry: Entry) {
-  return entry.directory && !entry.link && !pane.search ? pane.sizes.get(entry.name) : undefined;
+  if (!entry.directory || entry.link || pane.search) return undefined;
+  const computed = pane.backgroundSizes?.get(entry.name);
+  return computed ? computed.unavailable ? undefined : computed : pane.sizes.get(entry.name);
 }
 
 export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortSettings,
@@ -80,11 +86,14 @@ export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortS
     entries.filter((entry) => (hidden || !entry.hidden || entry.name === pane.revealedHidden && entry.name === pane.selected) &&
       (!filter || entry.name.toLocaleLowerCase().includes(filter))),
     sort, available ? chosen : "name", settings, pane.marked,
-    (entry) => pane.search?.matches.get(entry.name)?.entry.name ?? entry.name,
+    (entry) => pane.search?.matches.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entry.name,
     (entry, field) => {
       switch (field) {
         case "modified": return entry.modified;
-        case "size": return folderMeasurement(pane, entry)?.bytes ?? entry.size;
+        case "size": {
+          const computed = pane.backgroundSizes?.get(entry.name);
+          return computed?.unavailable ? undefined : computed?.bytes ?? folderMeasurement(pane, entry)?.bytes ?? entry.size;
+        }
         case "description": return entry.description ?? descriptions.get(entry.name);
         case "hardLinks": return entry.directory || entry.link ? undefined : entry.hardLinks ?? metadata.get(entry.name)?.hardLinks;
         case "owner":
@@ -108,6 +117,15 @@ export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortS
 export function paneCursorIndex(pane: PaneState, entries: readonly Entry[]) {
   const selected = entries.findIndex((entry) => entry.name === pane.selected);
   if (selected >= 0 || !entries.length) return selected;
+  if (!pane.search && pane.selected?.includes("/")) {
+    const parents = pane.selected.split("/");
+    while (parents.length > 1) {
+      parents.pop();
+      const key = parents.join("/");
+      const ancestor = entries.findIndex((entry) => entry.name === key);
+      if (ancestor >= 0) return ancestor;
+    }
+  }
   return entries[0].name === ".." && entries.length > 1 && !isFileServer(pane.place) ? 1 : 0;
 }
 
@@ -144,6 +162,10 @@ export function paneItem(pane: PaneState, entry?: Entry): { place: FilePlace; en
     const match = pane.search.matches.get(entry.name);
     return match && match.directory.kind !== "smbRoot" ? { place: match.directory, entry: match.entry } : null;
   }
+  if (entry.tree) return {
+    place: entry.tree.parent,
+    entry: { ...entry, name: entry.tree.segments.at(-1) ?? entry.name, tree: undefined },
+  };
   return { place: pane.place, entry };
 }
 
@@ -247,6 +269,13 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   pane = closeSearchResults(pane);
   const samePlace = JSON.stringify(pane.place) === JSON.stringify(place);
   const current = new Map(listing.entries.map((entry) => [entry.name, entry]));
+  const retained = (key: string) => {
+    if (current.has(key)) return true;
+    const slash = key.indexOf("/");
+    if (slash < 0 || place.kind !== "local") return false;
+    const branch = current.get(key.slice(0, slash));
+    return !!branch?.directory && !branch.link;
+  };
   const keepMeasurements = samePlace && action === "background";
   const unchangedFolders = new Set(keepMeasurements ? pane.entries.flatMap((entry) => {
     const next = current.get(entry.name);
@@ -263,9 +292,9 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     entries: listing.entries,
     omitted: listing.omitted,
     selected: samePlace && pane.selected &&
-      (pane.selected === ".." ? hasParentRow(place) : current.has(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
+      (pane.selected === ".." ? hasParentRow(place) : retained(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
     revealedHidden: samePlace && pane.revealedHidden && current.has(pane.revealedHidden) ? pane.revealedHidden : undefined,
-    marked: samePlace ? pane.marked.filter((name) => current.has(name)) : [],
+    marked: samePlace ? pane.marked.filter(retained) : [],
     sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
     measuring: pane.measuring.filter((name) => unchangedFolders.has(name)),
 

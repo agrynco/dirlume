@@ -52,11 +52,21 @@ export async function testSmbNavigation() {
               window.terminalWrites = [];
               window.sshPrompt = (path) => {
                 const encode = (value) => btoa(String.fromCharCode(...new TextEncoder().encode(value)));
-                args.output.onmessage({ event: "data", data: encode(`\x1b]2;${promptToken}:0:${encode(path)}\x07`) });
+                args.output.onmessage({ event: "data", data: encode(`\x1b]2;${promptToken}:0:${encode(path)}:::bash:${encode("/fixture/bin:/usr/bin")}\x07`) });
               };
               return true;
             }
             case "write_terminal": window.terminalWrites?.push(args.data); return null;
+            case "complete_command":
+              window.unexpectedLocalCompletion = true;
+              return null;
+            case "complete_ssh_terminal": {
+              window.lastSshCompletion = { id: args.id, ...args.request };
+              if (args.request.line.startsWith("remote-fi")) {
+                return { index: 0, length: args.request.line.length, matches: [{ label: "remote-fixture", text: "remote-fixture", directory: false }] };
+              }
+              return { index: 0, length: 0, matches: [] };
+            }
             case "read_text":
               if (args.directory !== documents || args.name !== file.name) throw new Error("Unexpected SMB file");
               return { text: "Fixture", encoding: "utf8" };
@@ -171,7 +181,7 @@ export async function testSmbNavigation() {
     await right.getByRole("option", { name: /^ssh-notes/ }).waitFor();
     await right.press("F12");
     const sshTerminal = page.locator(".terminal-card").filter({ has: page.getByRole("heading", { name: "SSH terminal", exact: true }) });
-    const terminalHint = page.locator(".statusbar").getByText("File shortcuts paused. Click a file pane to use them.", { exact: true });
+    const terminalHint = page.locator(".statusbar").getByRole("status").filter({ hasText: "File shortcuts paused. Click a file pane to use them." });
     await sshTerminal.waitFor();
     await terminalHint.waitFor();
     await page.waitForFunction(() => typeof window.sshPrompt === "function");
@@ -190,7 +200,22 @@ export async function testSmbNavigation() {
     await sshTerminal.locator("header span").filter({ hasText: "/var/log" }).waitFor();
     await pathIs("right", "/var/log");
     assert.equal(await page.evaluate(() => window.terminalWrites.length), 1);
-    await sshTerminal.locator(".xterm-helper-textarea").focus();
+    const sshInput = sshTerminal.locator(".xterm-helper-textarea");
+    await sshInput.pressSequentially("remote-fi");
+    const suggestions = sshTerminal.getByRole("listbox", { name: "Command suggestions", exact: true });
+    await suggestions.getByRole("option", { name: "remote-fixture", exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.lastSshCompletion), {
+      id: 1, line: "remote-fi", caret: 9, directory: "/var/log", searchPath: "/fixture/bin:/usr/bin",
+    });
+    assert.equal(await page.evaluate(() => !!window.unexpectedLocalCompletion), false);
+    await sshInput.press("Tab");
+    await page.waitForFunction(() => window.terminalWrites.at(-1)?.endsWith("remote-fixture"));
+    await sshInput.press("Enter");
+    await sshInput.pressSequentially("private-input");
+    await suggestions.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.lastSshCompletion.line), "remote-fi");
+    await page.evaluate(() => window.sshPrompt("/var/log"));
+    await sshInput.focus();
     await right.focus();
     await terminalHint.waitFor({ state: "hidden" });
     assert.equal(await sshTerminal.isVisible(), true);

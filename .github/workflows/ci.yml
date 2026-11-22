@@ -128,6 +128,12 @@ jobs:
       - name: Build and type-check React
         if: github.event.action != 'closed'
         run: npm run build
+      - name: Verify packaged JavaScript error locations
+        if: github.event.action != 'closed'
+        run: node scripts/frontend-diagnostics-smoke.mjs
+      - name: Verify startup and manual update checks
+        if: github.event.action != 'closed'
+        run: node scripts/update-check-smoke.mjs
       - name: Verify editable dropdowns in light and dark themes
         if: github.event.action != 'closed'
         run: node scripts/editable-dropdown-smoke.mjs
@@ -137,6 +143,12 @@ jobs:
       - name: Verify the optional status bar
         if: github.event.action != 'closed'
         run: node scripts/status-bar-smoke.mjs
+      - name: Verify current marked row colors and keyboard navigation
+        if: github.event.action != 'closed'
+        run: node scripts/marked-cursor-smoke.mjs
+      - name: Verify right-click selection and held context menus
+        if: github.event.action != 'closed'
+        run: node scripts/right-click-selection-smoke.mjs
       - name: Verify independent text surface appearance
         if: github.event.action != 'closed'
         run: node scripts/text-appearance-smoke.mjs
@@ -152,6 +164,9 @@ jobs:
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
+      - name: Verify local file pane Tree and folder sizing
+        if: github.event.action != 'closed'
+        run: node scripts/file-pane-tree-smoke.mjs
       - name: Verify Git View
         if: github.event.action != 'closed'
         run: node scripts/git-view-smoke.mjs
@@ -190,6 +205,13 @@ jobs:
           }
           npm run tauri -- build --ci --bundles "${{ matrix.bundles }}" @configArgs -- --locked
           exit $LASTEXITCODE
+      - name: Retain build-matched JavaScript source maps
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-maps-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}
+          path: src-tauri/target/frontend-sourcemaps/*.js.map
+          if-no-files-found: error
+          overwrite: true
       - name: Build headless server
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default-features --features server --bin dirlume-server
       - name: Test two-process TLS access

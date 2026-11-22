@@ -8,14 +8,14 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::{
-    desktop::{blocking, message, Result},
+    desktop::{blocking_for, message, Result},
     local, terminal,
 };
 
@@ -36,6 +36,9 @@ pub struct CompletionRequest {
     caret: usize,
     directory: String,
     refresh_environment: bool,
+    #[cfg(windows)]
+    #[serde(default)]
+    shell_environment: Option<std::collections::HashMap<String, Option<String>>>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -46,6 +49,8 @@ pub struct CompletionBatch {
     length: usize,
     #[serde(default)]
     matches: Vec<Suggestion>,
+    #[serde(default)]
+    exclusive: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -72,7 +77,7 @@ pub async fn complete_command(
     }
     let serial = queue.serial.fetch_add(1, Ordering::Relaxed) + 1;
     let queue = queue.inner().clone();
-    blocking(move || {
+    blocking_for("complete_command", move || {
         let _worker = queue.worker.lock().map_err(message)?;
         if queue.serial.load(Ordering::Relaxed) != serial {
             return Ok(CompletionBatch::default());
@@ -87,7 +92,6 @@ struct Context {
     prefix: String,
     index: usize,
     length: usize,
-    #[cfg(not(windows))]
     byte_caret: usize,
 }
 
@@ -108,14 +112,18 @@ fn byte_at_utf16(line: &str, caret: usize) -> Option<usize> {
 fn unquote(word: &str, escape: char) -> String {
     let mut result = String::new();
     let mut quote = None;
-    let mut chars = word.chars();
+    let mut chars = word.chars().peekable();
     while let Some(letter) = chars.next() {
         if letter == escape && quote != Some('\'') {
             if let Some(escaped) = chars.next() {
                 result.push(escaped);
             }
         } else if quote == Some(letter) {
-            quote = None;
+            if escape == '`' && chars.next_if_eq(&letter).is_some() {
+                result.push(letter);
+            } else {
+                quote = None;
+            }
         } else if quote.is_none() && matches!(letter, '\'' | '"') {
             quote = Some(letter);
         } else {
@@ -126,8 +134,12 @@ fn unquote(word: &str, escape: char) -> String {
 }
 
 fn context(line: &str, caret: usize) -> Option<Context> {
+    shell_context(line, caret, cfg!(windows))
+}
+
+fn shell_context(line: &str, caret: usize, windows: bool) -> Option<Context> {
     let byte_caret = byte_at_utf16(line, caret)?;
-    let escape = if cfg!(windows) { '`' } else { '\\' };
+    let escape = if windows { '`' } else { '\\' };
     let mut words = Vec::new();
     let mut start = None;
     let mut quote = None;
@@ -176,7 +188,6 @@ fn context(line: &str, caret: usize) -> Option<Context> {
         prefix: unquote(&line[current.start..byte_caret], escape),
         index,
         length,
-        #[cfg(not(windows))]
         byte_caret,
     })
 }
@@ -190,16 +201,20 @@ fn starts_with(value: &str, prefix: &str) -> bool {
 }
 
 fn shell_word(value: &str) -> String {
-    if !(cfg!(windows) && value.starts_with('@'))
+    quote_word(value, cfg!(windows))
+}
+
+fn quote_word(value: &str, windows: bool) -> String {
+    if !(windows && value.starts_with('@'))
         && value.chars().all(|letter| {
             letter.is_alphanumeric()
                 || "_./-:+,=@%~".contains(letter)
-                || (cfg!(windows) && letter == '\\')
+                || (windows && letter == '\\')
         })
     {
         return value.to_owned();
     }
-    if cfg!(windows) {
+    if windows {
         return format!("'{}'", value.replace('\'', "''"));
     }
     if let Some(tail) = value.strip_prefix("~/") {
@@ -208,11 +223,119 @@ fn shell_word(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCompletionRequest {
+    line: String,
+    caret: usize,
+    directory: String,
+    search_path: String,
+}
+
+#[tauri::command]
+pub async fn complete_ssh_terminal(
+    id: u32,
+    request: RemoteCompletionRequest,
+    terminals: State<'_, terminal::Terminals>,
+) -> Result<CompletionBatch> {
+    if request.line.len() > MAX_DRAFT
+        || request.line.contains(['\0', '\r', '\n'])
+        || !request.directory.starts_with('/')
+        || request.directory.len() > MAX_DRAFT
+        || request.directory.contains('\0')
+        || request.search_path.len() > MAX_DRAFT
+        || request.search_path.contains('\0')
+    {
+        return Ok(CompletionBatch::default());
+    }
+    let Some(context) = shell_context(&request.line, request.caret, false) else {
+        return Ok(CompletionBatch::default());
+    };
+    let terminal = terminals.remote(id)?;
+    let shell = include_str!("completion/bash.sh");
+    let fallback = include_str!("completion/ssh-paths.sh");
+    let directory_only = context
+        .words
+        .first()
+        .is_some_and(|word| matches!(word.as_str(), "cd" | "pushd"));
+    let parts = [
+        format!(
+            "CDPATH= cd -- {} || exit",
+            crate::ssh::quote(&request.directory)
+        ),
+        "unset ENV BASH_ENV".to_owned(),
+        format!("export PATH={}", crate::ssh::quote(&request.search_path)),
+        format!(
+            "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {}",
+            crate::ssh::quote(fallback),
+            context.byte_caret,
+            crate::ssh::quote(&request.line),
+            if directory_only { "directory" } else { "any" },
+            if request.line.contains(['$', '`']) {
+                "''".to_owned()
+            } else {
+                crate::ssh::quote(shell)
+            },
+            context
+                .words
+                .iter()
+                .chain(std::iter::once(&context.prefix))
+                .map(|word| crate::ssh::quote(word))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    ];
+    let output = terminal.complete(&parts.join("\n")).await?;
+    let mut seen = BTreeSet::new();
+    let matches = output
+        .split(|&byte| byte == 0)
+        .filter_map(|value| {
+            let (source, value) = value.split_first()?;
+            let value = std::str::from_utf8(value).ok()?;
+            let (label, trailing_space) = match source {
+                b'N' => value
+                    .strip_suffix(' ')
+                    .map_or((value, false), |label| (label, true)),
+                b'P' => (value, false),
+                _ => return None,
+            };
+            if label.is_empty() || label.chars().any(char::is_control) || !seen.insert(label) {
+                return None;
+            }
+            let mut text = quote_word(label, false);
+            if trailing_space {
+                text.push(' ');
+            }
+            Some(Suggestion {
+                label: label.to_owned(),
+                text,
+                directory: label.ends_with('/'),
+            })
+        })
+        .take(MAX_MATCHES)
+        .collect();
+    Ok(CompletionBatch {
+        index: context.index,
+        length: context.length,
+        matches,
+        exclusive: false,
+    })
+}
+
 fn paths(cwd: &Path, prefix: &str, directories_only: bool) -> Vec<Suggestion> {
-    let separator = if cfg!(windows) { '\\' } else { '/' };
     let position = prefix.rfind(|c| c == '/' || (cfg!(windows) && c == '\\'));
+    let separator = position.map_or(if cfg!(windows) { '\\' } else { '/' }, |at| {
+        prefix.as_bytes()[at] as char
+    });
     let (base, name) = prefix.split_at(position.map_or(0, |at| at + 1));
-    let directory = if let Some(relative) = base.strip_prefix("~/") {
+    let home_relative = base.strip_prefix("~/").or_else(|| {
+        if cfg!(windows) {
+            base.strip_prefix("~\\")
+        } else {
+            None
+        }
+    });
+    let directory = if let Some(relative) = home_relative {
         let Some(home) = dirs::home_dir() else {
             return Vec::new();
         };
@@ -324,18 +447,26 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
             "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
         )
     });
-    if cfg!(windows) && directory && !context.prefix.starts_with('-') {
+    #[cfg(windows)]
+    if let Some(batch) = platform::docker_options(request, &context, cwd) {
+        return batch;
+    }
+    if cfg!(windows)
+        && directory
+        && context.words.len() == 1
+        && !context.prefix.starts_with('-')
+        && (!context.prefix.contains(':') || context.prefix.as_bytes().get(1) == Some(&b':'))
+    {
         // Use filesystem metadata for local navigation. PowerShell providers can
         // classify a file as a container, depending on the active provider.
         let mut matches = paths(cwd, &context.prefix, true);
-        if !matches.is_empty() {
-            matches.truncate(MAX_MATCHES);
-            return CompletionBatch {
-                index: context.index,
-                length: context.length,
-                matches,
-            };
-        }
+        matches.truncate(MAX_MATCHES);
+        return CompletionBatch {
+            index: context.index,
+            length: context.length,
+            matches,
+            exclusive: true,
+        };
     }
     let shell = terminal::shell_program();
     // Shell completion hooks may expand expressions in a draft.
@@ -374,10 +505,20 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
         index: context.index,
         length: context.length,
         matches,
+        exclusive: false,
     }
 }
 
-fn read_process(mut command: Command, input: Vec<u8>) -> Option<Vec<u8>> {
+fn read_process(command: Command, input: Vec<u8>) -> Option<Vec<u8>> {
+    let timeout = Duration::from_secs(if cfg!(windows) { 8 } else { 4 });
+    read_process_with_timeout(command, input, timeout)
+}
+
+fn read_process_with_timeout(
+    mut command: Command,
+    input: Vec<u8>,
+    timeout: Duration,
+) -> Option<Vec<u8>> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -406,20 +547,26 @@ fn read_process(mut command: Command, input: Vec<u8>) -> Option<Vec<u8>> {
         let read = result.and_then(|()| reader.take(1024 * 1024).read_to_end(&mut bytes));
         let _ = sender.send(read.ok().map(|_| bytes));
     });
-    let timeout = if cfg!(windows) { 8 } else { 4 };
-    let bytes = results
-        .recv_timeout(Duration::from_secs(timeout))
-        .ok()
-        .flatten();
-    if bytes.is_none() || child.try_wait().ok().flatten().is_none() {
+    let deadline = Instant::now() + timeout;
+    let bytes = results.recv_timeout(timeout).ok().flatten();
+    let mut exited = child.try_wait().ok().flatten();
+    while bytes.is_some() && exited.is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+        exited = child.try_wait().ok().flatten();
+    }
+    if bytes.is_none() || exited.is_none() {
         #[cfg(unix)]
         unsafe {
             libc::kill(-(child.id() as i32), libc::SIGKILL);
         }
         let _ = child.kill();
     }
-    let _ = child.wait();
-    bytes
+    let status = child.wait().ok()?;
+    if status.success() {
+        bytes
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -435,5 +582,16 @@ mod tests {
         assert_eq!(result.prefix, "ch");
         assert_eq!(result.index, caret - 2);
         assert_eq!(result.length, 3);
+    }
+
+    #[test]
+    fn parses_power_shell_folder_quotes_and_drive_roots() {
+        let root = "cd C:\\";
+        let context = shell_context(root, root.len(), true).unwrap();
+        assert_eq!(context.prefix, "C:\\");
+        let quoted = "cd 'C:\\O''Brien\\'";
+        let context = shell_context(quoted, quoted.len() - 1, true).unwrap();
+        assert_eq!(context.prefix, "C:\\O'Brien\\");
+        assert_eq!(context.index + context.length, quoted.len());
     }
 }

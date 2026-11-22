@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
 import { applyAppearance, isLightTheme, resolveAppearance, useSystemTheme } from "./appearance";
 import { reportFrontendError } from "./diagnostics";
 import { saveDialogSize } from "./Dialog";
-import { HelpDialog } from "./HelpDialog";
 import { useHelpShortcut } from "./contextHelp";
 import { setLanguage, t } from "./i18n";
 import { persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
@@ -13,6 +12,8 @@ import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
 import { pickFromDesktop } from "./AppearancePicker";
 import { windowsClient, type NamedFile } from "./api";
+
+const HelpDialog = lazy(() => import("./HelpDialog"));
 
 export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   initialPreferences: Preferences;
@@ -88,6 +89,8 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
       setPreferences(next);
       return next;
     }} />}
-    {help && <HelpDialog initialTopic={help} language={preferences.language} onClose={() => setHelp(null)} />}
+    {help && <Suspense fallback={null}>
+      <HelpDialog initialTopic={help.topic} side={help.side} language={preferences.language} onClose={() => setHelp(null)} />
+    </Suspense>}
   </>;
 }

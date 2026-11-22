@@ -1,15 +1,17 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
-import { helpGroups, helpText, helpTopics, type HelpTopic } from "./helpContent";
+import { helpText } from "./helpContent";
+import { helpGroups, helpTopics, overviewTopics, type HelpTopic } from "./helpTopics";
 import { t, type Language } from "./i18n";
 import { commandLabel, defaultBindings, showShortcuts } from "./preferences";
+import type { Side } from "./panes";
 
-export type { HelpTopic } from "./helpContent";
-
-export function HelpDialog({ initialTopic, language, onClose }: {
+export default function HelpDialog({ initialTopic, side, language, copyShortcuts, onClose }: {
   initialTopic: HelpTopic;
+  side?: Side;
   language: Language;
+  copyShortcuts?: readonly string[];
   onClose: () => void;
 }) {
   const [topic, setTopic] = useState(initialTopic);
@@ -26,9 +28,9 @@ export function HelpDialog({ initialTopic, language, onClose }: {
     else setTopic(id);
   }
 
-  const paragraph = helpText[language][topic].split(/\[\[([a-zA-Z]+)\|([^\]]+)\]\]/g);
+  const paragraphs = helpText[language][topic].split("\n\n");
   return (
-    <Dialog title={t("Help")} onClose={onClose} wide>
+    <Dialog title={t("Help")} onClose={onClose} wide contextHelp>
       <div className="help-layout">
         <nav className="help-contents" aria-label={t("Table of contents")}>
           <h3>{t("Table of contents")}</h3>
@@ -49,11 +51,23 @@ export function HelpDialog({ initialTopic, language, onClose }: {
             <section id={`help-${id}`} key={id} hidden={id !== topic} aria-labelledby={`help-heading-${id}`}>
               {id === topic && <>
                 <h3 id={`help-heading-${id}`} tabIndex={-1} ref={heading}>{t(helpTopics[id].title)}</h3>
-                <p>{paragraph.map((part, index) => index % 3 === 0 ? part : index % 3 === 1 ?
-                  <a key={index} href={`#help-${part}`} onClick={(event) => {
+                {topic === "paneSources" && side && <p>{t(side === "left" ?
+                  "This control changes the source for the left pane." : "This control changes the source for the right pane.")}</p>}
+                {paragraphs.map((paragraph) => {
+                  const parts = paragraph.split(/\[\[([a-zA-Z]+)\|([^\]]+)\]\]/g);
+                  return <p key={paragraph}>{parts.map((part, index) => index % 3 === 0 ? part : index % 3 === 1 ?
+                    <a key={index} href={`#help-${part}`} onClick={(event) => {
+                      event.preventDefault();
+                      openTopic(part as HelpTopic);
+                    }}>{parts[index + 1]}</a> : null)}</p>;
+                })}
+                {id === "terminalShortcuts" && !!copyShortcuts?.length && <p>{t("Configured file Copy shortcut: {0}.", showShortcuts(copyShortcuts))}</p>}
+                {overviewTopics[id] && <ul className="help-related">
+                  {overviewTopics[id].map((related) => <li key={related}><a href={`#help-${related}`} onClick={(event) => {
                     event.preventDefault();
-                    openTopic(part as HelpTopic);
-                  }}>{paragraph[index + 1]}</a> : null)}</p>
+                    openTopic(related);
+                  }}>{t(helpTopics[related].title)}</a></li>)}
+                </ul>}
                 {helpTopics[id].keys.length > 0 && <>
                   <h4>{t("Default shortcuts")}</h4>
                   <dl className="help-keys">

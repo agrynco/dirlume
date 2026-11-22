@@ -18,7 +18,7 @@ export type AppearancePick = {
   font?: FontGroup;
   view?: ViewFont;
   layout?: PanelLayout;
-  row?: "current" | "marked";
+  row?: "current" | "marked" | "currentMarked";
 };
 
 export type PickHistoryEntry = AppearancePick & { id: string; time: number };
@@ -38,7 +38,8 @@ function surfacePick(target: AppearancePick["target"], surface: Surface): Appear
 
 export function pickLabel(pick: AppearancePick) {
   if (pick.layout) {
-    const row = pick.row === "current" ? "Current file row" : pick.row === "marked" ? "Marked file row" : targets[pick.target];
+    const row = pick.row === "currentMarked" ? "Current marked file row" :
+      pick.row === "current" ? "Current file row" : pick.row === "marked" ? "Marked file row" : targets[pick.target];
     return t("{0} ({1})", t(row), t(panelLayouts[pick.layout]));
   }
   return t(targets[pick.target]);
@@ -61,7 +62,7 @@ export function readAppearancePick(value: unknown): AppearancePick | null {
     font: pick.font && Object.hasOwn(fontGroups, pick.font) ? pick.font : undefined,
     view: pick.view && Object.hasOwn(viewFonts, pick.view) ? pick.view : undefined,
     layout: pick.layout && Object.hasOwn(panelLayouts, pick.layout) ? pick.layout : undefined,
-    row: pick.row === "current" || pick.row === "marked" ? pick.row : undefined,
+    row: pick.row === "current" || pick.row === "marked" || pick.row === "currentMarked" ? pick.row : undefined,
   };
 }
 
@@ -109,6 +110,10 @@ export function resolvePick(element: Element): Target | null {
     const marked = row.classList.contains("marked");
     const current = row.dataset.current === "true";
     const active = pane.classList.contains("active");
+    const view = pane.id === "right-pane" ? "right" : "left";
+    if (current && marked && active) return { element: row, pick: { target: "row",
+      colors: ["panel-current-marked-bg", "panel-current-marked-outline", "panel-selected-ink", "panel-marked"],
+      font: "panel", layout, view, row: "currentMarked" } };
     const fileColor = row.dataset.fileColor as Color | undefined;
     const colors: Color[] = ["panel-bg", "panel-ink", "panel-muted"];
     if (layout === "classic" && current && active) colors.push("accent-fill", ...(marked ? [] : ["on-accent"] as const));
@@ -124,7 +129,7 @@ export function resolvePick(element: Element): Target | null {
           (document.documentElement.dataset.theme === "classic-blue" && !active && !marked))) colors.push(fileColor);
     if (!marked && row.querySelector(".folder-icon")) colors.push("folder");
     return { element: row, pick: { target: "row", colors, font: "panel", layout,
-      view: pane.id === "right-pane" ? "right" : "left", row: current ? "current" : marked ? "marked" : undefined } };
+      view, row: current ? "current" : marked ? "marked" : undefined } };
   }
 
   const text = element.closest(".text-window");

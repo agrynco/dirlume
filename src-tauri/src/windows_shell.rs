@@ -237,7 +237,7 @@ fn shell_icon(path: &Path) -> Option<String> {
     Some(STANDARD.encode(bytes))
 }
 
-fn show_item_menu(hwnd: HWND, path: &Path, background: bool) -> Result<()> {
+fn show_item_menu(hwnd: HWND, path: &Path, background: bool) -> Result<bool> {
     if MENU_HANDLERS.with(|handlers| handlers.borrow().is_some()) {
         return Err("A Windows context menu is already open.".to_owned());
     }
@@ -306,7 +306,7 @@ fn show_item_menu(hwnd: HWND, path: &Path, background: bool) -> Result<()> {
                 };
                 context.InvokeCommand(&invoke).map_err(message)?;
             }
-            Ok(())
+            Ok(selected != 0)
         })();
         CoTaskMemFree(Some(item.cast()));
         result
@@ -318,7 +318,7 @@ pub async fn windows_item_menu(
     window: WebviewWindow,
     directory: String,
     name: Option<String>,
-) -> Result<()> {
+) -> Result<bool> {
     let mut path = local::absolute(&directory).map_err(message)?.to_owned();
     let background = name.is_none();
     if let Some(name) = name {

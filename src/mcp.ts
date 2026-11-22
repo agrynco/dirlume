@@ -140,7 +140,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
     case "read_text": {
       const place = requirePlace();
       const file = textFile(place, lookup(await entries(place), name));
-      const contents = await readPlaceText(file);
+      const contents = await readPlaceText(file, undefined, "mcp");
       if (revisions.size >= 8) revisions.delete(revisions.keys().next().value!);
       const revision = crypto.randomUUID();
       revisions.set(revision, { file, contents });

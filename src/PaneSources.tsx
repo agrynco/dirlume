@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef } from "react";
 import { Activity, ChevronDown, Folder, HardDrive, Server } from "lucide-react";
 import { windowsClient, type ConnectionSource, type QuickLocation } from "./api";
 import { Button } from "./Button";
+import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
 import type { Side } from "./panes";
 import { bindingMatches, driveSourceCommand, eventShortcut, showShortcut, type Bindings } from "./preferences";
@@ -27,7 +28,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
   useEffect(() => {
     if (!open) return;
     function closeOutside(event: PointerEvent) {
-      if (event.target instanceof Node && !box.current?.contains(event.target)) dismiss();
+      if (!helpIsOpen() && event.target instanceof Node && !box.current?.contains(event.target)) dismiss();
     }
     window.addEventListener("pointerdown", closeOutside);
     return () => window.removeEventListener("pointerdown", closeOutside);
@@ -51,7 +52,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
     </Button>;
   }
 
-  return <div className="location-menu" data-overlay={overlay ? side : undefined} ref={box}>
+  return <div className="location-menu" data-overlay={overlay ? side : undefined} data-help-side={side} data-help-topic="paneSources" ref={box}>
     {!overlay && <Button className="icon-button location-trigger"
       aria-label={t(side === "left" ? "Locations for left pane" : "Locations for right pane")}
       aria-expanded={open} onClick={onToggle}><HardDrive /><ChevronDown /></Button>}

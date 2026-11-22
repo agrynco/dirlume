@@ -7,6 +7,8 @@ mod archives;
 #[cfg(feature = "desktop")]
 mod completion;
 #[cfg(feature = "desktop")]
+mod deletion;
+#[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
 mod diagnostics;
@@ -26,6 +28,8 @@ mod ftp;
 mod ftp_transfer;
 #[cfg(feature = "desktop")]
 mod git_view;
+#[cfg(feature = "desktop")]
+mod image_edit;
 #[cfg(feature = "desktop")]
 mod kswitcher;
 mod local;

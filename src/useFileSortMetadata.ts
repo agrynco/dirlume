@@ -88,7 +88,7 @@ export function useFileSortMetadata(pane: PaneState, settings: SortSettings, sho
           const known = items.find(({ entry }) => entry.name.toLowerCase() === "descript.ion" && !entry.directory && !entry.link);
           const file = known?.entry.name ?? (search ? "descript.ion" : null);
           if (!file) continue;
-          const text = await api.readText(directory, file).then((file) => file.text, () => "");
+          const text = await api.readText(directory, file, "sort_metadata").then((file) => file.text, () => "");
           const names = parseDescriptions(text, windowsClient);
           for (const { name, entry } of items) {
             const description = names.get(windowsClient ? entry.name.toLocaleLowerCase() : entry.name);

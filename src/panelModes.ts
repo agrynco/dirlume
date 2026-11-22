@@ -44,7 +44,7 @@ function mode(list: PanelColumn[], status = basicStatus): PanelMode {
 export const defaultPanelModes: PanelModes = {
   brief: mode(columns(["name", 0], ["name", 0], ["name", 0])),
   medium: mode(columns(["name", 0], ["name", 0])),
-  full: mode(columns(["name", 0], ["size", 6], ["date", 0], ["time", 5]), nameStatus),
+  full: mode(columns(["name", 0], ["size", 0], ["date", 0], ["time", 5]), nameStatus),
   wide: mode(columns(["name", 0], ["size", 6])),
   owners: mode(columns(["name", 0], ["size", 6], ["owner", 15]), columns(["rightName", 0], ["size", 6], ["date", 0], ["time", 15])),
   links: mode(columns(["name", 0], ["size", 6], ["links", 3])),

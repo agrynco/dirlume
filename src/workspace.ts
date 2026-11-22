@@ -3,7 +3,7 @@ import { reportFrontendError } from "./diagnostics";
 import { readFileSort } from "./fileSort";
 import { closeSearchResults, emptyPane, type PaneState, type Side } from "./panes";
 
-export type DocumentWindow = { id: number; file: NamedFile; editing: boolean };
+export type DocumentWindow = { id: number; file: NamedFile; editing: boolean; imageOrigin?: Side; diagnosticLog?: true };
 type LocalPlace = Extract<Place, { kind: "local" }>;
 export type SavedFtpLocation = Pick<FtpPlace, "profileId" | "segments">;
 type SavedPane = Pick<PaneState, "selected" | "marked" | "filter" | "sort" | "position"> & {
@@ -39,6 +39,10 @@ export function readWorkspace(): Workspace | null {
     }
     value.documents = value.documents.filter((document) => typeof document?.id === "number" &&
       typeof document.file?.name === "string" && isLocal(document.file.place));
+    for (const document of value.documents) {
+      if (document.imageOrigin !== "left" && document.imageOrigin !== "right") delete document.imageOrigin;
+      if (document.diagnosticLog !== true || document.editing) delete document.diagnosticLog;
+    }
     if (!value.documents.some(({ id }) => id === value.activeDocument)) value.activeDocument = null;
     return value;
   } catch (error) {
@@ -80,7 +84,8 @@ export function saveWorkspace(panes: Record<Side, PaneState>, active: Side, spli
   documents: DocumentWindow[], activeDocument: number | null, failedFtp: Partial<Record<Side, SavedFtpLocation>>) {
   const workspace: Workspace = {
     panels: { left: savePane(panes.left, failedFtp.left), right: savePane(panes.right, failedFtp.right) }, active, split, terminalHeight,
-    documents: documents.filter(({ file }) => isLocal(file.place)).map(({ id, file, editing }) => ({ id, file, editing })), activeDocument,
+    documents: documents.filter(({ file }) => isLocal(file.place))
+      .map(({ id, file, editing, imageOrigin, diagnosticLog }) => ({ id, file, editing, imageOrigin, diagnosticLog })), activeDocument,
   };
   try { localStorage.setItem(storageKey, JSON.stringify(workspace)); }
   catch (error) { reportFrontendError("save_workspace", error); }

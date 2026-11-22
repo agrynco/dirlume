@@ -38,7 +38,13 @@ Use **Ctrl+Shift+F8** to bookmark the active folder in group 8. Use **Ctrl+Shift
 
 Choose a file panel mode from the **Left** or **Right** menu. The active pane also responds to **Left Ctrl** with the top-row digits **1** for Brief, **2** for Medium, **3** for Full, **4** for Wide, **8** for File owners, **9** for File links, and **0** for Alternative full. Brief and Medium fill three or two groups of names down the pane. Full uses Name, Size, Date, and Time. Wide uses Name and Size. Alternative full adds mark indicators and shows sizes in bytes. File owners and File links show the metadata available from the current source.
 
+In Brief and Medium, **Up** and **Down** follow the sort order from the bottom of one column to the top of the next. **Left**, **Right**, **Page Up**, and **Page Down** move by a whole screen of files. **Home** and **End** go to the first and last entries.
+
 In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
+
+The built-in **Full** mode uses automatic Size and Date widths. These widths follow measured folder sizes and system-formatted dates in the current pane font. For a saved layout with fixed widths, set Size, Size in bytes, or Date to **0** to enable that behavior.
+
+After confirming a local deletion or Move to Trash, you can cancel preparation or follow progress for the current item and the full selection. If an item is locked, retry it, skip it, or skip all remaining locks in that batch. On Windows, **Find locking processes** opens the process inspector. Ending a process requires its own confirmation. Permanent deletion keeps a skipped item and its parent folders while continuing with removable siblings. The final free-space reading comes from the source volume.
 
 Open **Sort by** with **Ctrl+F12** or **Sort modes** in the **Left** or **Right** menu. Use the menu to sort by name, extension, size, timestamps, or other metadata supplied by the source. Choose **Unsorted** to keep listing order within each priority group. Press **+** for ascending, **−** for descending, or **\*** to reverse the direction. Press **F4** in the menu to edit tie-breakers.
 
@@ -48,7 +54,15 @@ Press **Enter** on a local folder row to open it with the cursor on **..**. Pres
 
 Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → Main File Panels → Panel layout**. Every layout works with every color scheme. Twin panels keeps file icons and adds drive buttons with icons, a line with the drive's free space above each list, column separators, and a flat key bar with icons. Classic commander uses dense rows without icons, a bar of drives and places above each pane, details of the current item below the list, and a function-key strip. Marked items use the **Marked items** color from **Appearance → Panels** for their check marks. The active and inactive selection colors set the row backgrounds. The pane footer shows the free space on the volume of a local folder.
 
+The current marked row in the active pane has its own fill and outline. Adjust or reset **Current marked row background** and **Current marked row outline** independently in **Options → Appearance → Panels**.
+
+Enable **Right-click selection** under **Options → Main File Panels** to mark an item with a short right-click. Drag with the right button held to mark the rows you cross, or start on a marked row to unmark them. Hold the button over a row or empty pane space for half a second and release when the spinner appears to open the usual context menu.
+
+Choose **List** or **Tree** independently in either local file pane. Use a folder's disclosure button or Left and Right to traverse the tree. You can mark and operate on items across branches. Switching to List from a nested row opens that item's parent and keeps it selected if available. Turn on **Folder sizes** to scan the current subtree in the background in either view. An ellipsis indicates a pending size, a dash indicates an unavailable size, and ≥ marks a partial total. Choose **Size on disk** when allocation is available. The toggle starts off each time the app opens.
+
 Click the free-space indicator or **Analyze space** to scan the folder shown in that pane. The adjacent arrow offers the containing volume, share, or connection root when available. The tree and treemap show file sizes or allocated storage, with percentages relative to each item's parent. **Show in other pane** opens a folder or selects a file there. **Stop** keeps partial results, **Rescan** repeats the same scope, and **Close** restores the file list. On Windows, full local NTFS volume scans use the Master File Table when accessible. Without volume access, Dirlume reads the sizes and file IDs of local NTFS directory entries in batches and scans folders concurrently. On solid-state storage, it uses up to 16 workers when the processor supports them. Local scans stream results to the pane as they arrive. Configure the **Analyze space** binding in **Options → Keyboard shortcuts**.
+
+In the local **Space Analyzer → Tree**, right-click a file or folder for its actions. Windows opens the Shell menu when available. Use **F5** to copy, **F6** to rename or move, **F8** to follow the location's Trash policy, or **Shift+Delete** to review permanent deletion. The same shortcut settings apply in the file pane and the analyzer. Copy and move suggest the other pane's directory when supported. Results refresh after file operations while keeping expanded branches.
 
 The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
 
@@ -78,7 +92,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 
 | Default keys | Action |
 | --- | --- |
-| F1 | Open the offline Help topic for the focused feature. Follow related topics in the guide and press Esc to return to the previous control. |
+| F1 | Open offline Help for the control under the pointer or the most recent keyboard focus. In an open dialog, Help stays within that dialog. Follow related sections in the guide and press Esc to return to the previous control. Change or disable Help under Options → Keyboard shortcuts. |
 | Alt or F9 | Show or hide the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to hide the menu and return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
@@ -100,7 +114,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
 | Ctrl+Insert in a file list | Copy the marked item names, one per line in pane order. With no marks, copy the name under the cursor. |
-| Ctrl+V in the terminal | Paste text into the active local or SSH session. **Options → Terminal** also enables right-click paste by default. |
+| Ctrl+V in the terminal | Paste text into the active local or SSH session. |
 | Ctrl+Shift+C (⌘⇧C on macOS) in a file list | Copy the current file or folder's full path as text. Also available under Commands → Copy full path. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
@@ -112,7 +126,13 @@ In **New folder**, enable **Process multiple names** to separate names with comm
 
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
 
-The shell receives keystrokes while its input has focus. A hint in the status bar, or beneath the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
+The shell receives keystrokes while its input has focus. A hint in the status bar, or beside the close button in the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Use the question-mark button to open offline Help and return to your command when you close it. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
+
+Right-click terminal output to open **Copy**, **Paste**, and **Select All**. On macOS, Control-click also opens the menu. **Copy** is available when text is selected. You can enable **Paste on right-click** in **Options → Terminal** to paste directly instead.
+
+In the Windows PowerShell terminal, `cd` suggests directories as you type. Select a folder to continue into its children. With Docker installed, `docker container` suggests subcommands, names, or IDs from the shell's active Docker context.
+
+At a supported PowerShell, Bash, or Zsh prompt, the terminal shows suggestions next to the caret as you edit a single-line command. Use **↑/↓** to select, **Tab** to insert the selected or first suggestion, or **Esc** to dismiss. Click a suggestion or press **Enter** with one selected to insert it. **Enter** submits the command when the list has no selection. Dirlume SSH terminals use the remote working directory and search path. If you run `ssh` yourself, the parent terminal suspends suggestions until it recognizes its prompt again.
 
 Type in the command line to see matching history and completions for the active local folder. On Windows, PowerShell supplies completions, including options for Windows tools and installed Git and .NET commands. On macOS and Linux, Dirlume uses available Bash or Zsh completions and can also complete executable names and paths. Use **↑/↓** to choose a suggestion, **Tab** or **Enter** to insert it, and **Esc** to dismiss the list. **Enter** runs the draft when no suggestion is selected. **Shift+Enter** runs it with the list open.
 
@@ -125,6 +145,12 @@ On Windows, **Options → Terminal → Automatically refresh environment variabl
 Open the syntax control in the Viewer or Editor header or choose **Syntax → Choose syntax…** to search by language, alias, or extension. Use the arrow keys and **Enter** to apply a choice. **Automatic** uses filename detection and **Plain text** turns off highlighting. Customize syntax colors for the individual tool in **Options → Viewer** or **Options → Editor**. The shared syntax colors remain in **Appearance → Text tools**. Markdown preview renders fenced Mermaid diagrams. Use **HTML formatting** in the viewer toolbar to toggle support for inline spans that specify `white-space: nowrap` in table cells. The setting applies to the open viewer tab. The **Open documents** bar switches between the files view and open documents. Dirlume restores local browsing history, selection, layout, and viewer/editor windows at startup. Unsaved changes require confirmation before closing the editor or exiting.
 
 Press **Ctrl+Q** or select **Quick View** in the main toolbar to preview the current file in the opposite pane while browsing. Toggle it again to restore that pane. **Ctrl+Left** and **Ctrl+Right** move the divider. Use **Rendered** and **Source** in the toolbar for Markdown and HTML. Rendered HTML runs no scripts and loads no external resources. For PNG, JPEG, GIF, WebP, and BMP images up to 16 MiB, use the buttons to zoom, fit, or rotate the preview.
+
+Quick View shows binary files as scrollable single-cell characters in file order. Each byte uses the DOS CP437 glyph mapping, and zero bytes appear as blank cells. Rows wrap to fit the pane.
+
+Press **F3** to open a PNG, JPEG, GIF, WebP, or BMP up to 16 MiB in the image Viewer. **Fit** shows the whole image and **100%** shows the original pixels. Drag a zoomed image to pan, or hold the configured wheel-zoom modifier and scroll to zoom around the pointer. **Previous image** and **Next image** follow the originating pane's sort order and filter in the same tab. Use **F4** to switch between the image and Hex, and **Esc** or **F10** to return to the last viewed file.
+
+Use **F4** on a local single-frame PNG or JPEG to edit it, or **F6** to switch between its saved view and your editing draft. Rotate 90° with **[** or **]**. Use **Crop** to draw a rectangle or set its position and size in image pixels, and choose free, original, preset, or custom proportions. **Apply crop** adds the selection to the draft. **Save a copy** saves in the source format without overwriting a file. **Replace original** asks for confirmation and checks whether the original changed. Camera and color profile metadata may be lost on export. The editor supports images up to 16 MiB and 32 megapixels.
 
 With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Git View works offline with locally available objects and leaves the working tree and index intact. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
 
@@ -239,7 +265,7 @@ On Windows, add an **SMB** connection using a server name, IP address, or UNC sh
 
 ## Desktop diagnostics
 
-Use **Help → Open error log** to open the log in Dirlume's viewer.
+Use **Help → Open error log** to see the latest entries first, with local timestamps down to the millisecond. Expand an entry to inspect its fields and recent actions. A warning icon marks panics, and partial lines can be opened individually. Select **Source** to copy the original JSONL in file order. Opening a JSONL file from a file pane uses the regular text viewer.
 
 Dirlume appends one JSON object per error to `diagnostics.jsonl` in the application data directory:
 
@@ -247,7 +273,15 @@ Dirlume appends one JSON object per error to `diagnostics.jsonl` in the applicat
 - Linux: `$XDG_DATA_HOME/io.github.agrynco.dirlume/logs/diagnostics.jsonl` (defaults to `~/.local/share`)
 - macOS: `~/Library/Application Support/io.github.agrynco.dirlume/logs/diagnostics.jsonl`
 
-Each entry records the failed operation, an error code, a timestamp in Unix milliseconds, and up to 32 recent actions in chronological order. Successful actions remain in memory. The log persists between sessions and records only allowlisted operation names and error codes, along with numeric OS error codes when available. It omits paths, command input, credentials, URLs, raw error text, and file contents.
+Each entry records the failed operation, an error code, a timestamp in Unix milliseconds, and up to 32 recent actions in chronological order. Successful actions remain in memory. The log persists between sessions and uses allowlisted operation names and error codes, along with numeric OS error codes when available. It omits user and absolute build paths, command input, credentials, URLs, raw error text, and file contents.
+
+For Rust panics, the `panic` object includes the desktop build, platform, architecture and, when known, the repository-relative Rust source path and line. Use the build number to locate the matching GitHub Actions build and source revision. The `subsystem` and `command` fields describe the failing worker when that context is available. An outcome of `recovered` means a desktop worker caught the panic. Other panics report `unknown`. A missing source, subsystem, or command is represented by `null`.
+
+For JavaScript failures reported by the window, a rejected promise, or React, the `frontend` object includes the desktop build, platform, architecture, origin, and known window surface. Its `source` contains the bundled asset basename and one-based generated line and column when available, or `null` when the location is unknown. To resolve the coordinates, download the `frontend-maps-<version>-build.<build>-<platform>` artifact from the matching GitHub Actions run. Open `<asset>.map` with a source map reader and look up the generated coordinates. With Node 24, use `new SourceMap(map).findOrigin(line, column)` from `node:module`, where `map` is the parsed JSON. Local builds place the maps in `src-tauri/target/frontend-sourcemaps`. Desktop packages omit these maps.
+
+Local text reads that encounter a problem include `fileRead` with the caller surface when known, the platform, the stage and reason, and any native `osCode`. A `preview_fallback` entry with outcome `recovered` means Quick View found a usable preview after its text read failed. An unsuccessful fallback reports `failed` and includes the fallback stage and cause. Read numeric codes in the context of the operating system that wrote the log.
+
+A failed update check includes `updateCheck` with the initiating trigger, build, platform, architecture, package target, stage, and reason. `httpStatus` is the code of the response available at the failure. A rate limit can be identified from HTTP 429 or a 403 with rate-limit headers. The update check records none of the response headers or body. Download and installation errors still use `install_update`.
 
 ## CI and releases
 

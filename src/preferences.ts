@@ -64,8 +64,10 @@ export const commands = {
   downRow: { label: "Next item", key: "ArrowDown" },
   selectUpRow: { label: "Extend selection up", key: "Shift+ArrowUp" },
   selectDownRow: { label: "Extend selection down", key: "Shift+ArrowDown" },
-  firstRow: { label: "First item", key: "ArrowLeft" },
-  lastRow: { label: "Last item", key: "ArrowRight" },
+  firstRow: { label: "First item", key: "Home" },
+  lastRow: { label: "Last item", key: "End" },
+  leftRow: { label: "Previous page or first item", key: "ArrowLeft" },
+  rightRow: { label: "Next page or last item", key: "ArrowRight" },
   pageUp: { label: "Previous page", key: "PageUp" },
   pageDown: { label: "Next page", key: "PageDown" },
   mark: { label: "Mark or unmark item", key: "Insert" },
@@ -125,6 +127,21 @@ export const commands = {
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
+  imagePrevious: { label: "Previous image", key: "ArrowLeft" },
+  imageNext: { label: "Next image", key: "ArrowRight" },
+  imageZoomIn: { label: "Zoom in on image", key: "Ctrl+=" },
+  imageZoomOut: { label: "Zoom out from image", key: "Ctrl+-" },
+  imageActualSize: { label: "Show image at actual size", key: "1" },
+  imageFit: { label: "Fit image to window", key: "0" },
+  imageRotateLeft: { label: "Rotate image left", key: "[" },
+  imageRotateRight: { label: "Rotate image right", key: "]" },
+  imageCrop: { label: "Crop image", key: "C" },
+  imageApplyCrop: { label: "Apply crop", key: "Enter" },
+  imageCancelCrop: { label: "Cancel crop", key: "" },
+  imageUndo: { label: "Undo image edit", key: "Ctrl+Z" },
+  imageRedo: { label: "Redo image edit", key: "Ctrl+Shift+Z" },
+  imageSaveCopy: { label: "Save a copy of the image", key: "Ctrl+S" },
+  imageReplace: { label: "Replace original image", key: "" },
   switchDocumentMode: { label: "Switch between Viewer and Editor", key: "F6" },
   saveText: { label: "Save text", key: "Ctrl+S" },
   closeText: { label: "Close the viewer or editor", key: "F10" },
@@ -183,8 +200,6 @@ export type Provider = "server" | "kswitcher";
 const alternateDefaults: Partial<Record<Command, { oldCommand: string; key: string }>> = {
   sortAscending: { oldCommand: "sortAscendingAlternate", key: "Shift++" },
   sortReverse: { oldCommand: "sortReverseAlternate", key: "Shift+*" },
-  firstRow: { oldCommand: "firstRowAlternate", key: "Home" },
-  lastRow: { oldCommand: "lastRowAlternate", key: "End" },
   refresh: { oldCommand: "refreshAlternate", key: "" },
   saveText: { oldCommand: "saveTextAlternate", key: "F2" },
   documentRedo: { oldCommand: "documentRedoAlternate", key: macDocumentKeys ? "" : "Ctrl+Shift+Z" },
@@ -216,6 +231,7 @@ export function commandScope(command: Command) {
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
+  if (command.startsWith("image")) return "image";
   if (command === "switchDocumentMode" || command === "saveText" || command === "closeText" ||
       command === "cancelText" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
@@ -234,6 +250,8 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   const commands = [left, right];
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
+  if ((leftScope === "image" || rightScope === "image") &&
+      commands.some((command) => ["viewAsHex", "closeText", "cancelText", "switchDocumentMode", "nextDocument", "previousDocument", "settings"].includes(command))) return true;
   if (commands.includes("swap") && (leftScope === "compare" || rightScope === "compare")) return true;
   return (leftScope === "text" || rightScope === "text" || leftScope === "viewer" || rightScope === "viewer") &&
     (commands.includes("nextDocument") || commands.includes("previousDocument") || commands.includes("settings"));
@@ -285,6 +303,8 @@ export interface Preferences {
   schemes: Scheme[];
   retainedFonts?: RetainedFonts;
   hidden: boolean;
+  rightClickSelection: boolean;
+  paneViews: { left: "list" | "tree"; right: "list" | "tree" };
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
   provider: Provider;
@@ -302,7 +322,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
-export const preferenceBindingVersion = 7;
+export const preferenceBindingVersion = 8;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -322,8 +342,24 @@ export function shortcutBindings(preferences: Preferences) {
 }
 
 function readBindings(saved: Record<string, unknown> | undefined, version: number): Bindings {
+  if (saved && version < 8) {
+    saved = { ...saved };
+    for (const [edge, horizontal, boundary] of [["firstRow", "leftRow", "Home"], ["lastRow", "rightRow", "End"]] as const) {
+      const former = saved[edge];
+      if (Array.isArray(former)) {
+        const arrow = commands[horizontal].key;
+        if (!Object.hasOwn(saved, horizontal)) saved[horizontal] = former.filter((key) => key === arrow);
+        saved[edge] = former.filter((key) => key !== arrow);
+      } else {
+        const alternate = saved[edge + "Alternate"];
+        if (typeof former === "string" && (version > 0 || former !== boundary)) saved[horizontal] = former;
+        if (typeof alternate === "string") saved[edge] = alternate;
+        else delete saved[edge];
+      }
+    }
+  }
   const oldDefaults: Partial<Record<Command, string>> = {
-    firstRow: "Home", lastRow: "End", mark: "Space", rename: "F2",
+    mark: "Space", rename: "F2",
     filter: mac ? "Meta+F" : "Ctrl+F", terminal: mac ? "Meta+`" : "Ctrl+`",
     previousChange: "Alt+ArrowUp", nextChange: "Alt+ArrowDown",
   };
@@ -445,8 +481,13 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   actionButtonWidth: { group: "filePanels", portable: true, read: (value) => value === "full" ? "full" : "compact" },
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
+  rightClickSelection: { group: "filePanels", portable: true, read: (value) => value === true },
+  paneViews: { group: "filePanels", portable: true, read: (value) => {
+    const saved = value as Partial<Preferences["paneViews"]> | null | undefined;
+    return { left: saved?.left === "tree" ? "tree" : "list", right: saved?.right === "tree" ? "tree" : "list" };
+  } },
   refreshEnvironment: { group: "terminal", portable: true, read: (value) => value !== false },
-  terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value !== false },
+  terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value === true },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
   viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
   viewerMarkdownContentWidth: { group: "viewer", portable: true, read: (value) => value === "full" ? "full" :

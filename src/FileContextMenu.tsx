@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
 
-export function FileContextMenu({ x, y, onClose, onReturn, children }: {
+export function FileContextMenu({ x, y, label = "File actions", onClose, onReturn, children }: {
+  label?: string;
   x: number; y: number; onClose: () => void; onReturn: () => void; children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -14,13 +16,13 @@ export function FileContextMenu({ x, y, onClose, onReturn, children }: {
     if (!menu) return;
     menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4))}px`;
     menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4))}px`;
-    menu.querySelector("button")?.focus({ preventScroll: true });
+    menu.querySelector<HTMLButtonElement>("button:enabled")?.focus({ preventScroll: true });
   }, [x, y]);
 
   useEffect(() => {
     function dismiss() { close.current(); }
     function outside(event: PointerEvent) {
-      if (event.target instanceof Node && !ref.current?.contains(event.target)) dismiss();
+      if (!helpIsOpen() && event.target instanceof Node && !ref.current?.contains(event.target)) dismiss();
     }
     window.addEventListener("pointerdown", outside);
     window.addEventListener("blur", dismiss);
@@ -32,9 +34,9 @@ export function FileContextMenu({ x, y, onClose, onReturn, children }: {
     };
   }, []);
 
-  return createPortal(<div ref={ref} className="file-column-menu" role="menu" aria-label={t("File actions")}
+  return createPortal(<div ref={ref} className="file-column-menu" role="menu" data-help-topic="operations" aria-label={t(label)}
     onContextMenu={(event) => event.preventDefault()}
-    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onClose(); }}
+    onBlur={(event) => { if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) onClose(); }}
     onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();

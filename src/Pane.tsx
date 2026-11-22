@@ -2,13 +2,14 @@ import { HistoryField } from "./HistoryField";
 import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import {
-  ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, File, Folder,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
-import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type PaneState, type Side, type SortColumn } from "./panes";
+import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
@@ -16,12 +17,18 @@ import { showShortcut, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
-import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColumnLayout, saveColumnLayout } from "./FileColumns";
+import { columnGroupTrack, fieldClass, FileColumns, measuredColumnFields, panelColumnTracks, readColumnLayout, saveColumnLayout, type MeasuredColumnField } from "./FileColumns";
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
 import { SpaceControl } from "./SpaceControl";
-import { canAnalyze, type SpacePlace } from "./spaceScan";
+import { canAnalyze, type Metric, type SpacePlace } from "./spaceScan";
+import { useRightClickSelection } from "./useRightClickSelection";
+
+function sizeLabel(bytes: number, incomplete?: boolean, formatter?: Intl.NumberFormat) {
+  const value = formatter ? formatter.format(bytes) : formatSize(bytes);
+  return incomplete ? `≥ ${value}` : value;
+}
 
 interface PaneProps {
   side: Side;
@@ -33,14 +40,22 @@ interface PaneProps {
   mode: PanelMode;
   sortAvailable: boolean;
   sortPending: boolean;
-  onGroupRows: (rows: number) => void;
+  onGroupLayout: (rows: number, pageSize: number) => void;
+  onPage: (capacity: number, direction: number) => void;
   showHidden: boolean;
+  rightClickSelection: boolean;
   pane: PaneState;
   entries: Entry[];
+  fileView: FilePaneView;
+  onFileView: (view: FilePaneView) => void;
+  onTreeBranch: (entry: Entry) => void;
+  folderSizes: { active: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
+  onFolderSizes: () => void;
   locations: QuickLocation[];
-  rename?: { name: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
+  rename?: { name: string; rowKey: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
   activate: () => void;
   onRow: (entry: Entry, range: boolean, mark: boolean) => void;
+  onRightClickMark: (names: readonly string[], mark: boolean) => void;
   onQuickMatch: (name: string) => void;
   onOpen: (entry: Entry) => void;
   onPath: (path: string) => void;
@@ -66,7 +81,7 @@ interface PaneProps {
   dropTarget: boolean;
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
-  onContext: (x: number, y: number, entry?: Entry) => void;
+  onContext: (x: number, y: number, entry?: Entry, preserveMarks?: boolean) => void;
   onAnalyze: (place: SpacePlace) => void;
   spaceDisabled: boolean;
 }
@@ -109,7 +124,9 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupRows, showHidden, pane, entries, locations, rename, activate, onRow, onQuickMatch, onOpen, onPath, onLocalLocation,
+export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden,
+  rightClickSelection, pane, entries, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
+  onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
@@ -120,6 +137,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const list = useRef<HTMLDivElement>(null);
+  const markedSet = new Set(pane.marked);
+  const rightClick = useRightClickSelection({ list, entries, marked: markedSet, scope: path,
+    enabled: rightClickSelection && !catalog && !processView && !covered && !pane.loading,
+    onMark: onRightClickMark, onContext: (x, y, entry) => onContext(x, y, entry, true) });
   const savedScroll = useRef<{ top: number; left: number } | null>(null);
   const columnHeader = useRef<HTMLDivElement>(null);
   const [modeVisibility, setModeVisibility] = useState(() => ({
@@ -131,8 +152,13 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const layoutMode = catalog ? "full" : modeId;
   const visibility = modeVisibility[layoutMode];
   const definition = catalog ? defaultPanelModes.full : mode;
-  const columns = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
-  const groups = panelColumnGroups(columns);
+  const tree = fileView === "tree";
+  const columnsInMode = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
+  const modeGroups = panelColumnGroups(columnsInMode);
+  const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
+    folderSizes.active && !group.some(({ field }) => field === "size" || field === "bytes")
+      ? [...group, { field: "size" as const, width: "0" }] : group);
+  const columns = groups.flat();
   const tracks = panelColumnTracks(columns);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
@@ -141,14 +167,18 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const matches = pane.search?.matches;
   const [viewport, setViewport] = useState({ top: 0, height: 0, rowHeight: 29 });
   const grouped = groups.length > 1;
+  const paged = grouped && (layoutMode === "brief" || layoutMode === "medium");
   const virtual = grouped || search || entries.length > 100;
   const visibleRows = Math.max(1, Math.floor((viewport.height - 8) / viewport.rowHeight));
-  const rowsPerGroup = grouped ? Math.max(visibleRows, Math.ceil(entries.length / groups.length)) : Math.max(1, entries.length);
+  const rowsPerGroup = paged ? visibleRows : grouped ? Math.max(visibleRows, Math.ceil(entries.length / groups.length)) : Math.max(1, entries.length);
+  const capacity = rowsPerGroup * groups.length;
+  const pageStart = paged ? Math.floor(Math.max(0, selected) / capacity) * capacity : 0;
+  const lastWheelPage = useRef(-Infinity);
   const renderedGroups = groups.map((group, groupIndex) => {
-    const first = groupIndex * rowsPerGroup;
+    const first = pageStart + groupIndex * rowsPerGroup;
     const last = Math.min(first + rowsPerGroup, entries.length);
-    const start = virtual ? Math.min(last, first + Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : first;
-    const end = virtual ? Math.min(last, first + Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : last;
+    const start = virtual && !paged ? Math.min(last, first + Math.max(0, Math.floor(viewport.top / viewport.rowHeight) - 5)) : first;
+    const end = virtual && !paged ? Math.min(last, first + Math.ceil((viewport.top + viewport.height) / viewport.rowHeight) + 6) : last;
     const indices = Array.from({ length: Math.max(0, end - start) }, (_, offset) => start + offset);
     if (virtual && selected >= first && selected < last && (selected < start || selected >= end)) {
       indices.push(selected);
@@ -158,7 +188,34 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   });
   const indices = renderedGroups.flatMap(({ indices }) => indices);
   const statusColumns = catalog ? [] : mode.status;
-  const displayedFields = [...columns, ...statusColumns].map(({ field }) => field);
+  const displayedColumns = [...columns, ...statusColumns];
+  const displayedFields = displayedColumns.map(({ field }) => field);
+  const automatic = measuredColumnFields.filter((field) => displayedColumns.some((column) => column.field === field && column.width === "0"));
+  const autoSize = automatic.includes("size");
+  const autoBytes = automatic.includes("bytes");
+  const language = locale();
+  const bytesFormat = useMemo(() => new Intl.NumberFormat(language), [language]);
+  const measuredSizes = useMemo(() => {
+    const size = new Map<string, string>();
+    const bytes = new Map<string, string>();
+    if (!search && (autoSize || autoBytes)) {
+      const measurements = pane.backgroundSizes
+        ? [...pane.backgroundSizes.values()].filter((result) => !result.unavailable && !result.pending)
+        : pane.sizes.values();
+      for (const result of measurements) {
+        // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
+        if (autoSize) {
+          const sample = sizeLabel(result.bytes, result.incomplete);
+          size.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
+        }
+        if (autoBytes) {
+          const sample = sizeLabel(result.bytes, result.incomplete, bytesFormat);
+          bytes.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
+        }
+      }
+    }
+    return { size: [...size.values()], bytes: [...bytes.values()] };
+  }, [search, autoSize, autoBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
   const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
   const dateLabel = useTimestamps(displayedFields.includes("date") ? visibleTimestamps : [], "date");
   const timeLabel = useTimestamps(displayedFields.includes("time") ? visibleTimestamps : [], "time");
@@ -226,7 +283,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     observer.observe(probe);
     return () => observer.disconnect();
   }, [virtual, processView]);
-  useLayoutEffect(() => { onGroupRows(grouped && !processView ? rowsPerGroup : 0); }, [grouped, processView, rowsPerGroup, onGroupRows]);
+  useLayoutEffect(() => {
+    onGroupLayout(grouped && !processView ? rowsPerGroup : 0, paged && !processView ? capacity : 0);
+  }, [grouped, paged, processView, rowsPerGroup, capacity, onGroupLayout]);
   useLayoutEffect(() => {
     const element = list.current;
     if (!element) return;
@@ -248,7 +307,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
       return;
     }
-    if (!active || selected < 0) return;
+    if (!active || selected < 0 || paged) return;
     if (virtual) {
       const top = (selected % rowsPerGroup) * viewport.rowHeight;
       const bottom = top + viewport.rowHeight + 8;
@@ -258,7 +317,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     } else {
       element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
     }
-  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll]);
+  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll, paged]);
   useEffect(() => {
     const target = document.getElementById(`${side}-pane`);
     const show = () => {
@@ -277,10 +336,14 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const isRemote = host || (pane.place && pane.place.kind !== "local");
   const folderItems = entries.filter(({ name }) => name !== "..");
   const folders = folderItems.reduce((count, entry) => count + Number(entry.directory), 0);
-  const markedSet = new Set(pane.marked);
   const marked = entries.filter(({ name }) => markedSet.has(name));
-  const complete = marked.every((entry) => entry.directory ? folderMeasurement(pane, entry)?.incomplete === false : entry.size !== null);
-  const markedBytes = marked.reduce((bytes, entry) => bytes + (folderMeasurement(pane, entry)?.bytes ?? entry.size ?? 0), 0);
+  const complete = marked.every((entry) => {
+    const background = pane.backgroundSizes?.get(entry.name);
+    return background ? !background.incomplete && !background.unavailable :
+      entry.directory ? folderMeasurement(pane, entry)?.incomplete === false : entry.size !== null;
+  });
+  const markedBytes = marked.reduce((bytes, entry) => bytes +
+    (pane.backgroundSizes?.get(entry.name)?.bytes ?? folderMeasurement(pane, entry)?.bytes ?? entry.size ?? 0), 0);
 
   const twin = layout === "twin";
   const current = selected >= 0 ? entries[selected] : undefined;
@@ -291,11 +354,13 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     switch (field) {
       case "size":
       case "bytes": {
-        const size = folderMeasurement(pane, entry);
+        const background = pane.backgroundSizes?.get(entry.name);
+        if (background?.unavailable) return missing;
+        if (background?.pending && background.bytes === 0) return "…";
+        const size = background ?? folderMeasurement(pane, entry);
         const count = size?.bytes ?? (entry.directory ? null : entry.size);
         if (count === null) return missing;
-        const value = field === "bytes" ? count.toLocaleString(locale()) : formatSize(count);
-        return size?.incomplete ? `≥ ${value}` : value;
+        return sizeLabel(count, size?.incomplete, field === "bytes" ? bytesFormat : undefined);
       }
       case "date": return entry.modified === null ? missing : dateLabel(entry.modified) ?? formatDate(entry.modified, "date");
       case "time": return entry.modified === null ? missing : timeLabel(entry.modified) ?? formatDate(entry.modified, "time");
@@ -305,17 +370,24 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         return links == null ? missing : links.toLocaleString(locale());
       }
       default: {
-        const original = matches?.get(entry.name)?.entry.name ?? entry.name;
+        const original = matches?.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entry.name;
         const display = displayPanelName(original, entry.directory, definition);
-        const prefix = listing && original !== entry.name ? entry.name.slice(0, -original.length) : "";
+        const prefix = listing && !entry.tree && original !== entry.name ? entry.name.slice(0, -original.length) : "";
         return prefix.normalize("NFC") + display;
       }
     }
   }
 
+  const widthSamples: Partial<Record<MeasuredColumnField, string[]>> = {};
+  for (const field of automatic) {
+    const samples = new Set(field === "size" || field === "bytes" ? measuredSizes[field] : []);
+    for (const index of indices) samples.add(itemValue(entries[index], field));
+    widthSamples[field] = [...samples];
+  }
+
   function renderName(entry: Entry, field: PanelField, listing: boolean) {
     const text = itemValue(entry, field, listing);
-    if (listing && rename?.name === entry.name) return <InlineRenameField {...rename} />;
+    if (listing && rename?.rowKey === entry.name) return <InlineRenameField {...rename} />;
     const dot = (entry.directory ? definition.alignFolders : definition.alignFiles) ? text.lastIndexOf(".") : -1;
     const aligned = dot > text.lastIndexOf("/") + 1 && dot < text.length - 1;
     return <span className={`file-name-text${field === "rightName" ? " file-name-end" : ""}${aligned && field !== "rightName" ? " file-name-aligned" : ""}`}>
@@ -333,6 +405,25 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       (base === "" || base.endsWith(":") || separator.test(folder.charAt(base.length))));
     return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
   }, undefined) : undefined;
+  const localView = pane.place?.kind === "local" && !pane.loading;
+  const viewControls = !catalog && !processView && !search && pane.place && <div className="pane-view-toolbar" data-help-topic="paneViews">
+      <div className="pane-view-modes" role="group" aria-label={t("File pane view")}>
+          <Button type="button" aria-pressed={!tree} disabled={!localView} onClick={() => onFileView("list")}>{t("List")}</Button>
+          <Button type="button" aria-pressed={tree} disabled={!localView} onClick={() => onFileView("tree")}>{t("Tree")}</Button>
+        </div>
+        <Button type="button" aria-pressed={folderSizes.active} disabled={!localView} onClick={onFolderSizes}>
+          <Ruler aria-hidden="true" />{t("Folder sizes")}
+        </Button>
+        {folderSizes.active && (folderSizes.support
+          ? <select value={folderSizes.metric} aria-label={t("Size metric")} onChange={(event) => folderSizes.setMetric(event.target.value as Metric)}>
+            <option value="logical">{t("File size")}</option>
+            <option value="allocated">{t("Size on disk")}</option>
+          </select> : <span className="pane-view-metric">{t("File size")}</span>)}
+        {folderSizes.scanning && <span className="pane-size-scan" role="status" aria-label={t("Measuring folders…")} data-tooltip={t("Measuring folders…")}>
+          <LoaderCircle className="spin" aria-hidden="true" />
+        </span>}
+        {folderSizes.error && <span className="pane-size-scan" role="status" data-tooltip={errorText(folderSizes.error)}>{t("Partial results")}</span>}
+      </div>;
   return (
     <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered}
       data-panel-mode={catalog || processView ? undefined : modeId}
@@ -341,7 +432,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       aria-label={t(side === "left" ? "left pane" : "right pane")}
       onPointerDown={activate} onFocus={activate}>
       <header className={`pane-heading${(catalog || localFolder && !host) && !processView && !search ? " local-heading" : ""}`}>
-        {layout !== "standard" && <nav className="drive-bar" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
+        {layout !== "standard" && <nav className="drive-bar" data-help-topic="paneSources" aria-label={t(side === "left" ? "Drives and places for left pane" : "Drives and places for right pane")}>
           {locations.map((location) => (
             <Button key={location.path} type="button" data-tooltip={location.path} aria-pressed={location === currentLocation}
               onClick={() => onLocalLocation(location)}>
@@ -357,6 +448,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
           {!processView && host && <span className="remote-name" data-tooltip={path}>SMB · {host}</span>}
         </div>
+        {layout === "standard" && viewControls}
         <div className="pane-tools">
           {processView && <Button className="icon-button" aria-label={t("Close processes")}
             onClick={() => onProcesses(false)}><X /></Button>}
@@ -366,7 +458,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             <Button className="icon-button" aria-label={t("Close search results")}
               onClick={onCloseResults}><X /></Button>
           </>}
-          {!processView && <Button className="icon-button" aria-label={t("Filter folder")} aria-pressed={filterOpen}
+          {!processView && <Button className="icon-button" data-help-topic="paneFilter" aria-label={t("Filter folder")} aria-pressed={filterOpen}
             onClick={() => {
               if (filterOpen) {
                 setFilterOpen(false);
@@ -377,21 +469,22 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 requestAnimationFrame(() => filterField.current?.focus());
               }
             }}><Search /></Button>}
-          {!processView && <Button className="icon-button" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
+          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
             <RefreshCw />
           </Button>}
         </div>
       </header>
+      {layout !== "standard" && viewControls}
       {twin && spaceControl && <div className="pane-volume">
         {localFolder && <><HardDrive aria-hidden="true" />
           <span className="pane-volume-name">{currentLocation ? t(currentLocation.label) : localFolder}</span></>}
         {spaceControl}
       </div>}
-      <div className="navigation">
+      <div className="navigation" data-help-topic="paneNavigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
         <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-path={path}>
+        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-help-topic="paneSources" data-path={path}>
           <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
         </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
@@ -399,7 +492,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
       {(filterOpen || pane.filter) && (
-        <label className="pane-filter">
+        <label className="pane-filter" data-help-topic="paneFilter">
           <Search />
           <HistoryField historyKey="pane-filter" ref={filterField} aria-label={t(side === "left" ? "Filter left folder" : "Filter right folder")}
             type="text" placeholder={t("Filter this folder")} value={pane.filter} onValueChange={onFilter}
@@ -413,15 +506,31 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <Button className="icon-button" aria-label={t("Close filter")} onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
-      <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks}
+      <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples}
         visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
         onVisibility={(column, visible) => {
           const next = { ...visibility, [column]: visible };
           setModeVisibility((before) => ({ ...before, [layoutMode]: next }));
           saveColumnLayout(side, layoutMode, next);
         }} />
-      <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} role="listbox" aria-label={t(side === "left" ? "left files" : "right files")}
-        onContextMenu={(event) => { event.preventDefault(); onContext(event.clientX, event.clientY); }}
+      {rightClick.spinner && createPortal(<span className="right-selection-hold" role="status"
+        aria-label={t("Release to open the context menu")} style={{
+          left: Math.min(window.innerWidth - 22, rightClick.spinner.x + 12),
+          top: Math.min(window.innerHeight - 22, rightClick.spinner.y + 12),
+        }}><LoaderCircle className="spin" aria-hidden="true" /></span>, document.body)}
+      <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} data-paged={paged || undefined}
+        role={tree ? "tree" : "listbox"} data-help-return data-file-view={fileView} aria-label={t(side === "left" ? "left files" : "right files")}
+        {...rightClick.events}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (!rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY);
+        }}
+        onWheel={(event) => {
+          if (!paged || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
+            Math.abs(event.deltaY) <= Math.abs(event.deltaX) || event.timeStamp - lastWheelPage.current < 150) return;
+          lastWheelPage.current = event.timeStamp;
+          onPage(capacity, Math.sign(event.deltaY));
+        }}
         onScroll={(event) => {
           if (columnHeader.current) columnHeader.current.scrollLeft = event.currentTarget.scrollLeft;
           if (!virtual) return;
@@ -443,21 +552,39 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             return <Fragment key={entry.name}>
               {gap > 0 && <div className="file-row-spacer" aria-hidden="true" style={{ height: gap * viewport.rowHeight }} />}
               <div id={`${side}-file-${index}`} className={`file-row${marked ? " marked" : ""}`}
-                role="option" aria-setsize={virtual ? entries.length : undefined} aria-posinset={virtual ? index + 1 : undefined}
+                role={tree ? "treeitem" : "option"} aria-setsize={virtual && !tree ? entries.length : undefined}
+                aria-posinset={virtual && !tree ? index + 1 : undefined}
+                aria-level={entry.tree?.segments.length}
+                aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
                 aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
                 data-file-color={fileColor(entry)}
-                aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name}
+                aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name} data-entry-index={index}
+                data-help-topic={catalog || search ? undefined : "paneSelection"}
                 onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  onContext(event.clientX, event.clientY, entry.name === ".." ? undefined : entry);
+                  if (!rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY, entry.name === ".." ? undefined : entry);
                 }}
-                onPointerDown={(event) => { if (entry.name !== ".." && rename?.name !== entry.name) onStartDrag(entry, event); }}
+                onPointerDown={(event) => { if (entry.name !== ".." && rename?.rowKey !== entry.name) onStartDrag(entry, event); }}
                 onDragStart={(event) => event.preventDefault()}
                 onDoubleClick={() => onOpen(entry)}>
                 {group.map(({ field }, slot) => isNameField(field) ?
                   <span key={slot} className="file-name" data-marked-name={field === "markedName" || undefined}>
+                    {tree && <span className="file-tree-indent" style={{ width: Math.min(12, (entry.tree?.segments.length ?? 1) - 1) * 12 }} aria-hidden="true" />}
+                    {tree && (entry.tree && entry.directory && !entry.link
+                      ? <Button type="button" className="file-tree-expand" tabIndex={-1}
+                        aria-label={t(entry.tree.expanded ? "Collapse folder" : "Expand folder")}
+                        data-tooltip={entry.tree.error ? errorText(entry.tree.error) : undefined}
+                        onPointerDown={(event) => { if (event.button === 0) event.stopPropagation(); }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (event.detail <= 1) onTreeBranch(entry);
+                          list.current?.focus({ preventScroll: true });
+                        }} onDoubleClick={(event) => event.stopPropagation()}>
+                        {entry.tree.loading ? <LoaderCircle className="spin" aria-hidden="true" /> :
+                          entry.tree.expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                      </Button> : <span className="file-tree-spacer" aria-hidden="true" />)}
                     {field === "markedName" && <span className="panel-mode-mark" aria-hidden="true">{marked && <Check />}</span>}
                     {entry.directory ? <Folder className="folder-icon" /> :
                       icon ? <img className="native-file-icon" alt="" src={`data:image/png;base64,${icon}`} /> : <File />}
@@ -483,18 +610,18 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         )}
       </div>
       {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={pane.selected}
-        items={folderItems.map(({ name }) => ({ id: name, name: matches?.get(name)?.entry.name ?? name }))}
+        items={folderItems.map(({ name, tree }) => ({ id: name, name: matches?.get(name)?.entry.name ?? tree?.segments.at(-1) ?? name }))}
         onChange={setQuickSearch} onMatch={onQuickMatch}
         onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
         onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
-      {pane.error && <div className="pane-error">
+      {pane.error && <div className="pane-error" data-help-topic="paneStatus">
         <span role="alert">{errorText(pane.error)}</span>
         {pane.deniedSshListing && !pane.loading &&
           <Button type="button" onClick={onRetryWithSudo}>{t("Open with sudo…")}</Button>}
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>
       </div>}
       {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
-      <footer className="pane-footer">
+      <footer className="pane-footer" data-help-topic="paneStatus">
         {pane.loading ? <div className="pane-progress">
           <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
             <LoaderCircle className="spin" aria-hidden="true" />

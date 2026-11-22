@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent
 import { createPortal } from "react-dom";
 import { Check } from "lucide-react";
 import { Button } from "./Button";
+import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
 
 export type ColumnMenuAnchor = { x: number; y: number; trigger: HTMLElement | null };
@@ -44,7 +45,7 @@ export function ColumnMenu({ anchor, choices, fallback, onClose }: {
 
   useEffect(() => {
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menu.current?.contains(event.target)) onClose();
+      if (!helpIsOpen() && event.target instanceof Node && !menu.current?.contains(event.target)) onClose();
     };
     window.addEventListener("pointerdown", outside);
     window.addEventListener("resize", onClose);
@@ -57,9 +58,9 @@ export function ColumnMenu({ anchor, choices, fallback, onClose }: {
   }, [onClose]);
 
   return createPortal(
-    <div className="file-column-menu" ref={menu} role="menu" aria-label={t("Columns")}
+    <div className="file-column-menu" ref={menu} role="menu" data-help-topic="paneColumns" aria-label={t("Columns")}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onClose(); }}
+      onBlur={(event) => { if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) onClose(); }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
