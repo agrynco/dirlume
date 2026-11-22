@@ -10,10 +10,10 @@ use std::{
     ptr,
 };
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::Engine;
 use tauri::WebviewWindow;
 use windows::{
-    core::{w, Interface, PCSTR, PCWSTR, PWSTR},
+    core::{Interface, PCSTR, PCWSTR, PWSTR},
     Win32::{
         Foundation::{
             ERROR_MORE_DATA, ERROR_SUCCESS, FILETIME, HWND, LPARAM, LRESULT, POINT, WPARAM,
@@ -33,7 +33,7 @@ use windows::{
             Shell::{
                 DefSubclassProc, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
                 RemoveWindowSubclass, SHBindToParent, SHGetDesktopFolder, SHParseDisplayName,
-                SetWindowSubclass, ShellExecuteW, CMF_NORMAL, CMINVOKECOMMANDINFO,
+                SetWindowSubclass, CMF_NORMAL, CMINVOKECOMMANDINFO,
             },
             WindowsAndMessaging::{
                 CreatePopupMenu, DestroyMenu, GetCursorPos, SetForegroundWindow, TrackPopupMenuEx,
@@ -336,30 +336,6 @@ pub async fn windows_item_menu(
         })
         .map_err(message)?;
     crate::desktop::blocking(move || receiver.recv().map_err(message)?).await
-}
-
-#[tauri::command]
-pub fn open_elevated(directory: String) -> Result<()> {
-    local::absolute(&directory).map_err(message)?;
-    let executable = wide(&std::env::current_exe().map_err(message)?);
-    let argument: Vec<u16> = format!("--open-folder={}", URL_SAFE_NO_PAD.encode(directory))
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
-    let status = unsafe {
-        ShellExecuteW(
-            None,
-            w!("runas"),
-            PCWSTR(executable.as_ptr()),
-            PCWSTR(argument.as_ptr()),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    if status.0 as usize <= 32 {
-        return Err("Windows did not start an administrator instance.".to_owned());
-    }
-    Ok(())
 }
 
 struct RestartSession(u32);

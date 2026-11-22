@@ -2329,19 +2329,25 @@ pub fn run() {
     #[cfg(windows)]
     crate::portable::maybe_apply_update();
     let _ = rustls::crypto::ring::default_provider().install_default();
+    let context = tauri::generate_context!();
     #[cfg(windows)]
-    if let Some(directory) = crate::portable::root() {
-        crate::portable::initialize(directory);
-    } else if requested_location().is_some() {
-        if let Some(base) = dirs::data_local_dir() {
-            std::env::set_var(
-                "WEBVIEW2_USER_DATA_FOLDER",
-                base.join("io.github.agrynco.dirlume")
-                    .join("AdministratorWebView"),
-            );
+    {
+        let administrator = crate::windows_elevation::is_elevated();
+        if let Some(directory) = crate::portable::root() {
+            crate::portable::initialize(directory, administrator);
+        } else if administrator
+            && (crate::windows_elevation::requested_handoff().is_some()
+                || std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none())
+        {
+            if let Some(base) = dirs::data_local_dir() {
+                std::env::set_var(
+                    "WEBVIEW2_USER_DATA_FOLDER",
+                    base.join(&context.config().identifier)
+                        .join("AdministratorWebView"),
+                );
+            }
         }
     }
-    let context = tauri::generate_context!();
     diagnostics::setup(&context.config().identifier);
     #[cfg(all(windows, feature = "ui-automation"))]
     let context = {
@@ -2452,7 +2458,9 @@ pub fn run() {
         #[cfg(windows)]
         crate::windows_smb::connect_smb,
         #[cfg(windows)]
-        crate::windows_shell::open_elevated,
+        crate::windows_elevation::open_elevated,
+        #[cfg(windows)]
+        crate::windows_elevation::windows_startup,
         #[cfg(windows)]
         crate::windows_shell::locking_processes,
         #[cfg(windows)]

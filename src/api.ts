@@ -354,6 +354,16 @@ export type InstalledRelease = ReleaseHighlights & { showOnStartup: boolean };
 export type AppUpdate = ReleaseHighlights & ({ kind: "install" } | { kind: "debian"; url: string });
 export type UpdateProgress = { downloaded: number; total: number | null };
 
+export type AdministratorWorkspace = {
+  side: "left" | "right";
+  directory: string;
+  selected?: string | null;
+  otherFolder?: string | null;
+  otherAnalyzer?: string | null;
+  split: number;
+  preferences: object;
+};
+
 export const api = {
   startMcp: () => invoke<McpConnection>("start_mcp"),
   stopMcp: () => invoke<void>("stop_mcp"),
@@ -398,7 +408,8 @@ export const api = {
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
   lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),
   windowsItemMenu: (directory: string, name?: string) => invoke<boolean>("windows_item_menu", { directory, name }),
-  openElevated: (directory: string) => invoke<void>("open_elevated", { directory }),
+  openElevated: (workspace: AdministratorWorkspace) => invoke<boolean>("open_elevated", { workspace }),
+  windowsStartup: () => invoke<{ administrator: boolean; handoff: boolean; workspace: AdministratorWorkspace | null; workspaceUnavailable: boolean } | null>("windows_startup"),
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   copyText: (text: string) => invoke<void>("copy_path", { path: text }),

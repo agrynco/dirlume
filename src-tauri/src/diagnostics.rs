@@ -84,6 +84,7 @@ const ACTIONS: &[&str] = &[
     "check_for_update",
     "install_update",
     "open_elevated",
+    "windows_startup",
     "open_web_link",
     "open_kswitcher",
     "list_kswitcher",

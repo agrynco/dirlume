@@ -21,7 +21,7 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
-import { smbLocation, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
+import { smbLocation, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { canAnalyze, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
 import { useFilePaneTree, usePaneFolderSizes, usePaneTreeRevision } from "./filePaneTree";
@@ -50,7 +50,7 @@ import { PaneSources, type PaneSource } from "./PaneSources";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { SearchDialog } from "./SearchDialog";
-import { ElevationButton, LockDialog } from "./ProcessTools";
+import { ElevationButton, ElevationContext, LockDialog } from "./ProcessTools";
 import { DeletionDialog } from "./DeletionDialog";
 import { DiskInformation } from "./DiskInformation";
 import type { Deletion } from "./api";
@@ -75,7 +75,7 @@ import {
   type DeniedSshListing, type FilePaneView, type ListingAction, type PaneState, type Side, type SortColumn,
 } from "./panes";
 import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
-  compactShortcut, preferenceKey, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
+  compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -133,7 +133,7 @@ type Modal =
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
   | { kind: "verifyConnection"; side: Side; profile: SavedConnection; verification: SshHostVerification }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
-  | { kind: "transfer"; transfer: Transfer }
+  | { kind: "transfer"; side: Side; transfer: Transfer }
   | { kind: "deletion"; deletion: Deletion }
   | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
@@ -199,12 +199,16 @@ function swapSides<T>(panes: Record<Side, T>): Record<Side, T> {
   return { left: panes.right, right: panes.left };
 }
 
-export default function App({ initialPreferences, portableUpdateError, portableSettingsError }: {
+export default function App({ initialPreferences, portableUpdateError, portableSettingsError, administrator,
+  administratorWorkspace, administratorWorkspaceUnavailable }: {
   initialPreferences: Preferences;
   portableUpdateError?: string | null;
   portableSettingsError?: string | null;
+  administrator?: boolean;
+  administratorWorkspace?: AdministratorWorkspace | null;
+  administratorWorkspaceUnavailable?: boolean;
 }) {
-  const [startup] = useState(readWorkspace);
+  const [startup] = useState(() => administratorWorkspace ? null : readWorkspace());
   const [ready, setReady] = useState(false);
   const [panes, setPanes] = useState(() => ({
     left: { ...restorePane(startup?.panels.left), loading: true },
@@ -215,13 +219,21 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [rowRename, setRowRename] = useState<RowRename | null>(null);
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [sourceMenu, setSourceMenu] = useState<{ side: Side; returnFocus: HTMLElement | null } | null>(null);
-  const [focusedSide, setActive] = useState<Side>(startup?.active === "right" ? "right" : "left");
+  const [focusedSide, setActive] = useState<Side>(administratorWorkspace?.side ?? (startup?.active === "right" ? "right" : "left"));
   const [quickViewSource, setQuickViewSource] = useState<Side | null>(null);
   const [quickViewSourceText, setQuickViewSourceText] = useState(false);
-  const [analysisPanes, setAnalysisPanes] = useState<Record<Side, AnalysisPane | null>>({ left: null, right: null });
+  const [analysisPanes, setAnalysisPanes] = useState<Record<Side, AnalysisPane | null>>(() => {
+    const panes: Record<Side, AnalysisPane | null> = { left: null, right: null };
+    if (administratorWorkspace?.otherAnalyzer) {
+      const place = localPath(administratorWorkspace.otherAnalyzer);
+      panes[opposite(administratorWorkspace.side)] = { id: 1, root: place, location: { place },
+        navigation: { segments: [], focus: false }, initialView: initialPreferences.spaceAnalyzerView ?? "tree" };
+    }
+    return panes;
+  });
   const [diskPanes, setDiskPanes] = useState<Record<Side, string | null>>({ left: null, right: null });
   const analysisHandles = useRef<Record<Side, SpaceAnalyzerHandle | null>>({ left: null, right: null });
-  const nextAnalysis = useRef(0);
+  const nextAnalysis = useRef(administratorWorkspace?.otherAnalyzer ? 1 : 0);
   const treeNavigation = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const [fileRevision, setFileRevision] = useState(0);
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
@@ -276,7 +288,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const terminalDrag = useRef<{ y: number; height: number; available: number; minimum: number; maximum: number } | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
   const terminalVisible = panelsHidden || terminalShare > 0;
-  const [split, setSplit] = useState(Number.isFinite(startup?.split) ? clampSplit(startup!.split) : 50);
+  const initialSplit = administratorWorkspace?.split ?? startup?.split;
+  const [split, setSplit] = useState(initialSplit !== undefined && Number.isFinite(initialSplit) ? clampSplit(initialSplit) : 50);
   const [commandLine, setCommandLine] = useState("");
   const [pendingCommands, setPendingCommands] = useState<Record<number, TerminalCommand[]>>({});
   const commandInput = useRef<HTMLTextAreaElement>(null);
@@ -286,7 +299,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const commandLineHistory = useMemo(() => historyItems.filter(({ source }) => source !== "ssh").map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
-  const startupError = portableUpdateError ?? portableSettingsError;
+  const startupError = (administratorWorkspaceUnavailable ? t("Could not restore the administrator workspace.") : undefined) ?? portableUpdateError ?? portableSettingsError;
   const [status, setStatus] = useState<WorkspaceStatus>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
@@ -538,7 +551,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const revealed = reveal !== undefined ? openedListing.entries.find((entry) => entry.name === reveal) : undefined;
       const found = reveal === ".." ? hasParentRow(openedPlace) : !!revealed;
-      if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("File no longer found: {0}", reveal), error: true });
+      if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("Item no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
@@ -579,7 +592,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const shown = isTauri() ? getCurrentWindow().show().catch((error: unknown) => {
       reportFrontendError("show_window", error, "native_error");
     }) : Promise.resolve();
-    void shown.then(() => Promise.all([api.locations(), api.requestedLocation()])).then(async ([locations, requested]) => {
+    void shown.then(() => Promise.all([api.locations(), administratorWorkspace ? null : api.requestedLocation()])).then(async ([locations, requested]) => {
       if (cancelled) return;
       setLocations(locations);
       const home = locations[0];
@@ -587,7 +600,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (home && alternate) {
         await Promise.all(([["left", home.path], ["right", alternate.path]] as const).map(async ([side, fallback]) => {
           if (request.current[side] !== 0) return;
-          const requestedFolder = side === "left" && requested ? filesystemPlace(requested) : null;
+          const elevationTarget = administratorWorkspace?.side === side ? administratorWorkspace : null;
+          const elevationFolder = elevationTarget?.directory ?? administratorWorkspace?.otherFolder;
+          const requestedFolder = elevationFolder ? localPath(elevationFolder) : side === "left" && requested ? filesystemPlace(requested) : null;
           const saved = startup?.panels[side];
           const savedFtp = !requestedFolder ? saved?.ftp : undefined;
           let failure: string | undefined;
@@ -621,7 +636,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           }
           const local = requestedFolder ?? saved?.place;
           let ticket = request.current[side] + 1;
-          if (!local || !await load(side, local, requestedFolder ? "push" : "refresh")) {
+          if (!local || !await load(side, local, requestedFolder ? "push" : "refresh", elevationTarget?.selected ?? undefined)) {
             if (cancelled || (local && request.current[side] !== ticket)) return;
             ticket = request.current[side] + 1;
             await load(side, localPath(fallback));
@@ -642,7 +657,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       setReady(true);
     });
     return () => { cancelled = true; };
-  }, [beginListing, load, startup, updatePane]);
+  }, [administratorWorkspace, beginListing, load, startup, updatePane]);
+
+  useEffect(() => {
+    if (!ready || !administratorWorkspace) return;
+    const frame = requestAnimationFrame(() => document.getElementById(administratorWorkspace.side + "-files")?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [administratorWorkspace, ready]);
+
+  const administratorTitle = administrator ? `Dirlume (${t("Administrator")})` : undefined;
+  useEffect(() => {
+    if (administratorTitle && isTauri()) void getCurrentWindow().setTitle(administratorTitle).catch(() => {});
+  }, [administratorTitle]);
 
   useEffect(() => {
     if (ready) saveWorkspace(panes, active, split, terminalHeight, documents, activeDocument, failedFtp.current);
@@ -1735,7 +1761,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     });
   }
 
-  function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null, chooseOperation = false) {
+  function openAdministrator({ directory, side = active, selected }: { directory: string; side?: Side; selected?: string }) {
+    const other = opposite(side);
+    const otherPlace = visiblePanes.current[other].place;
+    const otherAnalyzer = analysisPanes[other]?.root;
+    return api.openElevated({ directory, side, selected, split, preferences: preferenceSnapshot(preferences),
+      otherFolder: otherPlace?.kind === "local" ? otherPlace.path : undefined,
+      otherAnalyzer: otherAnalyzer?.kind === "local" ? otherAnalyzer.path : undefined });
+  }
+
+  function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
+    chooseOperation = false, side = active) {
     if (!items.length) return;
     const remoteDestination = isFileServer(target) ? target : undefined;
     if (remoteDestination && source.kind !== "local") {
@@ -1747,7 +1783,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       setStatus({ text: source.kind === "kswitcher" ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
       return;
     }
-    setModal({ kind: "transfer", transfer: {
+    setModal({ kind: "transfer", side, transfer: {
       kind, source, items, chooseOperation,
       target: target?.kind === "local" || isFileServer(target) ? placePath(target) : "",
       remoteDestination,
@@ -1782,7 +1818,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       const location = analysisPanes[targetSide]?.location.place ?? treeFolder(targetSide) ?? target.place;
       openTransfer(command, items.length === 1 ? items[0].place : root, [...items],
         gitView || environmentPanels[targetSide] || previewSide === targetSide || processPanels[targetSide] || target.search ||
-          command === "move" && isFileServer(location) ? null : location);
+          command === "move" && isFileServer(location) ? null : location, false, side);
     } else {
       const entries = items.flatMap(({ place, entry }) => {
         const parent = spaceRelativePath(root, place);
@@ -1920,7 +1956,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const side = payload.moving ? dropSide(event.clientX, event.clientY, payload.source.kind === "local", payload.side) : null;
     if (!side) return;
     openTransfer("copy", payload.source, payload.items, panes[side].place,
-      payload.source.kind === "local" && panes[side].place?.kind === "local" && !panes[payload.side].search);
+      payload.source.kind === "local" && panes[side].place?.kind === "local" && !panes[payload.side].search, payload.side);
   }
 
   function selectRow(side: Side, entry: Entry, range: boolean, mark: boolean) {
@@ -2847,6 +2883,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
 
   return (
+    <ElevationContext value={openAdministrator}>
     <div className={`app${terminalVisible ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} data-status-bar={preferences.showStatusBar ? undefined : "hidden"}
       style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
@@ -2859,7 +2896,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"} data-help-topic="workspace"
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
         <div className="brand">
-          <span className="brand-icon"><FolderTree /></span><h1>Dirlume</h1>
+          <span className="brand-icon"><FolderTree /></span><h1 aria-label={administratorTitle}>Dirlume</h1>
+          {administrator && <span className="administrator-label" aria-hidden="true">{t("Administrator")}</span>}
         </div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
         <div className="top-actions">
@@ -3264,7 +3302,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </Dialog>
       )}
       {modal?.kind === "transfer" && (
-        <TransferDialog transfer={modal.transfer} showHidden={preferences.hidden} onClose={() => setModal(null)}
+        <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden} onClose={() => setModal(null)}
           onFinished={(success) => { fileLocationsChanged(); if (success) setStatus({ text: "Transfer complete" }); }} />
       )}
       {modal?.kind === "search" && (
@@ -3323,7 +3361,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               openTransfer("copy", item.place, transferItems(side, entry!, state.marked.includes(entry!.name)),
-                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null : target.place);
+                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null : target.place, false, side);
             }}>{t("Copy")}</Button>
             {item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
@@ -3479,6 +3517,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         setShortcuts: (next) => { persistFolderShortcuts(next); setFolderShortcuts(next); },
       }} />
     </div>
+    </ElevationContext>
   );
 }
 
@@ -3572,7 +3611,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             </select>
           </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          {!modal.remote && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
+          {!modal.remote && windowsClient && isPermissionError(error) &&
+            <ElevationButton directory={modal.path} selected={modal.kind === "rename" ? modal.name : undefined} />}
           {!modal.remote && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button></div>}

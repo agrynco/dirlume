@@ -625,7 +625,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <Button type="button" onClick={onRetryWithSudo}>{t("Open with sudo…")}</Button>}
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>
       </div>}
-      {pane.elevationPath && <ElevationButton directory={pane.elevationPath} />}
+      {pane.elevationPath && <ElevationButton directory={pane.elevationPath} side={side} />}
       <footer className="pane-footer" data-help-topic="paneStatus">
         {pane.loading ? <div className="pane-progress">
           <div className="pane-progress-status" role="status" data-tooltip={pane.loadingPath ?? loadingLabel}>
