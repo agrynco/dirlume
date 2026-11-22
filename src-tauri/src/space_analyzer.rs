@@ -197,6 +197,47 @@ fn scan(
     (out.send)(ScanEvent::Finished)
 }
 
+pub fn measure_folder(root: &Path, stop: &AtomicBool) -> Option<(u64, bool)> {
+    if stop.load(Ordering::Relaxed) {
+        return None;
+    }
+    if !fs::symlink_metadata(root)
+        .is_ok_and(|metadata| metadata.is_dir() && !local::is_link(&metadata))
+    {
+        return Some((0, true));
+    }
+
+    let mut bytes = 0u64;
+    let mut incomplete = false;
+    let result = scan(root, stop, &mut |event| {
+        match event {
+            ScanEvent::Start { .. } => {
+                bytes = 0;
+                incomplete = false;
+            }
+            ScanEvent::Batch { changes } => {
+                for change in changes {
+                    match change {
+                        Change::Entry {
+                            directory: false,
+                            size,
+                            ..
+                        } => {
+                            bytes = bytes.saturating_add(size.unwrap_or(0));
+                            incomplete |= size.is_none();
+                        }
+                        Change::Closed { partial, .. } => incomplete |= partial,
+                        _ => {}
+                    }
+                }
+            }
+            ScanEvent::Finished => {}
+        }
+        Ok(())
+    });
+    (!stop.load(Ordering::Relaxed)).then_some((bytes, incomplete || result.is_err()))
+}
+
 fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
     #[cfg(windows)]
     if let Some(volume) = windows_walk::local_ntfs(root) {
@@ -294,6 +335,32 @@ pub async fn space_mount(path: String) -> Result<Mount, String> {
     .await
 }
 
+#[derive(Serialize)]
+pub struct VolumeInformation {
+    path: String,
+    share: bool,
+    label: Option<String>,
+    filesystem: Option<String>,
+    capacity: Option<crate::disk_space::DiskSpace>,
+}
+
+#[tauri::command]
+pub async fn volume_information(path: String) -> Result<VolumeInformation, String> {
+    crate::desktop::blocking(move || {
+        let path = local::absolute(&path).map_err(|error| error.to_string())?;
+        let (root, share) = platform::mount(path).map_err(|error| error.to_string())?;
+        let (label, filesystem) = platform::volume_details(&root);
+        Ok(VolumeInformation {
+            path: local::display_path(&root).map_err(|error| error.to_string())?,
+            share,
+            label,
+            filesystem,
+            capacity: crate::disk_space::query(path).ok(),
+        })
+    })
+    .await
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;
@@ -307,9 +374,10 @@ mod platform {
         path::{Component, Prefix},
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        GetDriveTypeW, GetFileInformationByHandle, GetVolumePathNameW, BY_HANDLE_FILE_INFORMATION,
-        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+        GetDriveTypeW, GetFileInformationByHandle, GetVolumeInformationW, GetVolumePathNameW,
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES,
     };
 
     pub(super) fn open_directory(path: &Path) -> io::Result<File> {
@@ -373,6 +441,36 @@ mod platform {
         const DRIVE_REMOTE: u32 = 4;
         let share = unsafe { GetDriveTypeW(output.as_ptr()) } == DRIVE_REMOTE;
         Ok((root, share))
+    }
+
+    pub(super) fn volume_details(root: &Path) -> (Option<String>, Option<String>) {
+        let root = wide(root);
+        let mut label = [0u16; 261];
+        let mut filesystem = [0u16; 261];
+        // SAFETY: the root is NUL-terminated, and the output buffers have the specified lengths.
+        let found = unsafe {
+            GetVolumeInformationW(
+                root.as_ptr(),
+                label.as_mut_ptr(),
+                label.len() as u32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                filesystem.as_mut_ptr(),
+                filesystem.len() as u32,
+            )
+        };
+        if found == 0 {
+            return (None, None);
+        }
+        let read = |buffer: &[u16]| {
+            let length = buffer
+                .iter()
+                .position(|&unit| unit == 0)
+                .unwrap_or(buffer.len());
+            (length > 0).then(|| String::from_utf16_lossy(&buffer[..length]))
+        };
+        (read(&label), read(&filesystem))
     }
 
     #[test]
@@ -460,6 +558,89 @@ mod platform {
         Ok((PathBuf::from(OsStr::from_bytes(root)), kind == b"smbfs"))
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn volume_details(root: &Path) -> (Option<String>, Option<String>) {
+        let Some(id) = mount_id(root) else {
+            return (None, None);
+        };
+        let Ok(mounts) = fs::read_to_string("/proc/self/mountinfo") else {
+            return (None, None);
+        };
+        for line in mounts.lines() {
+            let Some((fields, volume)) = line.split_once(" - ") else {
+                continue;
+            };
+            let mut fields = fields.split_ascii_whitespace();
+            if fields.next().and_then(|value| value.parse::<u64>().ok()) != Some(id) {
+                continue;
+            }
+            let device = fields.nth(1);
+            let mut volume = volume.split_ascii_whitespace();
+            let filesystem = volume.next().map(str::to_owned);
+            let label = device.and_then(|device| {
+                let info = fs::read_to_string(format!("/run/udev/data/b{device}")).ok()?;
+                info.lines().find_map(|line| {
+                    line.strip_prefix("E:ID_FS_LABEL=")
+                        .filter(|label| !label.is_empty())
+                        .map(str::to_owned)
+                })
+            });
+            return (label, filesystem);
+        }
+        (None, None)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn volume_details(root: &Path) -> (Option<String>, Option<String>) {
+        use std::ffi::CStr;
+
+        let kind = filesystem(root).ok().map(|info| {
+            // SAFETY: statfs returns a NUL-terminated filesystem name.
+            unsafe { CStr::from_ptr(info.f_fstypename.as_ptr()) }
+                .to_string_lossy()
+                .into_owned()
+        });
+        let Ok(path) = CString::new(root.as_os_str().as_bytes()) else {
+            return (None, kind);
+        };
+        let mut attributes = libc::attrlist {
+            bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+            reserved: 0,
+            commonattr: 0,
+            volattr: libc::ATTR_VOL_INFO | libc::ATTR_VOL_NAME,
+            dirattr: 0,
+            fileattr: 0,
+            forkattr: 0,
+        };
+        let mut data = [0u8; 1024];
+        // SAFETY: both pointers are live for the call, and the supplied buffer size is correct.
+        let found = unsafe {
+            libc::getattrlist(
+                path.as_ptr(),
+                (&mut attributes as *mut libc::attrlist).cast(),
+                data.as_mut_ptr().cast(),
+                data.len(),
+                0,
+            )
+        } == 0;
+        let label = found
+            .then(|| {
+                let offset = i32::from_ne_bytes(data[4..8].try_into().unwrap());
+                let length = u32::from_ne_bytes(data[8..12].try_into().unwrap()) as usize;
+                let start = 4usize.checked_add_signed(offset as isize)?;
+                let name = CStr::from_bytes_until_nul(data.get(start..start.checked_add(length)?)?)
+                    .ok()?;
+                (!name.is_empty()).then(|| name.to_string_lossy().into_owned())
+            })
+            .flatten();
+        (label, kind)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn volume_details(_: &Path) -> (Option<String>, Option<String>) {
+        (None, None)
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn filesystem(path: &Path) -> io::Result<libc::statfs> {
         let path = CString::new(path.as_os_str().as_bytes())?;
@@ -474,6 +655,29 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measures_logical_sizes_within_the_scan_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("selected");
+        let outside = temp.path().join("sibling");
+        let empty = root.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(root.join("first"), b"123").unwrap();
+        fs::hard_link(root.join("first"), root.join("second")).unwrap();
+        fs::write(outside.join("oversize"), [0; 1024]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("redirect")).unwrap();
+        #[cfg(windows)]
+        junction::create(&outside, root.join("redirect")).unwrap();
+        let stop = AtomicBool::new(false);
+        assert_eq!(measure_folder(&root, &stop), Some((6, false)));
+        assert_eq!(measure_folder(&empty, &stop), Some((0, false)));
+        assert_eq!(measure_folder(&root.join("gone"), &stop), Some((0, true)));
+        stop.store(true, Ordering::Relaxed);
+        assert_eq!(measure_folder(&root, &stop), None);
+    }
 
     #[test]
     fn scans_nested_files_counts_hard_links_once_and_skips_redirects() {

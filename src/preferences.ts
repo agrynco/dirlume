@@ -83,11 +83,13 @@ export const commands = {
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },
+  processContextMenu: { label: "Open process context menu", key: "Shift+F10" },
   view: { label: "View text or measure folder", key: "F3" },
   quickView: { label: "Quick View", key: "Ctrl+Q" },
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
   environmentVariables: { label: "Environment variables", key: "" },
   analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
+  diskInformation: { label: "Disk information", key: "Ctrl+Shift+L" },
   cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
@@ -155,6 +157,8 @@ export const commands = {
   documentRedo: { label: "Redo text edit", key: macDocumentKeys ? "Meta+Shift+Z" : "Ctrl+Y" },
   documentStart: { label: "Go to start of document", key: macDocumentKeys ? "Meta+ArrowUp" : "Ctrl+Home" },
   documentEnd: { label: "Go to end of document", key: macDocumentKeys ? "Meta+ArrowDown" : "Ctrl+End" },
+  bookmarkLine: { label: "Bookmark line", key: `${documentModifier}+Alt+B` },
+  fileBookmarks: { label: "File bookmarks", key: `${documentModifier}+Shift+B` },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
   folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
@@ -226,6 +230,7 @@ export function commandScope(command: Command) {
   if (command === "help" || command === "menu" || command === "menuAlternate") return "global";
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText") return "terminal";
+  if (command === "processContextMenu") return "processPane";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
@@ -234,7 +239,7 @@ export function commandScope(command: Command) {
   if (command === "viewAsHex") return "viewer";
   if (command.startsWith("image")) return "image";
   if (command === "switchDocumentMode" || command === "saveText" || command === "closeText" ||
-      command === "cancelText" || command.startsWith("document")) return "text";
+      command === "cancelText" || command === "bookmarkLine" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
@@ -248,7 +253,9 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if (leftScope === rightScope) return true;
   if (leftScope === "wheel" || rightScope === "wheel") return false;
   if (leftScope === "global" || rightScope === "global") return true;
+  if ([leftScope, rightScope].includes("processPane") && [leftScope, rightScope].includes("main")) return true;
   const commands = [left, right];
+  if (commands.includes("fileBookmarks") && [leftScope, rightScope].some((scope) => scope === "text" || scope === "viewer")) return true;
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
   if ((leftScope === "image" || rightScope === "image") &&
@@ -280,6 +287,7 @@ export function assignShortcut(bindings: Bindings, command: Command, key: string
 
 export const panelLayouts = { standard: "Standard", twin: "Twin panels", classic: "Classic commander" } as const;
 export type PanelLayout = keyof typeof panelLayouts;
+export type SpaceAnalyzerView = "tree" | "treemap" | "sunburst";
 
 export const actionButtonWidths = { full: "Full width", compact: "Compact" } as const;
 export type ActionButtonWidth = keyof typeof actionButtonWidths;
@@ -305,6 +313,7 @@ export interface Preferences {
   retainedFonts?: RetainedFonts;
   hidden: boolean;
   rightClickSelection: boolean;
+  spaceAnalyzerView?: SpaceAnalyzerView;
   paneViews: { left: "list" | "tree"; right: "list" | "tree" };
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
@@ -487,6 +496,8 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
   rightClickSelection: { group: "filePanels", portable: true, read: (value) => value === true },
+  spaceAnalyzerView: { group: "filePanels", portable: true, read: (value) =>
+    value === "tree" || value === "treemap" || value === "sunburst" ? value : undefined },
   paneViews: { group: "filePanels", portable: true, read: (value) => {
     const saved = value as Partial<Preferences["paneViews"]> | null | undefined;
     return { left: saved?.left === "tree" ? "tree" : "list", right: saved?.right === "tree" ? "tree" : "list" };
@@ -554,13 +565,13 @@ let portableSnapshot: string | undefined;
 let pendingPortableWrite = Promise.resolve();
 let writeQueue = pendingPortableWrite;
 
-export async function restorePortablePreferences(main: boolean) {
+export async function restorePortablePreferences(main: boolean, isolated = false) {
   if (!windowsClient || !isTauri()) return null;
   try {
     const state = await api.readPortableState();
     if (!state) return null;
-    portableSettings = !state.settingsError;
-    if (state.preferences) {
+    portableSettings = !state.settingsError && !isolated;
+    if (state.preferences && !isolated) {
       portableSnapshot = JSON.stringify(state.preferences);
       if (main) localStorage.setItem(preferenceKey, portableSnapshot);
     }
@@ -575,10 +586,15 @@ export function flushPortablePreferences() {
   return pendingPortableWrite;
 }
 
-export function persistPreferences(preferences: Preferences) {
+export function preferenceSnapshot(preferences: Preferences) {
   const settings = Object.fromEntries(preferenceKeys.map((key) => [key, preferences[key]]));
   settings.bindingDefaults = preferenceBindingVersion;
   Object.assign(settings, { independentViewerZoom: true });
+  return settings;
+}
+
+export function persistPreferences(preferences: Preferences) {
+  const settings = preferenceSnapshot(preferences);
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;

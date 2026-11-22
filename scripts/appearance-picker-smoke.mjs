@@ -65,7 +65,9 @@ export async function testAppearancePicker() {
     });
     await page.addInitScript(() => {
       const path = "/fixture";
-      const files = ["first.txt", "some-photo.png"].map((name) => ({ name, directory: false, link: false, hidden: false, size: 7, modified: null }));
+      const files = ["first.txt", "some-photo.png", "logo.SVG", "art.svg", "Dockerfile", "backup.tar.gz", ".hidden.svg", "system.svg"]
+        .map((name) => ({ name, directory: name === "art.svg", link: false, hidden: name.startsWith(".") || name === "system.svg",
+          system: name === "system.svg", size: 7, modified: null }));
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command) => {
@@ -294,7 +296,7 @@ export async function testAppearancePicker() {
       const key = "dirlume.preferences.v1";
       const preferences = JSON.parse(localStorage.getItem(key));
       preferences.activeScheme = "legacy-dialog-font";
-      preferences.schemes.push({ id: "legacy-dialog-font", name: "Legacy dialog font", base: "light", colors: {},
+      preferences.schemes.push({ id: "legacy-dialog-font", name: "Legacy dialog font", base: "light", colors: { "file-image": "#2d598e" },
         fonts: { ui: { size: 15 }, dialog: { size: 18, family: "Arial" } } });
       localStorage.setItem(key, JSON.stringify(preferences));
     });
@@ -341,7 +343,75 @@ export async function testAppearancePicker() {
     await selectPage("Fonts");
     assert.equal(await size("Options window").inputValue(), "15");
     assert.equal(await size("File pane dialogs").inputValue(), "18");
+    await selectPage("File types");
+    const groups = options.getByRole("combobox", { name: "File extension group", exact: true });
+    const groupName = options.getByRole("textbox", { name: "Group name", exact: true });
+    const extension = options.getByRole("textbox", { name: "File extension", exact: true });
+    const colorField = options.getByRole("textbox", { name: "Filename color hex", exact: true });
+    const add = options.getByRole("button", { name: "Add extension", exact: true });
+    const remove = (suffix) => options.getByRole("button", { name: `Remove extension .${suffix}`, exact: true });
+    assert.equal(await groups.getByRole("option").count(), 8);
+    await groups.selectOption("file-image");
+    assert.equal(await colorField.inputValue(), "#2d598e");
+    await groupName.fill("Photos");
+    await groupName.press("Enter");
+    await extension.fill(".JPEGXL");
+    await add.click();
+    await remove("jpegxl").waitFor();
+    await remove("bmp").click();
+    assert.equal(await remove("bmp").count(), 0);
+
+    await options.getByRole("button", { name: "New group", exact: true }).click();
+    await groupName.fill("Vector images");
+    await groupName.press("Enter");
+    const vectors = await groups.inputValue();
+    const confirmMove = page.getByRole("dialog", { name: "Move extension", exact: true });
+    await extension.fill(".SVG");
+    await add.click();
+    await confirmMove.getByText("Move .svg from Photos to Vector images?", { exact: true }).waitFor();
+    await confirmMove.getByRole("button", { name: "Cancel", exact: true }).click();
+    await groups.selectOption("file-image");
+    await remove("svg").waitFor();
+    await groups.selectOption(vectors);
+    await extension.fill("svg");
+    await extension.press("Enter");
+    await confirmMove.getByRole("button", { name: "Move extension", exact: true }).click();
+    await colorField.fill("#853579");
+    await options.getByRole("combobox", { name: "File type font family", exact: true }).fill("Courier New");
+    const sample = options.getByLabel("Filename preview", { exact: true });
+    assert.equal(await sample.textContent(), "sample.svg");
+    assert.equal(await sample.evaluate((node) => getComputedStyle(node).color), "rgb(133, 53, 121)");
+    if (process.env.DIRLUME_FILE_TYPES_SCREENSHOT) await options.screenshot({ path: process.env.DIRLUME_FILE_TYPES_SCREENSHOT });
+    await selectPage("Main File Panels");
+    await options.getByRole("checkbox", { name: "Show hidden files", exact: true }).check();
     await done();
+    const file = (side, name) => page.locator(`#${side}-files .file-row[data-tooltip=${JSON.stringify(name)}]`);
+    const filename = (side, name) => file(side, name).locator(".file-name-text");
+    const appearance = (node) => node.evaluate((element) => [getComputedStyle(element).color, getComputedStyle(element).fontFamily]);
+    for (const side of ["left", "right"]) {
+      assert.equal(await file(side, "logo.SVG").getAttribute("data-file-color"), "custom");
+      assert.equal(await file(side, "art.svg").getAttribute("data-file-color"), null);
+      assert.equal(await file(side, "Dockerfile").getAttribute("data-file-color"), null);
+      assert.equal(await file(side, "backup.tar.gz").getAttribute("data-file-color"), "file-archive");
+      assert.equal(await file(side, ".hidden.svg").getAttribute("data-file-color"), "file-hidden");
+      assert.equal(await file(side, "system.svg").getAttribute("data-file-color"), "file-system");
+      const [ink, font] = await appearance(filename(side, "logo.SVG"));
+      assert.equal(ink, "rgb(133, 53, 121)");
+      assert.match(font, /^"?Courier New"?,/);
+    }
+    await file("left", "logo.SVG").click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
+    const [markedInk, markedFont] = await appearance(filename("left", "logo.SVG"));
+    assert.notEqual(markedInk, "rgb(133, 53, 121)");
+    assert.match(markedFont, /^"?Courier New"?,/);
+    await page.reload();
+    await open();
+    await selectPage("File types");
+    await groups.selectOption(vectors);
+    assert.equal(await colorField.inputValue(), "#853579");
+    await remove("svg").waitFor();
+    await options.getByRole("button", { name: "Reset file type font", exact: true }).click();
+    await done();
+    assert.equal((await appearance(filename("left", "logo.SVG")))[1], (await appearance(filename("left", "art.svg")))[1]);
     console.log("Verified appearance targets, grouped controls, draft preview, cancellation, and private date-grouped history.");
   } finally {
     await browser.close();

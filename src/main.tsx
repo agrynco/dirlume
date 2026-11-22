@@ -4,11 +4,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { ToolWindow } from "./ToolWindows";
 import { NativeAppearancePicker } from "./AppearancePicker";
-import type { NamedFile } from "./api";
+import { api, type NamedFile, windowsClient } from "./api";
 import { installDiagnosticListeners, reportReactError } from "./diagnostics";
 import { setLanguage } from "./i18n";
 import { isFeaturePage } from "./featureOptions";
-import { readPreferences, restorePortablePreferences, trackControlKeys } from "./preferences";
+import { normalizePreferences, readPreferences, restorePortablePreferences, trackControlKeys } from "./preferences";
 import { installTooltips } from "./tooltips";
 import "./styles.css";
 
@@ -22,8 +22,10 @@ const tool = window as Window & {
 };
 const comparison = tool.__dirlumeComparison;
 const optionsPage = tool.__dirlumeOptionsPage;
-void restorePortablePreferences(label === "main").then((portable) => {
-  const preferences = readPreferences();
+const windowsStartup = windowsClient && isTauri() ? api.windowsStartup().catch(() => null) : Promise.resolve(null);
+void windowsStartup.then(async (startup) => {
+  const portable = await restorePortablePreferences(label === "main", startup?.handoff);
+  const preferences = startup?.workspace ? normalizePreferences(startup.workspace.preferences) : readPreferences();
   setLanguage(preferences.language);
   createRoot(document.getElementById("root")!, {
     onCaughtError: reportReactError,
@@ -32,7 +34,8 @@ void restorePortablePreferences(label === "main").then((portable) => {
   }).render(<>
     {label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
       optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
-      <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError} />}
+      <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError}
+        administrator={startup?.administrator} administratorWorkspace={startup?.workspace} administratorWorkspaceUnavailable={startup?.workspaceUnavailable} />}
     {label !== "options" && isTauri() && <NativeAppearancePicker />}
   </>);
 });
