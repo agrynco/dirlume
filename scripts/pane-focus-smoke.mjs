@@ -76,8 +76,14 @@ try {
     await page.goto("http://dirlume.test/");
     const waitDates = (text) => Promise.all(sides.map((side) =>
       page.locator(`#${side}-files .file-date`).filter({ hasText: text }).first().waitFor()));
+    const waitDateMeasurements = () => page.waitForFunction((sides) => sides.every((side) => {
+      const pane = document.getElementById(`${side}-pane`);
+      const probe = pane?.querySelector('.file-column-probes [data-column="date"]');
+      return probe && pane.style.getPropertyValue("--file-date-width") === `${Math.ceil(probe.getBoundingClientRect().width)}px`;
+    }), sides);
     await waitDates(systemDate);
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await waitDateMeasurements();
     for (const side of sides) {
       const list = page.locator(`#${side}-files`);
       await list.focus();
@@ -91,8 +97,6 @@ try {
     }
     const both = () => Promise.all(sides.map((side) => snapshot(page, side)));
     const before = await both();
-    const dateWidths = await page.locator(".file-column.col-date").evaluateAll((columns) =>
-      columns.map((column) => column.getBoundingClientRect().width));
     for (const { date, scroll, current, marks } of before) {
       assert.equal(date, systemDate);
       assert.ok(scroll > 0);
@@ -125,13 +129,12 @@ try {
       }
       await release(date);
       await waitDates(date);
+      await waitDateMeasurements();
       if (date === systemDate) assert.deepEqual(await both(), before);
       assert.deepEqual(await counts(), initialCounts);
     }
-    await page.waitForFunction((widths) =>
-      [...document.querySelectorAll(".file-column.col-date")].every((column, index) =>
-        column.getBoundingClientRect().width < widths[index]), dateWidths);
     const rightBefore = await snapshot(page, "right");
+    assert.ok(rightBefore.columns[2].width < before[1].columns[2].width);
     await page.evaluate(() => {
       const fixture = window.focusFixture;
       window.dispatchEvent(new Event("blur"));
