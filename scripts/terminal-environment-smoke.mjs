@@ -60,6 +60,7 @@ export async function testTerminalEnvironment(page) {
     const options = window.getByRole("dialog", { name: "Options", exact: true });
     const search = options.getByRole("searchbox", { name: "Search settings" });
     await search.fill("refresh environment variables");
+    await search.press("Tab");
     await options.getByRole("button", { name: "Terminal", exact: true }).click();
     await options.getByRole("checkbox", { name: "Automatically refresh environment variables", exact: true }).setChecked(enabled);
     await search.fill("");

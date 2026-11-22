@@ -1,6 +1,13 @@
 {
   "version": "0.1.21",
   "highlights": [
-    "Open Disk information in either file pane to see capacity before scanning. Use Space Analyzer’s Sunburst or Treemap to explore space and open file actions directly on a chart item."
+    "See capacity in Disk information, explore or act on files from Sunburst and Treemap, and hover for each tile's full name and size. F3 measurements in List view use the same scanner.",
+    "Create file extension groups and set their filename colors and fonts in a custom color scheme.",
+    "Bookmark lines in the text Viewer and reopen bookmarked locations from the file panes.",
+    "Open as administrator restores your applied appearance, local workspace, and selected item. Windows marks the new window as Administrator.",
+    "Retry a stopped transfer from the failed item. On Windows, the lock inspector reports holders of folders and nested files as it checks them.",
+    "Right-click a process to view its properties, copy its PID or executable path, reveal the executable, or end that process with confirmation.",
+    "Submit commands from either pane with Terminal open or hidden. Commands use the displayed folder and show an error if the shell cannot enter it.",
+    "Insert the path of the parent row into the command line in local and SSH panes. The New folder batch checkbox now uses the standard label spacing."
   ]
 }
