@@ -2,7 +2,7 @@ import { HistoryField } from "./HistoryField";
 import { countText, errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
 import { AddressField } from "./AddressField";
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
@@ -11,7 +11,7 @@ import {
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
-import { fileColor } from "./appearance";
+import { fileAppearance, type FileTypeIndex } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { showShortcut, type PanelLayout } from "./preferences";
 import { useFontZoom } from "./useFontZoom";
@@ -47,6 +47,7 @@ interface PaneProps {
   pane: PaneState;
   addressPlace?: FileLocation | null;
   entries: Entry[];
+  fileTypes: FileTypeIndex;
   fileView: FilePaneView;
   onFileView: (view: FilePaneView) => void;
   onTreeBranch: (entry: Entry) => void;
@@ -126,7 +127,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 }
 
 export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, addressPlace,
-  rightClickSelection, pane, entries, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
+  rightClickSelection, pane, entries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
@@ -550,6 +551,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             const icon = icons.get(byName.get(entry.name) ?? "");
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
             const marked = markedSet.has(entry.name);
+            const appearance = fileAppearance(entry, fileTypes);
             return <Fragment key={entry.name}>
               {gap > 0 && <div className="file-row-spacer" aria-hidden="true" style={{ height: gap * viewport.rowHeight }} />}
               <div id={`${side}-file-${index}`} className={`file-row${marked ? " marked" : ""}`}
@@ -558,7 +560,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-level={entry.tree?.segments.length}
                 aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
                 aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
-                data-file-color={fileColor(entry)}
+                data-file-color={appearance.tone}
+                style={appearance.color || appearance.family ? { "--entry-color": appearance.color,
+                  "--entry-font": appearance.family && `${CSS.escape(appearance.family)}, var(--panel-font)` } as CSSProperties : undefined}
                 aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name} data-entry-index={index}
                 data-help-topic={catalog || search ? undefined : "paneSelection"}
                 onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}

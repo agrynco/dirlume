@@ -747,7 +747,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.file-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--entry-font, inherit); }
 .file-name svg { color: var(--muted); }
 .file-name img { width: 15px; height: 15px; object-fit: contain; flex: none; }
 .pane .file-name .folder-icon { color: var(--folder); }
@@ -1544,6 +1544,18 @@ button.color-swatch {
 }
 .color-picker-swatches span { flex: 1; background: var(--swatch); }
 .color-setting input[type=text] { padding-block: 4px; font-family: var(--mono); }
+.file-type-settings { min-width: 0; display: grid; gap: 10px; margin: 0 0 12px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); }
+.file-type-settings legend { padding-inline: 4px; font-weight: 650; }
+.file-type-toolbar, .file-type-font { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
+.file-type-toolbar > .field, .file-type-font > .font-family { flex: 1 1 10em; min-width: 0; }
+.file-type-toolbar > button { border-color: var(--line); background: var(--raised); }
+.file-type-toolbar > button:hover:not(:disabled) { background: var(--hover); }
+.file-type-toolbar :is(input, select), .file-type-settings > .field > input { min-width: 0; max-width: 100%; }
+.file-type-extensions { display: flex; flex-wrap: wrap; gap: 4px; }
+.file-type-extensions button { min-height: 26px; padding: 1px 6px; border-color: var(--line); background: var(--raised); }
+.file-type-extensions button:hover:not(:disabled) { background: var(--hover); }
+.file-type-extensions svg { width: 12px; height: 12px; }
+.file-type-sample { display: block; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-bg); overflow-wrap: anywhere; }
 .font-setting {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
