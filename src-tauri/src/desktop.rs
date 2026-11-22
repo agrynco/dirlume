@@ -634,6 +634,13 @@ struct TransferSession {
     cancelled: CancellationToken,
     pending: Mutex<Option<PendingConflict>>,
     remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
+    local: Mutex<LocalTransferAttempt>,
+}
+
+#[derive(Default)]
+struct LocalTransferAttempt {
+    destination: Option<PathBuf>,
+    resume: local_transfer::MoveResume,
 }
 
 struct PendingConflict {
@@ -813,6 +820,8 @@ struct TransferRequest {
     policy: local_transfer::Policy,
     ask_read_only: bool,
     #[serde(default)]
+    retry: bool,
+    #[serde(default)]
     copy_options: local::CopyOptions,
 }
 
@@ -840,6 +849,7 @@ fn transfer_outcome(completed: bool) -> TransferOutcome {
 enum TransferEvent {
     Progress {
         file: String,
+        path: String,
         bytes: u64,
         total: Option<u64>,
     },
@@ -986,7 +996,12 @@ async fn transfer_item(
                 .unwrap_or(path.as_os_str())
                 .to_string_lossy()
                 .into_owned();
-            let _ = output.send(TransferEvent::Progress { file, bytes, total });
+            let _ = output.send(TransferEvent::Progress {
+                file,
+                path: path.to_string_lossy().into_owned(),
+                bytes,
+                total,
+            });
             Ok(())
         };
         progress(Path::new(name), 0, None).map_err(message)?;
@@ -1032,14 +1047,28 @@ async fn transfer_item(
                 );
             }
         }
-        let target = transfer_target(
-            &request.destination,
-            name,
-            source.as_deref(),
-            request.multiple,
-            source.is_some() || ftp_source.is_some() || ssh_source.is_some() || archive.is_some(),
-        )
-        .map_err(message)?;
+        let mut local = source
+            .as_ref()
+            .map(|_| session.local.lock())
+            .transpose()
+            .map_err(message)?;
+        if let Some(local) = local.as_mut().filter(|_| !request.retry) {
+            **local = LocalTransferAttempt::default();
+        }
+        let target = match local.as_ref().and_then(|local| local.destination.clone()) {
+            Some(path) => path,
+            None => transfer_target(
+                &request.destination,
+                name,
+                source.as_deref(),
+                request.multiple,
+                source.is_some()
+                    || ftp_source.is_some()
+                    || ssh_source.is_some()
+                    || archive.is_some(),
+            )
+            .map_err(message)?,
+        };
         let options = local_transfer::Options {
             moving: request.moving,
             policy: request.policy,
@@ -1087,10 +1116,18 @@ async fn transfer_item(
                 .map(transfer_outcome);
             }
         }
-        if let Some(source) = source {
-            return local_transfer::transfer(&source, &target, &options, progress, ask)
-                .map(transfer_outcome)
-                .map_err(message);
+        if let (Some(source), Some(mut local)) = (source, local) {
+            local.destination = Some(target.clone());
+            return local_transfer::transfer(
+                &source,
+                &target,
+                &options,
+                &mut local.resume,
+                progress,
+                ask,
+            )
+            .map(transfer_outcome)
+            .map_err(message);
         }
 
         match fs::symlink_metadata(&target) {

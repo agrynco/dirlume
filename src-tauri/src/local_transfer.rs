@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs,
     io::{self, ErrorKind},
@@ -229,10 +230,23 @@ pub(crate) fn plan_target(
     Ok(Some(plan))
 }
 
-pub fn transfer(
+#[derive(Default)]
+pub(crate) struct MoveResume {
+    folders: HashMap<PathBuf, MovingFolder>,
+    skipped: HashMap<PathBuf, same_file::Handle>,
+}
+
+struct MovingFolder {
+    source: same_file::Handle,
+    destination: same_file::Handle,
+    path: PathBuf,
+}
+
+pub(crate) fn transfer(
     source: &Path,
     target: &Path,
     options: &Options,
+    resume: &mut MoveResume,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     mut ask: impl FnMut(Conflict) -> io::Result<Decision>,
 ) -> io::Result<bool> {
@@ -241,6 +255,7 @@ pub fn transfer(
         source,
         &target,
         options,
+        resume,
         &mut Vec::new(),
         &mut progress,
         &mut ask,
@@ -253,6 +268,7 @@ fn transfer_entry(
     source: &Path,
     target: &Path,
     options: &Options,
+    resume: &mut MoveResume,
     ancestors: &mut Vec<PathBuf>,
     progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ask: &mut impl FnMut(Conflict) -> io::Result<Decision>,
@@ -263,18 +279,39 @@ fn transfer_entry(
         // An excluded descendant is outside the requested copy, including during a merge.
         return Ok(!options.moving && !ancestors.is_empty());
     }
+    if let Some(skipped) = resume.skipped.get(source) {
+        if same_file::Handle::from_path(source).is_ok_and(|current| current == *skipped) {
+            return Ok(false);
+        }
+    }
+    let plan = if let Some(previous) = resume.folders.get(source) {
+        verify_source_folder(source, &previous.source, &options.copy)?;
+        verify_folder(&previous.path, &previous.destination)?;
+        Some(PlannedTarget {
+            path: previous.path.clone(),
+            replace: None,
+            merge: Some(same_file::Handle::from_path(&previous.path)?),
+        })
+    } else {
+        plan_target(
+            target,
+            Incoming::local(&incoming),
+            Some(source),
+            options,
+            ask,
+        )?
+    };
     let Some(PlannedTarget {
         path: target,
         replace,
         merge,
-    }) = plan_target(
-        target,
-        Incoming::local(&incoming),
-        Some(source),
-        options,
-        ask,
-    )?
+    }) = plan
     else {
+        if options.moving {
+            if let Ok(identity) = same_file::Handle::from_path(source) {
+                resume.skipped.insert(source.to_owned(), identity);
+            }
+        }
         return Ok(false);
     };
 
@@ -314,6 +351,16 @@ fn transfer_entry(
             }
         }
         let target_folder = same_file::Handle::from_path(&target)?;
+        if options.moving && !resume.folders.contains_key(source) {
+            resume.folders.insert(
+                source.to_owned(),
+                MovingFolder {
+                    source: same_file::Handle::from_path(source)?,
+                    destination: same_file::Handle::from_path(&target)?,
+                    path: target.clone(),
+                },
+            );
+        }
         let all_transferred =
             local::with_copy_directory(source, &target, &options.copy, ancestors, |ancestors| {
                 let entries = fs::read_dir(source)?.collect::<io::Result<Vec<_>>>()?;
@@ -325,6 +372,7 @@ fn transfer_entry(
                         &entry.path(),
                         &target.join(entry.file_name()),
                         options,
+                        resume,
                         ancestors,
                         progress,
                         ask,
@@ -339,6 +387,7 @@ fn transfer_entry(
         if options.moving && all_transferred {
             verify_folder(source, &source_folder)?;
             fs::remove_dir(source)?;
+            resume.folders.remove(source);
         }
         return Ok(all_transferred);
     }
@@ -528,6 +577,7 @@ mod tests {
             &source,
             &target,
             &options,
+            &mut MoveResume::default(),
             |_, _, _| Ok(()),
             |_| unreachable!()
         )
@@ -564,6 +614,7 @@ mod tests {
             &source,
             &target,
             &options,
+            &mut MoveResume::default(),
             |_, _, _| Ok(()),
             |conflict| {
                 Ok(if conflict.directory {
@@ -577,5 +628,51 @@ mod tests {
         assert!(!completed);
         assert_eq!(fs::read(target.join("keep")).unwrap(), b"original");
         assert_eq!(fs::read(target.join("new")).unwrap(), b"created");
+    }
+
+    #[test]
+    fn retry_resumes_a_partially_moved_folder_without_repeating_its_merge_decision() {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("source");
+        let target = fixture.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(source.join("one"), "first").unwrap();
+        fs::write(source.join("two"), "second").unwrap();
+        let options = Options {
+            moving: true,
+            policy: Policy::Ask,
+            ask_read_only: false,
+            copy: Default::default(),
+        };
+        let mut resume = MoveResume::default();
+        let result = transfer(
+            &source,
+            &target,
+            &options,
+            &mut resume,
+            |path, _, _| {
+                if path != source && fs::read_dir(&target)?.next().is_some() {
+                    return Err(io::Error::other("Fixture blocked the second move"));
+                }
+                Ok(())
+            },
+            |_| Ok(Decision::Overwrite),
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(&source).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&target).unwrap().count(), 1);
+        assert!(transfer(
+            &source,
+            &target,
+            &options,
+            &mut resume,
+            |_, _, _| Ok(()),
+            |_| panic!("The merge was already approved")
+        )
+        .unwrap());
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(target.join("one")).unwrap(), "first");
+        assert_eq!(fs::read_to_string(target.join("two")).unwrap(), "second");
     }
 }
