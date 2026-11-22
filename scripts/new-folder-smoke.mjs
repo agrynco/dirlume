@@ -43,6 +43,20 @@ export async function testNewFolder({ page, startDesktop, exitDesktop, root }) {
   await closeToolWindow(window, () => options.getByRole("button", { name: "Done", exact: true }).click());
 
   await open();
+  const multiple = dialog().getByRole("checkbox", { name: "Process multiple names", exact: true });
+  const multipleLabel = dialog().getByText("Process multiple names", { exact: true });
+  const labelGap = () => multiple.evaluate((input) =>
+    input.nextElementSibling.getBoundingClientRect().left - input.getBoundingClientRect().right);
+  assert.equal(await multiple.isChecked(), false);
+  assert.ok((await labelGap()) >= 8);
+  await multipleLabel.click();
+  assert.equal(await multiple.isChecked(), true);
+  assert.ok((await labelGap()) >= 8);
+  await dialog().getByLabel("Link type", { exact: true }).focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await multiple.evaluate((input) => document.activeElement === input), true);
+  await page.keyboard.press("Space");
+  assert.equal(await multiple.isChecked(), false);
   await name().fill("escape-cancelled");
   await name().press("Escape");
   await dialog().waitFor({ state: "hidden" });

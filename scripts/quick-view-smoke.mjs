@@ -204,6 +204,9 @@ async function checkImageDocuments(page) {
   const image = (name) => document.getByRole("img", { name, exact: true });
   const heading = (name) => document.getByRole("heading", { name, exact: true });
   const nav = (name) => control(document, name);
+  const tabs = page.getByRole("navigation", { name: "Open documents", exact: true });
+  const viewingTabs = tabs.getByRole("button", { name: /^View / });
+  const initialViewingTabs = await viewingTabs.count();
   const open = async (side, name) => {
     await row(page, side, name).click();
     await list(page, side).press("F3");
@@ -245,7 +248,9 @@ async function checkImageDocuments(page) {
   await page.waitForFunction((initial) => Math.abs(document.querySelector(".image-document:not([hidden]) img").getBoundingClientRect().width - initial) < 1, fit);
   await nav("Next image").click();
   await image("13-last.png").waitFor();
-  assert.equal(await page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: /^View / }).count(), 1);
+  assert.equal(await viewingTabs.count(), initialViewingTabs + 1);
+  assert.equal(await tabs.getByRole("button", { name: "View 12-middle.png", exact: true }).count(), 0);
+  assert.equal(await tabs.getByRole("button", { name: "View 13-last.png", exact: true }).count(), 1);
   await document.press("ArrowLeft");
   await image("12-middle.png").waitFor();
   await document.press("ArrowLeft");

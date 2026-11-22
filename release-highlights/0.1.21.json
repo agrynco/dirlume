@@ -1,0 +1,13 @@
+{
+  "version": "0.1.21",
+  "highlights": [
+    "See capacity in Disk information, explore or act on files from Sunburst and Treemap, and hover for each tile's full name and size. F3 measurements in List view use the same scanner.",
+    "Create file extension groups and set their filename colors and fonts in a custom color scheme.",
+    "Bookmark lines in the text Viewer and reopen bookmarked locations from the file panes.",
+    "Open as administrator restores your applied appearance, local workspace, and selected item. Windows marks the new window as Administrator.",
+    "Retry stopped transfers from the failed item and find Windows processes holding folders or nested files. Right-click a process to inspect it, copy its details, reveal its executable, or end it with confirmation.",
+    "Run commands in the displayed folder and see errors if the shell cannot enter it. Click web links in local or SSH terminal output to open them in your browser.",
+    "Insert the path of the parent row into the command line in local and SSH panes. The New folder batch checkbox now uses the standard label spacing.",
+    "Find the donation button in the About footer or use the Coffee icon in the title bar. Both controls adapt to the active color scheme."
+  ]
+}

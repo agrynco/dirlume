@@ -143,6 +143,12 @@ jobs:
       - name: Verify the optional status bar
         if: github.event.action != 'closed'
         run: node scripts/status-bar-smoke.mjs
+      - name: Verify terminal directory synchronization
+        if: github.event.action != 'closed'
+        run: node scripts/terminal-directory-smoke.mjs
+      - name: Verify terminal web links
+        if: github.event.action != 'closed'
+        run: node scripts/terminal-links-smoke.mjs
       - name: Verify current marked row colors and keyboard navigation
         if: github.event.action != 'closed'
         run: node scripts/marked-cursor-smoke.mjs
@@ -158,12 +164,24 @@ jobs:
       - name: Verify main menu visibility and shortcuts
         if: github.event.action != 'closed'
         run: node scripts/menu-header-smoke.mjs
+      - name: Verify the About and title-bar donation buttons
+        if: github.event.action != 'closed'
+        run: node scripts/about-donation-smoke.mjs
       - name: Verify contextual offline Help
         if: github.event.action != 'closed'
         run: node scripts/contextual-help-smoke.mjs
+      - name: Verify local Viewer file bookmarks
+        if: github.event.action != 'closed'
+        run: node scripts/file-bookmarks-smoke.mjs
+      - name: Verify command line paths from parent and file rows
+        if: github.event.action != 'closed'
+        run: node scripts/command-parent-path-smoke.mjs
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
+      - name: Verify administrator window workspace handoff
+        if: github.event.action != 'closed'
+        run: node scripts/administrator-workspace-smoke.mjs
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs
@@ -173,6 +191,9 @@ jobs:
       - name: Verify environment variable panes and copy review
         if: github.event.action != 'closed'
         run: node scripts/environment-panes-smoke.mjs
+      - name: Verify process context menu actions and identity
+        if: github.event.action != 'closed'
+        run: node scripts/process-context-menu-smoke.mjs
       - name: Verify workspace source and folder bookmark shortcuts
         if: github.event.action != 'closed'
         run: node scripts/workspace-source-shortcuts-smoke.mjs

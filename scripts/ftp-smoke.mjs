@@ -308,10 +308,12 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("F5");
     await copy.getByLabel("Destination", { exact: true }).fill(destination);
     await button(copy, "Copy").click();
-    const changed = page.getByRole("alert").filter({ hasText: "The FTP file changed during the download." });
-    await changed.waitFor();
+    const stopped = page.getByRole("dialog", { name: "Transfer stopped", exact: true });
+    await stopped.getByRole("alert").filter({ hasText: "The FTP file changed during the download." }).waitFor();
     await assert.rejects(readdir(join(destination, "unstable")), { code: "ENOENT" });
-    await button(changed.locator("xpath=ancestor::dialog"), "Done").click();
+    await button(stopped, "Retry").waitFor();
+    await button(stopped, "Cancel").click();
+    await stopped.waitFor({ state: "hidden" });
 
     await remoteRow("guide.md").click();
     await page.keyboard.press("F6");

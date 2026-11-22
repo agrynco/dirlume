@@ -141,9 +141,9 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
           <PathField id={targetId} label={t("Target")} value={target} onChange={setTarget} required
             readOnly={waiting} showHidden={showHidden} browse="folder" browsePath={directory} baseDirectory={directory} />
         </div>}
-        <label className="transfer-checkbox">
+        <label className="field-checkbox">
           <input type="checkbox" checked={multiple} disabled={waiting} onChange={(event) => setMultiple(event.target.checked)} />
-          {t("Process multiple names")}
+          <span>{t("Process multiple names")}</span>
         </label>
         {error && <p className="dialog-error" role="alert">{failedName ? t("Could not create {0}. {1}", failedName, errorText(error)) : errorText(error)}</p>}
         {windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}

@@ -634,6 +634,13 @@ struct TransferSession {
     cancelled: CancellationToken,
     pending: Mutex<Option<PendingConflict>>,
     remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
+    local: Mutex<LocalTransferAttempt>,
+}
+
+#[derive(Default)]
+struct LocalTransferAttempt {
+    destination: Option<PathBuf>,
+    resume: local_transfer::MoveResume,
 }
 
 struct PendingConflict {
@@ -813,6 +820,8 @@ struct TransferRequest {
     policy: local_transfer::Policy,
     ask_read_only: bool,
     #[serde(default)]
+    retry: bool,
+    #[serde(default)]
     copy_options: local::CopyOptions,
 }
 
@@ -840,6 +849,7 @@ fn transfer_outcome(completed: bool) -> TransferOutcome {
 enum TransferEvent {
     Progress {
         file: String,
+        path: String,
         bytes: u64,
         total: Option<u64>,
     },
@@ -986,7 +996,12 @@ async fn transfer_item(
                 .unwrap_or(path.as_os_str())
                 .to_string_lossy()
                 .into_owned();
-            let _ = output.send(TransferEvent::Progress { file, bytes, total });
+            let _ = output.send(TransferEvent::Progress {
+                file,
+                path: path.to_string_lossy().into_owned(),
+                bytes,
+                total,
+            });
             Ok(())
         };
         progress(Path::new(name), 0, None).map_err(message)?;
@@ -1032,14 +1047,28 @@ async fn transfer_item(
                 );
             }
         }
-        let target = transfer_target(
-            &request.destination,
-            name,
-            source.as_deref(),
-            request.multiple,
-            source.is_some() || ftp_source.is_some() || ssh_source.is_some() || archive.is_some(),
-        )
-        .map_err(message)?;
+        let mut local = source
+            .as_ref()
+            .map(|_| session.local.lock())
+            .transpose()
+            .map_err(message)?;
+        if let Some(local) = local.as_mut().filter(|_| !request.retry) {
+            **local = LocalTransferAttempt::default();
+        }
+        let target = match local.as_ref().and_then(|local| local.destination.clone()) {
+            Some(path) => path,
+            None => transfer_target(
+                &request.destination,
+                name,
+                source.as_deref(),
+                request.multiple,
+                source.is_some()
+                    || ftp_source.is_some()
+                    || ssh_source.is_some()
+                    || archive.is_some(),
+            )
+            .map_err(message)?,
+        };
         let options = local_transfer::Options {
             moving: request.moving,
             policy: request.policy,
@@ -1087,10 +1116,18 @@ async fn transfer_item(
                 .map(transfer_outcome);
             }
         }
-        if let Some(source) = source {
-            return local_transfer::transfer(&source, &target, &options, progress, ask)
-                .map(transfer_outcome)
-                .map_err(message);
+        if let (Some(source), Some(mut local)) = (source, local) {
+            local.destination = Some(target.clone());
+            return local_transfer::transfer(
+                &source,
+                &target,
+                &options,
+                &mut local.resume,
+                progress,
+                ask,
+            )
+            .map(transfer_outcome)
+            .map_err(message);
         }
 
         match fs::symlink_metadata(&target) {
@@ -2329,19 +2366,25 @@ pub fn run() {
     #[cfg(windows)]
     crate::portable::maybe_apply_update();
     let _ = rustls::crypto::ring::default_provider().install_default();
+    let context = tauri::generate_context!();
     #[cfg(windows)]
-    if let Some(directory) = crate::portable::root() {
-        crate::portable::initialize(directory);
-    } else if requested_location().is_some() {
-        if let Some(base) = dirs::data_local_dir() {
-            std::env::set_var(
-                "WEBVIEW2_USER_DATA_FOLDER",
-                base.join("io.github.agrynco.dirlume")
-                    .join("AdministratorWebView"),
-            );
+    {
+        let administrator = crate::windows_elevation::is_elevated();
+        if let Some(directory) = crate::portable::root() {
+            crate::portable::initialize(directory, administrator);
+        } else if administrator
+            && (crate::windows_elevation::requested_handoff().is_some()
+                || std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none())
+        {
+            if let Some(base) = dirs::data_local_dir() {
+                std::env::set_var(
+                    "WEBVIEW2_USER_DATA_FOLDER",
+                    base.join(&context.config().identifier)
+                        .join("AdministratorWebView"),
+                );
+            }
         }
     }
-    let context = tauri::generate_context!();
     diagnostics::setup(&context.config().identifier);
     #[cfg(all(windows, feature = "ui-automation"))]
     let context = {
@@ -2452,7 +2495,9 @@ pub fn run() {
         #[cfg(windows)]
         crate::windows_smb::connect_smb,
         #[cfg(windows)]
-        crate::windows_shell::open_elevated,
+        crate::windows_elevation::open_elevated,
+        #[cfg(windows)]
+        crate::windows_elevation::windows_startup,
         #[cfg(windows)]
         crate::windows_shell::locking_processes,
         #[cfg(windows)]
@@ -2461,6 +2506,7 @@ pub fn run() {
         list_directory,
         disk_space,
         crate::space_analyzer::space_mount,
+        crate::space_analyzer::volume_information,
         crate::space_analyzer::scan_local_space,
         crate::space_analyzer::cancel_space_scan,
         crate::git_view::git_repository,

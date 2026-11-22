@@ -59,9 +59,15 @@ export async function checkDiagnosticLog(viewer, file) {
   const source = viewer.locator(".cm-scroller");
   await source.waitFor();
   // CodeMirror renders only nearby lines, and a single wrapped entry can fill the viewport.
+  const scroller = await source.elementHandle();
+  await viewer.page().waitForFunction(({ scroller, lastEntry }) => {
+    if (Array.from(scroller.querySelectorAll(".cm-line")).some((line) => line.textContent === lastEntry)) return true;
+    scroller.scrollTop = scroller.scrollHeight;
+    return false;
+  }, { scroller, lastEntry: sample.at(-1) });
+  await scroller.dispose();
   const sourceLines = await source.evaluate(async (scroller, expected) => {
     const found = new Set();
-    scroller.scrollTop = scroller.scrollHeight;
     for (let step = 0; step < 30; step++) {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const lines = [...scroller.querySelectorAll(".cm-line")].reverse();

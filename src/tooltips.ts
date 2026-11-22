@@ -2,6 +2,12 @@ const selector = "[data-tooltip]";
 const tooltipId = "dirlume-tooltip";
 const viewportMargin = 8;
 const hoverDelay = 450;
+type PointerTooltip = { text: string; y: number };
+let showPointerTooltip: ((anchor: HTMLElement, text: string, x: number, y: number) => () => void) | undefined;
+
+export function showTooltipAtPointer(anchor: HTMLElement, text: string, event: MouseEvent) {
+  return showPointerTooltip?.(anchor, text, event.clientX, event.clientY);
+}
 
 function tooltipTarget(target: EventTarget | null) {
   return target instanceof Element ? target.closest<HTMLElement>(selector) : null;
@@ -49,6 +55,7 @@ export function installTooltips() {
   if (typeof tooltip.showPopover === "function") tooltip.popover = "manual";
 
   let trigger: HTMLElement | null = null;
+  let pointerTooltip: PointerTooltip | undefined;
   let pointerX = 0;
   let timer: number | undefined;
 
@@ -58,8 +65,8 @@ export function installTooltips() {
     tooltip.style.maxHeight = preferAbove ? `${Math.max(16, bounds.top - 2 * viewportMargin)}px` : "";
     const width = tooltip.offsetWidth;
     const height = tooltip.offsetHeight;
-    const below = bounds.bottom + viewportMargin;
-    const above = bounds.top - height - viewportMargin;
+    const below = (pointerTooltip?.y ?? bounds.bottom) + viewportMargin;
+    const above = (pointerTooltip?.y ?? bounds.top) - height - viewportMargin;
     const maxTop = window.innerHeight - height - viewportMargin;
     const top = preferAbove || (below > maxTop && above >= viewportMargin) ? above : below;
     tooltip.style.left = `${Math.max(viewportMargin, Math.min(pointerX - width / 2, window.innerWidth - width - viewportMargin))}px`;
@@ -67,7 +74,7 @@ export function installTooltips() {
   }
 
   const observer = new MutationObserver(() => {
-    const text = trigger && tooltipText(trigger);
+    const text = trigger && (pointerTooltip?.text ?? tooltipText(trigger));
     if (!trigger?.isConnected || trigger.closest("[hidden], dialog:not([open])") || !text) {
       hide();
     } else if (tooltip.textContent !== text) {
@@ -86,15 +93,17 @@ export function installTooltips() {
       tooltip.remove();
     }
     trigger = null;
+    pointerTooltip = undefined;
   }
 
-  function show(anchor: HTMLElement, x: number) {
-    if (trigger === anchor) return;
+  function show(anchor: HTMLElement, x: number, atPointer?: PointerTooltip) {
+    if (trigger === anchor && pointerTooltip === atPointer) return;
     hide();
     trigger = anchor;
+    pointerTooltip = atPointer;
     pointerX = x;
     timer = window.setTimeout(() => {
-      const text = tooltipText(anchor);
+      const text = pointerTooltip?.text ?? tooltipText(anchor);
       if (!anchor.isConnected || !text || !anchor.getClientRects().length) { hide(); return; }
       tooltip.textContent = text;
       (anchor.closest("dialog[open]") ?? document.body).append(tooltip);
@@ -105,6 +114,12 @@ export function installTooltips() {
         attributeFilter: ["data-tooltip", "data-tooltip-action", "data-tooltip-shortcut", "data-shortcut", "hidden", "open"] });
     }, hoverDelay);
   }
+
+  showPointerTooltip = (anchor, text, x, y) => {
+    const hover = { text, y };
+    show(anchor, x, hover);
+    return () => { if (pointerTooltip === hover) hide(); };
+  };
 
   document.addEventListener("pointerover", (event) => {
     if (event.pointerType === "touch" || event.buttons) return;

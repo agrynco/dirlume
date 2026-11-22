@@ -195,6 +195,14 @@ export interface DiskSpace {
   total: number;
 }
 
+export interface VolumeInformation {
+  path: string;
+  share: boolean;
+  label: string | null;
+  filesystem: string | null;
+  capacity: DiskSpace | null;
+}
+
 export interface GitBranch {
   reference: string;
   name: string;
@@ -304,7 +312,7 @@ export type TransferConflict = {
   incoming: TransferEntryDetails | null; existing: TransferEntryDetails;
 };
 export type TransferOutcome = { kind: "completed" | "skipped" };
-export type TransferProgress = { file: string; bytes: number; total: number | null };
+export type TransferProgress = { file: string; path?: string; bytes: number; total: number | null };
 export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
 
 interface Connection {
@@ -346,6 +354,16 @@ export type InstalledRelease = ReleaseHighlights & { showOnStartup: boolean };
 export type AppUpdate = ReleaseHighlights & ({ kind: "install" } | { kind: "debian"; url: string });
 export type UpdateProgress = { downloaded: number; total: number | null };
 
+export type AdministratorWorkspace = {
+  side: "left" | "right";
+  directory: string;
+  selected?: string | null;
+  otherFolder?: string | null;
+  otherAnalyzer?: string | null;
+  split: number;
+  preferences: object;
+};
+
 export const api = {
   startMcp: () => invoke<McpConnection>("start_mcp"),
   stopMcp: () => invoke<void>("stop_mcp"),
@@ -370,6 +388,7 @@ export const api = {
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
   spaceMount: (path: string) => invoke<{ path: string; share: boolean }>("space_mount", { path }),
+  volumeInformation: (path: string) => invoke<VolumeInformation>("volume_information", { path }),
   scanLocalSpace: (root: string, id: string, output: Channel<SpaceScanEvent>) =>
     invoke<void>("scan_local_space", { root, id, output }),
   cancelSpaceScan: (id: string) => invoke<void>("cancel_space_scan", { id }),
@@ -387,9 +406,13 @@ export const api = {
   panelMetadata: (items: PanelMetadataRequest[]) => invoke<PanelMetadata[]>("panel_metadata", { items }),
   fileIcons: (items: { directory: string; name: string }[]) => invoke<(string | null)[]>("file_icons", { items }),
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
-  lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),
+  lockingProcesses: (paths: string[], progress?: (update: { checked: number; processes: ProcessInfo[] }) => void) =>
+    invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", {
+      paths, output: new Channel(progress),
+    }),
   windowsItemMenu: (directory: string, name?: string) => invoke<boolean>("windows_item_menu", { directory, name }),
-  openElevated: (directory: string) => invoke<void>("open_elevated", { directory }),
+  openElevated: (workspace: AdministratorWorkspace) => invoke<boolean>("open_elevated", { workspace }),
+  windowsStartup: () => invoke<{ administrator: boolean; handoff: boolean; workspace: AdministratorWorkspace | null; workspaceUnavailable: boolean } | null>("windows_startup"),
   copyFileReferences: (items: { directory: string; name: string }[]) => invoke<void>("copy_file_references", { items }),
   clipboardFiles: () => invoke<{ directory: string; entry: Entry }[]>("clipboard_files"),
   copyText: (text: string) => invoke<void>("copy_path", { path: text }),
@@ -521,7 +544,7 @@ export const api = {
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; multiple: boolean; moving: boolean;
-    policy: ConflictPolicy; askReadOnly: boolean; copyOptions?: CopyOptions;
+    policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
 

@@ -76,7 +76,9 @@ export async function testCommandCompletion(page, root, docker) {
   async function setEnvironmentRefresh(enabled) {
     const tool = await openOptionsWindow(page);
     const options = tool.getByRole("dialog", { name: "Options", exact: true });
-    await options.getByRole("searchbox", { name: "Search settings", exact: true }).fill("refresh environment variables");
+    const search = options.getByRole("searchbox", { name: "Search settings", exact: true });
+    await search.fill("refresh environment variables");
+    await search.press("Tab");
     await options.getByRole("button", { name: "Terminal", exact: true }).click();
     const refresh = options.getByRole("checkbox", { name: "Automatically refresh environment variables", exact: true });
     const previous = await refresh.isChecked();

@@ -1,10 +1,11 @@
-import { t } from "./i18n";
+import { errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { X } from "lucide-react";
 import { FileContextMenu } from "./FileContextMenu";
 import { api, describeError, windowsClient, type ShellCompletionEnvironment, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
@@ -13,11 +14,17 @@ import { changeShellDirectory } from "./shell";
 import { bindingMatches, eventShortcut } from "./preferences";
 import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
 import { replaceTerminalRange, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
+import { showTooltipAtPointer } from "./tooltips";
 import "@xterm/xterm/css/xterm.css";
 
 // Focus and device reports are forwarded to the PTY without changing input state.
 const terminalReport = /^\x1b(?:\[(?:[IO]|\??[\d;]+[Rcnt])|\][\s\S]*(?:\x07|\x1b\\))$/;
 const macClient = /Macintosh/.test(navigator.userAgent);
+
+function isWebLink(text: string) {
+  if (!/^https?:\/\/[^/\\?#\s]/i.test(text) || /[\p{Cc}\s\\]|%(?![\da-f]{2})/iu.test(text)) return false;
+  try { return Boolean(new URL(text).hostname); } catch { return false; }
+}
 
 const lightAnsi: ITheme = {
   red: "#a12033", green: "#245d26", yellow: "#765000", blue: "#164ea5", magenta: "#783179", cyan: "#005e67",
@@ -56,7 +63,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  history, pasteShortcut, pasteOnRightClick, onClipboardError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
+  history, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -69,6 +76,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   pasteShortcut: readonly string[];
   pasteOnRightClick: boolean;
   onClipboardError: (error: unknown) => void;
+  onTerminalError: (message: string) => void;
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
   onDirectoryChange: (directory: string) => void;
@@ -81,6 +89,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   const instance = useRef<{ term: Terminal; fit: () => void; paste: () => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
+  const [commandsWaiting, setCommandsWaiting] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
@@ -96,6 +105,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   record.current = onCommandSubmitted;
   const reportDirectory = useRef(onDirectoryChange);
   reportDirectory.current = onDirectoryChange;
+  const reportError = useRef(onTerminalError);
+  reportError.current = onTerminalError;
   const pasteSettings = useRef({ pasteShortcut, pasteOnRightClick, onClipboardError, visible });
   pasteSettings.current = { pasteShortcut, pasteOnRightClick, onClipboardError, visible };
 
@@ -114,12 +125,43 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   useEffect(() => {
     const surface = container.current;
     if (!surface) return;
+    let linkMouseDown: { x: number; y: number; dragged: boolean } | null = null;
+    let dismissLinkTooltip: (() => void) | undefined;
     const term = new Terminal({
       ...terminalAppearance(), cursorBlink: true, screenReaderMode: true, rightClickSelectsWord: false,
+      linkHandler: { activate: activateLink, hover: hoverLink, leave: hideLinkTooltip },
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon(activateLink, { hover: hoverLink, leave: hideLinkTooltip }));
     term.open(surface);
+
+    function trackLinkDrag(event: MouseEvent) {
+      if (linkMouseDown && Math.hypot(linkMouseDown.x - event.clientX, linkMouseDown.y - event.clientY) > 4) {
+        linkMouseDown.dragged = true;
+      }
+    }
+
+    function activateLink(event: MouseEvent, href: string) {
+      if (event.button !== 0 || !linkMouseDown || !pasteSettings.current.visible) return;
+      trackLinkDrag(event);
+      const { dragged } = linkMouseDown;
+      linkMouseDown = null;
+      if (dragged || term.hasSelection() || !isWebLink(href)) return;
+      void api.openWebLink(href).catch((error: unknown) => {
+        if (!stopped) reportError.current(t("Could not open the terminal link. {0}", errorText(describeError(error))));
+      });
+    }
+
+    function hoverLink(event: MouseEvent, href: string) {
+      hideLinkTooltip();
+      if (surface && !event.buttons && isWebLink(href)) dismissLinkTooltip = showTooltipAtPointer(surface, href, event);
+    }
+
+    function hideLinkTooltip() {
+      dismissLinkTooltip?.();
+      dismissLinkTooltip = undefined;
+    }
     const fit = () => {
       if (!surface.clientWidth || !surface.clientHeight) return;
       fitAddon.fit();
@@ -258,17 +300,35 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (closed || stopped || (tracksPrompt && (!atPrompt || draft))) return false;
       const entry = applicationQueue.shift();
       if (!entry) return false;
+      setCommandsWaiting(applicationQueue.length > 0);
       const { command, directory } = entry;
+      // This command already tries to enter the requested directory and show any failure.
+      if (nextDirectory === directory) nextDirectory = null;
       const prefix = tracksPrompt ? internalPrefix : "";
-      const text = prefix + changeShellDirectory(directory, windows) + (windows ? "; " : " && ") + (tracksPrompt ? shellCommand(command) : command);
+      const location = changeShellDirectory(directory, windows);
+      const guard = windows ? `try { ${location} } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; return }; ` : `${location} && `;
+      const text = prefix + guard + (tracksPrompt ? shellCommand(command) : command);
       const prior = submitted.get(text);
       if (submitted.size >= 1000 && !prior) {
         const oldest = submitted.keys().next().value;
         if (oldest !== undefined) submitted.delete(oldest);
       }
       submitted.set(text, { original: command, pending: (prior?.pending ?? 0) + 1 });
-      send(text + "\r");
+      term.scrollToBottom();
+      send(text + "\r", true, (error) => rejectQueuedCommands(error, true));
       return true;
+    }
+
+    function commandFailed(error: unknown) {
+      reportError.current(t("Could not submit the command. {0}", errorText(describeError(error))));
+    }
+
+    function rejectQueuedCommands(error: unknown, writeFailed = false) {
+      closed = true;
+      if (!writeFailed && !applicationQueue.length) return;
+      applicationQueue.length = 0;
+      setCommandsWaiting(false);
+      commandFailed(error);
     }
 
     function shellCommand(command: string) {
@@ -372,7 +432,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     output.onmessage = (message) => {
       if (stopped) return;
       if (message.event === "closed") {
-        closed = true;
+        rejectQueuedCommands(new Error(t("This terminal session has closed.")));
         editable = null;
         hideSuggestions();
         term.writeln("\r\nShell exited.");
@@ -385,11 +445,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       tracksPrompt = tracked;
       if (!tracked) while (runQueuedCommand()) { /* Unsupported shells have no prompt marker. */ }
     }, (error: unknown) => {
-      if (!stopped) term.writeln(describeError(error));
+      if (!stopped) {
+        rejectQueuedCommands(error);
+        term.writeln(describeError(error));
+      }
     });
-    function send(data: string, observe = true) {
+    function send(data: string, observe = true, onFailure?: (error: unknown) => void) {
       // Readline can redraw its current prompt after canceling an edit without running the prompt hook.
-      if (data === "\x03" && atPrompt && editable) {
+      const canceledDraft = data === "\x03" && atPrompt && editable !== null;
+      if (canceledDraft) {
         draft = false;
         editable = { text: "", caret: 0 };
         hideSuggestions();
@@ -408,16 +472,23 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }
       queued = queued.then(async () => {
         await opening;
-        if (!closed && !stopped) await api.writeTerminal(session.id, data);
-      }).catch(() => {});
+        if (stopped) return;
+        if (closed) throw new Error(t("This terminal session has closed."));
+        await api.writeTerminal(session.id, data);
+      }).catch((error: unknown) => { if (!stopped) onFailure?.(error); });
+      if (canceledDraft && !runQueuedCommand()) synchronize();
     }
     enqueue.current = (entry) => {
       if (!entry) {
         send("\r");
         return;
       }
+      if (closed) {
+        commandFailed(new Error(t("This terminal session has closed.")));
+        return;
+      }
       applicationQueue.push(entry);
-      runQueuedCommand();
+      if (!runQueuedCommand()) setCommandsWaiting(true);
     };
     const data = term.onData((data) => send(data));
     let pasting = Promise.resolve();
@@ -463,6 +534,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
     function preserveSelection(event: MouseEvent) {
       handledControlClick = macClient && event.button === 0 && event.ctrlKey;
+      linkMouseDown = event.button === 0 && !handledControlClick ? { x: event.clientX, y: event.clientY, dragged: false } : null;
       if (handledControlClick) secondaryClick(event);
       else if (event.button === 2) {
         event.preventDefault();
@@ -477,6 +549,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       } else if (event.button === 2 || (macClient && event.ctrlKey)) secondaryClick(event);
     }
     surface.addEventListener("mousedown", preserveSelection, true);
+    surface.addEventListener("mousemove", trackLinkDrag, true);
     surface.addEventListener("contextmenu", openContextMenu, true);
     const keys = term.onKey(({ domEvent }) => {
       // xterm can leave a WebView function-key default enabled in screen reader mode.
@@ -490,6 +563,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }).catch(() => {});
     });
     const scrolled = term.onScroll(() => {
+      hideLinkTooltip();
       if (term.buffer.active.viewportY !== term.buffer.active.baseY) hideSuggestions();
       else renderSuggestions();
     });
@@ -497,6 +571,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     resize.observe(surface);
     return () => {
       stopped = true;
+      hideLinkTooltip();
       hideSuggestions();
       dismissSuggestions.current = () => {};
       chooseSuggestion.current = () => {};
@@ -509,6 +584,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       scrolled.dispose();
       term.textarea?.removeEventListener("blur", hideSuggestions);
       surface.removeEventListener("mousedown", preserveSelection, true);
+      surface.removeEventListener("mousemove", trackLinkDrag, true);
       surface.removeEventListener("contextmenu", openContextMenu, true);
       titles.forEach((title) => title.dispose());
       resize.disconnect();
@@ -575,6 +651,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       </header>
       {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}
+      </p>}
+      {commandsWaiting && <p className="terminal-environment-notice" role="status">
+        {t("Command queued. It will run when the terminal is ready.")}
       </p>}
       <div className="terminal-surface" ref={container} />
       {visible && popup && <CommandSuggestions id={suggestionId} {...popup} choose={(option) => chooseSuggestion.current(option)} />}
