@@ -1,7 +1,7 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, join, parse } from "node:path";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
@@ -14,6 +14,10 @@ using System.IO;
 using System.Threading;
 class Program {
   static int Main(string[] args) {
+    if (args.Length > 1 && args[0] == "complete") {
+      if (args[args.Length - 1].StartsWith("dotnet ")) Console.WriteLine("--list-sdks");
+      return 0;
+    }
     if (args.Length > 1 && args[0] == "__complete") {
       string prefix = args[args.Length - 1];
       string command = String.Join(" ", args, 1, args.Length - 2);
@@ -64,6 +68,7 @@ class Program {
     "Add-Type -Path $env:DIRLUME_TEST_DOCKER_SOURCE -OutputAssembly $env:DIRLUME_TEST_DOCKER_TARGET -OutputType ConsoleApplication"], {
     windowsHide: true, stdio: "pipe", env: { ...process.env, DIRLUME_TEST_DOCKER_SOURCE: source, DIRLUME_TEST_DOCKER_TARGET: target },
   });
+  await copyFile(target, join(folder, "dotnet.exe"));
   return folder;
 }
 
@@ -179,19 +184,18 @@ export async function testCommandCompletion(page, root, docker) {
   const screen = terminal.locator(".xterm-accessibility-tree");
   const atPrompt = () => page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
   await atPrompt();
+  // Keep the completion fixture first in this PowerShell session after an environment refresh.
+  await terminalInput.pressSequentially(`$env:PATH = '${docker.replaceAll("'", "''")};' + $env:PATH; Write-Output ('fixture-' + 'cli-ready')`);
+  await terminalInput.press("Enter");
+  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("fixture-cli-ready"));
+  await atPrompt();
   const samples = [
     ["ipconfig /re", ["/release", "/renew"]],
     ["cmd /c dir /", ["/b"]],
     ["Get-ChildItem -Rec", ["-Recurse"]],
     ["dir -Rec", ["-Recurse"]],
+    ["dotnet ", ["--list-sdks"]],
   ];
-  try {
-    if (execFileSync("dotnet", ["--list-sdks"], { encoding: "utf8", windowsHide: true }).trim()) {
-      samples.push(["dotnet ", ["--list-sdks"]]);
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
   for (const [line, candidates] of samples) {
     await terminalInput.pressSequentially(line);
     for (const name of candidates) await terminalOptions.getByRole("option", { name, exact: true }).waitFor({ timeout: 15000 });

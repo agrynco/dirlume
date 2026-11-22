@@ -129,19 +129,68 @@ const extensions: Record<ExtensionColor, string> = {
   "file-config": "cfg conf csv db env ini json jsonl lock sqlite toml tsv xml yaml yml",
   "file-executable": "appimage bat bin cmd com deb dll exe msi ps1 rpm sh so",
 };
-const fileColors = new Map(Object.entries(extensions).flatMap(([color, values]) =>
-  values.split(" ").map((extension): [string, ExtensionColor] => [extension, color as ExtensionColor])));
 
-export function fileColor({ name, directory, hidden, system }: Pick<Entry, "name" | "system"> &
-  Partial<Pick<Entry, "directory" | "hidden">>): FileColor | undefined {
-  if (system) return "file-system";
-  if (hidden) return "file-hidden";
-  if (directory) return undefined;
-  const filename = name.slice(name.lastIndexOf("/") + 1).toLowerCase();
-  if (filename === "makefile" || filename === "dockerfile") return "file-source";
-  if (filename === ".env" || filename.startsWith(".env.")) return "file-config";
+export type FileTypeGroup = {
+  id: string;
+  name: string;
+  extensions: string[];
+  color?: string;
+  family?: string;
+};
+
+export const defaultFileTypeGroups: readonly FileTypeGroup[] = (Object.keys(extensions) as ExtensionColor[]).map((id) =>
+  ({ id, name: colorGroups.files.colors[id], extensions: extensions[id].split(" ") }));
+
+export function normalizeExtension(value: string): string | undefined {
+  const extension = value.trim().normalize("NFC").replace(/^\./, "").toLowerCase();
+  return /^[\p{Letter}\p{Number}_+-]+$/u.test(extension) ? extension : undefined;
+}
+
+export function fileTypeColor({ id }: FileTypeGroup): ExtensionColor | undefined {
+  return Object.hasOwn(extensions, id) ? id as ExtensionColor : undefined;
+}
+
+function readFileTypeGroups(value: unknown): FileTypeGroup[] | undefined {
+  if (!Array.isArray(value)) return;
+  const groups: FileTypeGroup[] = [];
+  const allExtensions = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry.id !== "string" || !entry.id.trim() || typeof entry.name !== "string" || !Array.isArray(entry.extensions) ||
+        groups.some(({ id }) => id === entry.id)) continue;
+    const name = entry.name.trim().slice(0, maxSchemeNameLength);
+    if (!name) continue;
+    const assigned: string[] = [];
+    for (const item of entry.extensions) {
+      const extension = typeof item === "string" ? normalizeExtension(item) : undefined;
+      if (!extension || allExtensions.has(extension)) continue;
+      assigned.push(extension);
+      allExtensions.add(extension);
+    }
+    groups.push({ id: entry.id, name, extensions: assigned,
+      color: typeof entry.color === "string" && isHexColor(entry.color) ? entry.color : undefined,
+      family: typeof entry.family === "string" ? entry.family.trim().slice(0, maxFontFamilyLength) || undefined : undefined });
+  }
+  return groups;
+}
+
+export function fileTypeIndex(groups: readonly FileTypeGroup[] = defaultFileTypeGroups) {
+  return new Map(groups.flatMap((group) => group.extensions.map((extension) => [extension, group] as const)));
+}
+
+export type FileTypeIndex = ReadonlyMap<string, FileTypeGroup>;
+type AppearanceEntry = Pick<Entry, "name" | "system"> & Partial<Pick<Entry, "directory" | "hidden">>;
+
+export function fileAppearance({ name, directory, hidden, system }: AppearanceEntry, index: FileTypeIndex): {
+  tone?: FileColor | "custom"; color?: string; family?: string;
+} {
+  if (system) return { tone: "file-system" };
+  if (hidden) return { tone: "file-hidden" };
+  if (directory) return {};
+  const filename = name.slice(name.lastIndexOf("/") + 1);
   const dot = filename.lastIndexOf(".");
-  return dot > 0 ? fileColors.get(filename.slice(dot + 1)) : undefined;
+  const extension = dot > 0 ? normalizeExtension(filename.slice(dot + 1)) : undefined;
+  const group = extension ? index.get(extension) : undefined;
+  return group ? { tone: fileTypeColor(group) ?? "custom", color: group.color, family: group.family } : {};
 }
 
 export type Color = {
@@ -251,6 +300,7 @@ export interface Scheme {
   base: BaseTheme;
   colors: Palette;
   fonts: Fonts;
+  fileTypes?: FileTypeGroup[];
 }
 
 export const fontKeys = Object.keys(fontGroups) as FontGroup[];
@@ -381,7 +431,8 @@ export function readSchemes(value: unknown): Scheme[] {
         size: typeof size === "number" && Number.isInteger(size) && size >= minFontSize && size <= maxFontSize ? size : undefined,
       };
     }
-    result.push({ id: scheme.id, name: scheme.name.slice(0, maxSchemeNameLength), base: scheme.base, colors: palette, fonts });
+    result.push({ id: scheme.id, name: scheme.name.slice(0, maxSchemeNameLength), base: scheme.base, colors: palette, fonts,
+      fileTypes: readFileTypeGroups(scheme.fileTypes) });
   }
   return result;
 }
