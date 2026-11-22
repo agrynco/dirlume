@@ -218,7 +218,7 @@ try {
     await page.close();
   }
 
-  for (const refresh of [["Ctrl+Shift+R"], []]) {
+  for (const refresh of [["Ctrl+Shift+F9"], []]) {
     const page = await fixture(browser, refresh);
     await connect(page, "right");
     const modifier = await page.evaluate(() => /Macintosh/.test(navigator.userAgent) ? "Meta" : "Control");
@@ -226,7 +226,7 @@ try {
     await list(page, "right").press(`${modifier}+r`);
     assert.deepEqual(await page.evaluate(() => window.sshFixture.requests), []);
     if (refresh.length) {
-      await list(page, "right").press(`${modifier}+Shift+r`);
+      await list(page, "right").press("Control+Shift+F9");
       await page.waitForFunction(() => window.sshFixture.requests.some(([kind, id, path]) => kind === "ssh" && id === 37 && path === "/destination"));
     }
     await page.close();
