@@ -394,6 +394,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .sudo-body small { color: var(--dialog-muted); }
 .brand { gap: 9px; }
 .brand h1 { margin: 0; font-size: 1.23em; font-weight: 650; letter-spacing: -.03em; }
+.administrator-label {
+  padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--raised); color: var(--ink); font-size: .9em; font-weight: 600; white-space: nowrap;
+}
 .brand-icon {
   display: grid;
   place-items: center;

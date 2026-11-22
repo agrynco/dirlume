@@ -164,6 +164,9 @@ jobs:
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
+      - name: Verify administrator window workspace handoff
+        if: github.event.action != 'closed'
+        run: node scripts/administrator-workspace-smoke.mjs
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs

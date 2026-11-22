@@ -44,10 +44,14 @@ pub fn root() -> Option<&'static Path> {
         .as_deref()
 }
 
-pub fn initialize(directory: &Path) {
+pub fn initialize(directory: &Path, administrator: bool) {
     env::set_var(
         "WEBVIEW2_USER_DATA_FOLDER",
-        directory.join(".dirlume-webview"),
+        directory.join(if administrator {
+            ".dirlume-administrator-webview"
+        } else {
+            ".dirlume-webview"
+        }),
     );
     let cleanup = env::var_os(CLEANUP_ENV);
     env::remove_var(CLEANUP_ENV);

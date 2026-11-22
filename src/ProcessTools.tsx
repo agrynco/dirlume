@@ -3,20 +3,33 @@ import { Button } from "./Button";
 import { ColumnMenu, columnMenuBindings, type ColumnMenuAnchor } from "./ColumnMenu";
 import { ColumnResizeHandle, clampColumnWidth } from "./ColumnResizeHandle";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Cpu } from "lucide-react";
 import { api, describeError, type ProcessInfo } from "./api";
 import { Dialog } from "./Dialog";
 import { formatSize, type Side } from "./panes";
 import { useWindowsIcons } from "./useWindowsIcons";
 
-export function ElevationButton({ directory }: { directory: string }) {
+type ElevationTarget = { directory: string; side?: Side; selected?: string };
+
+export const ElevationContext = createContext<((target: ElevationTarget) => Promise<boolean>) | null>(null);
+
+export function ElevationButton(target: ElevationTarget) {
+  const openAsAdministrator = useContext(ElevationContext);
+  const button = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState("");
+  const [waiting, setWaiting] = useState(false);
   return (
     <div className="elevation-action">
-      <Button type="button" onClick={() => {
+      <Button ref={button} type="button" disabled={waiting || !openAsAdministrator} onClick={async () => {
+        if (!openAsAdministrator) return;
         setError("");
-        void api.openElevated(directory).catch((failure: unknown) => setError(describeError(failure)));
+        setWaiting(true);
+        try {
+          if (!await openAsAdministrator(target)) requestAnimationFrame(() => button.current?.focus());
+        }
+        catch (failure) { setError(describeError(failure)); }
+        finally { setWaiting(false); }
       }}>{t("Open as administrator")}</Button>
       {error && <p role="alert">{errorText(error)}</p>}
     </div>

@@ -554,13 +554,13 @@ let portableSnapshot: string | undefined;
 let pendingPortableWrite = Promise.resolve();
 let writeQueue = pendingPortableWrite;
 
-export async function restorePortablePreferences(main: boolean) {
+export async function restorePortablePreferences(main: boolean, isolated = false) {
   if (!windowsClient || !isTauri()) return null;
   try {
     const state = await api.readPortableState();
     if (!state) return null;
-    portableSettings = !state.settingsError;
-    if (state.preferences) {
+    portableSettings = !state.settingsError && !isolated;
+    if (state.preferences && !isolated) {
       portableSnapshot = JSON.stringify(state.preferences);
       if (main) localStorage.setItem(preferenceKey, portableSnapshot);
     }
@@ -575,10 +575,15 @@ export function flushPortablePreferences() {
   return pendingPortableWrite;
 }
 
-export function persistPreferences(preferences: Preferences) {
+export function preferenceSnapshot(preferences: Preferences) {
   const settings = Object.fromEntries(preferenceKeys.map((key) => [key, preferences[key]]));
   settings.bindingDefaults = preferenceBindingVersion;
   Object.assign(settings, { independentViewerZoom: true });
+  return settings;
+}
+
+export function persistPreferences(preferences: Preferences) {
+  const settings = preferenceSnapshot(preferences);
   const snapshot = JSON.stringify(settings);
   localStorage.setItem(preferenceKey, snapshot);
   if (!portableSettings || portableSnapshot === snapshot) return;
