@@ -169,7 +169,12 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
     await pressDigit(page, "Left", digit);
     await waitMode("right", id);
   }
-  for (const digit of [5, 6, 7]) await pressDigit(page, "Left", digit);
+  await pressDigit(page, "Left", 5);
+  const analyzer = page.locator(".space-analyzer-right").getByRole("treegrid");
+  await analyzer.waitFor();
+  await analyzer.press("Escape");
+  await waitMode("right", "alternativeFull");
+  for (const digit of [6, 7]) await pressDigit(page, "Left", digit);
   await waitMode("right", "alternativeFull");
   for (let digit = 0; digit < 10; digit++) {
     await pressDigit(page, "Right", digit);
