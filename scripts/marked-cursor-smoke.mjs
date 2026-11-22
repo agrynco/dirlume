@@ -106,9 +106,13 @@ try {
       const adjacent = await style(row(1));
       const inactive = await style(row(0, "right"));
       await colors();
-      await hex(background).fill("#aaccdd");
-      await hex(outline).fill("#234568");
       const preview = options.locator(".preview-file-current-marked");
+      await hex(background).fill("#aaccdd");
+      await page.waitForFunction(() => {
+        const sample = document.querySelector(".preview-file-current-marked");
+        return sample && getComputedStyle(sample).backgroundColor === "rgb(170, 204, 221)";
+      }, null, { timeout: 8000 });
+      await hex(outline).fill("#234568");
       assert.deepEqual(await stylePreview(preview), { background: "rgb(170, 204, 221)", outline: "rgb(35, 69, 104)" });
       await done();
       await page.reload();
