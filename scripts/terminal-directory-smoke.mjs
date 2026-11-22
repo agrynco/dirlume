@@ -155,15 +155,24 @@ async function testBrowserTerminalDirectory() {
         };
       }, editor);
       await page.goto("http://dirlume.test/");
+      const left = "/fixture/left";
       const right = "/fixture/right with spaces";
       const address = await editPaneAddress(page, "right");
       await address.fill(right);
       await address.press("Enter");
-      await page.locator("#right-path").locator("[aria-current=location]").getByText("right with spaces", { exact: true }).waitFor();
-      await page.locator("#left-files").press("F12");
+      await page.waitForFunction(({ left, right }) =>
+        [left, right].every((path, index) => {
+          const side = index === 0 ? "left" : "right";
+          return document.getElementById(`${side}-path`)?.dataset.path === path &&
+            document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false";
+        }), { left, right });
+      const leftFiles = page.locator("#left-files");
+      await leftFiles.focus();
+      await page.locator(".command-bar > span").getByText(left, { exact: true }).waitFor();
+      await leftFiles.press("F12");
       const terminal = page.getByRole("region", { name: "Terminal", exact: true });
       const header = terminal.locator(".terminal-location");
-      await header.getByText("/fixture/left", { exact: true }).waitFor();
+      await header.getByText(left, { exact: true }).waitFor();
       await page.locator("#right-files").focus();
       await header.getByText(right, { exact: true }).waitFor();
       const field = page.getByRole("combobox", { name: "Command line", exact: true });
