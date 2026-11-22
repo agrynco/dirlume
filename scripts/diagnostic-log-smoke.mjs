@@ -56,11 +56,24 @@ export async function checkDiagnosticLog(viewer, file) {
   await openRow.getByText(sample[2], { exact: true }).waitFor();
 
   await viewer.getByRole("button", { name: "Source", exact: true }).click();
-  const source = viewer.locator(".cm-content");
+  const source = viewer.locator(".cm-scroller");
   await source.waitFor();
-  await source.press("Control+End");
-  const visibleLines = await source.locator(".cm-line").allTextContents();
-  assert.deepEqual(visibleLines.filter(Boolean).slice(-sample.length), sample);
+  // CodeMirror renders only nearby lines, and a single wrapped entry can fill the viewport.
+  const sourceLines = await source.evaluate(async (scroller, expected) => {
+    const found = new Set();
+    scroller.scrollTop = scroller.scrollHeight;
+    for (let step = 0; step < 30; step++) {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const lines = [...scroller.querySelectorAll(".cm-line")].reverse();
+      for (const line of lines) {
+        if (expected.includes(line.textContent)) found.add(line.textContent);
+      }
+      if (found.size === expected.length || scroller.scrollTop === 0) break;
+      scroller.scrollTop -= Math.max(1, Math.floor(scroller.clientHeight / 2));
+    }
+    return [...found].reverse();
+  }, sample);
+  assert.deepEqual(sourceLines, sample);
   await viewer.getByRole("button", { name: "Entries", exact: true }).click();
   await entries.waitFor();
   assert.ok((await readFile(file, "utf8")).startsWith(original));

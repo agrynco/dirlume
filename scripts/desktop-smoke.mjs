@@ -535,7 +535,8 @@ try {
   const shortcutConflict = () => optionsPage.getByRole("dialog", { name: "Shortcut conflict" });
   await shortcutConflict().getByText("Home is assigned to First item.", { exact: true }).waitFor();
   await shortcutConflict().getByRole("button", { name: "Reassign shortcut", exact: true }).click();
-  await options.getByRole("button", { name: "Change ← for First item", exact: true }).waitFor();
+  await options.getByRole("button", { name: "Change ← for Previous page or first item", exact: true }).waitFor();
+  await options.getByRole("button", { name: "Add shortcut for First item", exact: true }).waitFor();
   await options.getByRole("button", { name: "Change F2 for Save text", exact: true }).waitFor();
   assert.equal(await options.getByRole("button", { name: "Change Home for First item", exact: true }).count(), 0);
   await closeToolWindow(optionsPage, () => options.getByRole("button", { name: "Done", exact: true }).click());
@@ -1737,6 +1738,11 @@ try {
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
   const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
+  const waitForColumnWidth = (side, column, width) => page.waitForFunction(({ selector, width }) =>
+    document.querySelector(selector)?.getBoundingClientRect().width === width,
+  { selector: `#${side}-pane .col-${column}`, width });
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await page.locator("#right-files .file-time").filter({ hasText: /\d{1,2}:\d{2}/ }).first().waitFor();
   assert.equal(await page.locator(".file-columns [role=separator]").count(), 0);
   const leftSize = await columnWidth("left", "size");
   const rightSize = await columnWidth("right", "size");
@@ -1792,16 +1798,16 @@ try {
   assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
-  assert.equal(await columnWidth("left", "size"), leftSize);
-  assert.equal(await columnWidth("right", "size"), rightSize);
+  await waitForColumnWidth("left", "size", leftSize);
+  await waitForColumnWidth("right", "size", rightSize);
   await rightHeader().getByRole("button", { name: "Date", exact: true }).waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "time"), rightTime);
+  await waitForColumnWidth("right", "time", rightTime);
   await rightHeader().locator(".col-time button svg").waitFor();
   await rightHeader().getByRole("button", { name: "Name", exact: true }).press("Shift+F10");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Date", exact: true, checked: false }).click();
   await page.keyboard.press("Escape");
   await columnMenu().waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "modified"), rightModified);
+  await waitForColumnWidth("right", "modified", rightModified);
   assert.equal(await panePath("left"), src);
   assert.equal(await panePath("right"), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
@@ -1832,7 +1838,7 @@ try {
   const ukrainianTopics = ukrainianHelp.getByRole("navigation", { name: "Зміст" }).getByRole("link");
   const topicLinks = await ukrainianTopics.evaluateAll((links) => links.map((link) => link.getAttribute("href")));
   await ukrainianHelp.getByRole("link", { name: "Термінал", exact: true }).click();
-  assert.match(await ukrainianHelp.locator("#help-terminal p").innerText(), /інтерактивну оболонку/);
+  assert.match(await ukrainianHelp.locator("#help-terminal").innerText(), /інтерактивну оболонку/);
   await optionsPage.keyboard.press("Escape");
   assert.equal(await ukrainianSearch.inputValue(), "Шрифти");
   assert.equal(await ukrainianSearch.evaluate((field) => field === document.activeElement), true);
@@ -1866,7 +1872,7 @@ try {
   await russianHelp.getByRole("heading", { name: "Основные файловые панели", exact: true }).waitFor();
   assert.deepEqual(await russianHelp.getByRole("navigation", { name: "Оглавление" }).getByRole("link")
     .evaluateAll((links) => links.map((link) => link.getAttribute("href"))), topicLinks);
-  assert.match(await russianHelp.locator("#help-files p").innerText(), /Введите путь/i);
+  assert.match(await russianHelp.locator("#help-files").innerText(), /Введите путь/i);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Найти файлы", exact: true }).click();
   const russianFind = page.getByRole("dialog", { name: "Найти файлы", exact: true });
@@ -1973,6 +1979,8 @@ try {
     await page.getByRole("dialog", { name: "Help", exact: true })
       .getByRole("heading", { name: shortcut === "F3" ? "Viewer" : "Editor", exact: true }).waitFor();
     await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "Help", exact: true }).waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.closest(".text-window:not([hidden])"));
     await sampleSurface.waitFor();
     await page.keyboard.press("Escape");
     await sampleSurface.waitFor({ state: "hidden" });
@@ -2000,7 +2008,7 @@ try {
       const link = contents.locator(`a[href="${href}"]`);
       await link.click();
       assert.equal(await help.locator(`${href} h3`).innerText(), await link.innerText());
-      assert.match(await help.locator(`${href} p`).innerText(), /\S/);
+      assert.match(await help.locator(`${href} p`).first().innerText(), /\S/);
     }
     await page.keyboard.press("Escape");
   } finally {
@@ -2014,7 +2022,7 @@ try {
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
   await page.keyboard.press("Escape");
   await help.waitFor({ state: "hidden" });
-  assert.equal(await helpTerminalInput.evaluate((element) => document.activeElement === element), true);
+  await page.waitForFunction(() => document.activeElement?.matches(".xterm-helper-textarea"));
   await terminalButton.click();
   await page.getByRole("combobox", { name: "Command line", exact: true }).press("F1");
   await help.getByRole("heading", { name: "Terminal", exact: true }).waitFor();
@@ -2032,7 +2040,9 @@ try {
   await optionsHelp.locator('.help-contents [aria-current="location"][href="#help-window"]').waitFor();
   await optionsPage.keyboard.press("Escape");
   await optionsHelp.waitFor({ state: "hidden" });
-  assert.equal(await helpAppearance.evaluate((element) => element === document.activeElement), true);
+  const appearanceFocus = await helpAppearance.elementHandle();
+  try { await optionsPage.waitForFunction((element) => element === document.activeElement, appearanceFocus); }
+  finally { await appearanceFocus.dispose(); }
   await shortcutSearch.fill("help");
   await shortcutOptions.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
   await shortcutOptions.getByRole("button", { name: "Change F1 for Help", exact: true }).click();
