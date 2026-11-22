@@ -64,15 +64,24 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
   await input().press("Shift+Enter");
   await run("disposable-history-password");
   await waitForCommand(secure);
-  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("queued-history-marker"));
+  const waitForPowerShellPrompt = (after) => page.waitForFunction((after) => {
+    const lines = Array.from(document.querySelectorAll(".terminal-card:not([hidden]) .xterm-rows > div"),
+      (line) => line.textContent.trim()).filter(Boolean);
+    return (!after || lines.includes(after)) && /^PS .+>$/.test(lines.at(-1) ?? "");
+  }, after);
+  await waitForPowerShellPrompt("queued-history-marker");
   await terminalInput().pressSequentially("Write-Output 'abandoned-draft'");
+  await page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-rows")?.textContent.includes("abandoned-draft"));
   await terminalInput().press("Control+c");
+  await waitForPowerShellPrompt();
   await run("Write-Output 'history-after-cancel'");
   await waitForCommand("Write-Output 'history-after-cancel'");
   const history = await stored();
   assert.equal(history.filter(({ text }) => text === fromField).length, 1);
   assert.equal(history.filter(({ text }) => text === queued).length, 1);
-  assert.equal(history.some(({ text }) => /abandoned-draft|disposable-history-password|Set-Location -LiteralPath/.test(text)), false);
+  for (const pattern of [/abandoned-draft/, /disposable-history-password/, /Set-Location -LiteralPath/]) {
+    assert.equal(history.some(({ text }) => pattern.test(text)), false, `Unexpected command history entry matching ${pattern}`);
+  }
   assert.ok(history.find(({ text }) => text === direct).date > 0);
   await run("exit");
   await waitForCommand("exit");
