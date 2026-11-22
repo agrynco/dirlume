@@ -25,6 +25,7 @@ import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
+import { testRetainedTerminalDirectory } from "./terminal-directory-smoke.mjs";
 import { testNativeTerminalMenu, testTerminalPaste } from "./terminal-paste-smoke.mjs";
 import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-picker-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
@@ -1479,7 +1480,8 @@ try {
   await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
   await terminalFocusHint.waitFor();
-  await commandLine.waitFor({ state: "hidden" });
+  await commandLine.waitFor();
+  assert.equal(await commandLine.inputValue(), "preserved draft");
   const firstHeight = await paneHeight();
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
   const terminalSplit = await paneSplit();
@@ -2298,6 +2300,7 @@ try {
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
+  await testRetainedTerminalDirectory(page, temp);
   await testOsTimestamps(page, temp);
   await testPermanentDelete(page, temp);
   await testBatchDeletion(page, temp);

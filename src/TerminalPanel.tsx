@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { errorText, t } from "./i18n";
 import { Button } from "./Button";
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Channel } from "@tauri-apps/api/core";
@@ -56,7 +56,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  history, pasteShortcut, pasteOnRightClick, onClipboardError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
+  history, pasteShortcut, pasteOnRightClick, onClipboardError, onCommandError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -69,6 +69,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   pasteShortcut: readonly string[];
   pasteOnRightClick: boolean;
   onClipboardError: (error: unknown) => void;
+  onCommandError: (message: string) => void;
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
   onDirectoryChange: (directory: string) => void;
@@ -81,6 +82,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   const instance = useRef<{ term: Terminal; fit: () => void; paste: () => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
+  const [commandsWaiting, setCommandsWaiting] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
@@ -96,6 +98,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   record.current = onCommandSubmitted;
   const reportDirectory = useRef(onDirectoryChange);
   reportDirectory.current = onDirectoryChange;
+  const reportCommandError = useRef(onCommandError);
+  reportCommandError.current = onCommandError;
   const pasteSettings = useRef({ pasteShortcut, pasteOnRightClick, onClipboardError, visible });
   pasteSettings.current = { pasteShortcut, pasteOnRightClick, onClipboardError, visible };
 
@@ -258,17 +262,35 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (closed || stopped || (tracksPrompt && (!atPrompt || draft))) return false;
       const entry = applicationQueue.shift();
       if (!entry) return false;
+      setCommandsWaiting(applicationQueue.length > 0);
       const { command, directory } = entry;
+      // This command already tries to enter the requested directory and show any failure.
+      if (nextDirectory === directory) nextDirectory = null;
       const prefix = tracksPrompt ? internalPrefix : "";
-      const text = prefix + changeShellDirectory(directory, windows) + (windows ? "; " : " && ") + (tracksPrompt ? shellCommand(command) : command);
+      const location = changeShellDirectory(directory, windows);
+      const guard = windows ? `try { ${location} } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; return }; ` : `${location} && `;
+      const text = prefix + guard + (tracksPrompt ? shellCommand(command) : command);
       const prior = submitted.get(text);
       if (submitted.size >= 1000 && !prior) {
         const oldest = submitted.keys().next().value;
         if (oldest !== undefined) submitted.delete(oldest);
       }
       submitted.set(text, { original: command, pending: (prior?.pending ?? 0) + 1 });
-      send(text + "\r");
+      term.scrollToBottom();
+      send(text + "\r", true, (error) => rejectQueuedCommands(error, true));
       return true;
+    }
+
+    function commandFailed(error: unknown) {
+      reportCommandError.current(t("Could not submit the command. {0}", errorText(describeError(error))));
+    }
+
+    function rejectQueuedCommands(error: unknown, writeFailed = false) {
+      closed = true;
+      if (!writeFailed && !applicationQueue.length) return;
+      applicationQueue.length = 0;
+      setCommandsWaiting(false);
+      commandFailed(error);
     }
 
     function shellCommand(command: string) {
@@ -372,7 +394,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     output.onmessage = (message) => {
       if (stopped) return;
       if (message.event === "closed") {
-        closed = true;
+        rejectQueuedCommands(new Error(t("This terminal session has closed.")));
         editable = null;
         hideSuggestions();
         term.writeln("\r\nShell exited.");
@@ -385,11 +407,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       tracksPrompt = tracked;
       if (!tracked) while (runQueuedCommand()) { /* Unsupported shells have no prompt marker. */ }
     }, (error: unknown) => {
-      if (!stopped) term.writeln(describeError(error));
+      if (!stopped) {
+        rejectQueuedCommands(error);
+        term.writeln(describeError(error));
+      }
     });
-    function send(data: string, observe = true) {
+    function send(data: string, observe = true, onFailure?: (error: unknown) => void) {
       // Readline can redraw its current prompt after canceling an edit without running the prompt hook.
-      if (data === "\x03" && atPrompt && editable) {
+      const canceledDraft = data === "\x03" && atPrompt && editable !== null;
+      if (canceledDraft) {
         draft = false;
         editable = { text: "", caret: 0 };
         hideSuggestions();
@@ -408,16 +434,23 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }
       queued = queued.then(async () => {
         await opening;
-        if (!closed && !stopped) await api.writeTerminal(session.id, data);
-      }).catch(() => {});
+        if (stopped) return;
+        if (closed) throw new Error(t("This terminal session has closed."));
+        await api.writeTerminal(session.id, data);
+      }).catch((error: unknown) => { if (!stopped) onFailure?.(error); });
+      if (canceledDraft && !runQueuedCommand()) synchronize();
     }
     enqueue.current = (entry) => {
       if (!entry) {
         send("\r");
         return;
       }
+      if (closed) {
+        commandFailed(new Error(t("This terminal session has closed.")));
+        return;
+      }
       applicationQueue.push(entry);
-      runQueuedCommand();
+      if (!runQueuedCommand()) setCommandsWaiting(true);
     };
     const data = term.onData((data) => send(data));
     let pasting = Promise.resolve();
@@ -575,6 +608,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       </header>
       {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}
+      </p>}
+      {commandsWaiting && <p className="terminal-environment-notice" role="status">
+        {t("Command queued. It will run when the terminal is ready.")}
       </p>}
       <div className="terminal-surface" ref={container} />
       {visible && popup && <CommandSuggestions id={suggestionId} {...popup} choose={(option) => chooseSuggestion.current(option)} />}

@@ -2126,7 +2126,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setTerminalInputFocused(false);
     setTerminalShare(0);
     setPanelsHidden(false);
-    if (moveFocus) requestAnimationFrame(() => commandInput.current?.focus());
+    if (moveFocus) requestAnimationFrame(() => {
+      const field = commandInput.current;
+      if (field && !field.closest(".app.has-terminal")) field.focus();
+    });
   }
 
   function dropTerminal(key: string) {
@@ -2199,9 +2202,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       else if (!analysis && currentRow) open(active, currentRow);
       return;
     }
-    const session = openTerminal();
+    const session = openTerminal(!terminalVisible);
     if (!session || !terminalPlace) return;
-    setTerminalShare(terminalHeight);
+    if (!terminalVisible) setTerminalShare(terminalHeight);
     setPendingCommands((commands) => ({
       ...commands, [session.id]: [...(commands[session.id] ?? []), { command: commandLine, directory: placePath(terminalPlace) }],
     }));
@@ -2889,12 +2892,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   ];
 
   const showFileActions = !showingGit && !environmentActive && activeDocument === null;
+  const commandLineVisible = showFileActions && !panelsHidden;
   const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
 
   return (
     <ElevationContext value={openAdministrator}>
-    <div className={`app${terminalVisible ? " has-terminal" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
+    <div className={`app${terminalVisible ? " has-terminal" : ""}${commandLineVisible ? " has-command-line" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} data-status-bar={preferences.showStatusBar ? undefined : "hidden"}
       style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
@@ -3184,6 +3188,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
             pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
+            onCommandError={(message) => setStatus({ text: message, error: true })}
             pendingCommands={pendingCommands[session.id] ?? noCommands}
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
@@ -3195,8 +3200,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
         {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
       </div>}
-      <form className="command-bar" data-help-topic="terminal" hidden={terminalVisible || showingGit || environmentActive} onSubmit={submitCommand}>
-        <Button type="button" className="toolbar-button" onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
+      <form className="command-bar" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
+        <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>
         <span data-tooltip={terminalLocation ? placePath(terminalLocation) : undefined}>{terminalLocation ? placePath(terminalLocation) : ""}</span>
