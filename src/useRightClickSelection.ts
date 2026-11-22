@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type RefObject, type MouseEvent, type PointerEvent } from "react";
-import type { Entry } from "./api";
+
+type Row = { name: string };
 
 type Point = { x: number; y: number };
-type Gesture = {
+type Gesture<Item> = {
   id: number;
-  start: Entry | null;
+  start: Item | null;
   position: Point;
   started: number;
   timer: number;
@@ -17,23 +18,23 @@ const holdDelay = 500;
 const interval = 8;
 const point = (event: PointerEvent): Point => ({ x: event.clientX, y: event.clientY });
 
-function hit(list: HTMLDivElement | null, entries: readonly Entry[], { x, y }: Point) {
+function hit<Item extends Row>(list: HTMLDivElement | null, entries: readonly Item[], { x, y }: Point) {
   const element = document.elementFromPoint(x, y);
   if (!list?.contains(element) || element?.closest(".inline-rename")) return undefined;
   const index = element?.closest<HTMLElement>(".file-row")?.dataset.entryIndex;
   return index === undefined ? null : entries[Number(index)] ?? null;
 }
 
-export function useRightClickSelection({ list, entries, marked, enabled, scope, onMark, onContext }: {
+export function useRightClickSelection<Item extends Row>({ list, entries, marked, enabled, scope, onMark, onContext }: {
   list: RefObject<HTMLDivElement | null>;
-  entries: readonly Entry[];
+  entries: readonly Item[];
   marked: ReadonlySet<string>;
   enabled: boolean;
   scope: string;
   onMark: (names: readonly string[], mark: boolean) => void;
-  onContext: (x: number, y: number, entry?: Entry) => void;
+  onContext: (x: number, y: number, entry?: Item) => void;
 }) {
-  const gesture = useRef<Gesture | null>(null);
+  const gesture = useRef<Gesture<Item> | null>(null);
   const [spinner, setSpinner] = useState<Point | null>(null);
 
   const clear = useCallback(() => {
@@ -54,7 +55,7 @@ export function useRightClickSelection({ list, entries, marked, enabled, scope, 
     };
   }, [clear, enabled, scope]);
 
-  function move(current: Gesture, next: Point) {
+  function move(current: Gesture<Item>, next: Point) {
     if (current.mode === "cancelled") return;
     const previous = current.position;
     current.position = next;
@@ -101,7 +102,7 @@ export function useRightClickSelection({ list, entries, marked, enabled, scope, 
     clear();
     listElement.focus({ preventScroll: true });
     listElement.setPointerCapture(event.pointerId);
-    const current: Gesture = {
+    const current: Gesture<Item> = {
       id: event.pointerId, start, position, started: performance.now(), timer: 0, mode: "hold",
       mark: start ? !marked.has(start.name) : true, visited: new Set(),
     };

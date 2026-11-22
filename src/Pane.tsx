@@ -8,7 +8,7 @@ import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileColor } from "./appearance";
@@ -45,6 +45,7 @@ interface PaneProps {
   showHidden: boolean;
   rightClickSelection: boolean;
   pane: PaneState;
+  addressPlace?: FileLocation | null;
   entries: Entry[];
   fileView: FilePaneView;
   onFileView: (view: FilePaneView) => void;
@@ -124,7 +125,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
   </span>;
 }
 
-export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden,
+export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, addressPlace,
   rightClickSelection, pane, entries, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
@@ -486,7 +487,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
         {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-help-topic="paneSources" data-path={path}>
           <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
-        </div> : <AddressField key={pane.addressRevision} side={side} place={pane.place} showHidden={showHidden}
+        </div> : <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
         {sourceMenu}
       </div>

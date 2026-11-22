@@ -28,7 +28,7 @@ export function SpaceControl({ place, free, onAnalyze, disabled }: {
   const capacity = free ? t("{0} free of {1}", formatSize(free.available), formatSize(free.total)) : "";
   const used = free && free.total > 0 ? Math.max(0, Math.min(100, 100 * (1 - free.available / free.total))) : 0;
   return <div className="space-control" data-help-topic="spaceScope">
-    <Button className="space-control-main" aria-label={t("Analyze space")} tooltip={capacity || t("Analyze space")}
+    <Button className="space-control-main" aria-label={t("Analyze space")} tooltip={t("Open Space Analyzer to scan the current folder.")}
       onClick={() => onAnalyze(place)} disabled={disabled}>
       <HardDrive className="space-control-icon" aria-hidden="true" />
       {free ? <>

@@ -123,6 +123,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "A required Git object is missing from this local repository.": ["У локальному репозиторії бракує потрібного об’єкта Git.", "В локальном репозитории отсутствует нужный объект Git."],
   "Could not read the Git repository.": ["Не вдалося прочитати репозиторій Git.", "Не удалось прочитать репозиторий Git."],
   "Analyze space": ["Аналізувати місце", "Анализировать место"],
+  "Open Space Analyzer to scan the current folder.": ["Відкрити аналізатор місця для поточної папки.", "Открыть анализатор места для текущей папки."],
   "Analysis scope": ["Область аналізу", "Область анализа"],
   "Analyze volume": ["Аналізувати том", "Анализировать том"],
   "Analyze share": ["Аналізувати спільний ресурс", "Анализировать общий ресурс"],

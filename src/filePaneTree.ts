@@ -1,6 +1,6 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { describeError, watchDirectory, type Entry, type PanelMetadata } from "./api";
+import { describeError, watchDirectory, windowsClient, type Entry, type PanelMetadata } from "./api";
 import type { SortMode, SortSettings } from "./fileSort";
 import { childPlace, readPlace, visibleEntries, type PaneBackgroundSize, type PaneState } from "./panes";
 import { scanSpace, unavailable, type Metric, type SpaceNode, type SpaceResult } from "./spaceScan";
@@ -108,6 +108,29 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
     }
   }
 
+  async function reveal(pane: PaneState, path: readonly string[], current: () => boolean) {
+    if (!root) return null;
+    let entries: readonly Entry[] = pane.entries;
+    const segments: string[] = [];
+    const opened = new Map<string, Branch>();
+    for (const [index, part] of path.entries()) {
+      const match = entries.find(({ name }) => windowsClient ? name.toLowerCase() === part.toLowerCase() : name === part);
+      if (!current() || !match?.directory || match.link) return null;
+      segments.push(match.name);
+      if (index + 1 === path.length) break;
+      const key = segments.join("/");
+      const existing = branches.get(key);
+      try {
+        entries = existing?.revision === revision && !existing.error ? existing.entries :
+          (await readPlace(childFolder(root, segments), undefined, false)).listing.entries;
+      } catch { return null; }
+      opened.set(key, { segments: [...segments], expanded: true, revision, entries });
+    }
+    if (!current()) return null;
+    if (opened.size) setSnapshot((snapshot) => ({ scope, branches: new Map([...(snapshot.scope === scope ? snapshot.branches : emptyBranches), ...opened]) }));
+    return segments.join("/") || "..";
+  }
+
   const visible = useCallback((
     pane: PaneState, top: Entry[], hidden: boolean, settings: SortSettings, canSort: (mode: SortMode) => boolean,
     measures: (entries: readonly Entry[]) => ReadonlyMap<string, PaneBackgroundSize> | undefined,
@@ -128,7 +151,7 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
     return output;
   }, [branches, enabled, revision, root, row]);
 
-  return { enabled: enabled && !!root, branches, lookup, toggle, visible };
+  return { enabled: enabled && !!root, branches, lookup, reveal, toggle, visible };
 }
 
 type ScanSnapshot = {

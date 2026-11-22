@@ -1,5 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, folderLabel, isFileServer, placePath, type Entry, type FileLocation, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
+import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
 export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
@@ -27,6 +27,19 @@ export async function containingScope(place: SpacePlace): Promise<Scope | null> 
 export function spacePath(place: SpacePlace) {
   return place.kind === "server" || isFileServer(place) ? place.origin + placePath(place)
     : place.kind === "kswitcher" ? place.address + " · " + place.path : place.path;
+}
+
+export function spaceRelativePath(root: SpacePlace, target: SpacePlace): string[] | null {
+  if (root.kind !== target.kind) return null;
+  if ((root.kind === "server" || isFileServer(root)) && (!(target.kind === "server" || isFileServer(target)) || root.id !== target.id)) return null;
+  if (root.kind === "kswitcher" && (target.kind !== "kswitcher" || root.peer !== target.peer || root.directory !== target.directory)) return null;
+  const windows = root.kind === "kswitcher" || root.kind === "local" && windowsClient;
+  const split = (place: SpacePlace) => placePath(place).split(windows ? /[\\/]+/ : /\/+/).filter(Boolean);
+  const base = split(root);
+  const destination = split(target);
+  const compare = (part: string) => windows ? part.toLowerCase() : part;
+  return destination.length >= base.length && base.every((part, index) => compare(part) === compare(destination[index]))
+    ? destination.slice(base.length) : null;
 }
 
 export interface SpaceNode {
