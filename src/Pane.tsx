@@ -8,7 +8,7 @@ import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
@@ -63,6 +63,7 @@ interface PaneProps {
   onPath: (path: string) => void;
   onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
+  onOpenConnections: (source: ConnectionSource) => void;
   onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
   onParent: () => void;
@@ -135,7 +136,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
+  onPathAncestor, onOpenConnections, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
@@ -493,7 +494,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-help-topic="paneSources" data-path={path}>
           <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
         </div> : <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} showHidden={showHidden}
-          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
+          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onOpenConnections={onOpenConnections} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
         {sourceMenu}
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)}

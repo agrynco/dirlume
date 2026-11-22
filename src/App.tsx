@@ -1414,6 +1414,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   async function openSavedConnection(side: Side, profile: SavedConnection, approval?: SshHostVerification) {
+    const location = panes[side].place;
     const { ticket } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
     function complete(place: Place, listing: Listing) {
@@ -1442,7 +1443,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             setModal(verification);
           } else {
             const { id, address, origin, segments, listing } = result;
-            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments }, listing);
+            const catalogSource = location?.kind === "connections" && location.source === "ftp" ? "ftp" : undefined;
+            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, catalogSource }, listing);
           }
           break;
         }
@@ -3022,6 +3024,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (trees[side].enabled && place.kind === "local") void navigateTree(side, place, true);
               else void load(side, place);
             }}
+            onOpenConnections={(source) => openConnections(side, source)}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
             onDismissError={() => {
@@ -3208,7 +3211,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
             focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
-            pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
+            copyShortcut={shortcuts.copyTerminalText} pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
             onTerminalError={(message) => setStatus({ text: message, error: true })}
             pendingCommands={pendingCommands[session.id] ?? noCommands}

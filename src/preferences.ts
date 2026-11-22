@@ -117,6 +117,7 @@ export const commands = {
   terminal: { label: "Show or hide file panels", key: "Ctrl+O" },
   toggleTerminal: { label: "Toggle terminal", key: "F12" },
   pasteTerminalText: { label: "Paste text into terminal", key: "Ctrl+V" },
+  copyTerminalText: { label: "Copy selected terminal text", key: macDocumentKeys ? "Meta+C" : "Ctrl+Shift+C" },
   expandTerminal: { label: "Make the terminal taller", key: "Ctrl+ArrowUp" },
   collapseTerminal: { label: "Make the terminal shorter", key: "Ctrl+ArrowDown" },
   commandPath: { label: "Insert selected path in command line", key: "Ctrl+F" },
@@ -229,7 +230,7 @@ export function commandLabel(command: Command) {
 export function commandScope(command: Command) {
   if (command === "help" || command === "menu" || command === "menuAlternate") return "global";
   if (command === "zoomFont") return "wheel";
-  if (command === "pasteTerminalText") return "terminal";
+  if (command === "pasteTerminalText" || command === "copyTerminalText") return "terminal";
   if (command === "processContextMenu") return "processPane";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";

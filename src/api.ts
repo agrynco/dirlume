@@ -105,7 +105,7 @@ export type FileLocation =
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[] }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; address: string }
-  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[] }
+  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; catalogSource?: "ftp" }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
 export const connectionSourceNames = { ftp: "FTP", ssh: "SSH", smb: "SMB", remote: "Remote machine" } as const;

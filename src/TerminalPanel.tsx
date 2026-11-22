@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Terminal, type ITerminalOptions, type ITheme } from "@xterm/xterm";
+import { Terminal, type IBufferRange, type ITerminalOptions, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { X } from "lucide-react";
@@ -11,7 +11,7 @@ import { FileContextMenu } from "./FileContextMenu";
 import { api, describeError, windowsClient, type ShellCompletionEnvironment, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
-import { bindingMatches, eventShortcut } from "./preferences";
+import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
 import { replaceTerminalRange, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
 import { showTooltipAtPointer } from "./tooltips";
@@ -63,7 +63,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  history, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
+  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -73,6 +73,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   pendingCommands: TerminalCommand[];
   watchEnvironment: boolean;
   history: readonly string[];
+  copyShortcut: readonly string[];
   pasteShortcut: readonly string[];
   pasteOnRightClick: boolean;
   onClipboardError: (error: unknown) => void;
@@ -86,11 +87,11 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
 }) {
   const remoteTerminal = session.kind === "ssh";
   const container = useRef<HTMLDivElement>(null);
-  const instance = useRef<{ term: Terminal; fit: () => void; paste: () => void } | null>(null);
+  const instance = useRef<{ term: Terminal; fit: () => void; paste: () => void; copy: (text: string) => void; openLink: (href: string) => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
   const [commandsWaiting, setCommandsWaiting] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string; href: string | null } | null>(null);
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
   const chooseSuggestion = useRef<(option: CommandSuggestion) => void>(() => {});
@@ -107,8 +108,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   reportDirectory.current = onDirectoryChange;
   const reportError = useRef(onTerminalError);
   reportError.current = onTerminalError;
-  const pasteSettings = useRef({ pasteShortcut, pasteOnRightClick, onClipboardError, visible });
-  pasteSettings.current = { pasteShortcut, pasteOnRightClick, onClipboardError, visible };
+  const clipboard = useRef({ copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, visible });
+  clipboard.current = { copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, visible };
 
   useEffect(() => {
     if (!windowsClient || !watchEnvironment) return;
@@ -125,7 +126,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   useEffect(() => {
     const surface = container.current;
     if (!surface) return;
+    const terminalSurface = surface;
     let linkMouseDown: { x: number; y: number; dragged: boolean } | null = null;
+    let hoveredLink: { href: string; range: IBufferRange } | null = null;
     let dismissLinkTooltip: (() => void) | undefined;
     const term = new Terminal({
       ...terminalAppearance(), cursorBlink: true, screenReaderMode: true, rightClickSelectsWord: false,
@@ -143,24 +146,40 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
 
     function activateLink(event: MouseEvent, href: string) {
-      if (event.button !== 0 || !linkMouseDown || !pasteSettings.current.visible) return;
+      if (event.button !== 0 || !linkMouseDown || !clipboard.current.visible) return;
       trackLinkDrag(event);
       const { dragged } = linkMouseDown;
       linkMouseDown = null;
-      if (dragged || term.hasSelection() || !isWebLink(href)) return;
+      if (!dragged && !term.hasSelection()) openLink(href);
+    }
+
+    function openLink(href: string) {
+      if (stopped || !clipboard.current.visible || !isWebLink(href)) return;
       void api.openWebLink(href).catch((error: unknown) => {
         if (!stopped) reportError.current(t("Could not open the terminal link. {0}", errorText(describeError(error))));
       });
     }
 
-    function hoverLink(event: MouseEvent, href: string) {
+    function hoverLink(event: MouseEvent, href: string, range: IBufferRange) {
       hideLinkTooltip();
-      if (surface && !event.buttons && isWebLink(href)) dismissLinkTooltip = showTooltipAtPointer(surface, href, event);
+      hoveredLink = isWebLink(href) ? { href, range } : null;
+      if (hoveredLink && !event.buttons) dismissLinkTooltip = showTooltipAtPointer(terminalSurface, href, event);
     }
 
     function hideLinkTooltip() {
       dismissLinkTooltip?.();
       dismissLinkTooltip = undefined;
+    }
+    function linkAt(event: MouseEvent) {
+      const screen = terminalSurface.querySelector(".xterm-screen")?.getBoundingClientRect();
+      if (!hoveredLink || !screen?.width || !screen.height || event.clientX < screen.left || event.clientX >= screen.right ||
+          event.clientY < screen.top || event.clientY >= screen.bottom) return null;
+      // xterm reports one-based buffer ranges and may not repeat hover on the same cell after the menu closes.
+      const column = Math.floor((event.clientX - screen.left) * term.cols / screen.width) + 1;
+      const line = Math.floor((event.clientY - screen.top) * term.rows / screen.height) + term.buffer.active.viewportY + 1;
+      const { start, end } = hoveredLink.range;
+      return (line > start.y || (line === start.y && column >= start.x)) &&
+        (line < end.y || (line === end.y && column <= end.x)) ? hoveredLink.href : null;
     }
     const fit = () => {
       if (!surface.clientWidth || !surface.clientHeight) return;
@@ -168,7 +187,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       const height = surface.querySelector(".xterm-screen")?.getBoundingClientRect().height;
       if (height && term.rows) rowHeight.current = height / term.rows;
     };
-    instance.current = { term, fit, paste };
+    instance.current = { term, fit, paste, copy, openLink };
     fit();
     const output = new Channel<TerminalOutput>();
     let stopped = false;
@@ -256,7 +275,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }
       const current = editable;
       const directory = currentDirectory;
-      if (!current?.text.trim() || !directory || !pasteSettings.current.visible || !term.textarea?.matches(":focus")) return;
+      if (!current?.text.trim() || !directory || !clipboard.current.visible || !term.textarea?.matches(":focus")) return;
       const requested = revision;
       requesting = true;
       const history = remote ? sessionHistory : localHistory.current;
@@ -268,7 +287,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         : api.completeCommand(current.text, current.caret, directory, session.refreshEnvironment, shellEnvironment);
       const batch = await completion.catch(() => null);
       requesting = false;
-      if (requested === revision && pasteSettings.current.visible && !closed && !stopped) {
+      if (requested === revision && clipboard.current.visible && !closed && !stopped) {
         options = commandSuggestions(current.text, recent, batch);
         renderSuggestions();
       }
@@ -494,10 +513,17 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let pasting = Promise.resolve();
     function paste() {
       pasting = pasting.then(async () => {
-        if (stopped || closed || !pasteSettings.current.visible) return;
+        if (stopped || closed || !clipboard.current.visible) return;
         const text = await api.clipboardText();
-        if (!stopped && !closed && pasteSettings.current.visible && text) term.paste(text);
-      }).catch((error: unknown) => { if (!stopped) pasteSettings.current.onClipboardError(error); });
+        if (!stopped && !closed && clipboard.current.visible && text) term.paste(text);
+      }).catch((error: unknown) => { if (!stopped) clipboard.current.onClipboardError(error); });
+    }
+    function copy(text: string) {
+      if (!stopped && clipboard.current.visible && text) {
+        void api.copyText(text).catch((error: unknown) => {
+          if (!stopped) clipboard.current.onClipboardError(error);
+        });
+      }
     }
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown" || event.isComposing) return true;
@@ -513,7 +539,16 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         return false;
       }
       const command = eventShortcut(event);
-      if (!bindingMatches(pasteSettings.current.pasteShortcut, command)) {
+      if (bindingMatches(clipboard.current.copyShortcut, command)) {
+        event.preventDefault();
+        if (!event.repeat) copy(term.getSelection());
+        return false;
+      }
+      if (command === "Meta+C") {
+        event.preventDefault();
+        return false;
+      }
+      if (!bindingMatches(clipboard.current.pasteShortcut, command)) {
         if (command === "Ctrl+V") event.preventDefault();
         return true;
       }
@@ -521,29 +556,26 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (!event.repeat) paste();
       return false;
     });
-    let handledControlClick = false;
+    let handledSecondaryDown = false;
     function secondaryClick(event: MouseEvent) {
       event.preventDefault();
       event.stopPropagation();
-      if (pasteSettings.current.pasteOnRightClick) {
+      if (clipboard.current.pasteOnRightClick) {
         term.focus();
         paste();
       } else {
-        setMenu({ x: event.clientX, y: event.clientY, selection: term.getSelection() });
+        setMenu({ x: event.clientX, y: event.clientY, selection: term.getSelection(), href: linkAt(event) });
       }
     }
     function preserveSelection(event: MouseEvent) {
-      handledControlClick = macClient && event.button === 0 && event.ctrlKey;
-      linkMouseDown = event.button === 0 && !handledControlClick ? { x: event.clientX, y: event.clientY, dragged: false } : null;
-      if (handledControlClick) secondaryClick(event);
-      else if (event.button === 2) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      handledSecondaryDown = event.button === 2 || (macClient && event.button === 0 && event.ctrlKey);
+      linkMouseDown = event.button === 0 && !handledSecondaryDown ? { x: event.clientX, y: event.clientY, dragged: false } : null;
+      // Handle the gesture before xterm changes the selection, including in WebViews that suppress contextmenu.
+      if (handledSecondaryDown) secondaryClick(event);
     }
     function openContextMenu(event: MouseEvent) {
-      if (handledControlClick) {
-        handledControlClick = false;
+      if (handledSecondaryDown) {
+        handledSecondaryDown = false;
         event.preventDefault();
         event.stopPropagation();
       } else if (event.button === 2 || (macClient && event.ctrlKey)) secondaryClick(event);
@@ -556,6 +588,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (/^F\d+$/.test(domEvent.key)) domEvent.preventDefault();
     });
     const resized = term.onResize(({ rows, cols }) => {
+      hoveredLink = null;
       hideSuggestions();
       resizing = resizing.then(async () => {
         await opening;
@@ -567,6 +600,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (term.buffer.active.viewportY !== term.buffer.active.baseY) hideSuggestions();
       else renderSuggestions();
     });
+    const outputChanged = term.onWriteParsed(() => { hoveredLink = null; });
     const resize = new ResizeObserver(fit);
     resize.observe(surface);
     return () => {
@@ -582,6 +616,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       keys.dispose();
       resized.dispose();
       scrolled.dispose();
+      outputChanged.dispose();
       term.textarea?.removeEventListener("blur", hideSuggestions);
       surface.removeEventListener("mousedown", preserveSelection, true);
       surface.removeEventListener("mousemove", trackLinkDrag, true);
@@ -631,14 +666,16 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     if (popup && popup.selected >= 0) document.getElementById(`${suggestionId}-${popup.selected}`)?.scrollIntoView({ block: "nearest" });
   }, [popup, suggestionId]);
 
-  function menuAction(action: "copy" | "paste" | "selectAll") {
+  function menuAction(action: "copy" | "paste" | "selectAll" | "openLink" | "copyLink") {
     const active = instance.current;
-    if (!active || !menu) return;
+    if (!visible || !active || !menu) return;
     setMenu(null);
     active.term.focus();
-    if (action === "copy") void api.copyText(menu.selection).catch(onClipboardError);
+    if (action === "copy") active.copy(menu.selection);
     else if (action === "paste") active.paste();
-    else active.term.selectAll();
+    else if (action === "selectAll") active.term.selectAll();
+    else if (menu.href && action === "openLink") active.openLink(menu.href);
+    else if (menu.href) active.copy(menu.href);
   }
 
   return (
@@ -659,9 +696,13 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       {visible && popup && <CommandSuggestions id={suggestionId} {...popup} choose={(option) => chooseSuggestion.current(option)} />}
       {visible && menu && <FileContextMenu label="Terminal actions" x={menu.x} y={menu.y}
         onClose={() => setMenu(null)} onReturn={() => instance.current?.term.focus()}>
-        <Button role="menuitem" disabled={!menu.selection} onClick={() => menuAction("copy")}>{t("Copy")}</Button>
-        <Button role="menuitem" onClick={() => menuAction("paste")}>{t("Paste")}</Button>
+        <Button role="menuitem" shortcut={showShortcut(copyShortcut[0])} disabled={!menu.selection} onClick={() => menuAction("copy")}>{t("Copy")}</Button>
+        <Button role="menuitem" shortcut={showShortcut(pasteShortcut[0])} onClick={() => menuAction("paste")}>{t("Paste")}</Button>
         <Button role="menuitem" onClick={() => menuAction("selectAll")}>{t("Select All")}</Button>
+        {menu.href && <>
+          <Button role="menuitem" onClick={() => menuAction("openLink")}>{t("Open Link")}</Button>
+          <Button role="menuitem" onClick={() => menuAction("copyLink")}>{t("Copy Link Address")}</Button>
+        </>}
       </FileContextMenu>}
     </section>
   );
