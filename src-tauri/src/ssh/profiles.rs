@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs, io,
     net::IpAddr,
     path::{Path, PathBuf},
@@ -34,27 +35,51 @@ pub(super) struct ConnectionSettings {
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub(super) struct Profile {
-    id: Uuid,
-    pub label: String,
+pub(super) struct SavedHost {
     #[serde(flatten)]
     pub settings: ConnectionSettings,
-}
-
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub(super) struct SavedProfile {
-    #[serde(flatten)]
-    pub profile: Profile,
     credential: Option<Uuid>,
 }
 
-impl SavedProfile {
+impl SavedHost {
     pub fn secret(&self) -> Result<Option<Zeroizing<String>>> {
         read_secret(self.credential)
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+struct SavedJumpHost {
+    id: Uuid,
+    #[serde(flatten)]
+    host: SavedHost,
+}
+
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SavedProfile {
+    id: Uuid,
+    pub label: String,
+    #[serde(flatten)]
+    pub destination: SavedHost,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    jump_hosts: Vec<SavedJumpHost>,
+}
+
+impl SavedProfile {
+    pub fn route(&self) -> impl Iterator<Item = &SavedHost> {
+        let destination = std::slice::from_ref(&self.destination);
+        self.jump_hosts
+            .iter()
+            .map(|jump| &jump.host)
+            .chain(destination)
+    }
+
+    fn credentials(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.route().filter_map(|host| host.credential)
+    }
+}
+
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostKey {
     #[serde(flatten)]
@@ -81,7 +106,7 @@ impl Config {
     pub fn profile(&self, id: Uuid) -> Result<&SavedProfile> {
         self.profiles
             .iter()
-            .find(|item| item.profile.id == id)
+            .find(|item| item.id == id)
             .ok_or_else(|| "This SSH profile was removed.".to_owned())
     }
 
@@ -92,12 +117,24 @@ impl Config {
             .map(|item| item.fingerprint.as_str())
     }
 
-    pub fn trust(&mut self, path: &Path, endpoint: Endpoint, fingerprint: String) -> Result<()> {
-        self.trusted_hosts.push(HostKey {
-            endpoint,
-            fingerprint,
-        });
-        self.persist(path)
+    pub fn trust(&mut self, path: &Path, keys: Vec<HostKey>) -> Result<()> {
+        let before = self.trusted_hosts.len();
+        for key in keys {
+            match self.fingerprint(&key.endpoint) {
+                Some(pin) if pin == key.fingerprint => {}
+                Some(_) => {
+                    return Err(format!(
+                        "The trusted SSH host key for {}:{} changed. Try the connection again.",
+                        key.endpoint.host, key.endpoint.port
+                    ))
+                }
+                None => self.trusted_hosts.push(key),
+            }
+        }
+        if self.trusted_hosts.len() != before {
+            self.persist(path)?;
+        }
+        Ok(())
     }
 
     fn persist(&self, path: &Path) -> Result<()> {
@@ -114,17 +151,52 @@ impl Config {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProfileSummary {
+struct HostSummary {
     #[serde(flatten)]
-    profile: Profile,
+    settings: ConnectionSettings,
     has_secret: bool,
+}
+
+impl From<SavedHost> for HostSummary {
+    fn from(host: SavedHost) -> Self {
+        Self {
+            settings: host.settings,
+            has_secret: host.credential.is_some(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JumpHostSummary {
+    id: Uuid,
+    #[serde(flatten)]
+    host: HostSummary,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileSummary {
+    id: Uuid,
+    label: String,
+    #[serde(flatten)]
+    destination: HostSummary,
+    jump_hosts: Vec<JumpHostSummary>,
 }
 
 impl From<SavedProfile> for ProfileSummary {
     fn from(item: SavedProfile) -> Self {
         Self {
-            profile: item.profile,
-            has_secret: item.credential.is_some(),
+            id: item.id,
+            label: item.label,
+            destination: item.destination.into(),
+            jump_hosts: item
+                .jump_hosts
+                .into_iter()
+                .map(|jump| JumpHostSummary {
+                    id: jump.id,
+                    host: jump.host.into(),
+                })
+                .collect(),
         }
     }
 }
@@ -134,6 +206,22 @@ impl From<SavedProfile> for ProfileSummary {
 pub struct ProfileInput {
     id: Option<Uuid>,
     label: String,
+    #[serde(flatten)]
+    destination: HostInput,
+    #[serde(default)]
+    jump_hosts: Vec<JumpHostInput>,
+}
+
+#[derive(Deserialize)]
+struct JumpHostInput {
+    id: Option<Uuid>,
+    #[serde(flatten)]
+    host: HostInput,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HostInput {
     host: String,
     port: u16,
     username: String,
@@ -143,8 +231,8 @@ pub struct ProfileInput {
     clear_secret: bool,
 }
 
-impl ProfileInput {
-    pub(super) fn settings(&self) -> Result<ConnectionSettings> {
+impl HostInput {
+    fn settings(&self) -> Result<ConnectionSettings> {
         let username = self.username.trim();
         let host = self.host.trim();
         let host = host
@@ -185,38 +273,90 @@ impl ProfileInput {
         })
     }
 
-    pub(super) fn take_secret(&mut self) -> Option<Zeroizing<String>> {
-        self.secret
+    fn prepare(mut self, previous: Option<&SavedHost>) -> Result<DraftHost> {
+        let secret = self
+            .secret
             .take()
             .map(Zeroizing::new)
-            .filter(|secret| !self.clear_secret && !secret.is_empty())
-    }
-
-    fn previous<'a>(&self, config: &'a Config) -> Result<Option<&'a SavedProfile>> {
-        self.id.map(|id| config.profile(id)).transpose()
-    }
-
-    fn reusable_credential(
-        &self,
-        settings: &ConnectionSettings,
-        previous: Option<&SavedProfile>,
-    ) -> Option<Uuid> {
-        previous
-            .filter(|old| !self.clear_secret && &old.profile.settings == settings)
-            .and_then(|old| old.credential)
-    }
-
-    pub(super) fn secret_for_test(
-        &self,
-        config: &Config,
-        settings: &ConnectionSettings,
-        draft: Option<Zeroizing<String>>,
-    ) -> Result<Option<Zeroizing<String>>> {
-        let previous = self.previous(config)?;
-        match draft {
-            Some(secret) => Ok(Some(secret)),
-            None => read_secret(self.reusable_credential(settings, previous)),
+            .filter(|secret| !self.clear_secret && !secret.is_empty());
+        let settings = self.settings()?;
+        let credential = previous
+            .filter(|old| !self.clear_secret && old.settings == settings)
+            .and_then(|old| old.credential);
+        if matches!(settings.auth, Authentication::Password)
+            && secret.is_none()
+            && credential.is_none()
+        {
+            return Err("Enter the SSH password.".to_owned());
         }
+        Ok(DraftHost {
+            settings,
+            secret,
+            credential,
+        })
+    }
+}
+
+pub(super) struct DraftHost {
+    pub settings: ConnectionSettings,
+    secret: Option<Zeroizing<String>>,
+    credential: Option<Uuid>,
+}
+
+impl DraftHost {
+    pub fn take_secret(&mut self) -> Result<Option<Zeroizing<String>>> {
+        match self.secret.take() {
+            Some(secret) => Ok(Some(secret)),
+            None => read_secret(self.credential),
+        }
+    }
+}
+
+struct DraftProfile {
+    destination: DraftHost,
+    jump_hosts: Vec<(Uuid, DraftHost)>,
+}
+
+impl ProfileInput {
+    fn prepare(self, previous: Option<&SavedProfile>) -> Result<DraftProfile> {
+        let destination = self
+            .destination
+            .prepare(previous.map(|profile| &profile.destination))?;
+        let mut seen = HashSet::new();
+        let jump_hosts = self
+            .jump_hosts
+            .into_iter()
+            .enumerate()
+            .map(|(index, jump)| {
+                let id = jump.id.unwrap_or_else(Uuid::new_v4);
+                if !seen.insert(id) {
+                    return Err("Every SSH jump host must have a distinct entry.".to_owned());
+                }
+                let old = previous
+                    .and_then(|profile| profile.jump_hosts.iter().find(|host| host.id == id));
+                let host = jump
+                    .host
+                    .prepare(old.map(|old| &old.host))
+                    .map_err(|error| format!("Jump host {}. {error}", index + 1))?;
+                Ok((id, host))
+            })
+            .collect::<Result<_>>()?;
+        Ok(DraftProfile {
+            destination,
+            jump_hosts,
+        })
+    }
+
+    pub(super) fn test_route(self, config: &Config) -> Result<Vec<DraftHost>> {
+        let previous = self.id.map(|id| config.profile(id)).transpose()?;
+        let route = self.prepare(previous)?;
+        let mut hosts = route
+            .jump_hosts
+            .into_iter()
+            .map(|(_, host)| host)
+            .collect::<Vec<_>>();
+        hosts.push(route.destination);
+        Ok(hosts)
     }
 }
 
@@ -271,6 +411,35 @@ fn delete_credential(key: Uuid) {
     let _ = credential(key).and_then(|entry| entry.delete_credential().map_err(message));
 }
 
+#[derive(Default)]
+struct NewCredentials(Vec<Uuid>);
+
+impl NewCredentials {
+    fn save(&mut self, host: DraftHost) -> Result<SavedHost> {
+        let mut key = host.credential;
+        if let Some(secret) = host.secret {
+            let id = Uuid::new_v4();
+            self.0.push(id);
+            credential(id)?.set_password(&secret).map_err(|error| {
+                format!("Could not save the SSH secret in the system credential store. {error}")
+            })?;
+            key = Some(id);
+        }
+        Ok(SavedHost {
+            settings: host.settings,
+            credential: key,
+        })
+    }
+}
+
+impl Drop for NewCredentials {
+    fn drop(&mut self) {
+        for key in self.0.drain(..) {
+            delete_credential(key);
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn ssh_profiles(app: AppHandle) -> Result<Vec<ProfileSummary>> {
     let path = config_path(&app)?;
@@ -286,60 +455,51 @@ pub async fn ssh_profiles(app: AppHandle) -> Result<Vec<ProfileSummary>> {
 }
 
 #[tauri::command]
-pub async fn save_ssh_profile(mut input: ProfileInput, app: AppHandle) -> Result<ProfileSummary> {
+pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<ProfileSummary> {
     let path = config_path(&app)?;
-    let secret = input.take_secret();
     blocking(move || {
         let label = input.label.trim().to_owned();
         if label.is_empty() {
             return Err("Enter a connection name.".to_owned());
         }
-        let settings = input.settings()?;
         let _lock = lock(&path)?;
         let mut config = Config::load(&path)?;
-        let previous = input.previous(&config)?;
-        let reusable = input.reusable_credential(&settings, previous);
-        if matches!(settings.auth, Authentication::Password)
-            && secret.is_none()
-            && reusable.is_none()
-        {
-            return Err("Enter the SSH password.".to_owned());
-        }
-        let updated_key = if let Some(secret) = secret {
-            let key = Uuid::new_v4();
-            credential(key)?.set_password(&secret).map_err(|error| {
-                format!("Could not save the SSH secret in the system credential store. {error}")
-            })?;
-            Some(key)
-        } else {
-            None
-        };
-        let key = updated_key.or(reusable);
-        let old_key = previous
-            .and_then(|old| old.credential)
-            .filter(|old| Some(*old) != key);
         let id = input.id.unwrap_or_else(Uuid::new_v4);
+        let previous = input.id.map(|id| config.profile(id)).transpose()?;
+        let old_keys = previous
+            .into_iter()
+            .flat_map(SavedProfile::credentials)
+            .collect::<Vec<_>>();
+        let draft = input.prepare(previous)?;
+        let mut new_credentials = NewCredentials::default();
         let item = SavedProfile {
-            profile: Profile {
-                id,
-                label,
-                settings,
-            },
-            credential: key,
+            id,
+            label,
+            destination: new_credentials.save(draft.destination)?,
+            jump_hosts: draft
+                .jump_hosts
+                .into_iter()
+                .enumerate()
+                .map(|(index, (id, host))| {
+                    let host = new_credentials
+                        .save(host)
+                        .map_err(|error| format!("Jump host {}. {error}", index + 1))?;
+                    Ok(SavedJumpHost { id, host })
+                })
+                .collect::<Result<_>>()?,
         };
-        if let Some(existing) = config.profiles.iter_mut().find(|old| old.profile.id == id) {
+        if let Some(existing) = config.profiles.iter_mut().find(|old| old.id == id) {
             *existing = item.clone();
         } else {
             config.profiles.push(item.clone());
         }
-        if let Err(error) = config.persist(&path) {
-            if let Some(key) = updated_key {
+        config.persist(&path)?;
+        new_credentials.0.clear();
+        let retained = item.credentials().collect::<HashSet<_>>();
+        for key in old_keys {
+            if !retained.contains(&key) {
                 delete_credential(key);
             }
-            return Err(error);
-        }
-        if let Some(key) = old_key {
-            delete_credential(key);
         }
         Ok(item.into())
     })
@@ -352,10 +512,10 @@ pub async fn remove_ssh_profile(id: Uuid, app: AppHandle) -> Result<()> {
     blocking(move || {
         let _lock = lock(&path)?;
         let mut config = Config::load(&path)?;
-        let key = config.profile(id)?.credential;
-        config.profiles.retain(|item| item.profile.id != id);
+        let keys = config.profile(id)?.credentials().collect::<Vec<_>>();
+        config.profiles.retain(|item| item.id != id);
         config.persist(&path)?;
-        if let Some(key) = key {
+        for key in keys {
             delete_credential(key);
         }
         Ok(())

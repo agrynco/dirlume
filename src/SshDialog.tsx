@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState, type FormEvent } from "react";
-import { api, describeError, type SshHostVerification, type SshProfile } from "./api";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { ArrowDown, ArrowUp, Plus } from "lucide-react";
+import { api, describeError, type SshHostInput, type SshHostVerification, type SshJumpHost, type SshProfile } from "./api";
 import { Button } from "./Button";
 import { ConnectionProtocol, type ConnectionDraft } from "./ConnectionProtocol";
 import { Dialog } from "./Dialog";
@@ -27,6 +28,113 @@ export function VerifyHostDialog({ verification, testing, onCancel, onApprove }:
   </Dialog>;
 }
 
+type HostDraft = {
+  host: string;
+  port: string;
+  username: string;
+  auth: SshHostInput["auth"]["kind"];
+  path: string;
+  secret: string;
+  clearSecret: boolean;
+};
+type SavedHost = Pick<SshProfile, "host" | "port" | "username" | "auth" | "hasSecret">;
+type JumpDraft = HostDraft & { id: string };
+
+function hostDraft(saved?: SavedHost | null, draft?: ConnectionDraft): HostDraft {
+  return {
+    host: saved?.host ?? draft?.host ?? "", port: draft?.port ?? String(saved?.port ?? 22),
+    username: saved?.username ?? draft?.username ?? "",
+    auth: saved?.auth.kind ?? "password", path: saved?.auth.kind === "privateKey" ? saved.auth.path : "",
+    secret: "", clearSecret: false,
+  };
+}
+
+function keepsSecret(host: HostDraft, saved?: SavedHost | null) {
+  return !!saved?.hasSecret && saved.host === host.host.trim().replace(/^\[(.*)\]$/, "$1").toLowerCase() &&
+    saved.port === Number(host.port) && saved.username === host.username.trim() && saved.auth.kind === host.auth &&
+    (saved.auth.kind !== "privateKey" || saved.auth.path === host.path.trim());
+}
+
+function canConnect(host: HostDraft, saved?: SavedHost | null) {
+  const port = Number(host.port);
+  return !!host.host.trim() && !!host.username.trim() && Number.isInteger(port) && port >= 1 && port <= 65535 &&
+    (host.auth === "privateKey" ? !!host.path.trim() : !!(host.secret || keepsSecret(host, saved)));
+}
+
+function hostInput(host: HostDraft): SshHostInput {
+  return {
+    host: host.host, port: Number(host.port), username: host.username,
+    auth: host.auth === "privateKey" ? { kind: "privateKey", path: host.path } : { kind: "password" },
+    secret: host.secret || undefined, clearSecret: host.auth === "privateKey" && host.clearSecret,
+  };
+}
+
+function routeHost(host: HostDraft) {
+  const server = host.host.trim();
+  if (!server || Number(host.port) === 22 || !host.port) return server;
+  return (server.includes(":") && !server.startsWith("[") ? `[${server}]` : server) + `:${host.port}`;
+}
+
+function SshHostFields({ connection, saved, onChange, onError, jump = false }: {
+  connection: HostDraft;
+  saved?: SavedHost | null;
+  onChange: (update: Partial<HostDraft>) => void;
+  onError: (error: string) => void;
+  jump?: boolean;
+}) {
+  const { host, port, username, auth, path, secret, clearSecret } = connection;
+  const useKey = auth === "privateKey";
+  const savedSecret = keepsSecret(connection, saved);
+
+  async function chooseKey() {
+    try {
+      const chosen = await open({ title: t("Select SSH private key") });
+      if (chosen) onChange({ path: chosen });
+    } catch (failure) {
+      onError(describeError(failure));
+    }
+  }
+
+  return <>
+    <div className="ftp-host-row">
+      <label className="field">{t("Server")}
+        <HistoryField historyKey="ssh-host" aria-label={t("Server")} required spellCheck={false}
+          placeholder={jump ? "bastion.example.com" : "ssh.example.com"} value={host} onValueChange={(host) => onChange({ host })} />
+      </label>
+      <label className="field">{t("Port")}
+        <input required type="number" min={1} max={65535} value={port} onChange={(event) => onChange({ port: event.target.value })} />
+      </label>
+    </div>
+    <label className="field">{t("Username")}
+      <HistoryField historyKey="ssh-username" aria-label={t("Username")} required spellCheck={false}
+        value={username} onValueChange={(username) => onChange({ username })} />
+    </label>
+    <label className="field">{t("Authentication")}
+      <select aria-label={t("Authentication")} value={auth} onChange={(event) => onChange({
+        auth: event.target.value === "privateKey" ? "privateKey" : "password", secret: "", clearSecret: false,
+      })}>
+        <option value="password">{t("Password")}</option>
+        <option value="privateKey">{t("Private key")}</option>
+      </select>
+    </label>
+    {useKey && <div className="ftp-encoding-row">
+      <label className="field">{t("Private key file")}
+        <input required value={path} onChange={(event) => onChange({ path: event.target.value })} spellCheck={false} />
+      </label>
+      <Button type="button" onClick={() => { void chooseKey(); }}>{t("Browse…")}</Button>
+    </div>}
+    <label className="field">{t(useKey ? "Private key passphrase" : "Password")}
+      <input type="password" autoComplete="new-password" value={secret} disabled={useKey && clearSecret}
+        placeholder={savedSecret ? t(useKey ? "Keep saved passphrase" : "Keep saved password") : undefined}
+        required={!useKey && !savedSecret} onChange={(event) => onChange({ secret: event.target.value })} />
+    </label>
+    {useKey && savedSecret && <label className="field-checkbox">
+      <span>{t("Clear saved passphrase")}</span>
+      <input type="checkbox" checked={clearSecret} onChange={(event) => onChange({ clearSecret: event.target.checked })} />
+    </label>}
+  </>;
+}
+
 export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClose }: {
   profile: SshProfile | null;
   draft?: ConnectionDraft;
@@ -36,48 +144,66 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
   onClose: () => void;
 }) {
   const [label, setLabel] = useState(profile?.label ?? draft?.label ?? "");
-  const [connection, setConnection] = useState({
-    host: profile?.host ?? draft?.host ?? "", port: draft?.port ?? String(profile?.port ?? 22),
-    username: profile?.username ?? draft?.username ?? "",
-    auth: profile?.auth.kind ?? "password", path: profile?.auth.kind === "privateKey" ? profile.auth.path : "",
-    secret: "", clearSecret: false,
-  });
-  const { host, port, username, auth, path, secret, clearSecret } = connection;
+  const [connection, setConnection] = useState(() => hostDraft(profile, draft));
+  const [jumps, setJumps] = useState<JumpDraft[]>(() =>
+    (profile?.jumpHosts ?? []).map((host) => ({ ...hostDraft(host), id: host.id })));
+  const [editor, setEditor] = useState<JumpDraft>();
+  const editorRef = useRef<HTMLFieldSetElement>(null);
+  const nextJump = useRef(0);
+  const jumpId = useId();
+  const savedJump = (id: string): SshJumpHost | undefined => profile?.jumpHosts?.find((host) => host.id === id);
   const [working, setWorking] = useState<"save" | "test">();
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
-  const [verification, setVerification] = useState<SshHostVerification>();
-  const useKey = auth === "privateKey";
-  const savedSecret = profile?.hasSecret && profile.host === host.trim().replace(/^\[(.*)\]$/, "$1").toLowerCase() &&
-    profile.port === Number(port) && profile.username === username.trim() && profile.auth.kind === auth &&
-    (profile.auth.kind !== "privateKey" || profile.auth.path === path.trim());
-  const numericPort = Number(port);
-  const canTest = !!host.trim() && !!username.trim() && Number.isInteger(numericPort) && numericPort >= 1 && numericPort <= 65535 &&
-    (useKey ? !!path.trim() : !!(secret || savedSecret));
+  const [pending, setPending] = useState<{ verification: SshHostVerification; approvals: readonly SshHostVerification[] }>();
+  const canTest = !editor && canConnect(connection, profile);
+  const route = [t("This computer"), ...jumps.map(routeHost), routeHost(connection) || t("SSH destination")];
   const input: Parameters<typeof api.saveSshProfile>[0] = {
-    id: profile?.id, label, host, port: numericPort, username,
-    auth: useKey ? { kind: "privateKey", path } : { kind: "password" },
-    secret: secret || undefined, clearSecret: useKey && clearSecret,
+    ...hostInput(connection), id: profile?.id, label,
+    jumpHosts: jumps.map((host) => ({ ...hostInput(host), id: savedJump(host.id)?.id })),
   };
 
-  function updateConnection(update: Partial<typeof connection>) {
-    setConnection((current) => ({ ...current, ...update }));
+  const editingId = editor?.id;
+  useEffect(() => {
+    if (editingId) editorRef.current?.querySelector("input")?.focus();
+  }, [editingId]);
+
+  function changed() {
     setVerified(false);
     setError("");
   }
 
-  async function chooseKey() {
-    try {
-      const chosen = await open({ title: t("Select SSH private key") });
-      if (chosen) updateConnection({ path: chosen });
-    } catch (failure) {
-      setError(describeError(failure));
-    }
+  function closeEditor(id?: string) {
+    setEditor(undefined);
+    requestAnimationFrame(() => document.getElementById(id ? `${jumpId}-edit-${id}` : `${jumpId}-add`)?.focus());
+  }
+
+  function saveJump() {
+    if (!editor || !canConnect(editor, savedJump(editor.id))) return;
+    setJumps((current) => current.some((host) => host.id === editor.id)
+      ? current.map((host) => host.id === editor.id ? editor : host)
+      : [...current, editor]);
+    closeEditor(editor.id);
+    changed();
+  }
+
+  function moveJump(index: number, offset: number) {
+    const next = index + offset;
+    setJumps((current) => current.map((host, position) => position === next ? current[index] :
+      position === index ? current[next] : host));
+    changed();
+  }
+
+  function removeJump(index: number) {
+    setJumps((current) => current.filter((_, position) => position !== index));
+    const next = jumps[index + 1] ?? jumps[index - 1];
+    closeEditor(next?.id);
+    changed();
   }
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (working) return;
+    if (working || editor) return;
     setWorking("save");
     setError("");
     try {
@@ -89,15 +215,15 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
     }
   }
 
-  async function testConnection(approval?: SshHostVerification) {
+  async function testConnection(approvals: readonly SshHostVerification[] = []) {
     if (working || !canTest) return;
     setWorking("test");
-    setVerification(undefined);
+    setPending(undefined);
     setVerified(false);
     setError("");
     try {
-      const result = await api.testSshConnection(input, approval);
-      if (result.kind === "verifyHost") setVerification(result.verification);
+      const result = await api.testSshConnection(input, approvals);
+      if (result.kind === "verifyHost") setPending({ verification: result.verification, approvals });
       else setVerified(true);
     } catch (failure) {
       setError(describeError(failure));
@@ -111,46 +237,58 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
   return <><Dialog title={t(title)} onClose={() => { if (!working) onClose(); }}>
     <form className="dialog-form" onSubmit={(event) => { void save(event); }} autoComplete="off">
       <div className="dialog-body ftp-fields" inert={!!working}>
-        {onUseFtp && <ConnectionProtocol value="sftp" onChange={() => onUseFtp({ label, host, port, username })} />}
+        {onUseFtp && <ConnectionProtocol value="sftp" onChange={() => onUseFtp({
+          label, host: connection.host, port: connection.port, username: connection.username,
+        })} />}
         <label className="field">{t("Connection name")}
           <HistoryField historyKey="ssh-name" aria-label={t("Connection name")} data-initial-focus required value={label} onValueChange={setLabel} />
         </label>
-        <div className="ftp-host-row">
-          <label className="field">{t("Server")}
-            <HistoryField historyKey="ssh-host" aria-label={t("Server")} required spellCheck={false}
-              placeholder="ssh.example.com" value={host} onValueChange={(host) => updateConnection({ host })} />
-          </label>
-          <label className="field">{t("Port")}
-            <input required type="number" min={1} max={65535} value={port} onChange={(event) => updateConnection({ port: event.target.value })} />
-          </label>
-        </div>
-        <label className="field">{t("Username")}
-          <HistoryField historyKey="ssh-username" aria-label={t("Username")} required spellCheck={false}
-            value={username} onValueChange={(username) => updateConnection({ username })} />
-        </label>
-        <label className="field">{t("Authentication")}
-          <select aria-label={t("Authentication")} value={auth} onChange={(event) => updateConnection({
-            auth: event.target.value === "privateKey" ? "privateKey" : "password", secret: "", clearSecret: false,
-          })}>
-            <option value="password">{t("Password")}</option>
-            <option value="privateKey">{t("Private key")}</option>
-          </select>
-        </label>
-        {useKey && <div className="ftp-encoding-row">
-          <label className="field">{t("Private key file")}
-            <input required value={path} onChange={(event) => updateConnection({ path: event.target.value })} spellCheck={false} />
-          </label>
-          <Button type="button" onClick={() => { void chooseKey(); }}>{t("Browse…")}</Button>
-        </div>}
-        <label className="field">{t(useKey ? "Private key passphrase" : "Password")}
-          <input type="password" autoComplete="new-password" value={secret} disabled={useKey && clearSecret}
-            placeholder={savedSecret ? t(useKey ? "Keep saved passphrase" : "Keep saved password") : undefined}
-            required={!useKey && !savedSecret} onChange={(event) => updateConnection({ secret: event.target.value })} />
-        </label>
-        {useKey && savedSecret && <label className="field-checkbox">
-          <span>{t("Clear saved passphrase")}</span>
-          <input type="checkbox" checked={clearSecret} onChange={(event) => updateConnection({ clearSecret: event.target.checked })} />
-        </label>}
+        <SshHostFields connection={connection} saved={profile} onChange={(update) => {
+          setConnection((current) => ({ ...current, ...update }));
+          changed();
+        }} onError={setError} />
+        <section className="ssh-jumps" aria-labelledby={jumpId}>
+          <div className="ssh-jump-heading">
+            <h3 id={jumpId}>{t("Jump hosts")}</h3>
+            <Button id={`${jumpId}-add`} type="button" disabled={!!editor}
+              onClick={() => { setEditor({ ...hostDraft(), id: `draft-${++nextJump.current}` }); setError(""); }}>
+              <Plus aria-hidden="true" />{t("Add jump host")}
+            </Button>
+          </div>
+          {jumps.length > 0 && <ol className="ssh-jump-list" role="list">
+            {jumps.map((jump, index) => <li key={jump.id}>
+              <span className="ssh-jump-name" dir="auto">{routeHost(jump)}</span>
+              <div className="ssh-jump-actions">
+                <Button id={`${jumpId}-edit-${jump.id}`} type="button" aria-label={t("Edit jump host {0}", index + 1)} disabled={!!editor}
+                  onClick={() => { setEditor(jump); setError(""); }}>{t("Edit")}</Button>
+                <Button type="button" className="icon-button" aria-label={t("Move up")} tooltip={t("Move up")}
+                  disabled={!!editor || index === 0} onClick={() => moveJump(index, -1)}><ArrowUp aria-hidden="true" /></Button>
+                <Button type="button" className="icon-button" aria-label={t("Move down")} tooltip={t("Move down")}
+                  disabled={!!editor || index === jumps.length - 1} onClick={() => moveJump(index, 1)}><ArrowDown aria-hidden="true" /></Button>
+                <Button type="button" aria-label={t("Remove jump host {0}", index + 1)} disabled={!!editor}
+                  onClick={() => removeJump(index)}>{t("Remove")}</Button>
+              </div>
+            </li>)}
+          </ol>}
+          {editor && <fieldset className="ssh-jump-editor ftp-fields" ref={editorRef}>
+            <legend>{jumps.some((host) => host.id === editor.id) ? t("Edit jump host") : t("New jump host")}</legend>
+            <SshHostFields connection={editor} saved={savedJump(editor.id)} jump onChange={(update) => {
+              setEditor((current) => current?.id === editor.id ? { ...current, ...update } : current);
+              setError("");
+            }} onError={setError} />
+            <div className="dialog-actions">
+              <Button type="button" onClick={() => {
+                closeEditor(jumps.some((host) => host.id === editor.id) ? editor.id : undefined);
+                setError("");
+              }}>{t("Cancel")}</Button>
+              <Button type="button" disabled={!canConnect(editor, savedJump(editor.id))} onClick={saveJump}>{t("Save jump host")}</Button>
+            </div>
+          </fieldset>}
+          <div className="ssh-route">
+            <strong>{t("Route")}</strong>
+            <output aria-label={t("Route")} dir="auto">{route.join(" → ")}</output>
+          </div>
+        </section>
         {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         {verified && <p role="status">{t("SFTP connection successful.")}</p>}
         <div className="dialog-actions">
@@ -160,11 +298,11 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
       </div>
       <footer className="dialog-footer">
         <Button type="button" disabled={!!working} onClick={onClose}>{t("Cancel")}</Button>
-        <Button type="submit" className="primary" disabled={!!working}>{t(working === "save" ? "Saving…" : "Save connection")}</Button>
+        <Button type="submit" className="primary" disabled={!!working || !!editor}>{t(working === "save" ? "Saving…" : "Save connection")}</Button>
       </footer>
     </form>
   </Dialog>
-  {verification && <VerifyHostDialog verification={verification} testing onCancel={() => setVerification(undefined)}
-    onApprove={() => { void testConnection(verification); }} />}
+  {pending && <VerifyHostDialog verification={pending.verification} testing onCancel={() => setPending(undefined)}
+    onApprove={() => { void testConnection([...pending.approvals, pending.verification]); }} />}
   </>;
 }

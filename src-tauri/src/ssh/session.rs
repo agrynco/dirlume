@@ -9,11 +9,10 @@ use openssh_sftp_client::{
     metadata::{FileType, MetaData, MetaDataBuilder, Permissions},
     Error, Sftp,
 };
-use russh::client::Handle;
 use tokio::io::AsyncSeekExt;
 use uuid::Uuid;
 
-use super::{SftpFailure, SftpResult, VerifyHost};
+use super::{AuthenticatedRoute, SftpFailure, SftpResult};
 
 use crate::{
     desktop::{message, Result},
@@ -38,7 +37,7 @@ const MAX_DEPTH: usize = 128;
 
 pub struct Session {
     sftp: Sftp,
-    client: Handle<VerifyHost>,
+    client: AuthenticatedRoute,
 }
 
 #[derive(Debug)]
@@ -126,7 +125,7 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Session {
-    pub(super) fn new(client: Handle<VerifyHost>, sftp: Sftp) -> Self {
+    pub(super) fn new(client: AuthenticatedRoute, sftp: Sftp) -> Self {
         Self { client, sftp }
     }
 
