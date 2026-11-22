@@ -153,10 +153,12 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
         </label>}
         {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         {verified && <p role="status">{t("SFTP connection successful.")}</p>}
+        <div className="dialog-actions">
+          <Button type="button" disabled={!!working || !canTest}
+            onClick={() => { void testConnection(); }}>{t(working === "test" ? "Testing…" : "Test connection")}</Button>
+        </div>
       </div>
       <footer className="dialog-footer">
-        <Button type="button" disabled={!!working || !canTest}
-          onClick={() => { void testConnection(); }}>{t(working === "test" ? "Testing…" : "Test connection")}</Button>
         <Button type="button" disabled={!!working} onClick={onClose}>{t("Cancel")}</Button>
         <Button type="submit" className="primary" disabled={!!working}>{t(working === "save" ? "Saving…" : "Save connection")}</Button>
       </footer>

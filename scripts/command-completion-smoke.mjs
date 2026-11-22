@@ -1,10 +1,11 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, join, parse } from "node:path";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
-async function makeDockerFixture(directory) {
+export async function makeDockerFixture(directory) {
   const folder = join(directory, "docker-fixture");
   await mkdir(folder);
   const source = join(folder, "Program.cs");
@@ -13,9 +14,44 @@ using System.IO;
 using System.Threading;
 class Program {
   static int Main(string[] args) {
+    if (args.Length > 1 && args[0] == "complete") {
+      if (args[args.Length - 1].StartsWith("dotnet ")) Console.WriteLine("--list-sdks");
+      return 0;
+    }
+    if (args.Length > 1 && args[0] == "__complete") {
+      string prefix = args[args.Length - 1];
+      string command = String.Join(" ", args, 1, args.Length - 2);
+      string[] options = null;
+      if (command == "") options = new[] { "container", "compose" };
+      if (command == "container") options = new[] { "inspect", "logs", "start", "stop" };
+      if (command == "compose") options = new[] { "logs", "ps", "up" };
+      if (command == "container logs" || command == "compose logs") options = new[] { "--tail", "--follow", "-f" };
+      if (command == "compose up") options = new[] { "--build", "-d" };
+      foreach (string option in options ?? new string[0]) if (option.StartsWith(prefix)) Console.WriteLine(option);
+      Console.WriteLine(":4");
+      return 0;
+    }
+    string context = Environment.GetEnvironmentVariable("DOCKER_CONTEXT");
+    if (args.Length > 2 && args[0] == "--context") {
+      context = args[1];
+      string[] remaining = new string[args.Length - 2];
+      Array.Copy(args, 2, remaining, 0, remaining.Length);
+      args = remaining;
+    }
+    if (args.Length >= 3 && args[0] == "compose" && args[args.Length-2] == "config" && args[args.Length-1] == "--services") {
+      string project = args.Length == 5 && (args[1] == "-f" || args[1] == "--file") ? args[2] :
+        Environment.GetEnvironmentVariable("COMPOSE_FILE");
+      string path = Path.Combine(Environment.CurrentDirectory, String.IsNullOrEmpty(project) ? "compose.yaml" : project);
+      if (!File.Exists(path)) return 1;
+      foreach (string service in File.ReadAllLines(path)) Console.WriteLine(service);
+      return 0;
+    }
     if (args.Length != 6 || String.Join(" ", args, 0, 5) != "container ls --all --no-trunc --format" ||
         args[5] != "{\\"ID\\":{{json .ID}},\\"Names\\":{{json .Names}}}") return 2;
-    string context = Environment.GetEnvironmentVariable("DOCKER_CONTEXT");
+    if (context == "fixture-explicit") {
+      Console.WriteLine("{\\"ID\\":\\"deadcafe\\",\\"Names\\":\\"web-explicit\\"}");
+      return 0;
+    }
     if (context == "fixture-offline" || context == "fixture-slow") {
       string root = Path.GetDirectoryName(typeof(Program).Assembly.Location);
       File.WriteAllText(Path.Combine(root, context + ".seen"), "1");
@@ -32,17 +68,33 @@ class Program {
     "Add-Type -Path $env:DIRLUME_TEST_DOCKER_SOURCE -OutputAssembly $env:DIRLUME_TEST_DOCKER_TARGET -OutputType ConsoleApplication"], {
     windowsHide: true, stdio: "pipe", env: { ...process.env, DIRLUME_TEST_DOCKER_SOURCE: source, DIRLUME_TEST_DOCKER_TARGET: target },
   });
+  await copyFile(target, join(folder, "dotnet.exe"));
   return folder;
 }
 
-export async function testCommandCompletion(page, root) {
+export async function testCommandCompletion(page, root, docker) {
+  async function setEnvironmentRefresh(enabled) {
+    const tool = await openOptionsWindow(page);
+    const options = tool.getByRole("dialog", { name: "Options", exact: true });
+    await options.getByRole("searchbox", { name: "Search settings", exact: true }).fill("refresh environment variables");
+    await options.getByRole("button", { name: "Terminal", exact: true }).click();
+    const refresh = options.getByRole("checkbox", { name: "Automatically refresh environment variables", exact: true });
+    const previous = await refresh.isChecked();
+    await refresh.setChecked(enabled);
+    await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
+    return previous;
+  }
+  // Use the environment of this isolated app process for the synthetic Docker executable.
+  const previousRefresh = await setEnvironmentRefresh(false);
   const cwd = join(root, "completion");
   await mkdir(cwd);
   const childFolder = join(cwd, "completion folder", "Child Folder");
   await mkdir(childFolder, { recursive: true });
   await writeFile(join(cwd, "completion folder", "Child File.txt"), "");
   await writeFile(join(cwd, "completion file.txt"), "");
-  const docker = await makeDockerFixture(root);
+  await writeFile(join(cwd, "compose.yaml"), "web\nworker\n");
+  await writeFile(join(cwd, "alternate.yaml"), "web-alternate\nqueue\n");
+  await writeFile(join(childFolder, "compose.yaml"), "web-child\nworker-child\n");
   const git = (...args) => execFileSync("git", args, { cwd, stdio: "ignore", windowsHide: true });
   git("init", "-q");
   git("-c", "user.name=Dirlume", "-c", "user.email=dirlume@example.invalid",
@@ -74,6 +126,23 @@ export async function testCommandCompletion(page, root) {
   await input.press("ArrowDown");
   await input.press("Enter");
   assert.equal(await input.inputValue(), "reg query");
+  await draft("docker co", "container");
+  await option("compose").waitFor();
+  await draft("docker container logs --ta", "--tail");
+  await draft("docker --context fixture-explicit container logs --tail 20 we", "web-explicit");
+  assert.equal(await option("web-api").count(), 0);
+  await draft("docker container inspect aabb", /^aabbccddeeff/);
+  await draft("docker compose lo", "logs");
+  await draft("docker compose up --bu", "--build");
+  await draft("docker compose logs -", "-f");
+  await option("--follow").waitFor();
+  await draft("docker compose up wo", "worker");
+  await draft("docker compose --file alternate.yaml logs --tail 20 we", "web-alternate");
+  await input.fill('docker compose logs --tail 20 "we" --follow');
+  await input.press("End");
+  for (let step = 0; step < " --follow".length; step++) await input.press("ArrowLeft");
+  await option("web").click();
+  assert.equal(await input.inputValue(), 'docker compose logs --tail 20 "web" --follow');
   await draft("git checkout fixture-", "fixture-completion");
   await input.press("Tab");
   assert.equal(await input.inputValue(), "git checkout fixture-completion");
@@ -90,6 +159,7 @@ export async function testCommandCompletion(page, root) {
   await option(/completion folder/).click();
   assert.match(await input.inputValue(), /^cd .*completion folder/);
 
+  await setEnvironmentRefresh(true);
   for (const suffix of ["first", "second", "first"]) {
     const value = `Write-Output 'completion-history-${suffix}'`;
     await input.fill(value);
@@ -112,19 +182,20 @@ export async function testCommandCompletion(page, root) {
   const terminalInput = terminal.locator(".xterm-helper-textarea");
   const terminalOptions = terminal.getByRole("listbox", { name: "Command suggestions", exact: true });
   const screen = terminal.locator(".xterm-accessibility-tree");
+  const atPrompt = () => page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
+  await atPrompt();
+  // Keep the completion fixture first in this PowerShell session after an environment refresh.
+  await terminalInput.pressSequentially(`$env:PATH = '${docker.replaceAll("'", "''")};' + $env:PATH; Write-Output ('fixture-' + 'cli-ready')`);
+  await terminalInput.press("Enter");
+  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("fixture-cli-ready"));
+  await atPrompt();
   const samples = [
     ["ipconfig /re", ["/release", "/renew"]],
     ["cmd /c dir /", ["/b"]],
     ["Get-ChildItem -Rec", ["-Recurse"]],
     ["dir -Rec", ["-Recurse"]],
+    ["dotnet ", ["--list-sdks"]],
   ];
-  try {
-    if (execFileSync("dotnet", ["--list-sdks"], { encoding: "utf8", windowsHide: true }).trim()) {
-      samples.push(["dotnet ", ["--list-sdks"]]);
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
   for (const [line, candidates] of samples) {
     await terminalInput.pressSequentially(line);
     for (const name of candidates) await terminalOptions.getByRole("option", { name, exact: true }).waitFor({ timeout: 15000 });
@@ -144,7 +215,6 @@ export async function testCommandCompletion(page, root) {
   await screen.getByText(/git checkout --quiet/).waitFor();
   await terminalInput.press("Control+c");
   const terminalOption = (name) => terminalOptions.getByRole("option", { name, exact: true });
-  const atPrompt = () => page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
   const cancel = async () => { await terminalInput.press("Control+c"); await atPrompt(); };
   await atPrompt();
   const drive = parse(process.env.SystemRoot ?? cwd).root;
@@ -171,11 +241,15 @@ export async function testCommandCompletion(page, root) {
   await terminalInput.press("Enter");
   await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, childFolder);
 
+  let commandNumber = 0;
   const remember = async (line) => {
-    await terminalInput.pressSequentially(line);
+    const number = ++commandNumber;
+    const command = `${line}; Write-Output ('completion-ready-' + '${number}')`;
+    await terminalInput.pressSequentially(command);
     await terminalInput.press("Enter");
     await page.waitForFunction((expected) => JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]")
-      .some(({ text }) => text === expected), line);
+      .some(({ text }) => text === expected), command);
+    await screen.getByText(`completion-ready-${number}`, { exact: true }).waitFor();
     await atPrompt();
   };
   await remember(`$env:Path = '${docker.replaceAll("'", "''")};' + $env:Path; $env:DOCKER_CONTEXT = 'fixture-active'`);
@@ -201,6 +275,19 @@ export async function testCommandCompletion(page, root) {
   await terminalInput.press("Escape");
   await terminalOptions.waitFor({ state: "hidden" });
   await cancel();
+  await terminalInput.pressSequentially("docker compose up wo");
+  await terminalOption("worker-child").waitFor();
+  await cancel();
+  await remember("Set-Location ../..; $env:COMPOSE_FILE = 'alternate.yaml'");
+  await page.waitForFunction((path) => document.querySelector(".terminal-card:not([hidden]) header span")?.textContent === path, cwd);
+  await terminalInput.pressSequentially("docker compose logs --tail 20 we");
+  await terminalOption("web-alternate").waitFor();
+  assert.equal(await terminalOption("web-api").count(), 0);
+  await cancel();
+  await terminalInput.pressSequentially("docker compose up --bu");
+  await terminalOption("--build").waitFor();
+  await cancel();
+  await remember("Set-Location -LiteralPath './completion folder/Child Folder'");
   await remember("$env:DOCKER_CONTEXT = 'fixture-offline'");
   await terminalInput.pressSequentially("docker container logs web");
   const dockerObserved = (name) => page.waitForFunction(async ({ docker, name }) =>
@@ -218,5 +305,6 @@ export async function testCommandCompletion(page, root) {
   assert.equal(await terminalOption("web-api").count(), 0);
   await cancel();
   await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
-  console.log("Verified Windows terminal completion for drive roots, nested folders, Docker commands and active-context containers.");
+  if (!previousRefresh) await setEnvironmentRefresh(false);
+  console.log("Verified Windows completion for folders, Docker flags and containers, and Compose projects in both inputs.");
 }

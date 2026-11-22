@@ -74,16 +74,34 @@ function BreadcrumbTrack({ clip, track, ancestors, current, goTo }: {
   </div>;
 }
 
-export function ReadOnlyAddressBreadcrumbs({ place, path }: { place: FileLocation; path: string }) {
+export function CompactAddressBreadcrumbs({ place, path, goTo }: {
+  place: FileLocation; path: string; goTo?: (place: FileLocation) => void;
+}) {
   // A volume or share can be scanned without loading a directory listing first.
   const target = place.kind === "local" && place.parent === null ? { ...place, parent: parentPath(place.path, windowsClient) } : place;
   const ancestors = breadcrumbPlaces(target).slice(0, -1);
   const { clip, track, clipped } = useBreadcrumbClip();
   const shortened = clipped || (ancestors.length === 3 && Boolean(parentPlace(ancestors[0])));
+  const [overflow, setOverflow] = useState(false);
+  const overflowButton = useRef<HTMLButtonElement>(null);
 
-  return <div className="address-breadcrumbs" role="group" aria-label={path} title={path}>
-    <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} current={folderLabel(target)} />
-    {shortened && <span className="address-overflow address-ellipsis" aria-hidden="true">…</span>}
+  return <div className="address-breadcrumbs" role="group" aria-label={path} title={path} onBlur={(event) => {
+    if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) setOverflow(false);
+  }} onKeyDown={(event) => {
+    if (event.key !== "Escape" || !overflow) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setOverflow(false);
+    overflowButton.current?.focus();
+  }}>
+    <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} current={folderLabel(target)} goTo={goTo} />
+    {shortened && (goTo ? <Button ref={overflowButton} type="button" className="icon-button address-overflow"
+      aria-label={t("Show parent folders")} aria-expanded={overflow} onClick={() => setOverflow(!overflow)}>…</Button> :
+      <span className="address-overflow address-ellipsis" aria-hidden="true">…</span>)}
+    {shortened && overflow && goTo && <div className="location-popup address-parents">
+      {breadcrumbPlaces(target, Infinity).slice(0, -1).map((ancestor) => <Button type="button" key={placeKey(ancestor)}
+        tooltip={placePath(ancestor)} onClick={() => { setOverflow(false); goTo(ancestor); }}>{folderLabel(ancestor)}</Button>)}
+    </div>}
   </div>;
 }
 

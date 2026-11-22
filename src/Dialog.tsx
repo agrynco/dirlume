@@ -22,7 +22,7 @@ export function saveDialogSize(key: string, size: Dimensions) {
 }
 
 export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownCapture,
-  wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, helpTopic, contextHelp = false }: {
+  wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, font, helpTopic, contextHelp = false }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -35,6 +35,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   suspended?: boolean;
   dismissOnOutside?: boolean;
   tone?: "warning";
+  font?: "options";
   helpTopic?: HelpTopic;
   contextHelp?: boolean;
 }) {
@@ -94,7 +95,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
 
   return (
     <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
-      style={size} data-tone={tone} data-help-topic={helpTopic} data-context-help={contextHelp || undefined} aria-labelledby={heading} onKeyDown={(event) => {
+      style={size} data-tone={tone} data-font={font} data-help-topic={helpTopic} data-context-help={contextHelp || undefined} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
       }}
       onKeyDownCapture={(event) => {

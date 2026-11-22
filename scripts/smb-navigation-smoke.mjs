@@ -50,9 +50,10 @@ export async function testSmbNavigation() {
               const { promptToken, ssh } = args.request;
               if (!ssh) return false;
               window.terminalWrites = [];
-              window.sshPrompt = (path) => {
+              window.sshPrompt = (path, environment) => {
                 const encode = (value) => btoa(String.fromCharCode(...new TextEncoder().encode(value)));
-                args.output.onmessage({ event: "data", data: encode(`\x1b]2;${promptToken}:0:${encode(path)}:::bash:${encode("/fixture/bin:/usr/bin")}\x07`) });
+                const encodedEnvironment = environment ? ":" + encode(environment) : "";
+                args.output.onmessage({ event: "data", data: encode(`\x1b]2;${promptToken}:0:${encode(path)}:::bash:${encode("/fixture/bin:/usr/bin")}${encodedEnvironment}\x07`) });
               };
               return true;
             }
@@ -64,6 +65,10 @@ export async function testSmbNavigation() {
               window.lastSshCompletion = { id: args.id, ...args.request };
               if (args.request.line.startsWith("remote-fi")) {
                 return { index: 0, length: args.request.line.length, matches: [{ label: "remote-fixture", text: "remote-fixture", directory: false }] };
+              }
+              if (args.request.line === "docker compose logs --tail 20 we" && args.request.shellEnvironment?.COMPOSE_FILE === "remote.yaml" &&
+                  args.request.shellEnvironment?.DOCKER_CONTEXT === "remote-engine") {
+                return { index: args.request.caret - 2, length: 2, matches: [{ label: "web-remote", text: "web-remote", directory: false }], exclusive: true };
               }
               return { index: 0, length: 0, matches: [] };
             }
@@ -205,7 +210,7 @@ export async function testSmbNavigation() {
     const suggestions = sshTerminal.getByRole("listbox", { name: "Command suggestions", exact: true });
     await suggestions.getByRole("option", { name: "remote-fixture", exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.lastSshCompletion), {
-      id: 1, line: "remote-fi", caret: 9, directory: "/var/log", searchPath: "/fixture/bin:/usr/bin",
+      id: 1, line: "remote-fi", caret: 9, directory: "/var/log", searchPath: "/fixture/bin:/usr/bin", shellEnvironment: undefined,
     });
     assert.equal(await page.evaluate(() => !!window.unexpectedLocalCompletion), false);
     await sshInput.press("Tab");
@@ -214,7 +219,16 @@ export async function testSmbNavigation() {
     await sshInput.pressSequentially("private-input");
     await suggestions.waitFor({ state: "hidden" });
     assert.equal(await page.evaluate(() => window.lastSshCompletion.line), "remote-fi");
-    await page.evaluate(() => window.sshPrompt("/var/log"));
+    await page.evaluate(() => window.sshPrompt("/var/log", "COMPOSE_FILE=remote.yaml\0DOCKER_CONTEXT=remote-engine\0COMPOSE_PROFILES\0"));
+    await sshInput.pressSequentially("docker compose logs --tail 20 we");
+    await suggestions.getByRole("option", { name: "web-remote", exact: true }).waitFor();
+    const remoteDraft = await page.evaluate(() => window.lastSshCompletion);
+    assert.deepEqual(remoteDraft.shellEnvironment, { COMPOSE_FILE: "remote.yaml", DOCKER_CONTEXT: "remote-engine", COMPOSE_PROFILES: null });
+    assert.equal(remoteDraft.directory, "/var/log");
+    assert.equal(remoteDraft.id, 1);
+    assert.equal(await page.evaluate(() => !!window.unexpectedLocalCompletion), false);
+    await sshInput.press("Tab");
+    await page.waitForFunction(() => window.terminalWrites.at(-1)?.endsWith("web-remote"));
     await sshInput.focus();
     await right.focus();
     await terminalHint.waitFor({ state: "hidden" });

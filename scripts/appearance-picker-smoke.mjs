@@ -74,7 +74,7 @@ export async function testAppearancePicker() {
           if (command === "file_icons") return [];
           if (command === "read_text") return { text: "Fixture text", encoding: "utf8" };
           if (command === "open_terminal") return false;
-          if (command === "installed_fonts") return ["Arial"];
+          if (command === "installed_fonts") return ["Arial", "Courier New"];
           return null;
         },
       };
@@ -84,6 +84,41 @@ export async function testAppearancePicker() {
     const options = optionsDialog(page);
     const selectPage = (name) => options.getByRole("navigation", { name: "Options sections" }).getByRole("button", { name, exact: true }).click();
     const done = () => options.getByRole("button", { name: "Done", exact: true }).click();
+    const size = (name) => options.getByRole("spinbutton", { name: name + " font size", exact: true });
+    const verifySteps = async (field, inherited) => {
+      assert.equal(await field.inputValue(), String(inherited));
+      await field.hover();
+      const { width, height } = await field.boundingBox();
+      const padding = await field.evaluate((input) => parseFloat(getComputedStyle(input).paddingRight));
+      for (const [y, delta] of [[height / 3, 1], [height * 2 / 3, -1]]) {
+        await field.click({ position: { x: width - padding - 5, y } });
+        assert.equal(await field.inputValue(), String(inherited + delta));
+        await field.fill("");
+        await field.blur();
+      }
+      for (const [key, delta] of [["ArrowUp", 1], ["ArrowDown", -1]]) {
+        await field.press(key);
+        assert.equal(await field.inputValue(), String(inherited + delta));
+        await field.fill("");
+        await field.blur();
+      }
+    };
+    await open();
+    await selectPage("Fonts");
+    await verifySteps(size("File pane dialogs"), 14);
+    await size("Main window").fill("18");
+    await verifySteps(size("File pane dialogs"), 18);
+    await size("File pane dialogs").fill("24");
+    await size("File pane dialogs").press("ArrowUp");
+    assert.equal(await size("File pane dialogs").inputValue(), "24");
+    await size("File pane dialogs").press("ArrowDown");
+    assert.equal(await size("File pane dialogs").inputValue(), "23");
+    await size("File pane dialogs").fill("");
+    await size("File panels").fill("18");
+    await selectPage("View font sizes");
+    await verifySteps(size("Left file pane"), 18);
+    await page.keyboard.press("Escape");
+    await options.waitFor({ state: "hidden" });
     const start = async () => {
       await pickerButton(page).click();
       await overlay(page).waitFor();
@@ -255,6 +290,58 @@ export async function testAppearancePicker() {
     assert.equal(await preview.evaluate((frame) => getComputedStyle(frame).backgroundImage), gradient);
     await done();
     await page.waitForFunction((image) => getComputedStyle(document.body).backgroundImage === image, gradient);
+    await page.evaluate(() => {
+      const key = "dirlume.preferences.v1";
+      const preferences = JSON.parse(localStorage.getItem(key));
+      preferences.activeScheme = "legacy-dialog-font";
+      preferences.schemes.push({ id: "legacy-dialog-font", name: "Legacy dialog font", base: "light", colors: {},
+        fonts: { ui: { size: 15 }, dialog: { size: 18, family: "Arial" } } });
+      localStorage.setItem(key, JSON.stringify(preferences));
+    });
+    await page.reload();
+    await open();
+    await options.getByRole("searchbox", { name: "Search settings" }).fill("");
+    const fontStyle = (element) => element.evaluate((node) => [getComputedStyle(node).fontSize, getComputedStyle(node).fontFamily]);
+    let [pixels, family] = await fontStyle(options);
+    assert.equal(pixels, "18px");
+    assert.match(family, /^Arial,/);
+    await selectPage("Dialogs");
+    assert.equal(await size("File pane dialogs").inputValue(), "18");
+    assert.equal(await size("Options window").inputValue(), "18");
+    const optionFamily = options.getByRole("combobox", { name: "Options window font family", exact: true });
+    await optionFamily.fill("Courier New");
+    await size("Options window").fill("14");
+    await selectPage("Fonts");
+    assert.equal(await size("Options window").inputValue(), "14");
+    assert.equal(await size("File pane dialogs").inputValue(), "18");
+    assert.equal(await fontStyle(options.locator(".preview-dialog").first()).then(([size]) => size), "18px");
+    assert.equal(await fontStyle(options.locator(".preview-options")).then(([size]) => size), "14px");
+    await options.getByRole("button", { name: "Apply", exact: true }).click();
+    [pixels, family] = await fontStyle(options.getByRole("button", { name: "General", exact: true }));
+    assert.equal(pixels, "14px");
+    assert.match(family, /^"?Courier New"?,/);
+    await done();
+    await row.click();
+    await page.keyboard.press("F5");
+    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+    [pixels, family] = await fontStyle(copy.getByRole("combobox", { name: "Destination" }));
+    assert.equal(pixels, "18px");
+    assert.match(family, /^Arial,/);
+    await copy.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.reload();
+    await open();
+    await selectPage("Dialogs");
+    assert.equal(await size("Options window").inputValue(), "14");
+    await options.getByRole("button", { name: "Reset options window font", exact: true }).click();
+    assert.equal(await size("Options window").inputValue(), "15");
+    assert.equal(await size("File pane dialogs").inputValue(), "18");
+    await done();
+    await page.reload();
+    await open();
+    await selectPage("Fonts");
+    assert.equal(await size("Options window").inputValue(), "15");
+    assert.equal(await size("File pane dialogs").inputValue(), "18");
+    await done();
     console.log("Verified appearance targets, grouped controls, draft preview, cancellation, and private date-grouped history.");
   } finally {
     await browser.close();

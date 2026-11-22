@@ -1,9 +1,11 @@
 import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
+import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
+import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath } from "./panes";
 import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
@@ -82,6 +84,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
     ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
     : destination;
+  const lockingMove = phase === "done" && windowsClient && blocked?.place.kind === "local" && moving && isLockError(error);
 
   useEffect(() => {
     if (phase === "done") action.current?.focus();
@@ -208,12 +211,12 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
                 label={t("Destination {0}", index + 2)} historyKey="transfer-destination" value={path} required
                 onChange={(value) => setAdditional((current) => current.map((old, offset) => offset === index ? value : old))}
                 showHidden={showHidden} server={transfer.remoteDestination} browse="folder" />)}
-              <div className="transfer-destination-actions">
-                <Button type="button" onClick={() => setAdditional([...additional, ""])}>{t("Add destination")}</Button>
-                <Button type="button" onClick={() => {
+              <div className="dialog-action-group">
+                <DialogIconButton label={t("Add destination")} onClick={() => setAdditional([...additional, ""])}><Plus /></DialogIconButton>
+                <DialogIconButton label={t("Remove last destination")} onClick={() => {
                   if (additional.length === 1) setMultipleDestinations(false);
                   else setAdditional(additional.slice(0, -1));
-                }}>{t("Remove last destination")}</Button>
+                }}><Trash2 /></DialogIconButton>
               </div>
             </>}
             {localCopy && <label className="setting"><span>{t("Access rights")}</span>
@@ -282,25 +285,22 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
                 <progress aria-label={t("Overall transfer progress")} max={copies} value={processed} />
                 {phase === "done" && <p role="status">{t("{0} completed", completed)}{skipped ? `, ${t("{0} skipped", skipped)}` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+                {lockingMove && <div className="dialog-actions">
+                  <Button type="button" onClick={() => {
+                    const paths = [placePath(childPlace(blocked.place, blocked.entry.name))];
+                    if (/^(?:[a-z]:[\\/]|\\\\)/i.test(destination)) {
+                      paths.push(placePath(childPlace(localPath(destination), blocked.entry.name)));
+                    }
+                    setLockPaths(paths);
+                  }}>{t("Find locking processes")}</Button>
+                </div>}
                 {localTarget && windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
                   <ElevationButton directory={blocked.place.path} />}
           </div>
           <footer className="dialog-footer">
             {phase === "done" ? (
               <>
-                {windowsClient && blocked?.place.kind === "local" && moving && isLockError(error) && (
-                  <>
-                    <Button type="button" onClick={() => {
-                      if (!blocked || blocked.place.kind !== "local") return;
-                      const paths = [placePath(childPlace(blocked.place, blocked.entry.name))];
-                      if (/^(?:[a-z]:[\\/]|\\\\)/i.test(destination)) {
-                        paths.push(placePath(childPlace(localPath(destination), blocked.entry.name)));
-                      }
-                      setLockPaths(paths);
-                    }}>{t("Find locking processes")}</Button>
-                    <Button type="button" onClick={() => setPhase("setup")}>{t("Retry")}</Button>
-                  </>
-                )}
+                {lockingMove && <Button type="button" onClick={() => setPhase("setup")}>{t("Retry")}</Button>}
                 <Button ref={action} type="button" className="primary" onClick={onClose}>{t("Done")}</Button>
               </>
             ) : (
@@ -330,7 +330,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
         <footer className="dialog-footer">
           {conflict.replaceable && (
             <Button type="button" className="alert-confirm" disabled={answering === conflict}
-              onClick={() => { void resolve("overwrite"); }}>{t("Overwrite")}</Button>
+              onClick={() => { void resolve("overwrite"); }}>{t(conflict.directory ? "Merge" : "Overwrite")}</Button>
           )}
           <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>{t("Skip")}</Button>
           <Button type="button" onClick={cancel}>{t("Cancel")}</Button>

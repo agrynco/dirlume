@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { Button } from "./Button";
+import { Plus } from "lucide-react";
+import { DialogIconButton, RowOrderActions } from "./DialogActions";
 import { t } from "./i18n";
 import { panelFields, panelNameOptions, isNameField, panelWidthsFit, validPanelWidth, type PanelColumn, type PanelField, type PanelMode, type PanelNameOption } from "./panelModes";
 import { SettingSearchLabel } from "./SettingSearchLabel";
@@ -38,14 +38,9 @@ function ColumnSettings({ columns, status, onChange }: {
         <input type="text" aria-label={t("{0}, field {1}", t(widthLabel), index + 1)} aria-invalid={!valid}
           aria-describedby={valid ? undefined : `panel-width-${status}-${index}`}
           value={column.width} onChange={(event) => set(index, { ...column, width: event.target.value })} />
-        <div className="panel-mode-field-actions">
-          <Button type="button" className="icon-button" aria-label={t("Move field {0} up", index + 1)}
-            disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUp /></Button>
-          <Button type="button" className="icon-button" aria-label={t("Move field {0} down", index + 1)}
-            disabled={index === columns.length - 1} onClick={() => move(index, index + 1)}><ArrowDown /></Button>
-          <Button type="button" className="icon-button" aria-label={t("Remove field {0}", index + 1)}
-            onClick={() => onChange(columns.filter((_, i) => i !== index))}><Trash2 /></Button>
-        </div>
+        <RowOrderActions up={t("Move field {0} up", index + 1)} down={t("Move field {0} down", index + 1)}
+          remove={t("Remove field {0}", index + 1)} first={index === 0} last={index === columns.length - 1}
+          onMove={(offset) => move(index, index + offset)} onRemove={() => onChange(columns.filter((_, i) => i !== index))} />
         {!valid && <p className="dialog-error" role="alert" id={`panel-width-${status}-${index}`}>
           {t("Enter 0 for automatic, a character count from 1 to 999, or a percentage from 1% to 100%.")}
         </p>}
@@ -55,7 +50,7 @@ function ColumnSettings({ columns, status, onChange }: {
       <p className="dialog-error" role="alert">{t("Percentage widths must add up to 100% or less.")}</p>}
     {!status && !columns.some(({ field }) => isNameField(field)) &&
       <p className="dialog-error" role="alert">{t("Include at least one name field in the file list.")}</p>}
-    <Button type="button" onClick={() => onChange([...columns, { field: "name", width: "0" }])}><Plus /> {t("Add field")}</Button>
+    <DialogIconButton label={t("Add field")} onClick={() => onChange([...columns, { field: "name", width: "0" }])}><Plus /></DialogIconButton>
   </fieldset>;
 }
 

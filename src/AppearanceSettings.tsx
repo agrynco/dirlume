@@ -22,7 +22,8 @@ import { SettingSearchLabel } from "./SettingSearchLabel";
 import { pickedSurface, type AppearancePick } from "./appearancePick";
 
 export type AppearanceSection = keyof typeof colorGroups | "fonts";
-const sharedFonts = ["ui", "panel", "dialog", "mono"] as const;
+const dialogFonts = ["dialog", "options"] as const;
+const sharedFonts = ["ui", "panel", ...dialogFonts, "mono"] as const;
 
 export function ViewFontSettings({ preferences, onChange, views }: {
   preferences: Preferences;
@@ -82,7 +83,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     fontGroup === "viewer" || fontGroup === "editor" || fontGroup === "terminal" ? optionSurfaces[fontGroup] :
       section === "text" ? optionSurfaces.text : [];
   const groups = surfaces.length ? [] : selection ? selection.font ? [selection.font] : [] :
-    fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : [];
+    fontGroup ? [fontGroup] : section === "fonts" ? sharedFonts : section === "dialogs" ? dialogFonts : [];
   const showingFonts = groups.length > 0 || surfaces.length > 0;
   const colorSections = selection || section === "fonts" ? [] : section === "panels" && fontGroup === "panel" ? ["panels", "files"] as const : [section];
 
@@ -109,7 +110,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
     const name = number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number);
     const scheme: Scheme = {
-      id: `scheme-${number}`, name, base, colors, fonts,
+      id: `scheme-${number}`, name, base, colors, fonts: { ...fonts, options: fonts.options ?? {} },
       ...(automaticName ? { suggestedName: name } : {}),
     };
     setManagedId(scheme.id);
@@ -124,7 +125,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   }
 
   function setFont(group: FontGroup, font?: Font) {
-    const fonts = { ...applied?.fonts, [group]: font };
+    const fonts = { ...applied?.fonts, [group]: group === "options" ? font ?? {} : font };
     const viewFontSizes = { ...preferences.viewFontSizes };
     for (const view of viewFontKeys) {
       const viewGroup = viewFonts[view].group;
@@ -407,28 +408,32 @@ function FontSizeInput({ label, size, fallback, min, max, disabled, onChange }: 
   onChange: (size?: number) => void;
 }) {
   return <OptionalNumberInput label={t("{0} font size", t(label))} size={size} fallback={String(fallback)}
-    min={min} max={max} disabled={disabled} onChange={onChange} />;
+    inherited={fallback} min={min} max={max} disabled={disabled} onChange={onChange} />;
 }
 
-export function OptionalNumberInput({ label, size, fallback, min, max, disabled, onChange }: {
+export function OptionalNumberInput({ label, size, fallback, inherited, min, max, disabled, onChange }: {
   label: string;
   size?: number;
   fallback: string;
+  inherited?: number;
   min: number;
   max: number;
   disabled?: boolean;
   onChange: (size?: number) => void;
 }) {
-  const [text, setText] = useState(String(size ?? ""));
-  useEffect(() => setText(String(size ?? "")), [size]);
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? String(size ?? inherited ?? "");
 
   return <input aria-label={label} type="number" min={min} max={max}
-    value={text} placeholder={fallback} disabled={disabled} onBlur={() => setText(String(size ?? ""))}
+    value={value} placeholder={fallback} disabled={disabled} onBlur={() => setDraft(null)}
     onChange={(event) => {
       const { value, valueAsNumber, validity } = event.target;
-      setText(value);
-      if (validity.badInput) return;
-      if (!value) onChange();
-      else if (Number.isInteger(valueAsNumber) && valueAsNumber >= min && valueAsNumber <= max) onChange(valueAsNumber);
+      if (!validity.badInput && value && Number.isInteger(valueAsNumber) && valueAsNumber >= min && valueAsNumber <= max) {
+        setDraft(null);
+        onChange(valueAsNumber);
+      } else {
+        setDraft(value);
+        if (!value && !validity.badInput) onChange();
+      }
     }} />;
 }

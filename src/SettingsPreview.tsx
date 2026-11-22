@@ -10,6 +10,23 @@ import { pickedSurface, pickLabel, type AppearancePick } from "./appearancePick"
 
 type PreviewPage = AppearanceSection | FeaturePage | "viewFonts" | "general" | "shortcuts";
 
+function DialogFontSamples() {
+  return <div className="preview-dialogs">
+    <div className="preview-dialog">
+      <div className="preview-dialog-label">{t(fontGroups.dialog.label)}</div>
+      <strong>{t("Copy report.pdf")}</strong>
+      <div className="preview-field">{t("Downloads")}</div>
+      <div className="preview-dialog-actions"><span className="preview-primary">{t("Copy")}</span></div>
+    </div>
+    <div className="preview-dialog preview-options">
+      <div className="preview-dialog-label">{t(fontGroups.options.label)}</div>
+      <strong>{t("Appearance")}</strong>
+      <div className="preview-field">{t("Color scheme")}</div>
+      <div className="preview-dialog-actions"><span className="preview-primary">{t("Apply")}</span></div>
+    </div>
+  </div>;
+}
+
 const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "recording.mp4", "backup.zip", "config.json", "setup.exe"];
 const hiddenSample = { name: ".env", hidden: true };
 const systemSample = { name: "System Volume Information", directory: true, hidden: true, system: true };
@@ -97,11 +114,7 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
       <h3>{t("Preview")}</h3>
       <div className="preview-frame" ref={preview}>
         {pick ? surface ? <SurfacePreview surface={surface} preferences={preferences} /> : <PickPreview pick={pick} preferences={preferences} /> : page === "dialogs" ? (
-          <div className="preview-dialog">
-            <strong>{t("Copy report.pdf")}</strong>
-            <div className="preview-field">{t("Downloads")}</div>
-            <div className="preview-dialog-actions"><span>{t("Cancel")}</span><span className="preview-primary">{t("Copy")}</span></div>
-          </div>
+          <DialogFontSamples />
         ) : fontViews ? (
           <dl className="preview-view-fonts">
             {fontViews.map((view) => {
@@ -127,6 +140,7 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
             </div>
           ) : (
             <>
+              {page === "fonts" && <DialogFontSamples />}
               <div className="preview-toolbar"><FolderTree />{t("Project")}<span className="preview-toolbar-action">{t("Connect")}</span></div>
               <div className={page === "fonts" ? "preview-fonts" : undefined}>
                 <Samples hidden={preferences.hidden} all={false} showMarkedCursor={page === "panels" || page === "filePanels"} />

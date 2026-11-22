@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronDown, ChevronRight, Crosshair, Pencil, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { Dialog } from "./Dialog";
+import { DialogDisclosure, DialogIconButton } from "./DialogActions";
 import { AppearanceSettings, OptionalNumberInput, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
@@ -39,10 +40,11 @@ const surfaceTerms = (surfaces: readonly Surface[]) => surfaces.flatMap((surface
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
     id: id as AppearanceSection, label: group.label,
-    terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : [])],
+    terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : []),
+      ...(id === "dialogs" ? [fontGroups.dialog.label, fontGroups.options.label, "font family size"] : [])],
   })),
   { id: "fonts" as const, label: "Fonts", terms: [fontGroups.ui.label, fontGroups.panel.label,
-    fontGroups.dialog.label, fontGroups.mono.label, "family size installed"] },
+    fontGroups.dialog.label, fontGroups.options.label, fontGroups.mono.label, "family size installed"] },
   { id: "viewFonts" as const, label: "View font sizes", terms: [...Object.values(viewFonts).map(({ label }) => label), "zoom wheel"] },
 ];
 
@@ -354,23 +356,11 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
 
   return <SettingsSearchTerms value={terms}>
-    <Dialog title={t("Options")} helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
+    <Dialog title={t("Options")} font="options" helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
       wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
       {saveError && <p className="dialog-error settings-save-error" role="alert">
         {t("Could not save settings. Try again, or close Options to discard unapplied changes.")} {saveError}
       </p>}
-      <div className="settings-archive-actions">
-        <Button type="button" disabled={loadingArchive} onClick={() => void startImport()}>{t("Import settings")}</Button>
-        <Button type="button" disabled={loadingArchive} onClick={() => setSettingsArchive({ kind: "export" })}>{t("Export settings")}</Button>
-      </div>
-      {!selection && page === "shortcuts" && (
-        <Button type="button" disabled={!activeScheme} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
-          <RotateCcw /> {t("Restore defaults")}
-        </Button>
-      )}
-      {!selection && modePage && <Button type="button" onClick={() => onChange({
-        ...preferences, panelModes: { ...preferences.panelModes, [modePage]: defaultPanelModes[modePage] },
-      })}><RotateCcw /> {t("Reset")}</Button>}
       {(standalone || modePage) && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
       <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={() => apply(false)}>{t("Apply")}</Button>
       <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => apply(true)}>{t("Done")}</Button>
@@ -457,6 +447,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
             {(isAppearance || selection) && <><span>{t("Appearance")}</span><ChevronRight aria-hidden="true" /></>}
             {!selection && modePage && <><span>{t("Panel modes")}</span><ChevronRight aria-hidden="true" /></>}
             <h3>{selection ? pickLabel(selection) : modePage ? panelModeName(modePage, preferences.panelModes) : t(title ?? "General")}</h3>
+            <DialogDisclosure className="settings-archive-actions" label={t("Settings archive")} actions={[
+              { label: t("Import settings"), disabled: loadingArchive, run: () => void startImport() },
+              { label: t("Export settings"), disabled: loadingArchive, run: () => setSettingsArchive({ kind: "export" }) },
+            ]} />
           </header>
           {!selection && page === "shortcuts" && <div className="shortcut-scheme-bar">
             <label><SettingSearchLabel label="Shortcut scheme" aliases={["keymap", "bindings"]} />
@@ -468,11 +462,21 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 {shortcutSchemes.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
               </select>
             </label>
-            <Button type="button" onClick={() => openSchemeDialog({ kind: "new", name: "" })}><Plus aria-hidden="true" /> {t("New scheme")}</Button>
-            <Button type="button" className="icon-button" aria-label={t("Rename shortcut scheme")} disabled={!activeScheme}
-              onClick={() => activeScheme && openSchemeDialog({ kind: "rename", name: activeScheme.name })}><Pencil aria-hidden="true" /></Button>
-            <Button type="button" className="icon-button" aria-label={t("Delete shortcut scheme")} disabled={!activeScheme}
-              onClick={() => openSchemeDialog({ kind: "delete" })}><Trash2 aria-hidden="true" /></Button>
+            <div className="dialog-action-group">
+              <DialogIconButton label={t("New scheme")} onClick={() => openSchemeDialog({ kind: "new", name: "" })}><Plus /></DialogIconButton>
+              <DialogIconButton label={t("Rename shortcut scheme")} disabled={!activeScheme}
+                onClick={() => activeScheme && openSchemeDialog({ kind: "rename", name: activeScheme.name })}><Pencil /></DialogIconButton>
+              <DialogIconButton label={t("Delete shortcut scheme")} disabled={!activeScheme}
+                onClick={() => openSchemeDialog({ kind: "delete" })}><Trash2 /></DialogIconButton>
+            </div>
+            <Button type="button" disabled={!activeScheme} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
+              <RotateCcw aria-hidden="true" /> {t("Restore defaults")}
+            </Button>
+          </div>}
+          {!selection && modePage && <div className="dialog-actions settings-scope-actions">
+            <Button type="button" onClick={() => onChange({
+              ...preferences, panelModes: { ...preferences.panelModes, [modePage]: defaultPanelModes[modePage] },
+            })}><RotateCcw aria-hidden="true" /> {t("Reset")}</Button>
           </div>}
           <div className="settings-page-body" ref={pageBody}>
       {selection ? <AppearanceSettings key={selection.id} section="fonts" selection={selection}

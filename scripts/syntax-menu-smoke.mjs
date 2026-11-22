@@ -12,15 +12,27 @@ export async function testSyntaxMenu() {
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
     await page.addInitScript(() => {
-      const path = "/fixture";
+      const path = /Windows/i.test(navigator.userAgent) ? "C:\\fixture\\nginx\\conf.d" : "/fixture/nginx/conf.d";
       const entry = { name: "source.txt", directory: false, link: false, hidden: false, size: 30, modified: null };
+      const site = { ...entry, name: "example.com" };
+      const siteText = [
+        "server {",
+        "  listen 443 ssl; # HTTPS",
+        "  return 301 https://$host$request_uri;",
+        '  add_header X-Site "site: ${host}#1";',
+        "}",
+      ].join("\n");
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args) => {
           if (command === "locations") return [{ label: "Home", path }];
-          if (command === "list_directory") return { path, parent: null, entries: [entry], omitted: 0 };
+          if (command === "list_directory") return { path, parent: null, entries: [entry, site, { ...site, name: "vhost.conf" }], omitted: 0 };
           if (command === "file_icons") return args.items.map(() => null);
-          if (command === "read_text") return { text: "fn main() { let ready = true; }", encoding: "utf8" };
+          if (command === "read_text") return { text: args.name === entry.name ? "fn main() { let ready = true; }" : siteText, encoding: "utf8" };
+          if (command === "ssh_profiles") return [{ id: "ssh", label: "SSH fixture", host: "fixture", port: 22 }];
+          if (command === "connect_ssh") return { kind: "connected", id: 1, address: "fixture", origin: "sftp://fixture",
+            segments: ["etc", "nginx", "sites-enabled"], listing: { entries: [site], omitted: 0, elevated: false } };
+          if (command === "read_ssh_text") return { text: siteText, encoding: "utf8", revision: "1" };
           return null;
         },
       };
@@ -93,6 +105,42 @@ export async function testSyntaxMenu() {
     await syntax.click();
     await bar.getByRole("menuitem", { name: "Automatic", exact: true }).click();
     assert.match(await selector.textContent(), /Automatic/);
+    await document.getByRole("button", { name: "Close document", exact: true }).click();
+
+    for (const [name, mode] of [["vhost.conf", "Nginx"], ["example.com", "Plain text"]]) {
+      await list.getByRole("option", { name: new RegExp("^" + name.replace(".", "\\.")) }).click();
+      await list.press("F3");
+      const local = page.getByRole("region", { name, exact: true });
+      await local.getByText(`Automatic (${mode})`, { exact: true }).waitFor();
+      if (mode === "Plain text") {
+        await local.getByRole("button", { name: "Syntax", exact: true }).click();
+        await search.fill("Nginx");
+        await search.press("Enter");
+      }
+      await local.locator(".syntax-keyword").filter({ hasText: /^server$/ }).waitFor();
+      await local.getByRole("button", { name: "Close document", exact: true }).click();
+    }
+
+    const right = page.getByRole("listbox", { name: "right files", exact: true });
+    await right.press("Alt+F2");
+    await page.locator("#right-pane .location-popup").getByRole("button", { name: "SSH", exact: true }).click();
+    await right.getByRole("option", { name: /^SSH fixture/ }).click();
+    await right.press("Enter");
+    await right.getByRole("option", { name: /^example\.com/ }).click();
+    await right.press("F3");
+    const site = page.getByRole("region", { name: "example.com", exact: true });
+    for (const action of ["View", "Edit"]) {
+      if (action === "Edit") await site.press("F6");
+      await site.getByLabel(`${action} example.com`, { exact: true }).waitFor();
+      await site.getByText("Automatic (Nginx)", { exact: true }).waitFor();
+      await site.locator(".syntax-comment").filter({ hasText: /^# HTTPS$/ }).waitFor();
+      assert.deepEqual(await site.locator(".syntax-keyword").allTextContents(), ["server", "listen", "return", "add_header"]);
+      assert.deepEqual(await site.locator(".syntax-number").allTextContents(), ["443", "301"]);
+      assert.equal((await site.locator(".syntax-property").allTextContents()).join(""), "$host$request_uri${host}");
+      assert.deepEqual(await site.locator(".syntax-string").allTextContents(), ['"site: ', '#1"']);
+    }
+    await site.getByRole("button", { name: "Close document", exact: true }).click();
+    console.log("Verified automatic Nginx highlighting in the SFTP viewer and editor.");
     console.log("Verified searchable syntax selection, ranked aliases and extensions, focus restoration, and preserved editor drafts.");
   } finally {
     await browser.close();

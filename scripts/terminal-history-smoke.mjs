@@ -4,6 +4,10 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function testTerminalHistory({ page, root, startDesktop, exitDesktop }) {
+  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]"));
+  const navigation = ({ text }) => /Set-Location -LiteralPath/.test(text);
+  const entryKey = ({ text, date }) => JSON.stringify([text, date]);
+  const priorNavigation = new Set((await stored()).filter(navigation).map(entryKey));
   const left = join(root, "history-left");
   const right = join(root, "history-right");
   for (const [side, path] of [["left", left], ["right", right]]) {
@@ -24,7 +28,6 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
     await terminalInput().pressSequentially(line);
     await terminalInput().press("Enter");
   };
-  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]"));
   const waitForCommand = (text, count = 1) => page.waitForFunction(({ text, count }) => {
     const history = JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]");
     return history.filter((item) => item.text === text).length >= count;
@@ -64,15 +67,26 @@ export async function testTerminalHistory({ page, root, startDesktop, exitDeskto
   await input().press("Shift+Enter");
   await run("disposable-history-password");
   await waitForCommand(secure);
-  await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent?.includes("queued-history-marker"));
+  const waitForPowerShellPrompt = (after) => page.waitForFunction((after) => {
+    const lines = Array.from(document.querySelectorAll(".terminal-card:not([hidden]) .xterm-rows > div"),
+      (line) => line.textContent.trim()).filter(Boolean);
+    return (!after || lines.includes(after)) && /^PS .+>$/.test(lines.at(-1) ?? "");
+  }, after);
+  await waitForPowerShellPrompt("queued-history-marker");
   await terminalInput().pressSequentially("Write-Output 'abandoned-draft'");
+  await page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-rows")?.textContent.includes("abandoned-draft"));
   await terminalInput().press("Control+c");
+  await waitForPowerShellPrompt();
   await run("Write-Output 'history-after-cancel'");
   await waitForCommand("Write-Output 'history-after-cancel'");
   const history = await stored();
   assert.equal(history.filter(({ text }) => text === fromField).length, 1);
   assert.equal(history.filter(({ text }) => text === queued).length, 1);
-  assert.equal(history.some(({ text }) => /abandoned-draft|disposable-history-password|Set-Location -LiteralPath/.test(text)), false);
+  for (const pattern of [/abandoned-draft/, /disposable-history-password/]) {
+    assert.equal(history.some(({ text }) => pattern.test(text)), false, `Unexpected command history entry matching ${pattern}`);
+  }
+  assert.ok(history.filter(navigation).every((entry) => priorNavigation.has(entryKey(entry))),
+    "Pane changes during this check should not add internal navigation to command history.");
   assert.ok(history.find(({ text }) => text === direct).date > 0);
   await run("exit");
   await waitForCommand("exit");

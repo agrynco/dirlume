@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { hideComparisonOptions, showComparisonOptions } from "./tool-window-smoke.mjs";
 
 async function openFixture(browser, language = "en", userAgent) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, userAgent });
@@ -123,9 +124,11 @@ try {
   await files.locator('[data-tooltip="note.txt"]').click();
   await files.press("Shift+F11");
   const comparison = page.getByRole("dialog", { name: "Compare files", exact: true });
+  await showComparisonOptions(comparison);
   const layout = comparison.getByRole("combobox", { name: "Layout", exact: true });
   await openHelp(page, layout, "compare");
   await closeHelp(page, help, layout);
+  await hideComparisonOptions(comparison);
   await page.keyboard.press("Escape");
   await comparison.waitFor({ state: "hidden" });
 
@@ -176,6 +179,7 @@ try {
       await scanPane.getByRole("button", { name: "Analyze space", exact: true }).click();
       const analyzer = workspace.getByRole("region", { name: "Space Analyzer", exact: true });
       const close = analyzer.getByRole("button", { name: "Close", exact: true });
+      const tree = analyzer.getByRole("treegrid");
       const stop = analyzer.getByRole("button", { name: "Stop", exact: true });
       const treemap = analyzer.getByRole("button", { name: "Treemap", exact: true });
       const metric = analyzer.getByRole("combobox", { name: "Size metric", exact: true });
@@ -184,13 +188,13 @@ try {
       await workspace.keyboard.press("F1");
       await currentTopic(guide, "paneSources").waitFor();
       await guide.getByText(`This control changes the source for the ${other} pane.`, { exact: true }).waitFor();
-      await closeHelp(workspace, guide, close);
+      await closeHelp(workspace, guide, tree);
 
       await analyzer.locator(".space-target").hover();
       await workspace.keyboard.press("F1");
       await currentTopic(guide, "spacePath").waitFor();
-      assert.match(await guide.locator(".help-reading").innerText(), /root being scanned/);
-      await closeHelp(workspace, guide, close);
+      assert.match(await guide.locator(".help-reading").innerText(), /current folder/);
+      await closeHelp(workspace, guide, tree);
 
       await treemap.focus();
       await drive.hover();

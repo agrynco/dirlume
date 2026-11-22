@@ -10,7 +10,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   const picker = (group) => dialog().getByRole("listbox", { name: `Folder shortcuts in group ${group}`, exact: true });
   const title = () => dialog().getByRole("textbox", { name: "Title (optional)", exact: true });
   const path = () => dialog().getByLabel("Path", { exact: true });
-  const confirm = () => dialog().getByRole("button", { name: "OK", exact: true }).click();
+  const confirm = () => dialog().getByRole("button", { name: "Save", exact: true }).click();
   const opened = (side, target) => page.getByRole("region", { name: `${side} pane`, exact: true })
     .getByRole("heading", { name: basename(target), exact: true }).waitFor({ state: "attached" });
 

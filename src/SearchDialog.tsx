@@ -150,7 +150,7 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
           <p className="search-location"><strong>{t("Folder and subfolders")}</strong><span>{placePath(root) || root.kind === "kswitcher" && root.address}</span></p>
           {status && <p role="status">{t(status)}</p>}
           {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
-          {current && (
+          {current && <>
             <select aria-label={t("Search results")} size={8} value={current.relativePath}
               onChange={(event) => setSelected(event.currentTarget.value)}
               onDoubleClick={(event) => reveal(results.find((result) => result.relativePath === event.currentTarget.value))}
@@ -162,15 +162,17 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
               }}>
               {results.map(({ relativePath }) => <option key={relativePath} value={relativePath}>{relativePath}</option>)}
             </select>
-          )}
+            <div className="dialog-actions dialog-actions-end">
+              <Button type="button" onClick={() => reveal(current)}>{t("Go to file")}</Button>
+              {!running && <Button type="button" onClick={() => {
+                const { mask, matches, incomplete } = snapshot.current;
+                onShowResults(mask, matches, incomplete, current.relativePath);
+              }}>{t("Show in panel")}</Button>}
+            </div>
+          </>}
         </div>
         <footer className="dialog-footer">
           <Button type="button" onClick={onClose}>{t("Close")}</Button>
-          {current && <Button type="button" onClick={() => reveal(current)}>{t("Go to file")}</Button>}
-          {current && !running && <Button type="button" onClick={() => {
-            const { mask, matches, incomplete } = snapshot.current;
-            onShowResults(mask, matches, incomplete, current.relativePath);
-          }}>{t("Show in panel")}</Button>}
           {running ? <Button type="button" onClick={stop}>{t("Stop")}</Button> :
             <Button type="submit" className="primary" disabled={!mask.trim()}>{t("Search")}</Button>}
         </footer>

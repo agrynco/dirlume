@@ -1,4 +1,4 @@
-import { errorText, locale, t } from "./i18n";
+import { countText, errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
 import { Dialog } from "./Dialog";
+import { DialogDisclosure, DialogIconButton } from "./DialogActions";
 import { DiagnosticLog } from "./DiagnosticLog";
 import { SudoDialog } from "./SudoDialog";
 import { HexViewer } from "./HexViewer";
@@ -456,7 +457,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {diagnosticVisible && <DiagnosticLog source={document.text} />}
         <div className="source-surface" hidden={!sourceVisible}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
-            <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && sourceVisible}
+            <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>
@@ -754,6 +755,10 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
   const split = layout === "side-by-side";
   const columns = { "--comparison-columns": `minmax(0, ${ratio}fr) var(--comparison-gutter) minmax(0, ${100 - ratio}fr)` } as CSSProperties;
   const failure = error || (result && "error" in result ? result.error : "");
+  const applyActions = [
+    { label: t("Apply to left"), disabled: !activeGroup?.ranges, run: () => merge(rightFile, leftFile) },
+    { label: t("Apply to right"), disabled: !activeGroup?.ranges, run: () => merge(leftFile, rightFile) },
+  ];
   return <>
     <Dialog title={t("Compare files")} helpTopic="compare" wide standalone={standalone} onClose={requestClose}
       onKeyDownCapture={(event) => {
@@ -776,35 +781,44 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
         }
       }}>
       <div className="comparison-toolbar">
-        <Button disabled={!groups} shortcut={showShortcut(previousShortcut[0])} onClick={() => jump(-1)}><ArrowUp /> {t("Previous")}</Button>
-        <Button disabled={!groups} shortcut={showShortcut(nextShortcut[0])} onClick={() => jump(1)}><ArrowDown /> {t("Next")}</Button>
-        <span>{current ? `${current} / ${groups}` : `${groups} ${groups === 1 ? "change" : "changes"}`}</span>
-        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge(rightFile, leftFile)}><ArrowLeft /> {t("Apply to left")}</Button>
-        <Button type="button" disabled={!activeGroup?.ranges} onClick={() => merge(leftFile, rightFile)}>{t("Apply to right")} <ArrowRight /></Button>
-        <label><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
-          setInitialEditor(leftFile);
-          setEditing(event.target.checked);
-        }} /> {t("Edit files")}</label>
-        <label className="comparison-layout">{t("Layout")}
-          <select aria-label={t("Layout")} value={layout} onChange={(event) => {
-            const next = event.target.value as CompareLayout;
-            setLayout(next);
-            saveCompareOption(compareLayoutKey, next);
-          }}>
-            <option value="unified">{t("Unified")}</option>
-            <option value="side-by-side">{t("Side-by-side")}</option>
-          </select>
-        </label>
-        {split && <label><input type="checkbox" checked={connectors} onChange={(event) => {
-          setConnectors(event.target.checked);
-          saveCompareOption(compareConnectorsKey, String(event.target.checked));
-        }} /> {t("Show change connectors")}</label>}
-        <label><input type="checkbox" checked={whitespace} onChange={(event) => {
-          setWhitespace(event.target.checked); setCurrent(0);
-        }} /> {t("Show whitespace changes")}</label>
-        <label><input type="checkbox" checked={collapse} onChange={(event) => {
-          setCollapse(event.target.checked); setExpanded([]); saveCompareOption(compareCollapseKey, String(event.target.checked));
-        }} /> {t("Collapse unchanged sections")}</label>
+        <div className="dialog-action-group">
+          <DialogIconButton label={t("Previous")} disabled={!groups} shortcut={showShortcut(previousShortcut[0])}
+            onClick={() => jump(-1)}><ArrowUp /></DialogIconButton>
+          <DialogIconButton label={t("Next")} disabled={!groups} shortcut={showShortcut(nextShortcut[0])}
+            onClick={() => jump(1)}><ArrowDown /></DialogIconButton>
+          <span>{current ? t("{0} / {1}", current, groups) : countText(groups, "change")}</span>
+        </div>
+        <div className="comparison-apply-inline dialog-actions">
+          <Button type="button" disabled={applyActions[0].disabled} onClick={applyActions[0].run}><ArrowLeft aria-hidden="true" /> {applyActions[0].label}</Button>
+          <Button type="button" disabled={applyActions[1].disabled} onClick={applyActions[1].run}>{applyActions[1].label} <ArrowRight aria-hidden="true" /></Button>
+        </div>
+        <DialogDisclosure className="comparison-apply-menu" label={t("Apply")} actions={applyActions} />
+        <DialogDisclosure className="comparison-options" label={t("Options")}>
+          <label className="comparison-layout">{t("Layout")}
+            <select aria-label={t("Layout")} value={layout} onChange={(event) => {
+              const next = event.target.value as CompareLayout;
+              setLayout(next);
+              saveCompareOption(compareLayoutKey, next);
+            }}>
+              <option value="unified">{t("Unified")}</option>
+              <option value="side-by-side">{t("Side-by-side")}</option>
+            </select>
+          </label>
+          <label><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
+            setInitialEditor(leftFile);
+            setEditing(event.target.checked);
+          }} /> {t("Edit files")}</label>
+          {split && <label><input type="checkbox" checked={connectors} onChange={(event) => {
+            setConnectors(event.target.checked);
+            saveCompareOption(compareConnectorsKey, String(event.target.checked));
+          }} /> {t("Show change connectors")}</label>}
+          <label><input type="checkbox" checked={whitespace} onChange={(event) => {
+            setWhitespace(event.target.checked); setCurrent(0);
+          }} /> {t("Show whitespace changes")}</label>
+          <label><input type="checkbox" checked={collapse} onChange={(event) => {
+            setCollapse(event.target.checked); setExpanded([]); saveCompareOption(compareCollapseKey, String(event.target.checked));
+          }} /> {t("Collapse unchanged sections")}</label>
+        </DialogDisclosure>
       </div>
       {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}
       {!documents && !failure && <div className="dialog-body">{t("Loading…")}</div>}
@@ -814,7 +828,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
           aria-label={t(side === leftFile ? "Left file" : "Right file")}>
           <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
-            <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === initialEditor}
+            <CodeSurface file={files[side]} editing locked={saving} active={editing && side === initialEditor}
               value={documents[side]} onChange={(text) => {
                 setDocuments((previous) => previous && { ...previous, [side]: text });
                 setCurrent(0);

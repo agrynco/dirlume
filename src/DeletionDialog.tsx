@@ -58,7 +58,7 @@ function LockDecision({ locked, suspended, onCancel, onInspect, onDecide, waitin
         <div><strong>{locked.path.split(/[\\/]/).at(-1)}</strong><span>{locked.path}</span></div>
       </div>
       <p>{t("Deletion is paused while another process is using this item.")}</p>
-      {windowsClient && <div><Button type="button" onClick={onInspect}>{t("Find locking processes")}</Button></div>}
+      {windowsClient && <div><Button type="button" className="deletion-inspect" onClick={onInspect}>{t("Find locking processes")}</Button></div>}
       <label className="deletion-remember"><input type="checkbox" checked={remember}
         onChange={(event) => setRemember(event.currentTarget.checked)} />{t("Apply to all remaining locked items")}</label>
     </div>
@@ -171,7 +171,7 @@ export function DeletionDialog({ deletion, onClose, onFinished }: {
       <div className="dialog-body deletion-body">
         <div className="deletion-path">
           {event?.phase === "preparing" ? <FolderOpen aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-          <span>{result ? deletion.directory : path}</span>
+          <span className="deletion-progress-path">{result ? deletion.directory : path}</span>
         </div>
         {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         {cancelling && !result && !error && <p role="status">{t("Cancelling deletion…")}</p>}

@@ -19,7 +19,7 @@ import { testFileSort } from "./file-sort-smoke.mjs";
 import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
-import { testCommandCompletion } from "./command-completion-smoke.mjs";
+import { makeDockerFixture, testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
 import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
@@ -58,6 +58,7 @@ if (process.env.CI) {
   await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
+const dockerCompletionFixture = await makeDockerFixture(temp);
 const src = join(temp, "from");
 const dst = join(temp, "to");
 const diagnostics = join(temp, "diagnostics");
@@ -110,6 +111,9 @@ async function startDesktop() {
     windowsHide: true,
     env: {
       ...process.env,
+      PATH: `${dockerCompletionFixture};${process.env.PATH ?? process.env.Path ?? ""}`,
+      DOCKER_CONTEXT: "fixture-active",
+      COMPOSE_FILE: "",
       DIRLUME_TEST_PROCESS_ONLY: "launcher-value",
       DIRLUME_TEST_SKIP_UPDATE_CHECK: "1",
       ...(process.env.DIRLUME_INTERNAL_CDP === "1"
@@ -937,7 +941,7 @@ try {
   await left.getByRole("option", { name: /^overlap/ }).click();
   await page.keyboard.press("F5");
   await startTransfer("Copy");
-  await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
+  await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
   await conflict.getByText("Incoming", { exact: true }).waitFor();
   await conflict.getByText("2 B", { exact: true }).waitFor();
   assert.equal(await conflict.getByRole("button", { name: "Skip", exact: true }).evaluate((button) => document.activeElement === button), true);
@@ -1347,7 +1351,7 @@ try {
     await mergeRow.click();
     await page.keyboard.press("F6");
     await startTransfer("Move", otherVolume);
-    await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
+    await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
     await conflict.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByRole("dialog", { name: "Transfer canceled" }).getByRole("button", { name: "Done" }).click();
     assert.equal(await readFile(join(src, "merge", "update.txt"), "utf8"), "New contents");
@@ -1355,7 +1359,7 @@ try {
     await mergeRow.click();
     await page.keyboard.press("F6");
     await startTransfer("Move", otherVolume);
-    await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
+    await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
     await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
     await waitForCompletedTransfer();
     await assert.rejects(readFile(join(src, "merge", "update.txt")), { code: "ENOENT" });
@@ -2288,7 +2292,7 @@ try {
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
   await testCompareLayouts(page, temp);
-  await testCommandCompletion(page, temp);
+  await testCommandCompletion(page, temp, dockerCompletionFixture);
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
@@ -2332,11 +2336,35 @@ try {
 async function testNativeSpaceAnalyzer(page) {
   const exactButton = (scope, name) => scope.getByRole("button", { name, exact: true });
   const pane = page.getByRole("region", { name: "left pane", exact: true });
+  const nested = join(attributes, "system-folder", "scan-nested");
+  await mkdir(nested);
+  await writeFile(join(nested, "scan-report.txt"), "Scan fixture");
   await exactButton(pane, "Analyze space").click();
   const analyzer = page.getByRole("region", { name: "Space Analyzer", exact: true });
   await exactButton(analyzer, "Rescan").waitFor();
   await exactButton(analyzer, "Stop").waitFor({ state: "hidden" });
   assert.equal(await analyzer.getByRole("combobox", { name: "Size metric" }).inputValue(), "allocated");
+  const row = (name) => analyzer.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
+  await row("system-folder").dblclick();
+  await row("scan-nested").dblclick();
+  await row("scan-report.txt").click();
+  assert.equal(await analyzer.locator(".address-current").textContent(), "scan-nested");
+  const terminalToggle = page.getByRole("navigation", { name: "File actions" }).getByRole("button", { name: /^Terminal/ });
+  const terminal = page.locator(".terminal-card:visible");
+  if (!await terminal.isVisible()) await terminalToggle.click();
+  const input = terminal.locator(".xterm-helper-textarea");
+  const output = (text) => page.waitForFunction((expected) =>
+    document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent?.includes(expected), text);
+  await output("PS ");
+  await input.pressSequentially("if ((Get-Location).Path.EndsWith('scan-nested')) { Write-Output ('scan-' + 'directory-ok') }");
+  await input.press("Enter");
+  await output("scan-directory-ok");
+  await input.pressSequentially("cd ..");
+  await input.press("Enter");
+  await page.waitForFunction(() => document.querySelector(".space-analyzer .address-current")?.textContent === "system-folder");
+  assert.equal(await row("system-folder").getAttribute("data-current"), "true");
+  assert.equal(await input.evaluate((element) => element === document.activeElement), true);
+  await terminalToggle.click();
   await analyzer.getByText("system-hidden.dll", { exact: true }).click();
   await exactButton(analyzer, "Show in other pane").click();
   await page.locator("#right-files").getByRole("option", { name: /^system-hidden\.dll/, selected: true }).waitFor();

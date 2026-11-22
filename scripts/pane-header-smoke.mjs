@@ -47,13 +47,18 @@ export async function testFolderNavigationHeader() {
         const pane = page.locator(`#${side}-pane`);
         const columns = pane.locator(".file-columns");
         const list = pane.locator(".file-list");
-        const capacity = (label) => pane.locator(`.pane-volume button[data-tooltip=${JSON.stringify(label)}]`);
+        const capacity = (label) => pane.getByRole("button", { name: "Analyze space", exact: true })
+          .filter({ has: page.getByText(label, { exact: true }) });
         const bounds = () => columns.evaluate((header) => {
           const { x, y, width, height } = header.getBoundingClientRect();
           return { x, y, width, height, nameEdge: header.querySelector(".col-name").getBoundingClientRect().right };
         });
         await list.locator('[data-tooltip="Subfolder"]').click();
-        if (layout === "twin") await capacity("2 KiB free of 4 KiB").waitFor();
+        if (layout === "twin") {
+          const control = capacity("2 KiB free of 4 KiB");
+          await control.waitFor();
+          assert.equal(await control.getAttribute("data-tooltip"), "Open Space Analyzer to scan the current folder.");
+        }
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
         const before = await bounds();
         await list.press("Enter");
