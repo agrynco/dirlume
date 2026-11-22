@@ -2492,9 +2492,9 @@ button.color-swatch {
 }
 .preview-file-current-marked { color: var(--panel-selected-ink); }
 .preview-file-current-marked svg { color: var(--panel-marked); }
-.pane.active[data-layout] .file-row.marked[data-current="true"] .file-name {
+.pane.active[data-layout] .file-row.marked[data-current="true"]:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name {
   color: var(--panel-selected-ink);
 }
-.pane.active[data-layout="classic"] .file-row.marked[data-current="true"] .file-name {
+.pane.active[data-layout="classic"] .file-row.marked[data-current="true"]:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name {
   color: color-mix(in srgb, var(--panel-marked) 55%, var(--panel-selected-ink));
 }
