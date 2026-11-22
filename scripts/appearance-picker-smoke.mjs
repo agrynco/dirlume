@@ -84,6 +84,41 @@ export async function testAppearancePicker() {
     const options = optionsDialog(page);
     const selectPage = (name) => options.getByRole("navigation", { name: "Options sections" }).getByRole("button", { name, exact: true }).click();
     const done = () => options.getByRole("button", { name: "Done", exact: true }).click();
+    const size = (name) => options.getByRole("spinbutton", { name: name + " font size", exact: true });
+    const verifySteps = async (field, inherited) => {
+      assert.equal(await field.inputValue(), String(inherited));
+      await field.hover();
+      const { width, height } = await field.boundingBox();
+      const padding = await field.evaluate((input) => parseFloat(getComputedStyle(input).paddingRight));
+      for (const [y, delta] of [[height / 3, 1], [height * 2 / 3, -1]]) {
+        await field.click({ position: { x: width - padding - 5, y } });
+        assert.equal(await field.inputValue(), String(inherited + delta));
+        await field.fill("");
+        await field.blur();
+      }
+      for (const [key, delta] of [["ArrowUp", 1], ["ArrowDown", -1]]) {
+        await field.press(key);
+        assert.equal(await field.inputValue(), String(inherited + delta));
+        await field.fill("");
+        await field.blur();
+      }
+    };
+    await open();
+    await selectPage("Fonts");
+    await verifySteps(size("Dialogs"), 14);
+    await size("Main window").fill("18");
+    await verifySteps(size("Dialogs"), 18);
+    await size("Dialogs").fill("24");
+    await size("Dialogs").press("ArrowUp");
+    assert.equal(await size("Dialogs").inputValue(), "24");
+    await size("Dialogs").press("ArrowDown");
+    assert.equal(await size("Dialogs").inputValue(), "23");
+    await size("Dialogs").fill("");
+    await size("File panels").fill("18");
+    await selectPage("View font sizes");
+    await verifySteps(size("Left file pane"), 18);
+    await page.keyboard.press("Escape");
+    await options.waitFor({ state: "hidden" });
     const start = async () => {
       await pickerButton(page).click();
       await overlay(page).waitFor();
