@@ -54,7 +54,9 @@ async function fixture(browser, layout, source = "local") {
       if (segments.at(-1) === "outside-root") return listing([]);
       return listing([file("remote.dat", 1234, withAllocations ? 4096 : undefined)]);
     };
-    localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ layout, kswitcher: "Fixture bridge" }));
+    if (!localStorage.getItem("dirlume.preferences.v1")) {
+      localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ layout, kswitcher: "Fixture bridge" }));
+    }
     localStorage.setItem("dirlume.remote-connections", JSON.stringify([
       { kind: "server", id: "server", label: "Server fixture", credential: "fixture-invitation" },
       { kind: "kswitcher", id: "kswitcher", label: "Bridge fixture", peer: "fixture-peer" },
@@ -66,8 +68,15 @@ async function fixture(browser, layout, source = "local") {
         switch (command) {
           case "locations": return [{ label: "Home", path: folder }, { label: "Downloads", path: other }];
           case "disk_space": return source === "local" ? { available: 1_000_000, total: 2_000_000 } : null;
+          case "volume_information":
+            window.spaceCalls.push({ command, path: args.path });
+            return { path: base, share: source === "unc" || source === "mounted", label: "Fixture disk",
+              filesystem: windows ? "NTFS" : "smbfs", capacity: source === "unc" ? null : { total: 4096, available: 1024 } };
           case "space_mount": return { path: base, share: source === "unc" || source === "mounted" };
           case "list_directory":
+            if (window.spaceOperationFixture && (args.path.endsWith(joiner + "alpha") || args.path.endsWith(joiner + "beta"))) {
+              return { path: args.path, parent: null, ...listing([file("same.txt", 13, 4096)]) };
+            }
             return { path: args.path, parent: null, ...listing(args.path === folder
               ? [dir("branch"), ...Array.from({ length: 135 }, (_, i) => file("row-" + i, i))] : [fileA]) };
           case "connect_smb":
@@ -79,6 +88,16 @@ async function fixture(browser, layout, source = "local") {
             const child = (parent, entry) => ({ parent, name: entry.name, directory: entry.directory,
               size: entry.size, allocated: entry.allocated ?? null, shared: false });
             const closed = (id, error = null) => ({ closed: id, error, partial: !!error });
+            if (window.denseTreemap) {
+              send({ kind: "start", strategy: "walk" });
+              const media = Array.from({ length: 16 }, (_, i) => file(`media-${i}.dat`, Math.round(1.4 * gib), 2 * gib));
+              const small = Array.from({ length: 54 }, (_, i) => file(`small-${i}.dat`, 8 * 1024 ** 2, 16 * 1024 ** 2));
+              batch(child(0, dir("Recordings")), child(0, file("Archive.dat", 6 * gib, 9 * gib)),
+                ...[...media, ...small].map((entry) => child(0, entry)), closed(0),
+                child(1, file("Video.dat", 10 * gib, 12 * gib)), closed(1));
+              send({ kind: "finished" });
+              return;
+            }
             if (window.spaceOperationFixture) {
               send({ kind: "start", strategy: "walk" });
               batch(child(0, dir("alpha")), child(0, dir("beta")), closed(0),
@@ -159,6 +178,39 @@ async function openSource(page, menu, profile) {
   await left.getByRole("option", { name: new RegExp("^" + profile) }).dblclick();
 }
 
+async function checkTreemapLabels(page, analyzer) {
+  const tile = (name) => analyzer.getByRole("button", { name });
+  const hasLabel = (button, fit) => button.locator(`.space-tile-label[data-fit=${fit}]`);
+  const metric = analyzer.getByRole("combobox", { name: "Size metric" });
+  const tooltip = page.locator(".app-tooltip");
+  await button(analyzer, "Treemap").click();
+  await hasLabel(tile(/^Recordings, 12 GiB$/), "both").waitFor();
+  const more = tile(/^More items, 128 MiB$/);
+  await more.hover();
+  await tooltip.getByText("More items, 128 MiB", { exact: true }).waitFor();
+
+  await page.setViewportSize({ width: 800, height: 500 });
+  const sizeOnly = analyzer.locator('.space-tile-label[data-fit="size"]').first();
+  await sizeOnly.locator(":scope > span").waitFor();
+  assert.equal(await sizeOnly.locator("strong").isVisible(), false);
+  assert.match(await sizeOnly.locator(":scope > span").textContent(), /^\d+(?:[.,]\d+)? [GM]iB$/);
+  const hidden = analyzer.locator('.space-tile:has(.space-tile-label[data-fit="none"])').first();
+  await hidden.hover();
+  const hiddenLabel = await hidden.getAttribute("aria-label");
+  await tooltip.getByText(hiddenLabel, { exact: true }).waitFor();
+  assert.equal(await hidden.locator(".space-tile-label > span").isVisible(), false);
+
+  await page.setViewportSize({ width: 1120, height: 760 });
+  await metric.selectOption("logical");
+  const recordings = tile(/^Recordings, 10 GiB$/);
+  const label = hasLabel(recordings, "both");
+  await label.getByText("10 GiB", { exact: true }).waitFor();
+  await button(analyzer, "Treemap").hover();
+  await recordings.hover();
+  await tooltip.getByText("Recordings, 10 GiB", { exact: true }).waitFor();
+  assert.equal(await tile(/^More items, 64 MiB$/).count(), 1);
+}
+
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   const local = await fixture(browser, "standard");
@@ -190,7 +242,7 @@ try {
   await analyzer.getByRole("combobox", { name: "Size metric" }).selectOption("logical");
   assert.equal(await grid.locator(".space-entry-label").nth(1).textContent(), "branch");
   await button(analyzer, "Treemap").click();
-  await analyzer.getByRole("button", { name: /^branch,/ }).click();
+  assert.equal(await analyzer.locator(".space-map-heading > span").textContent(), "branch");
   await analyzer.getByRole("button", { name: /^sub,/ }).click();
   await analyzer.getByRole("button", { name: /^payload.dat,/ }).click();
   await assertBreadcrumbs(analyzer, ["mount", "open", "branch", "sub"]);
@@ -208,6 +260,7 @@ try {
   await local.keyboard.press("Digit5");
   await local.keyboard.up("ControlLeft");
   await local.waitForFunction(() => window.finishOldSpace);
+  await button(analyzer, "Tree").click();
   await row(analyzer, "branch").waitFor();
   const rootsBeforeSwap = await local.evaluate(() => window.spaceCalls.filter(({ command }) => command === "scan_local_space").length);
   await button(analyzer, "Stop").press("Control+u");
@@ -232,6 +285,78 @@ try {
   await button(left, "Analyze space").click();
   await analyzer.getByRole("alert").getByText(/Could not scan the folder/).waitFor();
   await local.close();
+
+  for (const source of ["local", "unc", "mounted"]) {
+    const page = await fixture(browser, "standard", source);
+    const left = pane(page, "left");
+    const right = pane(page, "right");
+    const disk = page.getByRole("region", { name: "Disk information", exact: true });
+    const chart = page.locator(".space-analyzer-left");
+    const files = left.getByRole("listbox");
+    const prior = await files.getAttribute("aria-activedescendant");
+    await files.press("Control+Shift+l");
+    await disk.getByText("Fixture disk", { exact: true }).waitFor();
+    assert.equal(await disk.getByText(source === "mounted" ? "/mnt/samba" : source === "unc" ? "\\\\fixture\\storage" : "C:\\fixture\\mount", { exact: true }).count(), 1);
+    assert.deepEqual(await page.evaluate(() => window.spaceCalls.map(({ command }) => command)), ["volume_information"]);
+    assert.equal(await disk.getByText(source === "unc" ? "Unavailable" : "25%", { exact: true }).count(), source === "unc" ? 2 : 1);
+    if (source === "local") await page.evaluate(() => { window.spaceOperationFixture = { beta: "same.txt", hold: false }; });
+    await button(disk, source === "local" ? "Scan volume" : "Scan share").click();
+    await finished(chart);
+    assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
+    if (source !== "local") {
+      await chart.getByRole("button", { name: /^root-only / }).waitFor();
+      await button(chart, "Close").click();
+      await files.waitFor();
+      assert.equal(await files.getAttribute("aria-activedescendant"), prior);
+      await page.close();
+      continue;
+    }
+    assert.equal(await chart.locator(".sunburst-chart path[data-depth='1']").count(), 2);
+    const matches = chart.getByRole("button", { name: /^same\.txt / });
+    await matches.nth(0).click();
+    const betaFile = matches.nth(1);
+    await betaFile.press("Shift+F10");
+    const menu = page.getByRole("menu", { name: "File actions", exact: true });
+    await menu.getByRole("menuitem", { name: "Copy", exact: true }).click();
+    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.ok((await copy.locator("label[data-tooltip]").filter({ hasText: "same.txt" }).getAttribute("data-tooltip")).endsWith("\\beta"));
+    await button(copy, "Cancel").click();
+    assert.equal(await betaFile.evaluate((node) => node === document.activeElement), true);
+    const [x, y] = await chart.locator(".sunburst-chart path[data-depth='1']").nth(1).evaluate((sector) => {
+      const bounds = sector.getBoundingClientRect();
+      for (let y = Math.ceil(bounds.top); y < bounds.bottom; y += 4) {
+        for (let x = Math.ceil(bounds.left); x < bounds.right; x += 4) {
+          if (document.elementFromPoint(x, y) === sector) return [x, y];
+        }
+      }
+      throw new Error("The chart has no visible target for this sector.");
+    });
+    await page.mouse.click(x, y, { button: "right" });
+    await menu.getByRole("menuitem", { name: "Show in other pane", exact: true }).click();
+    await pane(page, "right").getByRole("option", { name: /^same\.txt/, selected: true }).waitFor();
+    assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
+    if (process.env.DIRLUME_SUNBURST_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SUNBURST_SCREENSHOT });
+    await button(chart, "Sunburst").click();
+    await button(right, "Analyze space").click();
+    const rightChart = page.locator(".space-analyzer-right");
+    await finished(rightChart);
+    assert.equal(await button(rightChart, "Sunburst").getAttribute("aria-pressed"), "true");
+    await button(rightChart, "Treemap").click();
+    assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
+    await page.reload();
+    await button(left, "Analyze space").click();
+    await finished(chart);
+    assert.equal(await button(chart, "Treemap").getAttribute("aria-pressed"), "true");
+    await page.close();
+  }
+
+  const dense = await fixture(browser, "standard");
+  await dense.evaluate(() => { window.denseTreemap = true; });
+  await button(pane(dense, "left"), "Analyze space").click();
+  const denseAnalyzer = dense.getByRole("region", { name: "Space Analyzer", exact: true });
+  await finished(denseAnalyzer);
+  await checkTreemapLabels(dense, denseAnalyzer);
+  await dense.close();
 
   for (const [layout, source, label] of [["twin", "local", "Analyze volume"], ["classic", "unc", "Analyze share"], ["standard", "mounted", "Analyze share"]]) {
     const page = await fixture(browser, layout, source);
@@ -295,6 +420,10 @@ try {
     else await remote.getByText("File size", { exact: true }).waitFor();
     await row(remote, "broken").getByText("Unavailable").waitFor();
     if (source === "ftp") {
+      await button(remote, "Treemap").click();
+      await remote.getByRole("button", { name: /^nested, 1\.2\d* KiB$/ }).hover();
+      await page.locator(".app-tooltip").getByText(/^nested, 1\.2\d* KiB$/).waitFor();
+      await button(remote, "Tree").click();
       await assertBreadcrumbs(remote, ["fixture", "open"]);
       await page.evaluate(() => { window.spaceFailure = "Connection reset by peer"; });
       await button(remote, "Rescan").click();

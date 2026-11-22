@@ -161,9 +161,18 @@ jobs:
       - name: Verify contextual offline Help
         if: github.event.action != 'closed'
         run: node scripts/contextual-help-smoke.mjs
+      - name: Verify local Viewer file bookmarks
+        if: github.event.action != 'closed'
+        run: node scripts/file-bookmarks-smoke.mjs
+      - name: Verify command line paths from parent and file rows
+        if: github.event.action != 'closed'
+        run: node scripts/command-parent-path-smoke.mjs
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
+      - name: Verify administrator window workspace handoff
+        if: github.event.action != 'closed'
+        run: node scripts/administrator-workspace-smoke.mjs
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs

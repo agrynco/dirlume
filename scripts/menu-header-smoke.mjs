@@ -106,13 +106,14 @@ export async function testCommandIcons(page, native = false) {
       fits: item.scrollWidth <= item.clientWidth,
     };
   }));
-  assert.equal(rows.length, native ? 15 : 13);
+  assert.equal(rows.length, native ? 16 : 14);
   assert.ok(rows.every((row) => row.hidden === "true" && row.focusable === "false" && row.fits));
   assert.equal(new Set(rows.map(({ iconX }) => iconX)).size, 1);
   assert.equal(new Set(rows.map(({ labelX }) => labelX)).size, 1);
   assert.equal(new Set(rows.map(({ shortcutX }) => shortcutX).filter((x) => x !== undefined)).size, 1);
   assert.ok(rows.every(({ iconRight, labelX }) => labelX - iconRight >= 12),
     JSON.stringify(rows[0]));
+  await commands.getByRole("menuitem", { name: "File bookmarks", exact: true }).locator(".main-menu-action-icon").waitFor();
   if (native) {
     await commands.getByRole("menuitem", { name: "MCP server", exact: true }).locator(".main-menu-action-icon").waitFor();
     await commands.getByRole("menuitem", { name: "Check for updates", exact: true }).locator(".main-menu-action-icon").waitFor();
