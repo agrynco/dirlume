@@ -1478,7 +1478,8 @@ try {
   await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
   await terminal.waitFor();
   await terminalFocusHint.waitFor();
-  await commandLine.waitFor({ state: "hidden" });
+  await commandLine.waitFor();
+  assert.equal(await commandLine.inputValue(), "preserved draft");
   const firstHeight = await paneHeight();
   assert.ok(firstHeight < compactHeight, "Opening the terminal should shrink both file panes.");
   const terminalSplit = await paneSplit();
