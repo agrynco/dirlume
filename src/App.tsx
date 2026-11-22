@@ -1235,6 +1235,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
+  async function revealProcessExecutable(side: Side, path: string) {
+    const split = Math.max(path.lastIndexOf("/"), windowsClient ? path.lastIndexOf("\\") : -1);
+    if (split < 0 || split + 1 === path.length) throw new Error(t("The process executable path is unavailable."));
+    await revealSpace(side, localPath(path.slice(0, split + 1)), path.slice(split + 1));
+  }
+
   function open(side: Side, entry: Entry, selectParent = false) {
     if (entry.name === "..") { parent(side); return; }
     const pane = panes[side];
@@ -2889,6 +2895,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onCloseResults={() => closeResults(side)}
             onStartDrag={(entry, event) => startDrag(side, entry, event)} dropTarget={dropTarget === side}
             processView={processPanels[side]} onProcesses={(visible) => showProcesses(side, visible)}
+            processContextMenuShortcut={shortcuts.processContextMenu}
+            onShowExecutable={(path) => revealProcessExecutable(side, path)}
+            onProcessFeedback={(text, error) => setStatus({ text, error })}
             onContext={(x, y, entry, preserveMarks) => contextActions(side, x, y, entry, preserveMarks)}
             onRevealResult={(entry) => {
               const item = paneItem(panes[side], entry);

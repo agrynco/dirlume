@@ -83,6 +83,7 @@ export const commands = {
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },
+  processContextMenu: { label: "Open process context menu", key: "Shift+F10" },
   view: { label: "View text or measure folder", key: "F3" },
   quickView: { label: "Quick View", key: "Ctrl+Q" },
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
@@ -226,6 +227,7 @@ export function commandScope(command: Command) {
   if (command === "help" || command === "menu" || command === "menuAlternate") return "global";
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText") return "terminal";
+  if (command === "processContextMenu") return "processPane";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
   if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
@@ -248,6 +250,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if (leftScope === rightScope) return true;
   if (leftScope === "wheel" || rightScope === "wheel") return false;
   if (leftScope === "global" || rightScope === "global") return true;
+  if ([leftScope, rightScope].includes("processPane") && [leftScope, rightScope].includes("main")) return true;
   const commands = [left, right];
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
