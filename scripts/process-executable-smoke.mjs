@@ -56,7 +56,7 @@ export async function testProcessExecutablePath(page, appPid) {
     await actions.waitFor();
     await page.keyboard.press("Escape");
     await page.waitForFunction((side) => document.activeElement?.id === `${side}-files`, side);
-    await heading.click({ button: "right" });
+    await table.getByRole("button", { name: "Process", exact: true }).click({ button: "right" });
     await checkbox.click();
     await page.keyboard.press("Escape");
     assert.equal(await executable.innerText(), displayed);
