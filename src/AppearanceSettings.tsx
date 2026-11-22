@@ -407,28 +407,32 @@ function FontSizeInput({ label, size, fallback, min, max, disabled, onChange }: 
   onChange: (size?: number) => void;
 }) {
   return <OptionalNumberInput label={t("{0} font size", t(label))} size={size} fallback={String(fallback)}
-    min={min} max={max} disabled={disabled} onChange={onChange} />;
+    inherited={fallback} min={min} max={max} disabled={disabled} onChange={onChange} />;
 }
 
-export function OptionalNumberInput({ label, size, fallback, min, max, disabled, onChange }: {
+export function OptionalNumberInput({ label, size, fallback, inherited, min, max, disabled, onChange }: {
   label: string;
   size?: number;
   fallback: string;
+  inherited?: number;
   min: number;
   max: number;
   disabled?: boolean;
   onChange: (size?: number) => void;
 }) {
-  const [text, setText] = useState(String(size ?? ""));
-  useEffect(() => setText(String(size ?? "")), [size]);
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? String(size ?? inherited ?? "");
 
   return <input aria-label={label} type="number" min={min} max={max}
-    value={text} placeholder={fallback} disabled={disabled} onBlur={() => setText(String(size ?? ""))}
+    value={value} placeholder={fallback} disabled={disabled} onBlur={() => setDraft(null)}
     onChange={(event) => {
       const { value, valueAsNumber, validity } = event.target;
-      setText(value);
-      if (validity.badInput) return;
-      if (!value) onChange();
-      else if (Number.isInteger(valueAsNumber) && valueAsNumber >= min && valueAsNumber <= max) onChange(valueAsNumber);
+      if (!validity.badInput && value && Number.isInteger(valueAsNumber) && valueAsNumber >= min && valueAsNumber <= max) {
+        setDraft(null);
+        onChange(valueAsNumber);
+      } else {
+        setDraft(value);
+        if (!value && !validity.badInput) onChange();
+      }
     }} />;
 }
