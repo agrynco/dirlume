@@ -156,6 +156,8 @@ export const commands = {
   documentRedo: { label: "Redo text edit", key: macDocumentKeys ? "Meta+Shift+Z" : "Ctrl+Y" },
   documentStart: { label: "Go to start of document", key: macDocumentKeys ? "Meta+ArrowUp" : "Ctrl+Home" },
   documentEnd: { label: "Go to end of document", key: macDocumentKeys ? "Meta+ArrowDown" : "Ctrl+End" },
+  bookmarkLine: { label: "Bookmark line", key: `${documentModifier}+Alt+B` },
+  fileBookmarks: { label: "File bookmarks", key: `${documentModifier}+Shift+B` },
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
   folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
@@ -235,7 +237,7 @@ export function commandScope(command: Command) {
   if (command === "viewAsHex") return "viewer";
   if (command.startsWith("image")) return "image";
   if (command === "switchDocumentMode" || command === "saveText" || command === "closeText" ||
-      command === "cancelText" || command.startsWith("document")) return "text";
+      command === "cancelText" || command === "bookmarkLine" || command.startsWith("document")) return "text";
   if (command === "previousChange" || command === "nextChange") return "compare";
   if (command === "folderNameHistory") return "folderDialog";
   if (command.startsWith("picker")) return "folderPicker";
@@ -250,6 +252,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if (leftScope === "wheel" || rightScope === "wheel") return false;
   if (leftScope === "global" || rightScope === "global") return true;
   const commands = [left, right];
+  if (commands.includes("fileBookmarks") && [leftScope, rightScope].some((scope) => scope === "text" || scope === "viewer")) return true;
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
   if ((leftScope === "image" || rightScope === "image") &&

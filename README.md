@@ -176,6 +176,8 @@ In Markdown preview, a link to another Markdown document navigates in the curren
 
 The Viewer and Editor have document-specific menus and a shortcut strip. The header shows the active file's full path and document status. Choose **Options** beside the document menu to open the settings for that mode.
 
+In the local text Viewer, click beside a line number or use **Navigate → Bookmark line**. Markdown supports bookmarks in **Source** mode. **File bookmarks** in the Viewer shows the current file's bookmarks. **Commands → File bookmarks** in the file panes shows every saved bookmark, including entries for closed files. Press **Enter** on an entry to open its line. You can rename or remove a bookmark from either list. Bookmarks persist across restarts and keep their saved line numbers if the file changes.
+
 Use **F6** or the document's **File** menu to switch modes for the current file. The Viewer shows the saved file, and the Editor keeps its unsaved changes when you return. Change or disable the shortcut in **Options → Keyboard shortcuts**. In the file panes, **F6** still opens **Rename or move**.
 
 The Viewer refreshes an open local file when it changes on disk. The Editor offers **Reload from disk** to open the updated file or **Keep editing** to retain the current buffer. Reloading discards any unsaved edits. Saving still checks that the disk contents match the version originally opened or last saved by the Editor.
