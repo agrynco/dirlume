@@ -1,13 +1,14 @@
 import { HistoryField } from "./HistoryField";
 import { t } from "./i18n";
 import { Button } from "./Button";
-import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  basePalette, baseThemes, builtInThemes, captureFonts, colorGroups, colorKeysForSurface, colorLabels, effectiveFontSize, fontGroups, inheritedFont,
+  basePalette, baseThemes, builtInThemes, captureFonts, colorGroups, colorKeysForSurface, colorLabels, defaultFileTypeGroups, effectiveFontSize,
+  fileAppearance, fileTypeColor, fileTypeIndex, fontGroups, inheritedFont, normalizeExtension,
   isAvailableFont, isHexColor, surfaceColors,
   maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, systemTheme, useSystemTheme, viewerColors,
-  type Color, type Font, type FontGroup, type Palette, type Scheme, type Surface,
+  type Color, type FileTypeGroup, type Font, type FontGroup, type Palette, type Scheme, type Surface,
 } from "./appearance";
 import { maxViewerContentWidth, minViewerContentWidth, type Preferences } from "./preferences";
 import { api, describeError } from "./api";
@@ -90,27 +91,28 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   useLayoutEffect(() => setPalette(basePalette(base, overrides)), [base, overrides]);
 
   useEffect(() => {
-    if (!showingFonts) return;
+    if (!showingFonts && section !== "files") return;
     let current = true;
     void api.installedFonts().then(
       (families) => { if (current) setInstalled({ families }); },
       (error: unknown) => { if (current) setInstalled({ families: [], error: describeError(error) }); },
     );
     return () => { current = false; };
-  }, [showingFonts]);
+  }, [section, showingFonts]);
 
   function select(value: string) {
     onChange(selectAppearance(preferences, value));
   }
 
   function create({
-    fonts = applied?.fonts ?? {}, colors = applied?.colors ?? {}, viewFontSizes = preferences.viewFontSizes, automaticName = true,
-  }: { fonts?: Scheme["fonts"]; colors?: Palette; viewFontSizes?: Preferences["viewFontSizes"]; automaticName?: boolean } = {}) {
+    fonts = applied?.fonts ?? {}, colors = applied?.colors ?? {}, fileTypes = applied?.fileTypes,
+    viewFontSizes = preferences.viewFontSizes, automaticName = true,
+  }: { fonts?: Scheme["fonts"]; colors?: Palette; fileTypes?: FileTypeGroup[]; viewFontSizes?: Preferences["viewFontSizes"]; automaticName?: boolean } = {}) {
     let number = 1;
     while (preferences.schemes.some(({ id }) => id === `scheme-${number}`)) number++;
     const name = number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number);
     const scheme: Scheme = {
-      id: `scheme-${number}`, name, base, colors, fonts: { ...fonts, options: fonts.options ?? {} },
+      id: `scheme-${number}`, name, base, colors, fonts: { ...fonts, options: fonts.options ?? {} }, fileTypes,
       ...(automaticName ? { suggestedName: name } : {}),
     };
     setManagedId(scheme.id);
@@ -265,11 +267,15 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
           </FontFields>)}
         </div>
       )}
+      {!selection && section === "files" && <FileTypeSettings groups={applied?.fileTypes ?? defaultFileTypeGroups}
+        palette={palette} installed={installed} paneFont={applied?.fonts.panel?.family}
+        onChange={(fileTypes) => active ? update({ ...active, fileTypes }) : create({ fileTypes })} />}
       {colorSections.map((colorSection) => (
         <div className="color-settings" key={colorSection}>
           {colorSections.length > 1 && <h4>{t(colorGroups[colorSection].label)}</h4>}
           {colorSections.length === 1 && colorSection === "text" && <h4>{t("Shared text colors")}</h4>}
-          {colorFields(Object.keys(colorGroups[colorSection].colors) as Color[])}
+          {colorFields(colorSection === "files" && section === "files" ? ["file-hidden", "file-system"] :
+            Object.keys(colorGroups[colorSection].colors) as Color[])}
         </div>
       ))}
       {selection && !picked && <div className="color-settings">
@@ -321,6 +327,132 @@ function MarkdownWidthSettings({ preferences, onChange }: {
         min={minViewerContentWidth} max={maxViewerContentWidth} onChange={setWidth} />
     </label>}
   </>;
+}
+
+function FileTypeSettings({ groups, palette, installed, paneFont, onChange }: {
+  groups: readonly FileTypeGroup[];
+  palette: Palette;
+  installed: InstalledFonts;
+  paneFont?: string;
+  onChange: (groups: FileTypeGroup[]) => void;
+}) {
+  const [selected, setSelected] = useState(groups[0]?.id ?? "");
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [extensionDraft, setExtensionDraft] = useState("");
+  const [error, setError] = useState("");
+  const [move, setMove] = useState<{ extension: string; owner: FileTypeGroup } | null>(null);
+  const [picker, setPicker] = useState<{ initial: string; color: string } | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const group = groups.find(({ id }) => id === selected) ?? groups[0];
+  const label = (group: FileTypeGroup) => t(group.name);
+  const update = (change: Partial<FileTypeGroup>) => onChange(groups.map((item) => item.id === group.id ? { ...item, ...change } : item));
+  const ownColor = group && fileTypeColor(group);
+  const color = group?.color ?? (ownColor ? palette[ownColor] : palette["panel-ink"]) ?? "#000000";
+  const inherited = paneFont && isAvailableFont(paneFont, installed?.error ? undefined : installed?.families) ? paneFont : t("Current pane font");
+
+  function select(id: string) {
+    setSelected(id);
+    setNameDraft(null);
+    setExtensionDraft("");
+    setError("");
+  }
+
+  function newGroup() {
+    let number = 1;
+    while (groups.some((group) => group.id === `file-type-${number}` || label(group) === t("File type {0}", number))) number++;
+    const item = { id: `file-type-${number}`, name: t("File type {0}", number), extensions: [] };
+    onChange([...groups, item]);
+    select(item.id);
+    requestAnimationFrame(() => nameInput.current?.select());
+  }
+
+  function commitName() {
+    const name = nameDraft?.trim();
+    if (!name || name === label(group)) { setNameDraft(null); return; }
+    if (groups.some((item) => item.id !== group.id && label(item).toLowerCase() === name.toLowerCase())) {
+      setError(t("A file type group already has that name."));
+      return;
+    }
+    update({ name });
+    setNameDraft(null);
+    setError("");
+  }
+
+  function addExtension() {
+    const extension = normalizeExtension(extensionDraft);
+    if (!extension) { setError(t("Enter a file extension.")); return; }
+    if (group.extensions.includes(extension)) { setError(t("This extension is already in this group.")); return; }
+    const owner = groups.find((item) => item.extensions.includes(extension));
+    if (owner) setMove({ extension, owner });
+    else {
+      update({ extensions: [...group.extensions, extension] });
+      setExtensionDraft("");
+      setError("");
+    }
+  }
+
+  function moveExtension() {
+    if (!move) return;
+    onChange(groups.map((item) => item.id === group.id ? { ...item, extensions: [...item.extensions, move.extension] } :
+      item.id === move.owner.id ? { ...item, extensions: item.extensions.filter((extension) => extension !== move.extension) } : item));
+    setMove(null);
+    setExtensionDraft("");
+    setError("");
+  }
+
+  const sample = group?.extensions[0] && `sample.${group.extensions[0]}`;
+  const sampleStyle = sample ? fileAppearance({ name: sample }, fileTypeIndex(groups)) : undefined;
+  return <fieldset className="file-type-settings">
+    <legend><SettingSearchLabel label="File extension groups" /></legend>
+    <div className="file-type-toolbar">
+      <label className="field"><SettingSearchLabel label="File extension group" />
+        <select aria-label={t("File extension group")} value={group?.id ?? ""} onChange={(event) => select(event.target.value)}>
+          {groups.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}
+        </select>
+      </label>
+      <Button type="button" onClick={newGroup}><Plus aria-hidden="true" />{t("New group")}</Button>
+    </div>
+    {group && <>
+      <label className="field"><SettingSearchLabel label="Group name" />
+        <input ref={nameInput} aria-label={t("Group name")} maxLength={maxSchemeNameLength} value={nameDraft ?? label(group)}
+          onChange={(event) => setNameDraft(event.target.value)} onBlur={commitName} onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            commitName();
+          }} />
+      </label>
+      <div className="file-type-toolbar">
+        <label className="field"><SettingSearchLabel label="File extension" />
+          <input aria-label={t("File extension")} placeholder=".svg" value={extensionDraft} onChange={(event) => setExtensionDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addExtension(); } }} />
+        </label>
+        <Button type="button" disabled={!extensionDraft.trim()} onClick={addExtension}><Plus aria-hidden="true" />{t("Add extension")}</Button>
+      </div>
+      {group.extensions.length > 0 && <div className="file-type-extensions" aria-label={t("File extensions")}>
+        {group.extensions.map((extension) => <Button key={extension} type="button" aria-label={t("Remove extension {0}", "." + extension)}
+          onClick={() => update({ extensions: group.extensions.filter((value) => value !== extension) })}>.{extension}<Trash2 aria-hidden="true" /></Button>)}
+      </div>}
+      <ColorField label="Filename color" value={color} custom={Boolean(group.color)} onChange={(color) => update({ color })}
+        onOpen={() => setPicker({ color, initial: color })} />
+      <div className="file-type-font">
+        <FontFamilyField label="File type" value={group.family ?? ""} fallback={inherited} installed={installed} builtIn={false}
+          onChange={(family) => update({ family: family || undefined })} />
+        <Button type="button" className="icon-button" aria-label={t("Reset file type font")} disabled={!group.family}
+          onClick={() => update({ family: undefined })}><RotateCcw aria-hidden="true" /></Button>
+      </div>
+      {sampleStyle && <output className="file-type-sample" aria-label={t("Filename preview")}
+        style={{ color: picker?.color ?? sampleStyle.color ?? color,
+          fontFamily: sampleStyle.family ? `${CSS.escape(sampleStyle.family)}, var(--panel-font)` : "var(--panel-font)" }}>{sample}</output>}
+    </>}
+    {error && <p className="dialog-error" role="alert">{error}</p>}
+    {move && <Dialog title={t("Move extension")} onClose={() => setMove(null)} footer={<>
+      <Button type="button" data-initial-focus onClick={() => setMove(null)}>{t("Cancel")}</Button>
+      <Button type="button" className="primary" onClick={moveExtension}>{t("Move extension")}</Button>
+    </>}><div className="dialog-body">{t("Move {0} from {1} to {2}?", "." + move.extension, label(move.owner), label(group))}</div></Dialog>}
+    {picker && <ColorPicker label={t("Filename color")} initial={picker.initial}
+      onChange={(color) => setPicker({ ...picker, color })} onCommit={() => { update({ color: picker.color }); setPicker(null); }}
+      onCancel={() => setPicker(null)} />}
+  </fieldset>;
 }
 
 function ColorField({ label, value, custom, surface, onChange, onOpen }: {

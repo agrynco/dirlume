@@ -59,7 +59,7 @@ import { panelModeIds, panelModeName, type PanelModeId } from "./panelModes";
 import { AppearancePicker } from "./AppearancePicker";
 import type { AppearancePick } from "./appearancePick";
 import type { FeaturePage } from "./featureOptions";
-import { applyAppearance, isLightTheme, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
+import { applyAppearance, fileTypeIndex, isLightTheme, resolveAppearance, selectAppearance, useSystemTheme } from "./appearance";
 import { TextWindow, CompareDialog } from "./TextTools";
 import { ImageDocument } from "./ImageDocument";
 import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
@@ -235,6 +235,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const rowsPerGroup = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const groupPageSize = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
+  const fileTypes = useMemo(() => fileTypeIndex(scheme?.fileTypes), [scheme?.fileTypes]);
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
@@ -2835,7 +2836,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             active={active === side} covered={paneCovered(side)}
             layout={preferences.layout} showHidden={preferences.hidden} rightClickSelection={preferences.rightClickSelection}
             pane={paneSizes[side] ? { ...panes[side], backgroundSizes: paneSizes[side] } : panes[side]}
-            entries={entries[side]} locations={locations} addressPlace={treeFolder(side)}
+            entries={entries[side]} fileTypes={fileTypes} locations={locations} addressPlace={treeFolder(side)}
             fileView={trees[side].enabled ? "tree" : "list"} onFileView={(view) => void setFilePaneView(side, view)}
             onTreeBranch={(entry) => toggleTreeBranch(side, entry)} folderSizes={folderSizes[side]}
             onFolderSizes={() => setFolderSizesEnabled((before) => ({ ...before, [side]: !before[side] }))}

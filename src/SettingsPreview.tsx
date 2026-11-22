@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { Check, File, Folder, FolderTree } from "lucide-react";
-import { applyAppearance, colorKeysForSurface, fileColor, fontGroups, resolveAppearance, useSystemTheme, type Surface } from "./appearance";
+import { applyAppearance, colorKeysForSurface, fileAppearance, fileTypeIndex, fontGroups, resolveAppearance, useSystemTheme, type FileTypeIndex, type Surface } from "./appearance";
 import type { AppearanceSection } from "./AppearanceSettings";
 import { shortcutBindings, showShortcut, type Preferences } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
@@ -27,25 +27,26 @@ function DialogFontSamples() {
   </div>;
 }
 
-const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "recording.mp4", "backup.zip", "config.json", "setup.exe"];
+const fileSamples = ["main.rs", "notes.md", "report.pdf", "photo.png", "logo.svg", "recording.mp4", "backup.zip", "config.json", "setup.exe"];
 const hiddenSample = { name: ".env", hidden: true };
 const systemSample = { name: "System Volume Information", directory: true, hidden: true, system: true };
 
-function Samples({ hidden, all, showMarkedCursor }: { hidden: boolean; all: boolean; showMarkedCursor?: boolean }) {
+function Samples({ hidden, all, groups, showMarkedCursor }: { hidden: boolean; all: boolean; groups: FileTypeIndex; showMarkedCursor?: boolean }) {
   const files = all ? fileSamples : ["main.rs", "notes.md", "photo.png"];
-  const samples: Parameters<typeof fileColor>[0][] = files.map((name) => ({ name }));
+  const samples: Parameters<typeof fileAppearance>[0][] = files.map((name) => ({ name }));
   if (all || hidden) samples.push(hiddenSample);
   if (all) samples.push(systemSample);
   return (
     <div className={`preview-files${all ? " preview-file-types" : ""}`}>
       {!all && <div className="preview-folder"><Folder /> {t("Project")}</div>}
       {samples.map((entry, index) => {
-        const color = fileColor(entry);
+        const { tone, color, family } = fileAppearance(entry, groups);
         const currentMarked = showMarkedCursor && index === 2;
         const selection = currentMarked ? " preview-file-current-marked" : !all && index === 1 ? " preview-file-selected" : "";
         return <div className={`preview-file${selection}`} key={entry.name}>
           {currentMarked ? <Check /> : entry.directory ? <Folder /> : <File />}
-          <span style={color && !selection ? { color: `var(--${color})` } : undefined}>{entry.name}</span>
+          <span style={{ color: selection ? undefined : color ?? (tone && tone !== "custom" ? `var(--${tone})` : undefined),
+            fontFamily: family ? `${CSS.escape(family)}, var(--panel-font)` : undefined }}>{entry.name}</span>
         </div>;
       })}
     </div>
@@ -101,6 +102,7 @@ function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences:
 export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage; preferences: Preferences; pick?: AppearancePick }) {
   const preview = useRef<HTMLDivElement>(null);
   const { theme, scheme } = resolveAppearance(preferences, useSystemTheme());
+  const groups = fileTypeIndex(scheme?.fileTypes);
   const shortcuts = shortcutBindings(preferences);
   const fontViews = page === "viewFonts" ? viewFontKeys : null;
   const surface = pick && pickedSurface(pick);
@@ -131,7 +133,7 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
             {page === "text" && <CodeSample />}
           </>
         ) :
-          page === "files" ? <Samples hidden={preferences.hidden} all /> :
+          page === "files" ? <Samples hidden={preferences.hidden} groups={groups} all /> :
           page === "shortcuts" ? (
             <div className="preview-shortcuts">
               {([["View", "view"], ["Edit", "edit"], ["Find files", "search"], ["Copy", "copy"]] as const).map(([label, command]) => (
@@ -143,7 +145,7 @@ export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage
               {page === "fonts" && <DialogFontSamples />}
               <div className="preview-toolbar"><FolderTree />{t("Project")}<span className="preview-toolbar-action">{t("Connect")}</span></div>
               <div className={page === "fonts" ? "preview-fonts" : undefined}>
-                <Samples hidden={preferences.hidden} all={false} showMarkedCursor={page === "panels" || page === "filePanels"} />
+                <Samples hidden={preferences.hidden} groups={groups} all={false} showMarkedCursor={page === "panels" || page === "filePanels"} />
                 {page === "fonts" && <CodeSample />}
               </div>
             </>
