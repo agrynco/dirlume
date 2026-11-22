@@ -50,15 +50,32 @@ export async function testFolderMeasurement() {
             }
             if (command === "measure_folders") {
               return new Promise((done) => {
-                window.completeFolderMeasurement = () => {
-                  for (const name of args.names) {
+                const remaining = [...args.names];
+                window.completeFolderMeasurement = (only) => {
+                  for (const name of only ? [only] : [...remaining]) {
+                    const index = remaining.indexOf(name);
+                    if (index < 0) continue;
+                    remaining.splice(index, 1);
                     const large = name === "Measured folder";
                     args.output.onmessage({ name, bytes: large ? Math.round(14.1 * 1024 ** 3) : 1024, incomplete: large });
                   }
-                  window.completeFolderMeasurement = undefined;
-                  done();
+                  if (!remaining.length) {
+                    window.completeFolderMeasurement = undefined;
+                    done();
+                  }
                 };
+                window.lateFolderMeasurement = () => args.output.onmessage({ name: "Second folder", bytes: 99123, incomplete: false });
               });
+            }
+            if (command === "cancel_measurement") { window.completeFolderMeasurement(); return null; }
+            if (command === "scan_local_space") {
+              args.output.onmessage({ kind: "start", strategy: "walk" });
+              const size = Math.round(14.1 * 1024 ** 3);
+              args.output.onmessage({ kind: "batch", changes: [
+                { parent: 0, name: "fixture.bin", directory: false, size, allocated: size, shared: false },
+                { closed: 0, partial: true, error: null },
+              ] });
+              args.output.onmessage({ kind: "finished" });
             }
             return null;
           },
@@ -120,6 +137,30 @@ export async function testFolderMeasurement() {
       await page.waitForFunction((before) => parseFloat(getComputedStyle(document.querySelector("#left-files .file-size")).fontSize) > before, beforeZoom);
       await checkFits();
       assert.equal(await page.locator("#right-pane .file-column.col-size").evaluate((item) => item.getBoundingClientRect().width), rightWidth);
+
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await folder.click({ modifiers: [modifier] });
+      await second.click({ modifiers: [modifier] });
+      await pane.getByRole("listbox").press("F3");
+      await reading.waitFor();
+      await page.evaluate(() => window.completeFolderMeasurement("Measured folder"));
+      await folder.getByText(measured, { exact: true }).waitFor();
+      await second.locator('[aria-label="Measuring folder"]').waitFor();
+      await pane.getByRole("listbox").press("Escape");
+      await reading.waitFor({ state: "hidden" });
+      await page.evaluate(() => window.lateFolderMeasurement());
+      await second.getByText(layout === "twin" ? "1,024" : "1 KiB", { exact: true }).waitFor();
+      assert.equal(await folder.getByText(measured, { exact: true }).count(), 1);
+
+      await folder.dblclick();
+      await page.waitForFunction(() => document.querySelector("#left-path")?.dataset.path.endsWith("Measured folder") &&
+        document.querySelector("#left-files")?.getAttribute("aria-busy") === "false");
+      await pane.getByRole("button", { name: "Analyze space", exact: true }).click();
+      const analyzer = page.getByRole("region", { name: "Space Analyzer", exact: true });
+      await analyzer.getByRole("combobox", { name: "Size metric" }).selectOption("logical");
+      await analyzer.locator(".space-tree-row").filter({ has: page.getByText("Measured folder", { exact: true }) })
+        .getByText("14.1 GiB", { exact: true }).waitFor();
+      await analyzer.getByRole("status").getByText("Partial results", { exact: true }).waitFor();
       await page.close();
     }
     console.log("Verified stable folder measurement, automatic grouped sizes and native dates, and independent pane widths.");

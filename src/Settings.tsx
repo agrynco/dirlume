@@ -41,6 +41,7 @@ const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
     id: id as AppearanceSection, label: group.label,
     terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : []),
+      ...(id === "files" ? ["File extension groups", "Filename color", "Font family", "Add extension"] : []),
       ...(id === "dialogs" ? [fontGroups.dialog.label, fontGroups.options.label, "font family size"] : [])],
   })),
   { id: "fonts" as const, label: "Fonts", terms: [fontGroups.ui.label, fontGroups.panel.label,

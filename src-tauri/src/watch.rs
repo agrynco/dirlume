@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    thread,
 };
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -14,7 +15,7 @@ use tauri::{ipc::Channel, State};
 use crate::{
     desktop::{blocking, message, Result},
     diagnostics::{failure, FailureCode},
-    ftp, local,
+    ftp, local, space_analyzer,
 };
 
 #[derive(Default)]
@@ -62,21 +63,31 @@ pub async fn measure_folders(
         .map_err(message)?
         .insert(id, Arc::clone(&stop));
     let result = blocking(move || {
+        let reported_incomplete = AtomicBool::new(false);
         match source {
             MeasurementSource::Local { directory } => {
                 let directory = local::absolute(&directory).map_err(message)?;
                 for name in &names {
                     local::name_component(name).map_err(message)?;
                 }
-                report_sizes(names, &output, |name| {
-                    local::folder_size(&directory.join(name), &stop)
+                let workers = names.len().min(2);
+                let names = Mutex::new(names.into_iter());
+                thread::scope(|scope| {
+                    for _ in 0..workers {
+                        scope.spawn(|| {
+                            let pending = std::iter::from_fn(|| names.lock().ok()?.next());
+                            report_sizes(pending, &output, &reported_incomplete, |name| {
+                                space_analyzer::measure_folder(&directory.join(name), &stop)
+                            });
+                        });
+                    }
                 });
             }
             MeasurementSource::Ftp { segments, .. } => {
                 let mut ftp = connection
                     .ok_or("Connect to the FTP server first.")?
                     .open()?;
-                report_sizes(names, &output, |name| {
+                report_sizes(names, &output, &reported_incomplete, |name| {
                     ftp.folder_size(&ftp::child(&segments, name), &stop)
                 });
             }
@@ -89,18 +100,17 @@ pub async fn measure_folders(
 }
 
 fn report_sizes(
-    names: Vec<String>,
+    names: impl IntoIterator<Item = String>,
     output: &Channel<SizeResult>,
+    reported_incomplete: &AtomicBool,
     mut measure: impl FnMut(&str) -> Option<(u64, bool)>,
 ) {
-    let mut reported_incomplete = false;
     for name in names {
         let Some((bytes, incomplete)) = measure(&name) else {
             break;
         };
-        if incomplete && !reported_incomplete {
+        if incomplete && !reported_incomplete.swap(true, Ordering::Relaxed) {
             failure("measure_sizes", FailureCode::Incomplete, None);
-            reported_incomplete = true;
         }
         let _ = output.send(SizeResult {
             name,

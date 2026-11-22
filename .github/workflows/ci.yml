@@ -161,6 +161,9 @@ jobs:
       - name: Verify contextual offline Help
         if: github.event.action != 'closed'
         run: node scripts/contextual-help-smoke.mjs
+      - name: Verify local Viewer file bookmarks
+        if: github.event.action != 'closed'
+        run: node scripts/file-bookmarks-smoke.mjs
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs

@@ -195,6 +195,14 @@ export interface DiskSpace {
   total: number;
 }
 
+export interface VolumeInformation {
+  path: string;
+  share: boolean;
+  label: string | null;
+  filesystem: string | null;
+  capacity: DiskSpace | null;
+}
+
 export interface GitBranch {
   reference: string;
   name: string;
@@ -380,6 +388,7 @@ export const api = {
     invoke<void>("install_update", { version, onProgress }),
   locations: () => invoke<QuickLocation[]>("locations"),
   spaceMount: (path: string) => invoke<{ path: string; share: boolean }>("space_mount", { path }),
+  volumeInformation: (path: string) => invoke<VolumeInformation>("volume_information", { path }),
   scanLocalSpace: (root: string, id: string, output: Channel<SpaceScanEvent>) =>
     invoke<void>("scan_local_space", { root, id, output }),
   cancelSpaceScan: (id: string) => invoke<void>("cancel_space_scan", { id }),
