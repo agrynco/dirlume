@@ -15,7 +15,9 @@ using System.Threading;
 class Program {
   static int Main(string[] args) {
     if (args.Length > 1 && args[0] == "complete") {
-      if (args[args.Length - 1].StartsWith("dotnet ")) Console.WriteLine("--list-sdks");
+      string root = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+      File.WriteAllText(Path.Combine(root, "dotnet.seen"), "1");
+      Console.WriteLine("--list-sdks");
       return 0;
     }
     if (args.Length > 1 && args[0] == "__complete") {
@@ -161,6 +163,28 @@ export async function testCommandCompletion(page, root, docker) {
   await option(/completion folder/).click();
   assert.match(await input.inputValue(), /^cd .*completion folder/);
 
+  const openTerminal = () => page.locator("#left-files").press("F12");
+  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
+  const terminalInput = terminal.locator(".xterm-helper-textarea");
+  const terminalOptions = terminal.getByRole("listbox", { name: "Command suggestions", exact: true });
+  const terminalOption = (name) => terminalOptions.getByRole("option", { name, exact: true });
+  const closeTerminal = () => terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+  const atPrompt = () => page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
+
+  // The .NET completer uses the application environment. Start a fresh terminal with
+  // automatic environment refresh disabled so it resolves the synthetic dotnet.exe.
+  if (await page.locator(".terminal-card").count()) {
+    if (!await terminal.isVisible()) await openTerminal();
+    await closeTerminal();
+  }
+  await openTerminal();
+  await atPrompt();
+  await terminalInput.pressSequentially("dotnet ");
+  await terminalOption("--list-sdks").waitFor({ timeout: 15000 });
+  assert.ok((await readdir(docker)).includes("dotnet.seen"));
+  await terminalInput.press("Control+c");
+  await closeTerminal();
+
   await setEnvironmentRefresh(true);
   for (const suffix of ["first", "second", "first"]) {
     const value = `Write-Output 'completion-history-${suffix}'`;
@@ -179,12 +203,8 @@ export async function testCommandCompletion(page, root, docker) {
   assert.equal(await input.inputValue(), "Write-Output 'completion-history-first'");
   console.log("Verified PowerShell command completions, editing at the caret, and command history suggestions.");
 
-  await page.locator("#left-files").press("F12");
-  const terminal = page.getByRole("region", { name: "Terminal", exact: true });
-  const terminalInput = terminal.locator(".xterm-helper-textarea");
-  const terminalOptions = terminal.getByRole("listbox", { name: "Command suggestions", exact: true });
+  await openTerminal();
   const screen = terminal.locator(".xterm-accessibility-tree");
-  const atPrompt = () => page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.trim().endsWith(">"));
   await atPrompt();
   // Keep the completion fixture first in this PowerShell session after an environment refresh.
   await terminalInput.pressSequentially(`$env:PATH = '${docker.replaceAll("'", "''")};' + $env:PATH; Write-Output ('fixture-' + 'cli-ready')`);
@@ -196,7 +216,6 @@ export async function testCommandCompletion(page, root, docker) {
     ["cmd /c dir /", ["/b"]],
     ["Get-ChildItem -Rec", ["-Recurse"]],
     ["dir -Rec", ["-Recurse"]],
-    ["dotnet ", ["--list-sdks"]],
   ];
   for (const [line, candidates] of samples) {
     await terminalInput.pressSequentially(line);
@@ -216,7 +235,6 @@ export async function testCommandCompletion(page, root, docker) {
   await terminalOptions.getByRole("option", { name: "checkout", exact: true }).click();
   await screen.getByText(/git checkout --quiet/).waitFor();
   await terminalInput.press("Control+c");
-  const terminalOption = (name) => terminalOptions.getByRole("option", { name, exact: true });
   const cancel = async () => { await terminalInput.press("Control+c"); await atPrompt(); };
   await atPrompt();
   const drive = parse(process.env.SystemRoot ?? cwd).root;
@@ -306,7 +324,7 @@ export async function testCommandCompletion(page, root, docker) {
   await terminalOption("completion folder").waitFor();
   assert.equal(await terminalOption("web-api").count(), 0);
   await cancel();
-  await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+  await closeTerminal();
   if (!previousRefresh) await setEnvironmentRefresh(false);
   console.log("Verified Windows completion for folders, Docker flags and containers, and Compose projects in both inputs.");
 }

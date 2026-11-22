@@ -236,6 +236,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const nextAnalysis = useRef(administratorWorkspace?.otherAnalyzer ? 1 : 0);
   const treeNavigation = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const [fileRevision, setFileRevision] = useState(0);
+  const [sshUploadRefresh, setSshUploadRefresh] = useState<number | null>(null);
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
   const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
@@ -553,6 +554,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       const found = reveal === ".." ? hasParentRow(openedPlace) : !!revealed;
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("Item no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
+        if (background && pane.place !== place) return pane;
         const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
@@ -572,7 +574,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           setModal(credentialsDialog);
         }
         const text = credentialsRequired ? (prompt ? "" : error.message) : describeError(error);
-        updatePane(side, (pane) => background && pane.error ? pane : {
+        updatePane(side, (pane) => background && (pane.place !== place || pane.error) ? pane : {
           ...pane, loading: false, loadingPath: undefined, error: text,
           elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined,
           deniedSshListing: elevated ? pane.deniedSshListing : place.kind === "ssh" && isPermissionError(text)
@@ -585,6 +587,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (request.current[side] === ticket) delete pendingListings.current[side];
     }
   }, [beginListing, cancelScan, updatePane]);
+
+  useEffect(() => {
+    if (sshUploadRefresh === null) return;
+    const folders = (["left", "right"] as const).flatMap((side) => {
+      const { place, loading } = panes[side];
+      return place?.kind === "ssh" && place.id === sshUploadRefresh ? [{ side, place, loading }] : [];
+    });
+    // Let any navigation settle before rereading the directory on the upload's connection.
+    if (folders.some(({ side, loading }) => loading || pendingListings.current[side]?.background === false)) return;
+    setSshUploadRefresh(null);
+    for (const { side, place } of folders) void load(side, place, "refresh");
+  }, [sshUploadRefresh, panes, load]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2752,6 +2766,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
+    if (command === "refresh" && (onFiles?.id === "left-files" || onFiles?.id === "right-files")) {
+      refresh(onFiles.id === "left-files" ? "left" : "right");
+      return;
+    }
     if (!event.repeat || (!["hidden", "attributes", "quickView", "gitView", "analyzeSpace", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
       perform(command);
@@ -3325,7 +3343,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       )}
       {modal?.kind === "transfer" && (
         <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden} onClose={() => setModal(null)}
-          onFinished={(success) => { fileLocationsChanged(); if (success) setStatus({ text: "Transfer complete" }); }} />
+          onFinished={(success) => {
+            const destination = modal.transfer.remoteDestination;
+            if (destination?.kind === "ssh") setSshUploadRefresh(destination.id);
+            else fileLocationsChanged();
+            if (success) setStatus({ text: "Transfer complete" });
+          }} />
       )}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
