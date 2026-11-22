@@ -2548,7 +2548,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         break;
       case "commandPath":
       case "commandName":
-        if (currentItem && (currentItem.place.kind === "local" || currentItem.place.kind === "ssh")) {
+        if (command === "commandPath" && currentRow?.name === ".." &&
+            (pane.place?.kind === "local" || pane.place?.kind === "ssh")) {
+          const target = parentPlace(pane.place);
+          if (target) insertCommand(placePath(target), pane.place.kind === "local" && windowsClient);
+        } else if (currentItem && (currentItem.place.kind === "local" || currentItem.place.kind === "ssh")) {
           insertCommand(command === "commandPath"
             ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name,
           currentItem.place.kind === "local" && windowsClient);
