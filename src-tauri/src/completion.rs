@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fs,
     io::{Read, Write},
     path::Path,
@@ -19,9 +19,11 @@ use crate::{
     local, terminal,
 };
 
+mod docker;
 #[cfg(not(windows))]
 #[path = "completion/unix.rs"]
 mod platform;
+pub(crate) use docker::ENVIRONMENT as DOCKER_COMPLETION_ENVIRONMENT;
 #[cfg(windows)]
 #[path = "completion/windows.rs"]
 mod platform;
@@ -36,9 +38,8 @@ pub struct CompletionRequest {
     caret: usize,
     directory: String,
     refresh_environment: bool,
-    #[cfg(windows)]
     #[serde(default)]
-    shell_environment: Option<std::collections::HashMap<String, Option<String>>>,
+    shell_environment: Option<HashMap<String, Option<String>>>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -230,6 +231,8 @@ pub struct RemoteCompletionRequest {
     caret: usize,
     directory: String,
     search_path: String,
+    #[serde(default)]
+    shell_environment: Option<HashMap<String, Option<String>>>,
 }
 
 #[tauri::command]
@@ -252,6 +255,19 @@ pub async fn complete_ssh_terminal(
         return Ok(CompletionBatch::default());
     };
     let terminal = terminals.remote(id)?;
+    if let Some(query) = docker::query(&context, false) {
+        let output = terminal
+            .complete(&docker::remote_script(&request, &query))
+            .await
+            .unwrap_or_default();
+        return Ok(docker::batch(
+            &query,
+            &context,
+            &request.line,
+            &output,
+            false,
+        ));
+    }
     let shell = include_str!("completion/bash.sh");
     let fallback = include_str!("completion/ssh-paths.sh");
     let directory_only = context
@@ -447,8 +463,7 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
             "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
         )
     });
-    #[cfg(windows)]
-    if let Some(batch) = platform::docker_options(request, &context, cwd) {
+    if let Some(batch) = docker::local(request, &context, cwd) {
         return batch;
     }
     if cfg!(windows)
