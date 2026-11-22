@@ -11,7 +11,7 @@ import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Copy, Eye, EyeOff, FileDiff,
+  ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
   FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
   ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
 } from "lucide-react";
@@ -43,7 +43,7 @@ import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type Fo
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
-import { AboutDialog, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { AboutDialog, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { PaneSources, type PaneSource } from "./PaneSources";
@@ -2915,6 +2915,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
         <div className="top-actions">
+          <Button type="button" className="icon-button donation-button titlebar-donation" aria-label={t("Donate via monobank")}
+            data-tauri-drag-region="false" onClick={() => {
+              void api.openWebLink(donationUrl).catch((error: unknown) => setStatus({ text: describeError(error), error: true }));
+            }}><Coffee aria-hidden="true" /></Button>
           {panesAvailable && formattedPreview && <div className="quick-view-modes" role="group" data-help-topic="quickView" aria-label={t("Quick View format")}>
             <Button aria-pressed={!quickViewSourceText} onClick={() => { setQuickViewSourceText(false); focus(active); }}>{t("Rendered")}</Button>
             <Button aria-pressed={quickViewSourceText} onClick={() => { setQuickViewSourceText(true); focus(active); }}>{t("Source")}</Button>
