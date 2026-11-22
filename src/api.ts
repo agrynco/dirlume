@@ -152,14 +152,23 @@ export interface FtpProfile {
   codePage: number | null;
 }
 
-export interface SshProfile {
-  id: string;
-  label: string;
+export interface SshHostSettings {
   host: string;
   port: number;
   username: string;
   auth: { kind: "password" } | { kind: "privateKey"; path: string };
+}
+
+export interface SshJumpHost extends SshHostSettings {
+  id: string;
   hasSecret: boolean;
+}
+
+export interface SshProfile extends SshHostSettings {
+  id: string;
+  label: string;
+  hasSecret: boolean;
+  jumpHosts?: SshJumpHost[];
 }
 
 export interface SshHostVerification {
@@ -170,7 +179,8 @@ export interface SshHostVerification {
 
 type SshVerificationRequired = { kind: "verifyHost"; verification: SshHostVerification };
 type SshConnection = ({ kind: "connected" } & Connection & { segments: string[] }) | SshVerificationRequired;
-type SshProfileInput = Omit<SshProfile, "id" | "hasSecret"> & { id?: string; secret?: string; clearSecret?: boolean };
+export type SshHostInput = SshHostSettings & { secret?: string; clearSecret?: boolean };
+type SshProfileInput = SshHostInput & { id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[] };
 
 export interface NamedFile {
   place: TextPlace;
@@ -465,11 +475,13 @@ export const api = {
   sshProfiles: () => invoke<SshProfile[]>("ssh_profiles"),
   saveSshProfile: (input: SshProfileInput) =>
     invoke<SshProfile>("save_ssh_profile", { input }),
-  testSshConnection: (input: SshProfileInput, approval?: SshHostVerification) =>
-    invoke<{ kind: "success" } | SshVerificationRequired>("test_ssh_connection", { input, approval }),
+  testSshConnection: (input: SshProfileInput, approvals: readonly SshHostVerification[]) =>
+    invoke<{ kind: "success" } | SshVerificationRequired>("test_ssh_connection", {
+      input, approval: approvals[0], approvals,
+    }),
   removeSshProfile: (id: string) => invoke<void>("remove_ssh_profile", { id }),
-  connectSsh: (id: string, approval?: SshHostVerification, segments?: string[]) =>
-    invoke<SshConnection>("connect_ssh", { id, approval, segments }),
+  connectSsh: (id: string, approvals?: readonly SshHostVerification[], segments?: string[]) =>
+    invoke<SshConnection>("connect_ssh", { id, approval: approvals?.[0], approvals, segments }),
   disconnectSsh: (id: number) => invoke<void>("disconnect_ssh", { id }),
   listSsh: (id: number, segments: string[], sudoPassword?: string, reuseSudo?: boolean) =>
     invoke<Listing & { elevated: boolean }>("list_ssh", { id, segments, sudoPassword, reuseSudo }),

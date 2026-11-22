@@ -1,0 +1,6 @@
+{
+  "version": "0.1.24",
+  "highlights": [
+    "Add and reorder jump hosts in saved SSH and SFTP connections. Test the route before saving and use it for browsing, transfers, bookmarks, and the SSH terminal."
+  ]
+}

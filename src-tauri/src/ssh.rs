@@ -2,10 +2,13 @@ pub(crate) mod profiles;
 mod session;
 mod sudo;
 mod terminal;
+#[cfg(test)]
+mod tests;
 
 use std::{
     collections::HashMap,
     future::Future,
+    ops::Deref,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex,
@@ -17,7 +20,7 @@ use openssh_sftp_client::Sftp;
 use russh::{
     client,
     keys::{decode_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate},
-    ChannelMsg,
+    ChannelMsg, Disconnect,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -28,7 +31,10 @@ use crate::{
     desktop::{blocking, message, Result},
     protocol::{file_server_origin, RemoteListing},
 };
-use profiles::{Authentication, Config, ConnectionSettings, Endpoint, ProfileInput, SavedProfile};
+use profiles::{
+    Authentication, Config, ConnectionSettings, DraftHost, Endpoint, HostKey, ProfileInput,
+    SavedHost, SavedProfile,
+};
 pub(crate) use session::{Entry, Session};
 pub(crate) use terminal::{open_shell, RemoteTerminal};
 
@@ -93,6 +99,7 @@ impl From<SftpFailure> for String {
 #[derive(Debug)]
 enum HandshakeError {
     Transport(russh::Error),
+    Forwarding(russh::Error),
     Unverified(String),
     Changed { expected: String, received: String },
 }
@@ -107,6 +114,7 @@ impl std::fmt::Display for HandshakeError {
     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Transport(error) => write!(output, "Could not connect to the SSH server. {error}"),
+            Self::Forwarding(error) => write!(output, "The preceding jump host could not forward the connection. {error}"),
             Self::Unverified(fingerprint) => write!(output, "Verify the SSH host key {fingerprint} before connecting."),
             Self::Changed { expected, received } => write!(
                 output,
@@ -140,6 +148,7 @@ impl client::Handler for VerifyHost {
 fn handshake(
     endpoint: &Endpoint,
     expected: Option<String>,
+    through: Option<&client::Handle<VerifyHost>>,
 ) -> std::result::Result<client::Handle<VerifyHost>, HandshakeError> {
     let config = client::Config {
         keepalive_interval: Some(Duration::from_secs(30)),
@@ -147,24 +156,29 @@ fn handshake(
         ..Default::default()
     };
     tauri::async_runtime::block_on(async {
-        tokio::time::timeout(
-            TIMEOUT,
-            client::connect(
-                Arc::new(config),
-                (endpoint.host.as_str(), endpoint.port),
-                VerifyHost(expected),
-            ),
-        )
+        let config = Arc::new(config);
+        let verifier = VerifyHost(expected);
+        tokio::time::timeout(TIMEOUT, async {
+            if let Some(jump) = through {
+                let channel = jump
+                    .channel_open_direct_tcpip(&endpoint.host, endpoint.port.into(), "127.0.0.1", 0)
+                    .await
+                    .map_err(HandshakeError::Forwarding)?;
+                client::connect_stream(config, channel.into_stream(), verifier).await
+            } else {
+                client::connect(config, (endpoint.host.as_str(), endpoint.port), verifier).await
+            }
+        })
         .await
         .map_err(|_| russh::Error::ConnectionTimeout)?
     })
 }
 
 fn authenticate(
-    mut client: client::Handle<VerifyHost>,
+    client: &mut client::Handle<VerifyHost>,
     settings: &ConnectionSettings,
     secret: Option<&str>,
-) -> Result<client::Handle<VerifyHost>> {
+) -> Result<()> {
     let user = settings.username.as_str();
     let authenticated = match &settings.auth {
         Authentication::Password => {
@@ -194,10 +208,43 @@ fn authenticate(
     if !authenticated.success() {
         return Err("The SSH server rejected the credentials.".to_owned());
     }
-    Ok(client)
+    Ok(())
 }
 
-fn open_sftp(client: client::Handle<VerifyHost>) -> Result<Session> {
+// The destination is last so closing the route can disconnect it before the transports it uses.
+struct AuthenticatedRoute(Vec<client::Handle<VerifyHost>>);
+
+impl Deref for AuthenticatedRoute {
+    type Target = client::Handle<VerifyHost>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+            .last()
+            .expect("an authenticated route has a destination")
+    }
+}
+
+impl Drop for AuthenticatedRoute {
+    fn drop(&mut self) {
+        let clients = std::mem::take(&mut self.0);
+        if clients.is_empty() {
+            return;
+        }
+        tauri::async_runtime::spawn(async move {
+            for client in clients.into_iter().rev() {
+                let _ = tokio::time::timeout(Duration::from_secs(1), async {
+                    client
+                        .disconnect(Disconnect::ByApplication, "Closing the SSH route", "")
+                        .await?;
+                    client.await
+                })
+                .await;
+            }
+        });
+    }
+}
+
+fn open_sftp(client: AuthenticatedRoute) -> Result<Session> {
     let sftp = wait(async {
         let mut channel = client.channel_open_session().await.map_err(message)?;
         channel
@@ -223,28 +270,29 @@ fn open_sftp(client: client::Handle<VerifyHost>) -> Result<Session> {
 
 pub struct Connection {
     profile: SavedProfile,
-    fingerprint: String,
+    host_keys: Vec<HostKey>,
     listing: Mutex<Session>,
     sudo: sudo::Access,
 }
 
 impl Connection {
-    fn authenticated_client(&self) -> Result<client::Handle<VerifyHost>> {
-        let client = handshake(
-            &self.profile.profile.settings.endpoint,
-            Some(self.fingerprint.clone()),
-        )
-        .map_err(message)?;
-        let secret = self.profile.secret()?;
-        authenticate(
-            client,
-            &self.profile.profile.settings,
-            secret.as_ref().map(|value| value.as_str()),
-        )
+    fn authenticated_client(&self) -> Result<AuthenticatedRoute> {
+        match open_route(
+            self.profile.route().map(RouteHost::Saved).collect(),
+            |endpoint| stored_key(&self.host_keys, endpoint),
+            &[],
+        )? {
+            Ok((client, _)) => Ok(client),
+            Err(verification) => Err(format!(
+                "Verify the SSH host key for {}:{} before reconnecting.",
+                verification.endpoint.host, verification.endpoint.port
+            )),
+        }
     }
 
     pub fn open(&self) -> Result<Session> {
         open_sftp(self.authenticated_client()?)
+            .map_err(|error| route_error(&self.profile.destination.settings.endpoint, None, error))
     }
 
     fn retry_with_sudo<T>(
@@ -327,7 +375,8 @@ pub struct HostVerification {
 fn verified_handshake(
     endpoint: &Endpoint,
     pinned: Option<String>,
-    approval: Option<HostVerification>,
+    approval: Option<&HostVerification>,
+    through: Option<&client::Handle<VerifyHost>>,
 ) -> Result<std::result::Result<(client::Handle<VerifyHost>, String), HostVerification>> {
     if let Some(approval) = &approval {
         if &approval.endpoint != endpoint
@@ -338,8 +387,8 @@ fn verified_handshake(
             return Err("The SSH host verification changed. Try the connection again.".to_owned());
         }
     }
-    let expected = pinned.or_else(|| approval.map(|approval| approval.fingerprint));
-    match handshake(endpoint, expected.clone()) {
+    let expected = pinned.or_else(|| approval.map(|approval| approval.fingerprint.clone()));
+    match handshake(endpoint, expected.clone(), through) {
         Ok(client) => Ok(Ok((
             client,
             expected.ok_or("The SSH server did not provide a host key.")?,
@@ -352,6 +401,107 @@ fn verified_handshake(
     }
 }
 
+enum RouteHost<'a> {
+    Saved(&'a SavedHost),
+    Draft(&'a mut DraftHost),
+}
+
+impl<'a> RouteHost<'a> {
+    fn settings(&self) -> &ConnectionSettings {
+        match self {
+            Self::Saved(host) => &host.settings,
+            Self::Draft(host) => &host.settings,
+        }
+    }
+
+    fn credentials(self) -> (&'a ConnectionSettings, Result<Option<Zeroizing<String>>>) {
+        match self {
+            Self::Saved(host) => (&host.settings, host.secret()),
+            Self::Draft(host) => {
+                let secret = host.take_secret();
+                (&host.settings, secret)
+            }
+        }
+    }
+}
+
+fn route_error(endpoint: &Endpoint, jump: Option<usize>, error: impl std::fmt::Display) -> String {
+    let stage = jump.map_or_else(
+        || "SSH destination".to_owned(),
+        |index| format!("SSH jump host {index}"),
+    );
+    format!("{stage} ({}:{}). {error}", endpoint.host, endpoint.port)
+}
+
+fn stored_key(keys: &[HostKey], endpoint: &Endpoint) -> Option<String> {
+    keys.iter()
+        .find(|key| &key.endpoint == endpoint)
+        .map(|key| key.fingerprint.clone())
+}
+
+type RouteHandshake = std::result::Result<(AuthenticatedRoute, Vec<HostKey>), HostVerification>;
+
+fn open_route(
+    hosts: Vec<RouteHost<'_>>,
+    trusted: impl Fn(&Endpoint) -> Option<String>,
+    approvals: &[HostVerification],
+) -> Result<RouteHandshake> {
+    for approval in approvals {
+        if !hosts
+            .iter()
+            .any(|host| host.settings().endpoint == approval.endpoint)
+        {
+            return Err("The SSH route changed. Try the connection again.".to_owned());
+        }
+    }
+    let jumps = hosts.len().saturating_sub(1);
+    let mut clients = AuthenticatedRoute(Vec::with_capacity(hosts.len()));
+    let mut keys = Vec::with_capacity(hosts.len());
+    for (index, host) in hosts.into_iter().enumerate() {
+        let endpoint = host.settings().endpoint.clone();
+        let stage = (index < jumps).then_some(index + 1);
+        let explain = |error: String| route_error(&endpoint, stage, error);
+        let pinned = trusted(&endpoint).or_else(|| stored_key(&keys, &endpoint));
+        let approval = approvals
+            .iter()
+            .find(|approval| approval.endpoint == endpoint);
+        let (client, fingerprint) =
+            match verified_handshake(&endpoint, pinned, approval, clients.0.last())
+                .map_err(&explain)?
+            {
+                Ok(verified) => verified,
+                Err(verification) => return Ok(Err(verification)),
+            };
+        clients.0.push(client);
+        let (settings, secret) = host.credentials();
+        let secret = secret.map_err(&explain)?;
+        authenticate(
+            clients
+                .0
+                .last_mut()
+                .expect("the current SSH host was added"),
+            settings,
+            secret.as_deref().map(String::as_str),
+        )
+        .map_err(&explain)?;
+        keys.push(HostKey {
+            endpoint,
+            fingerprint,
+        });
+    }
+    if clients.0.is_empty() {
+        return Err("The SSH route has no destination.".to_owned());
+    }
+    Ok(Ok((clients, keys)))
+}
+
+fn route_approvals(
+    approval: Option<HostVerification>,
+    approvals: Option<Vec<HostVerification>>,
+) -> Vec<HostVerification> {
+    approvals.unwrap_or_else(|| approval.into_iter().collect())
+}
+
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TestOutcome {
@@ -361,44 +511,55 @@ pub enum TestOutcome {
 
 #[tauri::command]
 pub async fn test_ssh_connection(
-    mut input: ProfileInput,
+    input: ProfileInput,
     approval: Option<HostVerification>,
+    approvals: Option<Vec<HostVerification>>,
     app: AppHandle,
 ) -> Result<TestOutcome> {
     let path = profiles::config_path(&app)?;
-    let draft_secret = input.take_secret();
+    let approvals = route_approvals(approval, approvals);
     blocking(move || {
-        let settings = input.settings()?;
-        let endpoint = &settings.endpoint;
-        let pinned = {
-            let _lock = profiles::lock(&path)?;
-            Config::load(&path)?
-                .fingerprint(endpoint)
-                .map(str::to_owned)
-        };
-        let (client, fingerprint) = match verified_handshake(endpoint, pinned, approval)? {
-            Ok(verified) => verified,
-            Err(verification) => return Ok(TestOutcome::VerifyHost { verification }),
-        };
-        let secret = {
+        let (config, mut route) = {
             let _lock = profiles::lock(&path)?;
             let config = Config::load(&path)?;
-            if config
-                .fingerprint(endpoint)
-                .is_some_and(|pin| pin != fingerprint)
-            {
-                return Err(
-                    "The trusted SSH host key changed. Try the connection again.".to_owned(),
-                );
-            }
-            input.secret_for_test(&config, &settings, draft_secret)?
+            let route = input.test_route(&config)?;
+            (config, route)
         };
-        let session = open_sftp(authenticate(
-            client,
-            &settings,
-            secret.as_ref().map(|value| value.as_str()),
-        )?)?;
-        session.listing(&session.initial_directory()?)?;
+        let endpoint = route
+            .last()
+            .ok_or("The SSH route has no destination.")?
+            .settings
+            .endpoint
+            .clone();
+        let (client, keys) = match open_route(
+            route.iter_mut().map(RouteHost::Draft).collect(),
+            |endpoint| config.fingerprint(endpoint).map(str::to_owned),
+            &approvals,
+        )? {
+            Ok(route) => route,
+            Err(verification) => return Ok(TestOutcome::VerifyHost { verification }),
+        };
+        {
+            let _lock = profiles::lock(&path)?;
+            let config = Config::load(&path)?;
+            for key in keys {
+                if config
+                    .fingerprint(&key.endpoint)
+                    .is_some_and(|pin| pin != key.fingerprint)
+                {
+                    return Err(format!(
+                        "The trusted SSH host key for {}:{} changed. Try the connection again.",
+                        key.endpoint.host, key.endpoint.port
+                    ));
+                }
+            }
+        }
+        let explain = |error: String| route_error(&endpoint, None, error);
+        let session = open_sftp(client).map_err(&explain)?;
+        let directory = session.initial_directory().map_err(&explain)?;
+        session
+            .listing(&directory)
+            .map_err(|error| explain(error.into()))?;
         Ok(TestOutcome::Success)
     })
     .await
@@ -423,59 +584,50 @@ pub enum ConnectOutcome {
 pub async fn connect_ssh(
     id: Uuid,
     approval: Option<HostVerification>,
+    approvals: Option<Vec<HostVerification>>,
     segments: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, SshState>,
 ) -> Result<ConnectOutcome> {
     let path = profiles::config_path(&app)?;
+    let approvals = route_approvals(approval, approvals);
     let result = blocking(move || {
-        let (profile, pinned) = {
+        let (profile, config) = {
             let _lock = profiles::lock(&path)?;
             let config = Config::load(&path)?;
             let profile = config.profile(id)?.clone();
-            let pinned = config
-                .fingerprint(&profile.profile.settings.endpoint)
-                .map(str::to_owned);
-            (profile, pinned)
+            (profile, config)
         };
-        let settings = &profile.profile.settings;
-        let endpoint = &settings.endpoint;
-        let (client, fingerprint) = match verified_handshake(endpoint, pinned, approval)? {
-            Ok(verified) => verified,
+        let endpoint = &profile.destination.settings.endpoint;
+        let (client, host_keys) = match open_route(
+            profile.route().map(RouteHost::Saved).collect(),
+            |endpoint| config.fingerprint(endpoint).map(str::to_owned),
+            &approvals,
+        )? {
+            Ok(route) => route,
             Err(verification) => return Ok(Err(verification)),
         };
+        let explain = |error: String| route_error(endpoint, None, error);
+        let session = open_sftp(client).map_err(&explain)?;
+        let segments = match segments {
+            Some(segments) => segments,
+            None => session.initial_directory().map_err(&explain)?,
+        };
+        let listing = session
+            .listing(&segments)
+            .map_err(|error| explain(error.into()))?;
         {
             let _lock = profiles::lock(&path)?;
             let mut config = Config::load(&path)?;
             if config.profile(id)? != &profile {
                 return Err("The SSH profile changed. Select it again to connect.".to_owned());
             }
-            match config.fingerprint(endpoint) {
-                Some(pin) if pin == fingerprint => {}
-                Some(_) => {
-                    return Err(
-                        "The trusted SSH host key changed. Reopen the chooser to connect."
-                            .to_owned(),
-                    )
-                }
-                None => config.trust(&path, endpoint.clone(), fingerprint.clone())?,
-            }
+            config.trust(&path, host_keys.clone())?;
         }
-        let secret = profile.secret()?;
-        let session = open_sftp(authenticate(
-            client,
-            settings,
-            secret.as_ref().map(|value| value.as_str()),
-        )?)?;
-        let segments = match segments {
-            Some(segments) => segments,
-            None => session.initial_directory()?,
-        };
-        let listing = session.listing(&segments)?;
         Ok(Ok((
             Connection {
                 profile,
-                fingerprint,
+                host_keys,
                 listing: Mutex::new(session),
                 sudo: sudo::Access::default(),
             },
@@ -488,8 +640,8 @@ pub async fn connect_ssh(
         Ok(connected) => connected,
         Err(verification) => return Ok(ConnectOutcome::VerifyHost { verification }),
     };
-    let address = connection.profile.profile.label.clone();
-    let endpoint = &connection.profile.profile.settings.endpoint;
+    let address = connection.profile.label.clone();
+    let endpoint = &connection.profile.destination.settings.endpoint;
     let origin = file_server_origin("sftp", &endpoint.host, endpoint.port, 22);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state

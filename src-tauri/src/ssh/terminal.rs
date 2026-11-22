@@ -1,13 +1,10 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::{sync::Arc, time::Duration};
 
-use russh::{
-    client::{self, Msg},
-    ChannelMsg, ChannelWriteHalf,
-};
+use russh::{client::Msg, ChannelMsg, ChannelWriteHalf};
 use tauri::{async_runtime, ipc::Channel};
 
-use super::{quote, wait, Connection, Session, VerifyHost};
+use super::{quote, wait, AuthenticatedRoute, Connection, Session};
 use crate::{
     desktop::{message, Result},
     remote_transfer::UploadSession as _,
@@ -15,7 +12,7 @@ use crate::{
 };
 
 pub struct RemoteTerminal {
-    client: Arc<client::Handle<VerifyHost>>,
+    client: Arc<AuthenticatedRoute>,
     writer: ChannelWriteHalf<Msg>,
     reader: async_runtime::JoinHandle<()>,
 }

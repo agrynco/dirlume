@@ -4,13 +4,13 @@ use std::{
 };
 
 use openssh_sftp_client::Sftp;
-use russh::{client, ChannelMsg};
+use russh::ChannelMsg;
 use tauri::async_runtime;
 use tokio::{io::AsyncWriteExt, sync::Mutex};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::{wait, Connection, Session, VerifyHost};
+use super::{wait, AuthenticatedRoute, Connection, Session};
 use crate::desktop::{message, Result};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -85,7 +85,7 @@ async fn expire(cache: Weak<Mutex<Option<Authorization>>>) {
 }
 
 fn open_sftp(
-    client: client::Handle<VerifyHost>,
+    client: AuthenticatedRoute,
     mut password: Zeroizing<String>,
     read_only: bool,
 ) -> Result<Session> {

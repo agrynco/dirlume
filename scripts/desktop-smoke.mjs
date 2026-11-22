@@ -6,6 +6,7 @@ import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
+import { testNativeJumpHosts } from "./ssh-jump-native-smoke.mjs";
 import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testSystemTheme } from "./system-theme-smoke.mjs";
@@ -2323,6 +2324,13 @@ try {
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);
   await testMarkdownOptionsDismissal(page, attributes);
+  if (process.env.DIRLUME_SSH_FIXTURE_PYTHON) {
+    await testNativeJumpHosts(page, temp, dst, join(temp, "ssh-config"), async () => {
+      await exitDesktop(page);
+      page = await startDesktop();
+      return page;
+    });
+  }
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");
