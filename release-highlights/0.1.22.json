@@ -1,0 +1,6 @@
+{
+  "version": "0.1.22",
+  "highlights": [
+    "See copied files in the SSH pane after an upload finishes. Ctrl+R refreshes the focused file pane, including its current SSH folder."
+  ]
+}

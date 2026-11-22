@@ -176,6 +176,12 @@ jobs:
       - name: Verify command line paths from parent and file rows
         if: github.event.action != 'closed'
         run: node scripts/command-parent-path-smoke.mjs
+      - name: Verify SSH pane refresh after uploads and with shortcuts
+        if: github.event.action != 'closed'
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --target .smoke/sftp-test-deps paramiko==5.1.0
+          PYTHONPATH=.smoke/sftp-test-deps DIRLUME_SFTP_TEST_PYTHON=python node scripts/ssh-refresh-smoke.mjs
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
