@@ -59,12 +59,20 @@ try {
   const defaultModifier = await page.evaluate(() => /Macintosh/.test(navigator.userAgent) ? "Meta" : "Control");
   const addKey = defaultModifier + "+Alt+b";
   const awaitLine = async (text) => {
-    await viewer.getByText(text, { exact: true }).first().waitFor();
-    assert.equal(await viewer.getByText(text, { exact: true }).first().evaluate((node) => {
-      const { top, bottom } = node.getBoundingClientRect();
-      const viewport = node.closest(".cm-scroller")?.getBoundingClientRect();
-      return viewport && top >= viewport.top && bottom <= viewport.bottom;
-    }), true);
+    const viewportHandle = await scroller.elementHandle();
+    try {
+      // CodeMirror can render an offscreen line before completing the bookmark scroll.
+      await page.waitForFunction(({ scroller, text }) => {
+        const viewport = scroller.getBoundingClientRect();
+        return Array.from(scroller.querySelectorAll(".cm-line")).some((line) => {
+          if (line.textContent !== text) return false;
+          const { top, bottom } = line.getBoundingClientRect();
+          return top >= viewport.top && bottom <= viewport.bottom;
+        });
+      }, { scroller: viewportHandle, text });
+    } finally {
+      await viewportHandle.dispose();
+    }
   };
   await pane.press(defaultModifier + "+Shift+b");
   await list.getByText(/Click beside a line number/).waitFor();
