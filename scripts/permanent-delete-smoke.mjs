@@ -117,14 +117,20 @@ export async function testBatchDeletion(page, root) {
       if (permanent) {
         await row("04-locked.txt").click();
         await start();
-        await lock.getByRole("button", { name: "Find locking processes", exact: true }).click();
+        await apply.check();
+        const inspect = lock.getByRole("button", { name: "Find locking processes", exact: true });
         const inspector = page.getByRole("dialog", { name: "Processes using these files", exact: true });
         const owner = holders.at(-1);
         const process = inspector.getByRole("option", { name: new RegExp(`PID ${owner.pid}\\)`) });
-        await process.waitFor();
-        await inspector.getByRole("button", { name: "Close", exact: true }).click();
-        await lock.getByText("04-locked.txt", { exact: true }).waitFor();
-        await lock.getByRole("button", { name: "Find locking processes", exact: true }).click();
+        for (const key of [null, "Enter", "Space"]) {
+          if (key) await inspect.press(key);
+          else await inspect.click();
+          await process.waitFor();
+          if (key === "Space") break;
+          await inspector.getByRole("button", { name: "Close", exact: true }).click();
+          await lock.waitFor();
+          assert.equal(await apply.isChecked(), true);
+        }
         await process.click();
         await inspector.getByRole("button", { name: "End selected", exact: true }).click();
         const confirm = page.getByRole("dialog", { name: "End processes", exact: true });
@@ -215,6 +221,7 @@ export async function testAlertDialogStyles() {
                   window.showDeletionProgress = ({ phase, path }) => args.onProgress.onmessage(phase === "preparing"
                     ? { phase, selection, path }
                     : { phase, selection, progress: { path, currentTotal: 5, currentProcessed: 2, counts } });
+                  window.showDeletionLock = () => args.onProgress.onmessage({ phase: "locked", path: "/fixture/held.txt", token: 1 });
                   window.finishDeletionFixture = () => resolve({ selection, counts: { ...counts, unprocessed: 4 },
                     cancelled: true, availableAfter: 72 * 1024, failures: [] });
                 });
@@ -288,6 +295,31 @@ export async function testAlertDialogStyles() {
           await cancelled.getByText("72 KiB", { exact: true }).waitFor();
           await cancelled.getByText("4 unprocessed", { exact: true }).waitFor();
           await cancelled.getByRole("button", { name: "Done", exact: true }).click();
+        }
+        if (platform.startsWith("Windows")) {
+          await page.evaluate(() => { window.showDeletionLock = null; });
+          await list.press("Shift+Delete");
+          await alert.getByRole("button", { name: "Delete permanently", exact: true }).click();
+          await page.waitForFunction(() => typeof window.showDeletionLock === "function");
+          await page.evaluate(() => window.showDeletionLock());
+          const locked = page.getByRole("dialog", { name: "Item is in use", exact: true });
+          const inspect = locked.getByRole("button", { name: "Find locking processes", exact: true });
+          const retry = locked.getByRole("button", { name: "Retry", exact: true });
+          const appearance = (button) => button.evaluate((node) => {
+            const style = getComputedStyle(node);
+            return [style.borderColor, style.backgroundColor];
+          });
+          await page.mouse.move(0, 0);
+          const style = await appearance(inspect);
+          assert.deepEqual(style, await appearance(retry));
+          assert.notEqual(style[0], "rgba(0, 0, 0, 0)");
+          const cancel = locked.getByRole("button", { name: "Cancel", exact: true });
+          await cancel.press("Shift+Tab");
+          await page.keyboard.press("Shift+Tab");
+          assert.equal(await inspect.evaluate((button) => button === document.activeElement &&
+            parseFloat(getComputedStyle(button).outlineWidth) >= 2), true);
+          await cancel.click();
+          await page.getByRole("dialog", { name: "Deletion cancelled", exact: true }).getByRole("button", { name: "Done", exact: true }).click();
         }
         await page.close();
       }

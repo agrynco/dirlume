@@ -58,7 +58,7 @@ function LockDecision({ locked, suspended, onCancel, onInspect, onDecide, waitin
         <div><strong>{locked.path.split(/[\\/]/).at(-1)}</strong><span>{locked.path}</span></div>
       </div>
       <p>{t("Deletion is paused while another process is using this item.")}</p>
-      {windowsClient && <div><Button type="button" onClick={onInspect}>{t("Find locking processes")}</Button></div>}
+      {windowsClient && <div><Button type="button" className="deletion-inspect" onClick={onInspect}>{t("Find locking processes")}</Button></div>}
       <label className="deletion-remember"><input type="checkbox" checked={remember}
         onChange={(event) => setRemember(event.currentTarget.checked)} />{t("Apply to all remaining locked items")}</label>
     </div>

@@ -1297,7 +1297,7 @@ button.dialog-icon-button svg { width: 16px; height: 16px; }
 .dialog-disclosure-panel > button { justify-content: flex-start; white-space: normal; text-align: start; }
 .dialog-disclosure-panel > :is(button, label) { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .dialog-disclosure-panel > button:focus-visible { outline-offset: -2px; }
-.dialog-footer button, .text-toolbar button, .comparison-toolbar button { border-color: var(--line); background: var(--surface); }
+.dialog-footer button, .dialog .deletion-inspect, .text-toolbar button, .comparison-toolbar button { border-color: var(--line); background: var(--surface); }
 button.primary, button.primary:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-fill); border-color: var(--accent-fill); }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.negative, button.negative:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
