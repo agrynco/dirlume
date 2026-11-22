@@ -553,12 +553,15 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-ancestor button { min-height: 28px; padding: 2px 7px; }
 .address-ancestor > span { padding: 2px 7px; }
 .address-ancestor svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
+.address-source { flex: none; min-width: 0; max-width: 70%; }
+.address-source button { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 .address-current { padding: 3px 8px; }
 .address-forward { display: flex; min-width: 0; max-width: 45%; overflow: hidden; white-space: nowrap; }
 .address-forward .address-ancestor { min-width: 0; }
 .address-forward button { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: .64; }
 .address-forward button:is(:hover, :focus-visible) { opacity: 1; }
 .address-overflow { position: absolute; inset-inline-start: 0; background: var(--canvas); }
+.address-breadcrumbs[data-connection-source] > .address-overflow { position: static; flex: none; }
 .address-ellipsis { padding: 2px 7px; pointer-events: none; }
 .address-actions {
   position: absolute; z-index: 6; top: 100%; right: 0; display: flex; width: max-content; gap: 2px; padding: 2px;

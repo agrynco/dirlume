@@ -239,6 +239,8 @@ Press **Enter** on an archive to open it in a pane. Use **F5** to extract select
 
 Choose **FTP**, **SSH**, **SMB** (Windows), or **Remote machine** from either pane's sources menu to open its saved connections. Use **Shift+F4** to add a connection, **F4** to edit the selected connection, and **Enter** to connect. Open **..** to return to the previous location in that pane. Configure the connection shortcuts in **Options → Keyboard shortcuts**.
 
+While browsing a remote folder, click the source name at the beginning of the address breadcrumbs to open its saved connections in the same pane. SFTP returns to **FTP** when opened from that list and to **SSH** when opened from **SSH** or directly. The source stays accessible when long paths collapse into the ellipsis. **Back** returns to the remote folder, and **Forward** opens the list again.
+
 **SSH.** Open the left or right pane's sources with **Alt+F1** or **Alt+F2**, then choose **SSH** or press **5**. Use **Shift+F4** to add a named connection, **F4** to edit it, or select a saved connection and press **Enter**. SSH uses SFTP, with port 22 by default. Authenticate with a password or a private key file, optionally protected by a passphrase. Dirlume keeps passwords and passphrases in the system credential store and reads the private key from its existing location.
 
 Use **Test connection** in the SSH profile form to check the entered credentials and browse the server's initial directory before saving. Approval of a new host key applies only to that test.
