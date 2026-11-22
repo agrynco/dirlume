@@ -179,6 +179,7 @@ try {
       await scanPane.getByRole("button", { name: "Analyze space", exact: true }).click();
       const analyzer = workspace.getByRole("region", { name: "Space Analyzer", exact: true });
       const close = analyzer.getByRole("button", { name: "Close", exact: true });
+      const tree = analyzer.getByRole("treegrid");
       const stop = analyzer.getByRole("button", { name: "Stop", exact: true });
       const treemap = analyzer.getByRole("button", { name: "Treemap", exact: true });
       const metric = analyzer.getByRole("combobox", { name: "Size metric", exact: true });
@@ -187,13 +188,13 @@ try {
       await workspace.keyboard.press("F1");
       await currentTopic(guide, "paneSources").waitFor();
       await guide.getByText(`This control changes the source for the ${other} pane.`, { exact: true }).waitFor();
-      await closeHelp(workspace, guide, close);
+      await closeHelp(workspace, guide, tree);
 
       await analyzer.locator(".space-target").hover();
       await workspace.keyboard.press("F1");
       await currentTopic(guide, "spacePath").waitFor();
-      assert.match(await guide.locator(".help-reading").innerText(), /root being scanned/);
-      await closeHelp(workspace, guide, close);
+      assert.match(await guide.locator(".help-reading").innerText(), /current folder/);
+      await closeHelp(workspace, guide, tree);
 
       await treemap.focus();
       await drive.hover();

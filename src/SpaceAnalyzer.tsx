@@ -1,15 +1,17 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, File, Folder, HardDrive } from "lucide-react";
-import { ReadOnlyAddressBreadcrumbs } from "./AddressField";
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type Ref, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { ArrowLeft, ChevronDown, ChevronRight, File, Folder, HardDrive, LoaderCircle } from "lucide-react";
+import { CompactAddressBreadcrumbs } from "./AddressField";
 import { Button } from "./Button";
-import { api, describeError, smbHost, watchDirectory, windowsClient } from "./api";
+import { api, describeError, smbHost, watchDirectory, windowsClient, type FileLocation } from "./api";
 import { FileContextMenu } from "./FileContextMenu";
 import { errorText, locale, t } from "./i18n";
 import { formatSize, type Side } from "./panes";
-import { bindingMatches, eventShortcut, type Bindings } from "./preferences";
+import { bindingMatches, eventShortcut, type Bindings, type PanelLayout } from "./preferences";
+import { useRightClickSelection } from "./useRightClickSelection";
 import {
-  initialSpaceResult, nearestSpaceNode, scanSpace, sortedSpaceChildren, spaceLocalItem, spaceLocation, spacePath, spaceSegments,
+  canAnalyze, initialSpaceResult, nearestSpaceNode, scanSpace, sortedSpaceChildren, spaceLocalItem, spaceLocation, spacePath, spaceSegments,
   spaceShare, unavailable, type Metric, type SpaceItemCommand, type SpaceLocalItem, type SpaceNode, type SpacePlace, type SpaceResult,
 } from "./spaceScan";
 
@@ -26,8 +28,10 @@ function rowNote(entry: SpaceNode, metric: Metric, running: boolean) {
 }
 
 const rowHeight = 29;
+const rowKey = (node: SpaceNode) => node.parent ? JSON.stringify(spaceSegments(node)) : "..";
 
-function SpaceTree({ result, metric, selected, select, expanded, toggle, tree, itemContext, itemShortcut }: {
+function SpaceTree({ result, metric, selected, select, expanded, toggle, tree, itemContext, itemShortcut,
+  marked, changeMarks, clearMarks, bindings, rightClickSelection, scope }: {
   result: SpaceResult;
   metric: Metric;
   selected: number;
@@ -37,9 +41,16 @@ function SpaceTree({ result, metric, selected, select, expanded, toggle, tree, i
   tree: RefObject<HTMLDivElement | null>;
   itemContext?: (entry: SpaceNode, x: number, y: number) => void;
   itemShortcut?: (entry: SpaceNode, event: KeyboardEvent) => boolean;
+  marked: ReadonlySet<string>;
+  changeMarks: (names: readonly string[], mark: boolean) => void;
+  clearMarks: () => void;
+  bindings: Bindings;
+  rightClickSelection: boolean;
+  scope: string;
 }) {
   const id = useId();
   const viewport = useRef<HTMLDivElement>(null);
+  const anchor = useRef<string | null>(null);
   const [window, setWindow] = useState({ top: 0, height: rowHeight * 12 });
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -49,42 +60,63 @@ function SpaceTree({ result, metric, selected, select, expanded, toggle, tree, i
     return () => resize.disconnect();
   }, []);
   const rows = useMemo(() => {
-    const rows: { entry: SpaceNode; level: number }[] = [];
-    const stack = [{ entry: result.root, level: 1 }];
+    const rows: { entry: SpaceNode; level: number; name: string }[] = [];
+    const stack = [{ entry: result.root, level: 1, name: ".." }];
     while (stack.length) {
       const row = stack.pop()!;
       rows.push(row);
       if (!expanded.has(row.entry.id)) continue;
       const children = sortedSpaceChildren(row.entry, metric);
-      for (let i = children.length - 1; i >= 0; i -= 1) stack.push({ entry: children[i], level: row.level + 1 });
+      for (let i = children.length - 1; i >= 0; i -= 1) stack.push({ entry: children[i], level: row.level + 1, name: rowKey(children[i]) });
     }
     return rows;
   }, [result, metric, expanded]);
   const start = Math.max(0, Math.floor(window.top / rowHeight) - 6);
   const end = Math.min(rows.length, Math.ceil((window.top + window.height) / rowHeight) + 6);
   const visible = rows.slice(start, end);
+  const selectedIndex = rows.findIndex(({ entry }) => entry.id === selected);
+  const rightClick = useRightClickSelection({ list: tree, entries: rows, marked, enabled: rightClickSelection, scope,
+    onMark: (names, mark) => {
+      changeMarks(names, mark);
+      const last = rows.find((row) => row.name === names.at(-1));
+      if (last) { anchor.current = last.name; select(last.entry.id); }
+    },
+    onContext: (x, y, row) => { if (row) itemContext?.(row.entry, x, y); },
+  });
 
-  function choose(index: number) {
+  useLayoutEffect(() => {
     const element = viewport.current;
-    const next = Math.max(0, Math.min(rows.length - 1, index));
-    select(rows[next].entry.id);
-    if (!element) return;
-    const top = next * rowHeight;
+    if (!element || selectedIndex < 0) return;
+    const top = selectedIndex * rowHeight;
     if (top < element.scrollTop) element.scrollTop = top;
     else if (top + rowHeight > element.scrollTop + element.clientHeight) element.scrollTop = top + rowHeight - element.clientHeight;
+  }, [selectedIndex]);
+
+  function choose(index: number) {
+    const next = Math.max(0, Math.min(rows.length - 1, index));
+    select(rows[next].entry.id);
   }
 
   function keyDown(event: KeyboardEvent) {
     if (event.defaultPrevented || event.target !== event.currentTarget || event.nativeEvent.isComposing) return;
-    const index = Math.max(0, rows.findIndex(({ entry }) => entry.id === selected));
-    const { entry } = rows[index];
+    const index = Math.max(0, selectedIndex);
+    const { entry, name } = rows[index];
     if (itemContext && (event.key === "ContextMenu" || event.key === "F10" && event.shiftKey)) {
       event.preventDefault();
       const bounds = (document.getElementById(id + selected) ?? event.currentTarget).getBoundingClientRect();
       itemContext(entry, bounds.left + 20, bounds.bottom);
       return;
     }
-    if (itemShortcut?.(entry, event) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (itemShortcut?.(entry, event)) return;
+    const shortcut = eventShortcut(event);
+    const up = bindingMatches(bindings.selectUpRow, shortcut);
+    if (up || bindingMatches(bindings.selectDownRow, shortcut) || bindingMatches(bindings.mark, shortcut)) {
+      event.preventDefault();
+      if (name !== "..") changeMarks([name], !marked.has(name));
+      choose(index + (up ? -1 : 1));
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const open = expanded.has(entry.id);
     switch (event.key) {
       case "ArrowDown": choose(index + 1); break;
@@ -111,8 +143,12 @@ function SpaceTree({ result, metric, selected, select, expanded, toggle, tree, i
   }
 
   return <div ref={tree} className="space-tree" role="treegrid" data-help-topic="spaceTree" aria-label={t("Space usage")} aria-rowcount={rows.length + 1}
-    tabIndex={0} data-help-return onKeyDown={keyDown}
+    tabIndex={0} data-help-return onKeyDown={keyDown} aria-multiselectable="true" {...rightClick.events}
     aria-activedescendant={visible.some(({ entry }) => entry.id === selected) ? id + selected : undefined}>
+    {rightClick.spinner && createPortal(<span className="right-selection-hold" role="status"
+      aria-label={t("Release to open the context menu")} style={{
+        left: Math.min(innerWidth - 22, rightClick.spinner.x + 12), top: Math.min(innerHeight - 22, rightClick.spinner.y + 12),
+      }}><LoaderCircle className="spin" aria-hidden="true" /></span>, document.body)}
     <div className="space-tree-columns" role="row">
       <span role="columnheader">{t("Name")}</span><span role="columnheader" aria-sort="descending">{t("Size")}</span>
     </div>
@@ -120,23 +156,36 @@ function SpaceTree({ result, metric, selected, select, expanded, toggle, tree, i
       setWindow({ top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight });
     }}>
       <div style={{ height: rows.length * rowHeight, paddingTop: start * rowHeight }}>
-        {visible.map(({ entry, level }, index) => {
+        {visible.map(({ entry, level, name }, index) => {
           const Icon = entry.directory ? Folder : File;
           const open = expanded.has(entry.id);
           const share = spaceShare(entry, metric);
           const note = rowNote(entry, metric, result.phase === "scanning");
-          return <div key={entry.id} id={id + entry.id} className="space-tree-row"
+          const current = entry.id === selected;
+          const isMarked = marked.has(name);
+          return <div key={name} id={id + entry.id} className={`file-row space-tree-row${isMarked ? " marked" : ""}`}
+            data-current={current || undefined} data-entry-index={start + index}
             role="row" aria-rowindex={start + index + 2} aria-level={level}
-            aria-expanded={entry.children.length ? open : undefined} aria-selected={entry.id === selected}
+            aria-expanded={entry.children.length ? open : undefined} aria-selected={current || isMarked}
             style={{ height: rowHeight }} onClick={(event) => {
+              if (event.shiftKey) {
+                const position = start + index;
+                const anchorIndex = rows.findIndex((row) => row.name === anchor.current);
+                const from = anchorIndex >= 0 ? anchorIndex : Math.max(0, selectedIndex);
+                changeMarks(rows.slice(Math.min(from, position), Math.max(from, position) + 1).map((row) => row.name).filter((key) => key !== ".."), true);
+              } else {
+                anchor.current = name;
+                if (name !== ".." && (event.ctrlKey || event.metaKey)) changeMarks([name], !isMarked);
+                else if (!isMarked) clearMarks();
+              }
               select(entry.id);
               event.currentTarget.closest<HTMLElement>("[role=treegrid]")?.focus({ preventScroll: true });
             }} onDoubleClick={() => { if (entry.children.length) toggle(entry.id); }}
             onContextMenu={itemContext ? (event) => {
               event.preventDefault();
-              itemContext(entry, event.clientX, event.clientY);
+              if (!rightClick.suppressContextMenu(event)) itemContext(entry, event.clientX, event.clientY);
             } : undefined}>
-            <span className="space-tree-name" role="gridcell" style={{ paddingInlineStart: Math.min(level - 1, 12) * 13 }}
+            <span className="file-name space-tree-name" role="gridcell" style={{ paddingInlineStart: Math.min(level - 1, 12) * 13 }}
               title={entry.error || entry.name}>
               <span className="space-expand" aria-hidden="true" onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => {
                 if (event.detail === 1 && entry.children.length) toggle(entry.id);
@@ -216,14 +265,27 @@ function Treemap({ folder, metric, selected, select, browse, showTree }: {
 
 const treeActions = ["copy", "move", "recycle", "recycleAlternate", "delete"] as const;
 
-export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, operationsAvailable, onItemAction, onClose, onReveal, resolvePlace }: {
+export type SpaceNavigation = { segments: readonly string[]; focus: boolean };
+export type SpaceAnalyzerHandle = { focus: () => void; runAction: (command: SpaceItemCommand) => void };
+
+export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigation, active, layout, fileRevision, shortcuts, operationsAvailable,
+  rightClickSelection, onItemAction, onClose, onFocus, onNavigate, onLocation, onReveal, resolvePlace }: {
+  ref?: Ref<SpaceAnalyzerHandle>;
   side: Side;
   place: SpacePlace;
+  currentFolder: SpacePlace;
+  navigation: SpaceNavigation;
+  active: boolean;
+  layout: PanelLayout;
   fileRevision: number;
   shortcuts: Bindings;
   operationsAvailable: boolean;
-  onItemAction: (item: SpaceLocalItem, command: SpaceItemCommand) => void;
+  rightClickSelection: boolean;
+  onItemAction: (items: readonly SpaceLocalItem[], command: SpaceItemCommand) => void;
   onClose: () => void;
+  onFocus: () => void;
+  onNavigate: (place: SpacePlace) => void;
+  onLocation: (location: { place: SpacePlace; reveal?: string }) => void;
   onReveal: (place: SpacePlace, reveal?: string) => Promise<void>;
   resolvePlace: (place: SpacePlace) => SpacePlace;
 }) {
@@ -236,7 +298,8 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
   const [metricChoice, setMetric] = useState<Metric | null>(null);
   const [view, setView] = useState<"tree" | "treemap">("tree");
   const [expandedPaths, setExpandedPaths] = useState(() => new Map<string, string[]>([["[]", []]]));
-  const [selectedPath, setSelectedPath] = useState<string[]>([]);
+  const [selectedPath, setSelectedPath] = useState<readonly string[]>([]);
+  const [marked, setMarked] = useState<ReadonlySet<string>>(() => new Set());
   const [zoomPath, setZoomPath] = useState<string[]>([]);
   const [menu, setMenu] = useState<{ item: SpaceLocalItem; x: number; y: number } | null>(null);
   const menuRequest = useRef(0);
@@ -251,10 +314,29 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     const node = nearestSpaceNode(result.root, path);
     return spaceSegments(node).length === path.length ? [node.id] : [];
   })), [expandedPaths, result]);
-  const watchPath = spaceLocalItem(place, entry)?.place.path;
+  const watchPath = currentFolder.kind === "local" ? currentFolder.path : undefined;
   const localRevision = place.kind === "local" ? fileRevision : 0;
 
-  useLayoutEffect(() => { closeButton.current?.focus(); }, []);
+  function focus() { (tree.current ?? closeButton.current)?.focus({ preventScroll: true }); }
+  useImperativeHandle(ref, () => ({ focus, runAction: (command) => runAction(entry, command) }));
+
+  useLayoutEffect(() => {
+    const { segments, focus: focusTree } = navigation;
+    setSelectedPath(segments);
+    setZoomPath([...segments]);
+    setExpandedPaths((previous) => {
+      const next = new Map(previous);
+      for (let index = 0; index < segments.length; index++) {
+        const parent = segments.slice(0, index);
+        next.set(JSON.stringify(parent), parent);
+      }
+      return next;
+    });
+    if (!focusTree) return;
+    setView("tree");
+    const frame = requestAnimationFrame(() => (tree.current ?? closeButton.current)?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [navigation]);
   useEffect(() => () => { menuRequest.current++; }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -262,12 +344,6 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     void scanSpace(resolvePlace(place), controller.signal, (next) => {
       if (controller.signal.aborted) return;
       setResult(next);
-      if (next.phase !== "scanning") {
-        setSelectedPath((path) => {
-          const resolved = spaceSegments(nearestSpaceNode(next.root, path));
-          return resolved.length === path.length ? path : resolved;
-        });
-      }
     });
     return () => { controller.abort(); revealRequest.current += 1; };
   }, [revision, localRevision, place, resolvePlace]);
@@ -290,7 +366,20 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
   }, [watchPath]);
 
   function select(id: number) {
-    setSelectedPath(spaceSegments(result.nodes[id] ?? null));
+    const node = result.nodes[id] ?? result.root;
+    setSelectedPath(spaceSegments(node));
+    onLocation(spaceLocation(place, node));
+  }
+
+  function changeMarks(names: readonly string[], mark: boolean) {
+    setMarked((current) => {
+      const next = new Set(current);
+      for (const name of names) {
+        if (mark) next.add(name);
+        else next.delete(name);
+      }
+      return next;
+    });
   }
 
   function toggle(id: number) {
@@ -310,9 +399,6 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
 
   function rescan() {
     scan.current?.abort();
-    setExpandedPaths(new Map([["[]", []]]));
-    setSelectedPath([]);
-    setZoomPath([]);
     setRevealError("");
     setRevision((value) => value + 1);
   }
@@ -320,7 +406,24 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
   function browse(folder: SpaceNode) {
     const path = spaceSegments(folder);
     setZoomPath(path);
-    setSelectedPath(path);
+    select(folder.id);
+  }
+
+  function runAction(node: SpaceNode, command: SpaceItemCommand) {
+    if (!operationsAvailable || view !== "tree") return;
+    const selectedNodes = marked.size ? [...marked].flatMap((key) => {
+      const path: string[] = JSON.parse(key);
+      const candidate = nearestSpaceNode(result.root, path);
+      return rowKey(candidate) === key ? [candidate] : [];
+    }) : [node];
+    const folders = new Set(selectedNodes.filter((candidate) => candidate.directory).map(rowKey));
+    const items = selectedNodes.flatMap((candidate) => {
+      const path = spaceSegments(candidate);
+      if (path.some((_, depth) => depth > 0 && folders.has(JSON.stringify(path.slice(0, depth))))) return [];
+      const item = spaceLocalItem(place, candidate);
+      return item ? [item] : [];
+    });
+    if (items.length) onItemAction(items, command);
   }
 
   function itemShortcut(node: SpaceNode, event: KeyboardEvent) {
@@ -328,8 +431,7 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     const command = treeActions.find((key) => bindingMatches(shortcuts[key], shortcut));
     if (!command) return false;
     event.preventDefault();
-    const item = spaceLocalItem(place, node);
-    if (item && operationsAvailable && !event.repeat) onItemAction(item, command === "recycleAlternate" ? "recycle" : command);
+    if (!event.repeat) runAction(node, command === "recycleAlternate" ? "recycle" : command);
     return true;
   }
 
@@ -340,7 +442,7 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     tree.current?.focus({ preventScroll: true });
     const request = ++menuRequest.current;
     setMenu(null);
-    if (!isTauri() || !windowsClient) { setMenu({ item, x, y }); return; }
+    if (!isTauri() || !windowsClient || marked.size > 0) { setMenu({ item, x, y }); return; }
     void api.windowsItemMenu(item.place.path, item.entry.name).then((invoked) => {
       if (menuRequest.current !== request) return;
       tree.current?.focus({ preventScroll: true });
@@ -356,7 +458,7 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     if (!menu) return;
     tree.current?.focus({ preventScroll: true });
     setMenu(null);
-    onItemAction(menu.item, command);
+    runAction(entry, command);
   }
 
   async function reveal() {
@@ -370,7 +472,8 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     }
   }
 
-  return <section className={"pane space-analyzer space-analyzer-" + side} aria-label={t("Space Analyzer")} data-help-topic="spaceAnalyzer" data-pane-side={side}
+  return <section className={`pane space-analyzer space-analyzer-${side}${active ? " active" : ""}`} aria-label={t("Space Analyzer")}
+    data-help-topic="spaceAnalyzer" data-pane-side={side} data-layout={layout} onFocusCapture={onFocus}
     onKeyDown={(event) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
@@ -382,7 +485,8 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
       <span className="pane-title"><HardDrive aria-hidden="true" />{t("Space Analyzer")}</span>
       <Button ref={closeButton} data-help-topic="spaceActions" onClick={onClose}>{t("Close")}</Button>
     </header>
-    <div className="space-target" data-help-topic="spacePath"><ReadOnlyAddressBreadcrumbs place={place} path={spacePath(place)} /></div>
+    <div className="space-target" data-help-topic="spacePath"><CompactAddressBreadcrumbs place={currentFolder} path={spacePath(currentFolder)}
+      goTo={(target: FileLocation) => { if (canAnalyze(target)) onNavigate(target); }} /></div>
     <div className="space-toolbar">
       <div className="space-view-modes" role="group" aria-label={t("View")}>
         <Button data-help-topic="spaceTree" aria-pressed={view === "tree"} onClick={() => setView("tree")}>{t("Tree")}</Button>
@@ -399,7 +503,9 @@ export default function SpaceAnalyzer({ side, place, fileRevision, shortcuts, op
     {result.phase !== "error" && (view === "tree" ? <SpaceTree result={result} metric={metric}
       expanded={expanded} toggle={toggle} selected={selected} select={select} tree={tree}
       itemContext={place.kind === "local" ? openItemMenu : undefined}
-      itemShortcut={place.kind === "local" ? itemShortcut : undefined} /> :
+      itemShortcut={place.kind === "local" ? itemShortcut : undefined}
+      marked={marked} changeMarks={changeMarks} clearMarks={() => setMarked(new Set())} bindings={shortcuts}
+      rightClickSelection={rightClickSelection} scope={spacePath(place)} /> :
       <Treemap folder={folder} metric={metric} selected={selected} select={select} browse={browse} showTree={() => {
         setExpandedPaths((previous) => {
           const next = new Map(previous);

@@ -849,8 +849,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   background: var(--raised); font: .85em/1.25 var(--ui-font);
 }
 .space-tree-row { cursor: default; }
-.space-tree-row:hover { background: var(--hover); }
-.space-tree-row[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .space-tree-name { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
 .space-entry-label, .space-tree-name small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space-tree-name small { flex: none; max-width: 48%; padding-inline-end: 3px; opacity: .88; font-family: var(--ui-font); }

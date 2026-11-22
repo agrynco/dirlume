@@ -13,9 +13,9 @@ async function finished(analyzer) {
 
 async function assertBreadcrumbs(analyzer, names) {
   const bar = analyzer.locator(".space-target .address-breadcrumbs");
-  assert.deepEqual(await bar.locator(".address-ancestor > span, .address-current").allTextContents(), names);
+  assert.deepEqual(await bar.locator(".address-ancestor > button, .address-current").allTextContents(), names);
   assert.equal(await bar.locator(".address-ancestor > svg").count(), names.length - 1);
-  assert.equal(await bar.getByRole("button").count(), 0);
+  assert.equal(await bar.locator(".address-ancestor > button").count(), names.length - 1);
 }
 
 async function fixture(browser, layout, source = "local") {
@@ -193,7 +193,7 @@ try {
   await analyzer.getByRole("button", { name: /^branch,/ }).click();
   await analyzer.getByRole("button", { name: /^sub,/ }).click();
   await analyzer.getByRole("button", { name: /^payload.dat,/ }).click();
-  await assertBreadcrumbs(analyzer, ["C:", "fixture", "mount", "open"]);
+  await assertBreadcrumbs(analyzer, ["mount", "open", "branch", "sub"]);
   await button(analyzer, "Show in other pane").click();
   await pane(local, "right").getByRole("option", { name: /^payload.dat/, selected: true }).waitFor();
   await button(analyzer, "Close").click();
@@ -203,7 +203,10 @@ try {
   assert.equal(await files.getAttribute("aria-activedescendant"), chosen);
 
   await local.evaluate(() => { window.holdSpace = true; });
-  await files.press("Control+Shift+d");
+  await files.focus();
+  await local.keyboard.down("ControlLeft");
+  await local.keyboard.press("Digit5");
+  await local.keyboard.up("ControlLeft");
   await local.waitForFunction(() => window.finishOldSpace);
   await row(analyzer, "branch").waitFor();
   const rootsBeforeSwap = await local.evaluate(() => window.spaceCalls.filter(({ command }) => command === "scan_local_space").length);
@@ -262,7 +265,7 @@ try {
     await assertBreadcrumbs(target, names);
     if (source === "long") {
       await page.setViewportSize({ width: 600, height: 500 });
-      await target.locator(".address-ellipsis").waitFor();
+      await button(target, "Show parent folders").waitFor();
       assert.equal(await target.locator(".address-current").evaluate((current) =>
         current.getBoundingClientRect().right <= current.closest(".address-crumb-clip").getBoundingClientRect().right + 1), true);
       assert.equal(await target.locator(".address-breadcrumbs").getAttribute("title"), names.join("\\"));
@@ -333,6 +336,44 @@ try {
     await beta.dblclick();
     const duplicate = row(tree, "same.txt");
     await duplicate.nth(1).waitFor();
+    await duplicate.nth(1).click();
+    assert.equal(await analyzer.locator(".address-current").textContent(), "beta");
+    await button(analyzer.locator(".space-target"), "open").click();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "treegrid");
+    assert.equal(await root.getAttribute("data-current"), "true");
+    assert.equal(await duplicate.count(), 2);
+    const rightFiles = right.getByRole("listbox");
+    const rightSelection = await rightFiles.getAttribute("aria-activedescendant");
+    await page.keyboard.press("Tab");
+    await page.waitForFunction(() => document.activeElement?.id === "right-files");
+    assert.equal(await rightFiles.getAttribute("aria-activedescendant"), rightSelection);
+    await page.keyboard.press("Tab");
+    await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "treegrid");
+    if (source === "mounted") {
+      await button(right, "Analyze space").click();
+      const rightAnalysis = page.locator(".space-analyzer-right");
+      await finished(rightAnalysis);
+      assert.equal(await page.locator(".space-analyzer-left").isVisible(), true);
+      assert.equal(await rightAnalysis.locator(".address-current").textContent(), "other");
+      await button(rightAnalysis, "Close").click();
+      await rightFiles.waitFor();
+    }
+    const markModifier = source === "mac" ? "Meta" : "Control";
+    await duplicate.nth(0).click({ modifiers: [markModifier] });
+    await duplicate.nth(1).click({ modifiers: [markModifier] });
+    assert.equal(await tree.locator(".marked").count(), 2);
+    await page.keyboard.press("ArrowUp");
+    assert.equal(await beta.getAttribute("data-current"), "true");
+    await tree.press("F5");
+    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+    await copy.getByText("2 selected items", { exact: true }).waitFor();
+    await button(copy, "Cancel").click();
+    await alpha.click();
+    await duplicate.nth(1).click({ modifiers: ["Shift"] });
+    assert.equal(await tree.locator(".marked").count(), 4);
+    await tree.press("F5");
+    await copy.getByText("2 selected items", { exact: true }).waitFor();
+    await button(copy, "Cancel").click();
     await root.click();
     await tree.press("F6");
     assert.equal(await page.getByRole("dialog").count(), 0);
@@ -343,7 +384,6 @@ try {
     await menu.waitFor({ state: "hidden" });
     assert.equal(await tree.evaluate((element) => document.activeElement === element), true);
     await tree.press("F5");
-    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
     assert.equal(await copy.getByRole("combobox", { name: "Destination" }).inputValue(), "/other");
     await button(copy, "Cancel").click();
     await tree.press("F8");

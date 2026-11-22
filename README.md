@@ -64,6 +64,8 @@ Click the free-space indicator or **Analyze space** to scan the folder shown in 
 
 In the local **Space Analyzer → Tree**, right-click a file or folder for its actions. Windows opens the Shell menu when available. Use **F5** to copy, **F6** to rename or move, **F8** to follow the location's Trash policy, or **Shift+Delete** to review permanent deletion. The same shortcut settings apply in the file pane and the analyzer. Copy and move suggest the other pane's directory when supported. Results refresh after file operations while keeping expanded branches.
 
+Open **Space Analyzer** in either pane from the Left or Right menu, the free-space control, or **left Ctrl+5** on the number row. Each pane keeps its own scan and selection. The breadcrumbs show the selected folder or file's parent. Choose a breadcrumb within the scan to reveal its folder, or choose a folder above the root to scan it. In a local or matching SSH terminal, successful directory changes follow the same rules. In Tree, **Tab** switches panes and marked items take precedence for file actions. Choose a file panel mode such as **Full** to browse the current folder and keep the selected file. **Close** or **Esc** restores the previous file view.
+
 The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
 
 Set **Main menu position** under **Options → General**. Set **Action button width** under **Options → Main File Panels** to switch between compact and full-width buttons. Turn on **Hide action button icons** for a text-only File actions bar in any panel layout.

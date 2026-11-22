@@ -198,6 +198,7 @@ export type ShortcutScheme = { id: string; name: string; bindings: Bindings };
 export type Provider = "server" | "kswitcher";
 
 const alternateDefaults: Partial<Record<Command, { oldCommand: string; key: string }>> = {
+  analyzeSpace: { oldCommand: "analyzeSpaceAlternate", key: "LeftCtrl+5" },
   sortAscending: { oldCommand: "sortAscendingAlternate", key: "Shift++" },
   sortReverse: { oldCommand: "sortReverseAlternate", key: "Shift+*" },
   refresh: { oldCommand: "refreshAlternate", key: "" },
@@ -322,7 +323,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
-export const preferenceBindingVersion = 8;
+export const preferenceBindingVersion = 9;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -365,6 +366,10 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
   };
   const candidates = commandNames.flatMap((command) => {
     const value = saved?.[command];
+    if (command === "analyzeSpace" && version < 9 && (value === defaultBindings.analyzeSpace[0] ||
+        Array.isArray(value) && value.length === 1 && value[0] === defaultBindings.analyzeSpace[0])) {
+      return defaultBindings.analyzeSpace.map((key) => ({ command, key, configured: false }));
+    }
     const group = folderGroupCommand(command);
     const legacyDefault = group && !group.add && version < 7 ? `Ctrl+${group.group}` : undefined;
     const migrated = legacyDefault && (value === legacyDefault ||

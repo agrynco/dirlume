@@ -24,4 +24,6 @@ The Space Analyzer reads Windows UNC shares through Windows and OS-mounted SMB s
 
 Local Space Analyzer tree rows support the Windows Shell menu and Dirlume's Copy, Rename or move, Trash, and permanent deletion dialogs. They share the file pane's shortcuts and resolve actions from the selected row's parent path. Expanded branches survive a refresh after a file operation.
 
+Each pane can show its own Space Analyzer. Its breadcrumbs navigate the scan, Tree marks operate on the selected paths, and Tab switches panes while preserving each pane's selection. The active local or SSH analyzer and its matching terminal follow the same current folder. A switch to Full browses that folder. Closing the analyzer restores the previous file view.
+
 Either local file pane can use List or Tree independently of its column preset. Tree loads expanded branches and keeps marks by location across branches. Both views can show streaming folder totals from the Space Analyzer scanner.

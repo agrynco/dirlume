@@ -11,7 +11,7 @@ interface WorkspaceOwners {
   documents: DocumentOwner[];
   comparisons: Comparison[];
   transfer?: Transfer;
-  analyzer?: Place;
+  analyzers?: readonly (Place | undefined)[];
 }
 
 export function workspaceResources(owners: WorkspaceOwners) {
@@ -30,7 +30,7 @@ export function workspaceResources(owners: WorkspaceOwners) {
     tab.forward?.forEach(({ file }) => retain(file.place));
   }
   for (const pair of owners.comparisons) { retain(pair.left.place); retain(pair.right.place); }
-  retain(owners.analyzer);
+  owners.analyzers?.forEach(retain);
   if (owners.transfer) {
     retain(owners.transfer.source); retain(owners.transfer.remoteDestination);
     owners.transfer.items.forEach(({ place }) => retain(place));
