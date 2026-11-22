@@ -164,7 +164,7 @@ async function testBrowserTerminalLinks() {
           await list.getByRole("option", { name: /SSH fixture/ }).dblclick();
         }
         await list.getByRole("option", { name: /^fixture\.txt/ }).waitFor();
-        await list.press("F12");
+        await page.locator(".command-bar").getByRole("button", { name: "Terminal", exact: true }).click();
         const terminal = page.getByRole("region", { name: "Terminal", exact: true });
         await checkLinks(page, terminal, { mac: platform.startsWith("Macintosh") }).catch((error) => {
           throw new Error(`Terminal links failed with ${platform} in a ${ssh ? "SSH" : "local"} session.`, { cause: error });
