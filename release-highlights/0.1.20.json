@@ -5,6 +5,6 @@
     "Find settings import and export under Settings archive, and reach comparison controls from Options or the compact Apply menu.",
     "Complete Docker container and Compose subcommands, options, container names and IDs, and project services in the command line and terminal.",
     "Open Space Analyzer in either pane, navigate with breadcrumbs, and copy, move, or delete marked items from its local tree. The active analyzer and its matching terminal follow the same working directory.",
-    "Adjust font sizes from their displayed inherited values in Options."
+    "Set separate fonts for file pane dialogs and Options from Appearance. Font size arrows start from the displayed inherited size."
   ]
 }
