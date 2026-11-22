@@ -8,6 +8,7 @@ const evening = {
   id: "evening", name: "Evening palette", base: "dark",
   colors: { canvas: "#121824", "terminal-cursor": "#abcdef", "editor-syntax-keyword": "#ffee22", "viewer-outside-bg": "#670456" },
   fonts: { panel: { family: "Fixture Sans", size: 17 }, markdown: { family: "An unavailable font", size: 22 } },
+  fileTypes: [{ id: "vector", name: "Vector images", extensions: ["svg"], color: "#853579", family: "Fixture Sans" }],
 };
 const standalone = { id: "single", name: "Standalone palette", base: "sunrise", colors: { canvas: "#fef2dd" }, fonts: {} };
 const archive = (groups, schemes) => JSON.stringify({ format: "dirlume-settings", version: 1, groups, schemes });
@@ -175,6 +176,7 @@ try {
   assert.deepEqual(themeFile.schemes.map(({ name }) => name), [local.name, evening.name]);
   assert.deepEqual(themeFile.schemes[1].fonts.panel, evening.fonts.panel);
   assert.deepEqual(themeFile.schemes[1].fonts.markdown, evening.fonts.markdown);
+  assert.deepEqual(themeFile.schemes[1].fileTypes, evening.fileTypes);
   assert.deepEqual(themeFile.schemes[1].colors, evening.colors);
 
   await settingsArchiveAction(options, "Export settings");
@@ -246,6 +248,7 @@ try {
     [archive({ viewer: { viewerMarkdownContentWidth: "invalid" } }, []), "The settings file is invalid."],
     [archive({}, [{ ...evening, colors: { "terminal-cursor": "#bad" } }]), "The settings file is invalid."],
     [archive({}, [{ ...evening, fonts: { compare: { size: 400 } } }]), "The settings file is invalid."],
+    [archive({}, [{ ...evening, fileTypes: [...evening.fileTypes, { id: "other", name: "Other", extensions: ["svg"] }] }]), "The settings file is invalid."],
   ]) {
     await startImport(input);
     await invalidDialog.getByRole("alert").getByText(message, { exact: true }).waitFor();

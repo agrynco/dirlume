@@ -1099,7 +1099,8 @@ try {
   await searchSettings.fill("office documents");
   await searchSettings.press("Enter");
   await optionsPage.getByRole("heading", { name: "File types", exact: true }).waitFor();
-  await optionsPage.getByLabel("Source code hex").fill("#7c2144");
+  await optionsPage.getByRole("combobox", { name: "File extension group", exact: true }).selectOption("file-source");
+  await optionsPage.getByRole("textbox", { name: "Filename color hex", exact: true }).fill("#7c2144");
   const exampleSource = optionsPage.getByRole("region", { name: "Settings preview" }).getByText("main.rs", { exact: true });
   assert.equal(await foreground(exampleSource), "rgb(124, 33, 68)");
   assert.notEqual(await foreground(sourceName), "rgb(124, 33, 68)");

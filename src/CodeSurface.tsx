@@ -3,10 +3,11 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } f
 import { cursorDocEnd, cursorDocStart, defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
-import { EditorView, highlightActiveLine, keymap, lineNumbers, type Command } from "@codemirror/view";
+import { EditorView, gutter, GutterMarker, highlightActiveLine, keymap, lineNumbers, type Command } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { NamedFile } from "./api";
 import { detectLanguage, languageChoices } from "./syntaxCatalog";
+import { lineFingerprint, type BookmarkJump, type BookmarkResult } from "./fileBookmarks";
 
 const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.comment, tags.docComment], class: "syntax-comment" },
@@ -26,11 +27,31 @@ export type SourceActions = {
   redo: () => void;
   goToStart: () => void;
   goToEnd: () => void;
+  bookmarkLine: () => { line: number; text: string } | undefined;
 };
 const managedCommands: Command[] = [selectAll, cursorDocStart, cursorDocEnd];
 
+const lineBookmarkMarker = new class extends GutterMarker {
+  elementClass = "cm-line-bookmarked";
+}();
+
+function visibleBookmarkLine(view: EditorView) {
+  const { doc, selection } = view.state;
+  const caret = selection.main.head;
+  const viewport = view.scrollDOM.getBoundingClientRect();
+  const rect = view.coordsAtPos(caret);
+  if (rect && rect.top >= viewport.top && rect.bottom <= viewport.bottom) return doc.lineAt(caret);
+  const block = view.lineBlockAtHeight(viewport.top - view.documentTop);
+  const first = doc.lineAt(block.from);
+  if (block.top + view.documentTop < viewport.top && first.number < doc.lines &&
+      view.lineBlockAt(doc.line(first.number + 1).from).bottom + view.documentTop <= viewport.bottom) {
+    return doc.line(first.number + 1);
+  }
+  return first;
+}
+
 export default function CodeSurface({ file, editing, locked, active, fontSize, readingWidth, value, onChange,
-  ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus }: {
+  ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus, bookmarkLines, onBookmarkLine, bookmarkJump, onBookmarkResult }: {
   file: NamedFile;
   editing: boolean;
   locked: boolean;
@@ -43,14 +64,20 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
   syntaxOverride?: string;
   onSyntaxInfo?: (info: { detected: string | undefined; unavailable: boolean }) => void;
   onSourceStatus?: (status: SourceStatus) => void;
+  bookmarkLines?: ReadonlySet<number>;
+  onBookmarkLine?: (line: number, text: string) => void;
+  bookmarkJump?: BookmarkJump;
+  onBookmarkResult?: (result: BookmarkResult) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
-  const latest = useRef({ value, onChange, onSourceStatus });
-  latest.current = { value, onChange, onSourceStatus };
+  const latest = useRef({ value, onChange, onSourceStatus, onBookmarkLine, onBookmarkResult });
+  latest.current = { value, onChange, onSourceStatus, onBookmarkLine, onBookmarkResult };
   const languageSlot = useMemo(() => new Compartment(), []);
   const editSlot = useMemo(() => new Compartment(), []);
   const labelSlot = useMemo(() => new Compartment(), []);
+  const bookmarkSlot = useMemo(() => new Compartment(), []);
+  const jumped = useRef<number | undefined>(undefined);
   const fileName = file.name;
   const label = t(editing ? "Edit {0}" : "View {0}", fileName);
   const [unavailable, setUnavailable] = useState(false);
@@ -66,6 +93,11 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
     redo: () => { if (editor.current) { redo(editor.current); editor.current.focus(); } },
     goToStart: () => { if (editor.current) { cursorDocStart(editor.current); editor.current.focus(); } },
     goToEnd: () => { if (editor.current) { cursorDocEnd(editor.current); editor.current.focus(); } },
+    bookmarkLine: () => {
+      if (!editor.current) return undefined;
+      const { number: line, text } = visibleBookmarkLine(editor.current);
+      return { line, text };
+    },
   }), []);
 
   useEffect(() => {
@@ -76,7 +108,7 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
       state: EditorState.create({
         doc: latest.current.value,
         extensions: [
-          palette, languageSlot.of([]), editSlot.of([]), labelSlot.of([]), lineNumbers(),
+          palette, languageSlot.of([]), editSlot.of([]), labelSlot.of([]), bookmarkSlot.of([]), lineNumbers(),
           EditorView.lineWrapping,
           ...(editing ? [history(), highlightActiveLine(), keymap.of(managed ? defaultKeymap.filter(({ run }) => !run || !managedCommands.includes(run)) :
             [...defaultKeymap, ...historyKeymap])] : []),
@@ -98,9 +130,10 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
       }),
     });
     if (!editing) view.scrollDOM.tabIndex = 0;
+    jumped.current = undefined;
     editor.current = view;
     return () => { editor.current = null; view.destroy(); };
-  }, [editing, fileName, languageSlot, editSlot, labelSlot, managed]);
+  }, [editing, fileName, languageSlot, editSlot, labelSlot, bookmarkSlot, managed]);
 
   useEffect(() => {
     const view = editor.current;
@@ -121,6 +154,31 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
       annotations: [externalEdit.of(true), Transaction.addToHistory.of(false)],
     });
   }, [value]);
+
+  useEffect(() => {
+    editor.current?.dispatch({ effects: bookmarkSlot.reconfigure(bookmarkLines ? gutter({
+      class: "cm-file-bookmarks", renderEmptyElements: true,
+      lineMarker: (view, line) => bookmarkLines.has(view.state.doc.lineAt(line.from).number) ? lineBookmarkMarker : null,
+      domEventHandlers: { mousedown: (view, line, event) => {
+        if (!(event instanceof MouseEvent) || event.button !== 0) return false;
+        const { number, text } = view.state.doc.lineAt(line.from);
+        latest.current.onBookmarkLine?.(number, text);
+        return true;
+      } },
+    }) : []) });
+  }, [bookmarkLines, bookmarkSlot]);
+
+  useEffect(() => {
+    const view = editor.current;
+    if (!active || !view || !bookmarkJump || jumped.current === bookmarkJump.request) return;
+    const doc = view.state.doc;
+    const line = doc.line(Math.min(doc.lines, bookmarkJump.line));
+    jumped.current = bookmarkJump.request;
+    view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
+    view.scrollDOM.focus({ preventScroll: true });
+    latest.current.onBookmarkResult?.({ request: bookmarkJump.request, requested: bookmarkJump.line, shown: line.number,
+      changed: line.number === bookmarkJump.line && lineFingerprint(line.text) !== bookmarkJump.fingerprint });
+  }, [active, bookmarkJump, value]);
 
   useEffect(() => {
     editor.current?.dispatch({ effects: labelSlot.reconfigure(EditorView.contentAttributes.of({ "aria-label": label, spellcheck: "false" })) });

@@ -3,13 +3,20 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function checkResizeMarker(marker) {
-  await marker.waitFor();
-  assert.equal(await marker.evaluate((element) => {
-    const corner = element.getBoundingClientRect();
-    const surface = element.parentElement.getBoundingClientRect();
-    return element.tabIndex < 0 && element.getAttribute("aria-hidden") === "true" &&
-      Math.abs(surface.right - corner.right) <= 2 && Math.abs(surface.bottom - corner.bottom) <= 2;
-  }), true, "The decorative resize marker must be flush with its surface and outside the tab sequence.");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await marker.waitFor();
+    const aligned = await marker.evaluate((element) => {
+      if (!element.parentElement) return null;
+      const corner = element.getBoundingClientRect();
+      const surface = element.parentElement.getBoundingClientRect();
+      return element.tabIndex < 0 && element.getAttribute("aria-hidden") === "true" &&
+        Math.abs(surface.right - corner.right) <= 2 && Math.abs(surface.bottom - corner.bottom) <= 2;
+    });
+    if (aligned === null) continue;
+    assert.equal(aligned, true, "The decorative resize marker must be flush with its surface and outside the tab sequence.");
+    return;
+  }
+  assert.fail("The resize marker detached before its geometry could be verified.");
 }
 
 export async function openToolWindow(main, trigger, title) {
@@ -46,7 +53,13 @@ export async function hideComparisonOptions(dialog) {
 }
 
 export async function closeToolWindow(tool, trigger = () => tool.keyboard.press("Escape")) {
-  await Promise.all([tool.waitForEvent("close", { timeout: 8000 }), trigger()]);
+  const closed = tool.waitForEvent("close", { timeout: 8000 });
+  await Promise.all([closed, trigger().catch(async (error) => {
+    if (!String(error).includes("Target page, context or browser has been closed")) throw error;
+    // Escape can destroy the Options WebView before Playwright sends its key-up.
+    await closed;
+    if (!tool.context().pages().some((page) => !page.isClosed())) throw error;
+  })]);
 }
 
 export async function keepSuggestedColorSchemeName(page) {

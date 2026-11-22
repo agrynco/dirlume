@@ -39,6 +39,7 @@ function readArchiveScheme(value: unknown): Scheme {
   }
   const scheme = readSchemes([value])[0];
   if (!scheme || scheme.name !== value.name || !sameValue(value.colors, scheme.colors) ||
+      Object.hasOwn(value, "fileTypes") && !sameValue(value.fileTypes, scheme.fileTypes) ||
       Object.entries(value.fonts).some(([key, font]) => !isRecord(font) || !Object.hasOwn(scheme.fonts, key) ||
         !sameValue(font, scheme.fonts[key as keyof Scheme["fonts"]]))) throw new Error(invalidFile);
   return scheme;

@@ -6,7 +6,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
-import { childPlace, formatSize, localPath } from "./panes";
+import { childPlace, formatSize, localPath, type Side } from "./panes";
 import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
@@ -37,8 +37,9 @@ export function itemSource(place: FilePlace, item: Entry): TransferSource {
   return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name };
 }
 
-export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
+export function TransferDialog({ transfer, side, showHidden, onClose, onFinished }: {
   transfer: Transfer;
+  side: Side;
   showHidden: boolean;
   onClose: () => void;
   onFinished: (success: boolean) => void;
@@ -295,7 +296,7 @@ export function TransferDialog({ transfer, showHidden, onClose, onFinished }: {
                   }}>{t("Find locking processes")}</Button>
                 </div>}
                 {localTarget && windowsClient && blocked?.place.kind === "local" && isPermissionError(error) &&
-                  <ElevationButton directory={blocked.place.path} />}
+                  <ElevationButton directory={blocked.place.path} side={side} selected={blocked.entry.name} />}
           </div>
           <footer className="dialog-footer">
             {phase === "done" ? (

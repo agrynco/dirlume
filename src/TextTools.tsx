@@ -2,7 +2,7 @@ import { countText, errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, Settings2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
@@ -16,6 +16,7 @@ import type { TaskMarker } from "./MarkdownPreview";
 import { useMarkdownSearch } from "./MarkdownSearch";
 import { MainMenu, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
+import { bookmarkKey, bookmarkPath, type BookmarkJump, type BookmarkResult, type FileBookmark } from "./fileBookmarks";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { useFontZoom } from "./useFontZoom";
@@ -34,7 +35,8 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
 }
 
 export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors, diagnosticLog,
-  onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose }: {
+  onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
+  fileBookmarks, bookmarkJump, onBookmarkLine, onFileBookmarks }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -56,10 +58,14 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
   onClose: () => void;
+  fileBookmarks: readonly FileBookmark[];
+  bookmarkJump?: BookmarkJump;
+  onBookmarkLine: (path: string, line: number, text: string) => void;
+  onFileBookmarks: (path: string) => void;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
-  const [preview, setPreview] = useState(!editing && isMarkdownFile(file.name));
+  const [preview, setPreview] = useState(!editing && !bookmarkJump && isMarkdownFile(file.name));
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
   const [diagnosticSource, setDiagnosticSource] = useState(false);
@@ -69,6 +75,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const syntaxButton = useRef<HTMLButtonElement>(null);
   const syntaxOpener = useRef<HTMLElement | null>(null);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ line: 1, column: 1, canUndo: false, canRedo: false });
+  const [bookmarkResult, setBookmarkResult] = useState<BookmarkResult>();
   const [hexSize, setHexSize] = useState<number>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,6 +108,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const contentWidth = markdownViewer ? viewerMarkdownContentWidth ?? viewerContentWidth : viewerContentWidth;
   const diagnosticVisible = Boolean(document && diagnosticLog && !diagnosticSource && !hex);
   const sourceVisible = Boolean(document && !preview && !hex && !diagnosticVisible);
+  const localBookmarkPath = !editing && !diagnosticLog && !hex ? bookmarkPath(file) : null;
+  const bookmarkLines = useMemo(() => localBookmarkPath ? new Set(fileBookmarks.filter((item) =>
+    bookmarkKey(item.path) === bookmarkKey(localBookmarkPath)).map(({ line }) => line)) : undefined, [fileBookmarks, localBookmarkPath]);
   const search = useMarkdownSearch(markdownContent, markdownScroll, searchOpen ? searchQuery.trim() : "",
     active && markdownViewer, markdownSource, htmlFormatting);
   const byteSize = useMemo(() => {
@@ -125,6 +135,12 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       setHex(false);
     }
   }, [position, isMarkdown]);
+
+  useEffect(() => {
+    if (!bookmarkJump) return;
+    setPreview(false);
+    setHex(false);
+  }, [bookmarkJump]);
 
   useLayoutEffect(() => {
     if (active && markdownViewer && searchOpen) searchField.current?.focus();
@@ -308,6 +324,13 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const forward = action("Forward", "documentForward", () => navigate("forward"), !canGoForward);
   const searchAction = action("Search", "documentSearch", find);
   const hexAction = action("Hex", "viewAsHex", () => setHex(!hex));
+  const bookmarkAction = action("Bookmark line", "bookmarkLine", () => {
+    const line = sourceActions.current?.bookmarkLine();
+    if (line && localBookmarkPath) onBookmarkLine(localBookmarkPath, line.line, line.text);
+  });
+  const bookmarksAction = action("File bookmarks", "fileBookmarks", () => {
+    if (localBookmarkPath) onFileBookmarks(localBookmarkPath);
+  });
   const switchMode = action(editing ? "Open in Viewer" : "Open in Editor", "switchDocumentMode", onSwitchMode,
     saving || sudoAction !== null || (!editing && (!writable || !document)));
   const fileActions = [...(editing ? [saveAction] : []), switchMode, closeAction];
@@ -319,10 +342,10 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     action("Copy", "documentCopy", copySelection),
     action("Select all", "documentSelectAll", selectAllText),
   ];
-  const navigationActions = markdownViewer ? [back, forward, searchAction] : sourceVisible ? [
+  const navigationActions = [...(markdownViewer ? [back, forward, searchAction] : sourceVisible ? [
     action("Go to start", "documentStart", () => sourceActions.current?.goToStart()),
     action("Go to end", "documentEnd", () => sourceActions.current?.goToEnd()),
-  ] : [];
+  ] : []), ...(localBookmarkPath && document ? [...(sourceVisible ? [bookmarkAction] : []), bookmarksAction] : [])];
   const menuGroups: MenuGroup[] = [
     { label: "File", items: fileActions },
     { label: editing ? "Edit" : "Selection", items: selectionActions },
@@ -423,6 +446,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           </Button>
         )}
         {!editing && <Button shortcut={hexAction.shortcut} aria-pressed={hex} onClick={hexAction.run}>{t(hexAction.label)}</Button>}
+        {localBookmarkPath && document && <Button type="button" shortcut={bookmarksAction.shortcut} onClick={bookmarksAction.run}>
+          <Bookmark aria-hidden="true" /> {t(bookmarksAction.label)}
+        </Button>}
       </div>
       {markdownViewer && searchOpen && <form className="markdown-search" onSubmit={(event) => { event.preventDefault(); search.move(1); }}>
         <input ref={searchField} type="search" aria-label={t("Search rendered Markdown")} placeholder={t("Search rendered Markdown")}
@@ -443,6 +469,11 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           : !error && isPermissionError(readError) &&
             <Button type="button" onClick={() => setSudoAction("read")}>{t("Open with sudo…")}</Button>)}
       </div>}
+      {sourceVisible && bookmarkResult && bookmarkResult.request === bookmarkJump?.request &&
+        (bookmarkResult.changed || bookmarkResult.requested !== bookmarkResult.shown) &&
+        <p role="status" className="bookmark-position-status">{bookmarkResult.changed ?
+          t("Line {0} has changed since it was bookmarked.", bookmarkResult.requested) :
+          t("Bookmark line {0} is past the end of the file. Showing line {1}.", bookmarkResult.requested, bookmarkResult.shown)}</p>}
       {hex ? <HexViewer file={file} revision={hexRevision} onSize={setHexSize} /> :
         !document && !readError && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
@@ -459,6 +490,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
+              bookmarkLines={bookmarkLines} bookmarkJump={bookmarkJump} onBookmarkResult={setBookmarkResult}
+              onBookmarkLine={localBookmarkPath ? (line, lineText) => onBookmarkLine(localBookmarkPath, line, lineText) : undefined}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>
         </div>
