@@ -164,6 +164,9 @@ jobs:
       - name: Verify main menu visibility and shortcuts
         if: github.event.action != 'closed'
         run: node scripts/menu-header-smoke.mjs
+      - name: Verify the About and title-bar donation buttons
+        if: github.event.action != 'closed'
+        run: node scripts/about-donation-smoke.mjs
       - name: Verify contextual offline Help
         if: github.event.action != 'closed'
         run: node scripts/contextual-help-smoke.mjs

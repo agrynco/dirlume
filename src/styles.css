@@ -1424,6 +1424,18 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .about-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .about-actions button { justify-content: flex-start; text-align: start; border-color: var(--line); }
 .about-actions button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+button.donation-button {
+  --donation-tint: color-mix(in srgb, var(--accent) 11%, var(--raised));
+  --donation-border: color-mix(in srgb, var(--accent) 40%, var(--line));
+  --donation-label: color-mix(in srgb, var(--accent) 45%, var(--ink));
+  --donation-icon: color-mix(in srgb, var(--folder) 78%, var(--ink));
+  background: var(--donation-tint); border-color: var(--donation-border); color: var(--donation-label); font-weight: 650;
+}
+button.donation-button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, var(--raised)); }
+.donation-button > svg { color: var(--donation-icon); }
+.about-donation { min-width: 0; margin-inline-end: auto; justify-content: flex-start; text-align: start; }
+.about-donation > span { min-width: 0; }
+.titlebar-donation { flex: none; margin-inline-end: 4px; }
 .mcp-configuration { display: flex; align-items: flex-start; gap: 6px; }
 .mcp-configuration > .field { flex: 1; min-width: 0; }
 .mcp-copy-status { color: var(--dialog-muted); }
