@@ -4,6 +4,7 @@ import { chromium } from "playwright-core";
 import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const platforms = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Mozilla/5.0 (X11; Linux x86_64)", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"];
+const markModifier = process.platform === "darwin" ? "Meta" : "Control";
 const pane = (page, side) => page.getByRole("region", { name: `${side} pane`, exact: true });
 const grid = (page, side) => pane(page, side).getByRole("grid", { name: "Running processes", exact: true });
 const row = (page, side, pid) => grid(page, side).getByRole("row").filter({
@@ -80,7 +81,7 @@ try {
     const table = grid(page, side);
     const target = row(page, side, 9103);
     await row(page, side, 9101).click();
-    await row(page, side, 9102).click({ modifiers: [userAgent === platforms[2] ? "Meta" : "Control"] });
+    await row(page, side, 9102).click({ modifiers: [markModifier] });
     const marked = table.locator('tbody tr[aria-selected="true"]');
     await target.getByRole("gridcell", { name: "9103", exact: true }).click({ button: "right" });
     await menu(page).getByText("PID 9103", { exact: true }).waitFor();
