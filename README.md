@@ -136,6 +136,8 @@ The shell receives keystrokes while its input has focus. A hint in the status ba
 
 Right-click terminal output to open **Copy**, **Paste**, and **Select All**. On macOS, Control-click also opens the menu. **Copy** is available when text is selected. You can enable **Paste on right-click** in **Options → Terminal** to paste directly instead.
 
+Left-click an HTTP or HTTPS link in local or SSH terminal output to open it in the default browser on the computer running Dirlume. Hover over a labeled terminal hyperlink to see its destination before opening it.
+
 In the Windows PowerShell terminal, `cd` suggests directories as you type. Select a folder to continue into its children. With Docker installed, both inputs complete subcommands and options for `docker container` and `docker compose`. Container suggestions use the active Docker context or an explicit `--context`. Compose suggests services from the current project, including projects selected through `-f` or `COMPOSE_FILE`. A supported SSH terminal uses the connected host and the environment of its prompt.
 
 At a supported PowerShell, Bash, or Zsh prompt, the terminal shows suggestions next to the caret as you edit a single-line command. Use **↑/↓** to select, **Tab** to insert the selected or first suggestion, or **Esc** to dismiss. Click a suggestion or press **Enter** with one selected to insert it. **Enter** submits the command when the list has no selection. Dirlume SSH terminals use the remote working directory and search path. If you run `ssh` yourself, the parent terminal suspends suggestions until it recognizes its prompt again.
