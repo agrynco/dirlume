@@ -869,6 +869,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Configuration and data": ["Конфігурація й дані", "Конфигурация и данные"],
   "Executables and scripts": ["Програми та скрипти", "Программы и скрипты"],
   "Dialogs": ["Діалоги", "Диалоги"],
+  "File pane dialogs": ["Діалоги файлових панелей", "Диалоги файловых панелей"],
+  "Options window": ["Вікно параметрів", "Окно параметров"],
   "Dialog background": ["Тло діалогів", "Фон диалогов"],
   "Dialog headers and footers": ["Заголовки та нижні рядки діалогів", "Заголовки и нижние строки диалогов"],
   "Dialog fields": ["Поля діалогів", "Поля диалогов"],

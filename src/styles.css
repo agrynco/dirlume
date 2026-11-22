@@ -95,6 +95,8 @@
   --panel-size: 15px;
   --dialog-font: var(--ui-font);
   --dialog-size: var(--ui-size);
+  --options-font: var(--ui-font);
+  --options-size: var(--ui-size);
   --mono: var(--bundled-font), "Cascadia Mono", "SFMono-Regular", "Liberation Mono", monospace;
   --mono-size: var(--default-font-size);
   --viewer-font: var(--mono);
@@ -1110,6 +1112,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   overflow: hidden;
 }
 .dialog[open] { display: flex; flex-direction: column; }
+.dialog[data-font="options"] { font-family: var(--options-font); font-size: var(--options-size); }
 [data-theme="classic-blue"] .dialog {
   --line: #686868;
   --subtle: #ababab;
@@ -1268,7 +1271,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 }
 .folder-shortcut-row { display: grid; gap: 2px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
 .folder-shortcut-row > :is(span, small) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.folder-shortcut-row small { color: var(--dialog-muted); }
+.folder-shortcut-row small { color: var(--dialog-muted); font-size: inherit; }
 .folder-shortcut-row:hover { background: var(--hover); }
 .folder-shortcut-row[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--raised); }
@@ -1429,7 +1432,10 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .preview-code { margin: 0; padding: 8px 10px; background: var(--text-bg); color: var(--text-ink); font: var(--mono-size)/1.4 var(--mono); overflow: auto; }
 .surface-preview + .surface-preview { border-top: 1px solid var(--line); }
 .surface-preview-label { padding: 2px 10px; color: var(--muted); }
-.preview-dialog { padding: 8px 10px; background: var(--dialog-bg); color: var(--dialog-ink); font: var(--dialog-size)/1.35 var(--dialog-font); }
+.preview-dialogs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 155px), 1fr)); gap: 1px; background: var(--line); }
+.preview-dialog { min-width: 0; padding: 8px 10px; overflow-wrap: anywhere; background: var(--dialog-bg); color: var(--dialog-ink); font: var(--dialog-size)/1.35 var(--dialog-font); }
+.preview-options { font: var(--options-size)/1.35 var(--options-font); }
+.preview-dialog-label { color: var(--dialog-muted); font-size: .86em; margin-bottom: 4px; }
 .preview-field { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--dialog-input); margin-top: 5px; }
 .preview-dialog-actions, .preview-shortcuts { display: flex; gap: 6px; flex-wrap: wrap; }
 .preview-dialog-actions { justify-content: flex-end; margin-top: 6px; }

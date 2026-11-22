@@ -40,10 +40,11 @@ const surfaceTerms = (surfaces: readonly Surface[]) => surfaces.flatMap((surface
 const appearancePages = [
   ...Object.entries(colorGroups).map(([id, group]) => ({
     id: id as AppearanceSection, label: group.label,
-    terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : [])],
+    terms: [...Object.values(group.colors), ...(id === "text" ? surfaceTerms(optionSurfaces.text) : []),
+      ...(id === "dialogs" ? [fontGroups.dialog.label, fontGroups.options.label, "font family size"] : [])],
   })),
   { id: "fonts" as const, label: "Fonts", terms: [fontGroups.ui.label, fontGroups.panel.label,
-    fontGroups.dialog.label, fontGroups.mono.label, "family size installed"] },
+    fontGroups.dialog.label, fontGroups.options.label, fontGroups.mono.label, "family size installed"] },
   { id: "viewFonts" as const, label: "View font sizes", terms: [...Object.values(viewFonts).map(({ label }) => label), "zoom wheel"] },
 ];
 
@@ -355,7 +356,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
 
   return <SettingsSearchTerms value={terms}>
-    <Dialog title={t("Options")} helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
+    <Dialog title={t("Options")} font="options" helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
       wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
       {saveError && <p className="dialog-error settings-save-error" role="alert">
         {t("Could not save settings. Try again, or close Options to discard unapplied changes.")} {saveError}

@@ -226,7 +226,8 @@ export const bundledFontFamily = "GoMono Nerd Font Mono";
 export const fontGroups = {
   ui: { label: "Main window", fallback: "var(--system-font)" },
   panel: { label: "File panels", fallback: "var(--bundled-font), monospace" },
-  dialog: { label: "Dialogs", fallback: "var(--ui-font)" },
+  dialog: { label: "File pane dialogs", fallback: "var(--ui-font)" },
+  options: { label: "Options window", fallback: "var(--ui-font)" },
   mono: { label: "Editor, viewer, and terminal", fallback: "var(--bundled-font), monospace" },
   viewer: { label: "Viewer", fallback: "var(--mono)" },
   editor: { label: "Editor", fallback: "var(--mono)" },
@@ -262,7 +263,12 @@ export type RetainedFonts = Record<typeof typographyProperties[number], string>;
 
 export function readRetainedFonts(value: unknown): RetainedFonts | undefined {
   if (!value || typeof value !== "object") return;
-  const fonts = value as Record<string, unknown>;
+  const source = value as Record<string, unknown>;
+  const fonts: Record<string, unknown> = {
+    ...source,
+    "--options-font": source["--options-font"] ?? source["--dialog-font"],
+    "--options-size": source["--options-size"] ?? source["--dialog-size"],
+  };
   if (!typographyProperties.every((property) => {
     const setting = fonts[property];
     return typeof setting === "string" && setting.length <= 512 &&
@@ -278,7 +284,7 @@ export const maxSchemeNameLength = 48;
 export const isHexColor = (value: string) => /^#[a-f\d]{6}$/i.test(value);
 
 const fontParents: Partial<Record<FontGroup, FontGroup>> = {
-  dialog: "ui", viewer: "mono", editor: "mono", terminal: "mono",
+  dialog: "ui", options: "ui", viewer: "mono", editor: "mono", terminal: "mono",
   hex: "viewer", markdown: "viewer", command: "terminal", compare: "mono",
 };
 
@@ -367,7 +373,7 @@ export function readSchemes(value: unknown): Scheme[] {
     }
     const fonts: Fonts = {};
     for (const group of fontKeys) {
-      const font = scheme.fonts?.[group];
+      const font = group === "options" ? scheme.fonts?.options ?? scheme.fonts?.dialog : scheme.fonts?.[group];
       const family = typeof font?.family === "string" ? font.family.trim().slice(0, maxFontFamilyLength) : undefined;
       const size = font?.size;
       fonts[group] = {
