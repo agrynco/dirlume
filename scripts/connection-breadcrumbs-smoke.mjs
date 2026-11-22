@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
-import { editPaneAddress } from "./pane-address-smoke.mjs";
 
 const platforms = ["Windows NT 10.0; Win64; x64", "X11; Linux x86_64", "Macintosh; Intel Mac OS X 10_15_7"];
 const folders = ["one-long-folder", "two-long-folder", "three-long-folder", "four-long-folder", "leaf-folder"];
@@ -136,7 +135,10 @@ try {
     for (const name of folders) await row(page, other, name).dblclick();
     await checkCatalog(page, other, deep, "Remote machine", home, { root: "/", connectionName: "Server fixture" });
     if (index === 0) {
-      const address = await editPaneAddress(page, side);
+      const breadcrumbs = crumbs(page, side);
+      await breadcrumbs.hover();
+      await button(breadcrumbs, `Edit ${side} path`).click();
+      const address = pane(page, side).getByRole("combobox", { name: `${side} path`, exact: true });
       await address.fill(smbDeep);
       await address.press("Enter");
       await checkCatalog(page, side, smbDeep, "SMB", home, { root: smbRoot, connectionName: "fixture" });
