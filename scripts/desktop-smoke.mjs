@@ -1738,6 +1738,11 @@ try {
   await wheelFont("#right-files", -120);
   const enlargedRight = await fontSize("#right-pane");
   const columnWidth = (side, column) => page.locator(`#${side}-pane .col-${column}`).evaluate((element) => element.getBoundingClientRect().width);
+  const waitForColumnWidth = (side, column, width) => page.waitForFunction(({ selector, width }) =>
+    document.querySelector(selector)?.getBoundingClientRect().width === width,
+  { selector: `#${side}-pane .col-${column}`, width });
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await page.locator("#right-files .file-time").filter({ hasText: /\d{1,2}:\d{2}/ }).first().waitFor();
   assert.equal(await page.locator(".file-columns [role=separator]").count(), 0);
   const leftSize = await columnWidth("left", "size");
   const rightSize = await columnWidth("right", "size");
@@ -1793,16 +1798,16 @@ try {
   assert.equal(await fontSize(markdownSurface), enlargedMarkdown, "Restarting should restore the Markdown font size.");
   await page.keyboard.press("Control+Tab");
   assert.equal(await fontSize("#right-pane"), enlargedRight, "Restarting should restore the individual pane font size.");
-  assert.equal(await columnWidth("left", "size"), leftSize);
-  assert.equal(await columnWidth("right", "size"), rightSize);
+  await waitForColumnWidth("left", "size", leftSize);
+  await waitForColumnWidth("right", "size", rightSize);
   await rightHeader().getByRole("button", { name: "Date", exact: true }).waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "time"), rightTime);
+  await waitForColumnWidth("right", "time", rightTime);
   await rightHeader().locator(".col-time button svg").waitFor();
   await rightHeader().getByRole("button", { name: "Name", exact: true }).press("Shift+F10");
   await columnMenu().getByRole("menuitemcheckbox", { name: "Date", exact: true, checked: false }).click();
   await page.keyboard.press("Escape");
   await columnMenu().waitFor({ state: "hidden" });
-  assert.equal(await columnWidth("right", "modified"), rightModified);
+  await waitForColumnWidth("right", "modified", rightModified);
   assert.equal(await panePath("left"), src);
   assert.equal(await panePath("right"), dst);
   await page.getByRole("listbox", { name: "left files", exact: true }).getByRole("option", { name: /^guide.md/, selected: true }).waitFor();
