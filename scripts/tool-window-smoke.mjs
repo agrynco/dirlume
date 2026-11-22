@@ -46,7 +46,13 @@ export async function hideComparisonOptions(dialog) {
 }
 
 export async function closeToolWindow(tool, trigger = () => tool.keyboard.press("Escape")) {
-  await Promise.all([tool.waitForEvent("close", { timeout: 8000 }), trigger()]);
+  const closed = tool.waitForEvent("close", { timeout: 8000 });
+  await Promise.all([closed, trigger().catch(async (error) => {
+    if (!String(error).includes("Target page, context or browser has been closed")) throw error;
+    // Escape can destroy the Options WebView before Playwright sends its key-up.
+    await closed;
+    if (!tool.context().pages().some((page) => !page.isClosed())) throw error;
+  })]);
 }
 
 export async function keepSuggestedColorSchemeName(page) {
