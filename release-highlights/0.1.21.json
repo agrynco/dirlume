@@ -7,7 +7,7 @@
     "Open as administrator restores your applied appearance, local workspace, and selected item. Windows marks the new window as Administrator.",
     "Retry a stopped transfer from the failed item. On Windows, the lock inspector reports holders of folders and nested files as it checks them.",
     "Right-click a process to view its properties, copy its PID or executable path, reveal the executable, or end that process with confirmation.",
-    "Submit commands from either pane with Terminal open or hidden. Commands use the displayed folder and show an error if the shell cannot enter it.",
+    "Run commands in the displayed folder and see errors if the shell cannot enter it. Click web links in local or SSH terminal output to open them in your browser.",
     "Insert the path of the parent row into the command line in local and SSH panes. The New folder batch checkbox now uses the standard label spacing."
   ]
 }
