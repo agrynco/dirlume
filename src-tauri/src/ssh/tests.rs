@@ -28,6 +28,16 @@ impl Fixture {
         writeln!(self.commands, "{request}").expect("write to SSH fixture");
         self.read()
     }
+
+    fn wait_for_idle(&mut self) {
+        for _ in 0..30 {
+            if self.request(json!({}))["active"] == json!([0, 0, 0]) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(self.request(json!({}))["active"], json!([0, 0, 0]));
+    }
 }
 
 impl Drop for Fixture {
@@ -121,13 +131,7 @@ fn opens_a_two_hop_sftp_route() {
         assert!(challenge.fingerprint.starts_with("SHA256:"));
         approvals.push(challenge);
     }
-    for _ in 0..30 {
-        if fixture.request(json!({}))["active"] == json!([0, 0, 0]) {
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    assert_eq!(fixture.request(json!({}))["active"], json!([0, 0, 0]));
+    fixture.wait_for_idle();
 
     let (client, keys) = route(input.clone(), &approvals, &[])
         .expect("verify the entire route")
@@ -185,6 +189,7 @@ fn opens_a_two_hop_sftp_route() {
     drop(output);
     assert_eq!(fs::read(&destination).unwrap(), b"download from SSH");
     drop(session);
+    fixture.wait_for_idle();
 
     let mut denied = input.clone();
     denied["jumpHosts"] = json!([hosts[0]]);
@@ -209,4 +214,5 @@ fn opens_a_two_hop_sftp_route() {
         error.contains("SSH jump host 2 (second-bastion.invalid:")
             && error.contains("different host key")
     );
+    fixture.wait_for_idle();
 }
