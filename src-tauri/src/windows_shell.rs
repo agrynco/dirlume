@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     collections::BTreeMap,
-    fs,
+    fs, io,
     os::windows::{
         ffi::OsStrExt,
         io::{FromRawHandle, OwnedHandle},
@@ -11,7 +11,7 @@ use std::{
 };
 
 use base64::Engine;
-use tauri::WebviewWindow;
+use tauri::{ipc::Channel, WebviewWindow};
 use windows::{
     core::{Interface, PCSTR, PCWSTR, PWSTR},
     Win32::{
@@ -25,8 +25,9 @@ use windows::{
                 RM_PROCESS_INFO,
             },
             Threading::{
-                GetProcessTimes, IsProcessCritical, OpenProcess, TerminateProcess,
-                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+                GetProcessTimes, IsProcessCritical, OpenProcess, QueryFullProcessImageNameW,
+                TerminateProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+                PROCESS_TERMINATE,
             },
         },
         UI::{
@@ -41,6 +42,20 @@ use windows::{
                 WM_MEASUREITEM, WM_MENUCHAR,
             },
         },
+    },
+};
+use windows_sys::{
+    Wdk::Storage::FileSystem::{FileProcessIdsUsingFileInformation, NtQueryInformationFile},
+    Win32::{
+        Foundation::{
+            INVALID_HANDLE_VALUE, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
+            STATUS_INFO_LENGTH_MISMATCH,
+        },
+        Storage::FileSystem::{
+            CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        },
+        System::IO::IO_STATUS_BLOCK,
     },
 };
 
@@ -424,65 +439,259 @@ pub struct LockReport {
     incomplete: bool,
 }
 
+#[derive(serde::Serialize)]
+pub struct LockProgress {
+    checked: usize,
+    processes: Vec<ProcessInfo>,
+}
+
+// Restart Manager accepts files only. Query the directory handle with all share
+// modes enabled so the diagnostic itself does not block a later rename.
+fn directory_owners(path: &Path) -> io::Result<Vec<u32>> {
+    let wide_path = wide(path);
+    let raw = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            ptr::null_mut(),
+        )
+    };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let _handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+
+    // The result starts with a ULONG count followed by pointer-sized PIDs.
+    // A machine-word buffer supplies the array's alignment on either ABI.
+    let mut buffer = vec![0usize; 32];
+    while buffer.len() <= 16384 {
+        let mut status_block = IO_STATUS_BLOCK::default();
+        let status = unsafe {
+            NtQueryInformationFile(
+                raw,
+                &mut status_block,
+                buffer.as_mut_ptr().cast(),
+                std::mem::size_of_val(buffer.as_slice()) as u32,
+                FileProcessIdsUsingFileInformation,
+            )
+        };
+        match status {
+            0 => {
+                let count = buffer[0] as u32 as usize;
+                let ids = buffer[1..]
+                    .get(..count)
+                    .ok_or_else(|| io::Error::other("Invalid directory lock response"))?;
+                return Ok(ids
+                    .iter()
+                    .map(|&pid| pid as u32)
+                    .filter(|&pid| pid != 0 && pid != std::process::id())
+                    .collect());
+            }
+            STATUS_BUFFER_OVERFLOW | STATUS_BUFFER_TOO_SMALL | STATUS_INFO_LENGTH_MISMATCH => {
+                buffer.resize(buffer.len() * 2, 0)
+            }
+            _ => {
+                return Err(io::Error::other(format!(
+                    "Windows directory lock query failed (0x{:08X})",
+                    status as u32
+                )))
+            }
+        }
+    }
+    Err(io::Error::other(
+        "The directory has too many lock owners to list.",
+    ))
+}
+
+fn directory_process(pid: u32) -> ProcessInfo {
+    let mut entry = ProcessInfo {
+        id: ProcessId { pid, started: 0 },
+        name: format!("PID {pid}"),
+        cpu: 0.0,
+        memory: 0,
+        executable: None,
+        can_terminate: false,
+    };
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return entry;
+        };
+        let _handle = OwnedHandle::from_raw_handle(process.0);
+        let mut times = [FILETIME::default(); 4];
+        let [created, exited, kernel, user] = &mut times;
+        if GetProcessTimes(process, created, exited, kernel, user).is_ok() {
+            entry.id.started = process_started(*created);
+            let mut critical = windows::core::BOOL(0);
+            entry.can_terminate = pid > 4
+                && entry.id.started > 0
+                && IsProcessCritical(process, &mut critical).is_ok()
+                && !critical.as_bool();
+        }
+        let mut name = vec![0u16; 32768];
+        let mut len = name.len() as u32;
+        if QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(name.as_mut_ptr()),
+            &mut len,
+        )
+        .is_ok()
+        {
+            let path = PathBuf::from(String::from_utf16_lossy(&name[..len as usize]));
+            if let Some(name) = path.file_name() {
+                entry.name = name.to_string_lossy().into_owned();
+            }
+            entry.executable = Some(path.to_string_lossy().into_owned());
+        }
+    }
+    entry
+}
+
+#[derive(Default)]
+struct LockScan {
+    owners: BTreeMap<u32, ProcessInfo>,
+    checked: usize,
+    failure: Option<String>,
+}
+
+impl LockScan {
+    fn failed(&mut self, error: impl std::fmt::Display) {
+        self.failure.get_or_insert_with(|| message(error));
+    }
+
+    fn files(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        match lock_owners(paths) {
+            Ok(entries) => {
+                self.checked += paths.len();
+                for entry in entries {
+                    let pid = entry.Process.dwProcessId;
+                    let end = entry
+                        .strAppName
+                        .iter()
+                        .position(|&unit| unit == 0)
+                        .unwrap_or(entry.strAppName.len());
+                    let owner = self.owners.entry(pid).or_insert_with(|| ProcessInfo {
+                        id: ProcessId {
+                            pid,
+                            started: process_started(entry.Process.ProcessStartTime),
+                        },
+                        name: String::from_utf16_lossy(&entry.strAppName[..end]),
+                        cpu: 0.0,
+                        memory: 0,
+                        executable: None,
+                        can_terminate: pid > 4 && pid != std::process::id(),
+                    });
+                    owner.can_terminate &= entry.ApplicationType != RmCritical;
+                }
+            }
+            // One unsupported or disappearing file can make a Restart Manager batch fail.
+            Err(_) if paths.len() > 1 => paths
+                .iter()
+                .for_each(|path| self.files(std::slice::from_ref(path))),
+            Err(error) => self.failed(error),
+        }
+    }
+}
+
+fn next_lock_path(
+    roots: &mut impl Iterator<Item = PathBuf>,
+    folders: &mut Vec<fs::ReadDir>,
+) -> Option<io::Result<PathBuf>> {
+    while let Some(entries) = folders.last_mut() {
+        if let Some(entry) = entries.next() {
+            return Some(entry.map(|item| item.path()));
+        }
+        folders.pop();
+    }
+    roots.next().map(Ok)
+}
+
+fn scan_locks(paths: Vec<PathBuf>, output: Option<&Channel<LockProgress>>) -> Result<LockScan> {
+    const LIMIT: usize = 4096;
+    const BATCH: usize = 32;
+    let mut roots = paths.into_iter();
+    let mut scan = LockScan::default();
+    let mut folders = Vec::new();
+    let mut files = Vec::with_capacity(BATCH);
+    let mut visited = 0;
+    while let Some(path) = next_lock_path(&mut roots, &mut folders) {
+        if visited == LIMIT {
+            scan.failed("The lock scan reached its item limit.");
+            break;
+        }
+        visited += 1;
+        let previous_owners = scan.owners.len();
+        match path.and_then(|path| fs::symlink_metadata(&path).map(|metadata| (path, metadata))) {
+            Ok((_, metadata)) if local::is_link(&metadata) => {
+                scan.failed("Linked locations were skipped.")
+            }
+            Ok((path, metadata)) if metadata.is_dir() => {
+                match directory_owners(&path) {
+                    Ok(ids) => {
+                        scan.checked += 1;
+                        for pid in ids {
+                            scan.owners
+                                .entry(pid)
+                                .or_insert_with(|| directory_process(pid));
+                        }
+                    }
+                    Err(error) => scan.failed(error),
+                }
+                match fs::read_dir(&path) {
+                    Ok(entries) => folders.push(entries),
+                    Err(error) => scan.failed(error),
+                }
+            }
+            Ok((path, metadata)) if metadata.is_file() => files.push(path),
+            Ok(_) => scan.failed("Unsupported filesystem item."),
+            Err(error) => scan.failed(error),
+        }
+        if visited.is_multiple_of(BATCH) {
+            scan.files(&files);
+            files.clear();
+        }
+        if let Some(output) =
+            output.filter(|_| visited.is_multiple_of(BATCH) || scan.owners.len() != previous_owners)
+        {
+            let _ = output.send(LockProgress {
+                checked: scan.checked,
+                processes: scan.owners.values().cloned().collect(),
+            });
+        }
+    }
+    scan.files(&files);
+    if scan.checked == 0 {
+        return Err(scan
+            .failure
+            .unwrap_or_else(|| "No filesystem items to check.".to_owned()));
+    }
+    Ok(scan)
+}
+
 #[tauri::command]
-pub async fn locking_processes(paths: Vec<String>, app: tauri::AppHandle) -> Result<LockReport> {
+pub async fn locking_processes(
+    paths: Vec<String>,
+    output: Channel<LockProgress>,
+    app: tauri::AppHandle,
+) -> Result<LockReport> {
     crate::desktop::blocking(move || {
-        let mut pending = paths
+        let paths = paths
             .iter()
             .map(|path| local::absolute(path).map(Path::to_owned).map_err(message))
             .collect::<Result<Vec<_>>>()?;
-        let mut files = Vec::new();
-        let mut incomplete = false;
-        while let Some(path) = pending.pop() {
-            match fs::symlink_metadata(&path) {
-                Ok(metadata) if local::is_link(&metadata) => {}
-                Ok(metadata) if metadata.is_file() => files.push(path),
-                Ok(metadata) if metadata.is_dir() => match fs::read_dir(path) {
-                    Ok(entries) => {
-                        for entry in entries {
-                            match entry {
-                                Ok(entry) => pending.push(entry.path()),
-                                Err(_) => incomplete = true,
-                            }
-                        }
-                    }
-                    Err(_) => incomplete = true,
-                },
-                _ => incomplete = true,
-            }
-            if files.len() >= 4096 && !pending.is_empty() {
-                incomplete = true;
-                break;
-            }
-        }
-        let mut owners = BTreeMap::new();
-        for files in files.chunks(128) {
-            for entry in lock_owners(files)? {
-                let process = entry.Process;
-                let pid = process.dwProcessId;
-                let end = entry
-                    .strAppName
-                    .iter()
-                    .position(|&unit| unit == 0)
-                    .unwrap_or(entry.strAppName.len());
-                owners.entry(pid).or_insert_with(|| ProcessInfo {
-                    id: ProcessId {
-                        pid,
-                        started: process_started(process.ProcessStartTime),
-                    },
-                    name: String::from_utf16_lossy(&entry.strAppName[..end]),
-                    cpu: 0.0,
-                    memory: 0,
-                    executable: None,
-                    can_terminate: pid > 4
-                        && pid != std::process::id()
-                        && entry.ApplicationType != RmCritical,
-                });
-            }
-        }
+        let scan = scan_locks(paths, Some(&output))?;
+        let owners = scan.owners.into_values().collect::<Vec<_>>();
+        let processes = crate::processes::refresh_lock_owners(&app, owners.clone());
         Ok(LockReport {
-            processes: crate::processes::refresh_lock_owners(&app, owners.into_values().collect())?,
-            incomplete,
+            incomplete: scan.failure.is_some() || processes.is_err(),
+            processes: processes.unwrap_or(owners),
         })
     })
     .await

@@ -406,7 +406,10 @@ export const api = {
   panelMetadata: (items: PanelMetadataRequest[]) => invoke<PanelMetadata[]>("panel_metadata", { items }),
   fileIcons: (items: { directory: string; name: string }[]) => invoke<(string | null)[]>("file_icons", { items }),
   terminateProcesses: (ids: ProcessId[]) => invoke<string[]>("terminate_processes", { ids }),
-  lockingProcesses: (paths: string[]) => invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", { paths }),
+  lockingProcesses: (paths: string[], progress?: (update: { checked: number; processes: ProcessInfo[] }) => void) =>
+    invoke<{ processes: ProcessInfo[]; incomplete: boolean }>("locking_processes", {
+      paths, output: new Channel(progress),
+    }),
   windowsItemMenu: (directory: string, name?: string) => invoke<boolean>("windows_item_menu", { directory, name }),
   openElevated: (workspace: AdministratorWorkspace) => invoke<boolean>("open_elevated", { workspace }),
   windowsStartup: () => invoke<{ administrator: boolean; handoff: boolean; workspace: AdministratorWorkspace | null; workspaceUnavailable: boolean } | null>("windows_startup"),

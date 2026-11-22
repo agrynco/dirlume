@@ -164,6 +164,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const [ending, setEnding] = useState<ProcessInfo[]>([]);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [checked, setChecked] = useState(0);
   const [partial, setPartial] = useState(false);
   const [properties, setProperties] = useState<ProcessInfo | null>(null);
   const [revision, setRevision] = useState(0);
@@ -207,12 +208,15 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   useEffect(() => {
     let closed = false;
     let pending = false;
+    if (lockingPath) { setLoaded(false); setChecked(0); setPartial(false); setError(""); }
     async function refresh() {
       if (pending) return;
       pending = true;
       try {
         const { processes, incomplete } = lockingPath
-          ? await api.lockingProcesses([lockingPath]) : { processes: await api.listProcesses(), incomplete: false };
+          ? await api.lockingProcesses([lockingPath], ({ checked, processes }) => {
+            if (!closed) { setChecked(checked); setItems(processes); }
+          }) : { processes: await api.listProcesses(), incomplete: false };
         if (!closed) {
           setItems(processes);
           setLoaded(true);
@@ -284,6 +288,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
         <Button type="button" onClick={() => setRevision((previous) => previous + 1)}>{t("Refresh")}</Button>
         <Button type="button" onClick={onClose}>{t("Back to files")}</Button>
       </div>}
+      {lockingPath && !loaded && !error && <p className="pane-empty" role="status">{lockScanStatus(checked)}</p>}
       <div className="process-scroll">
         <table ref={table} id={`${side}-files`} className="process-table file-list" tabIndex={0}
           style={{ width: fillName ? `max(100%, ${tableWidth}px)` : tableWidth }}
@@ -336,9 +341,8 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
             </tr>;
           })}</tbody>
         </table>
-        {!visible.length && <p className="pane-empty">{error ? t("Could not list processes.") :
-          loaded ? t(lockingPath ? "Windows found no processes using these files." : "No running processes.") :
-            t(lockingPath ? "Checking files…" : "Loading processes…")}</p>}
+        {!visible.length && (!lockingPath || loaded && !partial) && <p className="pane-empty">{error ? t("Could not list processes.") :
+          loaded ? t(lockingPath ? "Windows found no processes using these files." : "No running processes.") : t("Loading processes…")}</p>}
       </div>
       {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={focused}
         items={visible.map((process) => ({ id: processKey(process), name: process.name }))}
@@ -370,21 +374,33 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   );
 }
 
+function lockScanStatus(checked: number) {
+  return checked ? t("Checking files… {0} checked.", countText(checked, "item")) : t("Checking files…");
+}
+
 export function LockDialog({ paths, onClose }: { paths: string[]; onClose: () => void }) {
-  const [items, setItems] = useState<ProcessInfo[] | null>(null);
+  const [items, setItems] = useState<ProcessInfo[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [checked, setChecked] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [partial, setPartial] = useState(false);
   const [ending, setEnding] = useState(false);
   const [revision, setRevision] = useState(0);
-  const marked = items?.filter((process) => process.canTerminate && selected.includes(processKey(process))) ?? [];
+  const marked = items.filter((process) => process.canTerminate && selected.includes(processKey(process)));
 
   useEffect(() => {
     let canceled = false;
     setError("");
-    setItems(null);
-    void api.lockingProcesses(paths).then(
-      ({ processes, incomplete }) => { if (!canceled) { setItems(processes); setPartial(incomplete); } },
+    setLoaded(false);
+    setChecked(0);
+    setPartial(false);
+    setItems([]);
+    setSelected([]);
+    void api.lockingProcesses(paths, ({ checked, processes }) => {
+      if (!canceled) { setChecked(checked); setItems(processes); }
+    }).then(
+      ({ processes, incomplete }) => { if (!canceled) { setItems(processes); setPartial(incomplete); setLoaded(true); } },
       (failure: unknown) => { if (!canceled) setError(describeError(failure)); },
     );
     return () => { canceled = true; };
@@ -394,14 +410,14 @@ export function LockDialog({ paths, onClose }: { paths: string[]; onClose: () =>
     <>
       <Dialog title={t("Processes using these files")} onClose={onClose}>
         <div className="dialog-body end-processes">
-          {error ? <p role="alert" className="dialog-error">{errorText(error)}</p> :
-            items === null ? <p role="status">{t("Checking files…")}</p> :
-            !items.length ? <p role="status">{t("Windows found no processes using these files.")}</p> :
-            <Processes items={items} selected={selected} onChange={setSelected} />}
-          {partial && <p>{t("Only some files could be checked.")}</p>}
+          {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
+          {!loaded && !error && <p role="status">{lockScanStatus(checked)}</p>}
+          {loaded && !partial && !items.length && <p role="status">{t("Windows found no processes using these files.")}</p>}
+          {items.length > 0 && <Processes items={items} selected={selected} onChange={setSelected} />}
+          {partial && <p role="status">{t("Only some files could be checked.")}</p>}
           <div className="dialog-actions dialog-actions-end">
-            <Button type="button" disabled={!items?.some((process) => process.canTerminate)}
-              onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>{t("Select all")}</Button>
+            <Button type="button" disabled={!items.some((process) => process.canTerminate)}
+              onClick={() => setSelected(items.filter((process) => process.canTerminate).map(processKey))}>{t("Select all")}</Button>
           </div>
         </div>
         <footer className="dialog-footer">

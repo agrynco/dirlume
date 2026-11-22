@@ -39,7 +39,7 @@ import { testMcp } from "./mcp-smoke.mjs";
 import { testProcessColumns } from "./process-columns-smoke.mjs";
 import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
-import { testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
+import { testFolderLockInspector, testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
 import { testNativeOptionalStatusBar } from "./status-bar-smoke.mjs";
@@ -2302,6 +2302,7 @@ try {
   await testBatchDeletion(page, temp);
   await testInlineRename(page, temp);
   await testLockingProcessPane(page, temp);
+  await testFolderLockInspector(page, temp);
   await testProcessColumns(page);
   await testProcessQuickSearch(page, temp);
   await testProcessExecutablePath(page, child.pid);

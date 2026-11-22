@@ -17,7 +17,7 @@ pub struct ProcessId {
     pub started: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessInfo {
     #[serde(flatten)]

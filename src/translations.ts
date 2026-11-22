@@ -650,6 +650,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Running processes": ["Запущені процеси", "Запущенные процессы"],
   "Processes using these files": ["Процеси, які використовують ці файли", "Процессы, использующие эти файлы"],
   "Checking files…": ["Перевірка файлів…", "Проверка файлов…"],
+  "Checking files… {0} checked.": ["Перевірка файлів… Уже перевірено {0}.", "Проверка файлов… Уже проверено {0}."],
   "Windows found no processes using these files.": ["Windows не знайшла процесів, які використовують ці файли.", "Windows не нашла процессов, использующих эти файлы."],
   "Only some files could be checked.": ["Вдалося перевірити лише частину файлів.", "Удалось проверить только часть файлов."],
   "Select all": ["Вибрати всі", "Выбрать все"],
