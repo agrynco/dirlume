@@ -1,0 +1,6 @@
+{
+  "version": "0.1.23",
+  "highlights": [
+    "Copy terminal selections with a configurable shortcut. Right-click web links in local and SSH terminals to open them or copy their addresses."
+  ]
+}

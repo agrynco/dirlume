@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-async function checkTerminalMenu(page, terminal, mac, native = false) {
+async function checkTerminalMenu(page, terminal, mac, { native = false, copyKey = mac ? "Meta+c" : "Control+Shift+c" } = {}) {
   const input = terminal.locator(".xterm-helper-textarea");
   const surface = terminal.locator(".terminal-surface");
   const menu = page.getByRole("menu", { name: "Terminal actions", exact: true });
@@ -10,8 +10,15 @@ async function checkTerminalMenu(page, terminal, mac, native = false) {
   const isFocused = (node) => node.evaluate((element) => element === document.activeElement);
   const secondaryClick = () => surface.click(mac ? { modifiers: ["Control"] } : { button: "right" });
   const focused = () => page.waitForFunction(() => document.activeElement?.matches(".xterm-helper-textarea"));
-  await page.waitForFunction(() => document.querySelector(".terminal-card:not([hidden]) .xterm-accessibility-tree")?.textContent.includes("selection second"));
-  await secondaryClick();
+  await terminal.locator(".xterm-rows").getByText("selection second", { exact: true }).waitFor();
+  if (!native) {
+    await input.press(copyKey);
+    assert.deepEqual(await page.evaluate(() => window.terminalPaste.copies), []);
+    await input.press("Control+c");
+    await page.waitForFunction(() => window.terminalPaste.writes.includes("\x03"));
+  }
+  // Some desktop WebViews deliver the press without a contextmenu event.
+  await surface.dispatchEvent("mousedown", { button: 2, buttons: 2, clientX: 300, clientY: 400 });
   assert.equal(await item("Copy").isDisabled(), true);
   assert.equal(await isFocused(item("Paste")), true);
   await page.keyboard.press("ArrowDown");
@@ -19,6 +26,13 @@ async function checkTerminalMenu(page, terminal, mac, native = false) {
   await page.keyboard.press("Enter");
   await menu.waitFor({ state: "hidden" });
   await focused();
+  if (!native) {
+    await input.press(copyKey);
+    await page.waitForFunction(() => window.terminalPaste.copies.length === 1);
+    const copied = await page.evaluate(() => window.terminalPaste.copies[0]);
+    assert.match(copied, /^retained scrollback 1\r?\n/);
+    assert.match(copied, /selection first\r?\nselection second/);
+  }
   await secondaryClick();
   assert.equal(await item("Copy").isEnabled(), true);
   assert.equal(await isFocused(item("Copy")), true);
@@ -26,12 +40,17 @@ async function checkTerminalMenu(page, terminal, mac, native = false) {
     if (process.env.DIRLUME_TERMINAL_MENU_CAPTURE) await menu.screenshot({ path: process.env.DIRLUME_TERMINAL_MENU_CAPTURE });
     await page.keyboard.press("Escape");
     await focused();
+    if (process.env.CI) {
+      await input.press(copyKey);
+      await page.waitForFunction(async () => /selection first\r?\nselection second/.test(await window.__TAURI_INTERNALS__.invoke("clipboard_text")));
+    }
     return;
   }
   await page.keyboard.press("Enter");
   await menu.waitFor({ state: "hidden" });
   await focused();
-  await page.waitForFunction(() => window.terminalPaste.copies.at(-1)?.replaceAll("\r\n", "\n").includes("selection first\nselection second"));
+  await page.waitForFunction(() => window.terminalPaste.copies.length === 2 &&
+    window.terminalPaste.copies.at(-1)?.replaceAll("\r\n", "\n").includes("selection first\nselection second"));
   const writes = () => page.evaluate(() => window.terminalPaste.writes.slice());
   const baseline = await writes();
   await secondaryClick();
@@ -70,7 +89,7 @@ export async function testNativeTerminalMenu(page) {
   await page.waitForFunction(() => document.querySelector(".xterm-accessibility-tree")?.textContent.includes("PS "));
   await input.pressSequentially("Write-Output 'selection first' 'selection second'");
   await input.press("Enter");
-  await checkTerminalMenu(page, terminal, false, true);
+  await checkTerminalMenu(page, terminal, false, { native: true });
   await terminal.getByRole("button", { name: "Close terminal", exact: true }).click();
 }
 
@@ -100,7 +119,8 @@ export async function testTerminalPaste() {
               segments: ["home"], listing: { entries: [file], omitted: 0, elevated: false } };
             if (command === "open_terminal") {
               if (args.request.ssh) window.terminalPaste.remoteTerminal = true;
-              args.output.onmessage({ event: "data", data: btoa("selection first\r\nselection second\r\n") });
+              const scrollback = Array.from({ length: 60 }, (_, index) => `retained scrollback ${index + 1}\r\n`).join("");
+              args.output.onmessage({ event: "data", data: btoa(scrollback + "selection first\r\nselection second\r\n") });
               return false;
             }
             if (command === "copy_path") { window.terminalPaste.copies.push(args.path); return null; }
@@ -196,6 +216,9 @@ export async function testTerminalPaste() {
         assert.equal(await rightClick.isChecked(), true);
         await rightClick.uncheck();
         await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+        await options.getByRole("button", { name: "Remove Ctrl+Shift+C from Copy selected terminal text", exact: true }).click();
+        await options.getByRole("button", { name: "Add shortcut for Copy selected terminal text", exact: true }).click();
+        await options.getByRole("textbox", { name: "New shortcut for Copy selected terminal text" }).press("Control+Shift+F9");
         await options.getByRole("button", { name: "Remove Ctrl+V from Paste text into terminal", exact: true }).click();
         await options.getByRole("button", { name: "Add shortcut for Paste text into terminal", exact: true }).click();
         await options.getByRole("textbox", { name: "New shortcut for Paste text into terminal" }).press("Control+Shift+v");
@@ -207,8 +230,13 @@ export async function testTerminalPaste() {
         await options.getByRole("textbox", { name: "New shortcut for Show or hide file panels" }).press("Control+Alt+o");
         await options.getByRole("button", { name: "Done", exact: true }).click();
         await surface.click({ button: "right" });
-        await page.getByRole("menu", { name: "Terminal actions", exact: true }).waitFor();
-        await page.keyboard.press("Escape");
+        const menu = page.getByRole("menu", { name: "Terminal actions", exact: true });
+        await menu.getByRole("menuitem", { name: "Select All", exact: true }).click();
+        const copied = await page.evaluate(() => window.terminalPaste.copies.length);
+        await input.press("Control+Shift+c");
+        assert.equal(await page.evaluate(() => window.terminalPaste.copies.length), copied);
+        await input.press("Control+Shift+F9");
+        await page.waitForFunction((copied) => window.terminalPaste.copies.length === copied + 1, copied);
         await input.press("Control+v");
         assert.equal(await page.evaluate(() => window.terminalPaste.reads), 2);
         await input.press("Control+Shift+v");
@@ -243,7 +271,9 @@ export async function testTerminalPaste() {
       await right.getByRole("option", { name: /^fixture\.txt/ }).waitFor();
       await page.getByRole("button", { name: "Toggle terminal", exact: true }).click();
       await terminal.getByRole("heading", { name: "SSH terminal", exact: true }).waitFor();
-      await checkTerminalMenu(page, terminal, platform.startsWith("Macintosh"));
+      await checkTerminalMenu(page, terminal, platform.startsWith("Macintosh"), {
+        copyKey: platform.startsWith("Windows") ? "Control+Shift+F9" : undefined,
+      });
       assert.equal(await page.evaluate(() => window.terminalPaste.remoteTerminal), true);
       await page.close();
     }

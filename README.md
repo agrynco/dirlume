@@ -134,7 +134,7 @@ Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlu
 
 The shell receives keystrokes while its input has focus. A hint in the status bar, or beside the close button in the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Use the question-mark button to open offline Help and return to your command when you close it. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 
-Right-click terminal output to open **Copy**, **Paste**, and **Select All**. On macOS, Control-click also opens the menu. **Copy** is available when text is selected. You can enable **Paste on right-click** in **Options → Terminal** to paste directly instead.
+Right-click local or SSH terminal output to open **Copy**, **Paste**, and **Select All**. On macOS, Control-click also opens the menu. **Select All** includes retained scrollback. Copy selected text to the system clipboard with **Ctrl+Shift+C** on Windows and Ubuntu or **Command+C** on macOS. Change or disable the binding under **Options → Keyboard shortcuts**. **Ctrl+C** interrupts the shell. Over an HTTP(S) link, the menu also offers **Open Link** and **Copy Link Address**. Enable **Paste on right-click** in **Options → Terminal** to paste directly.
 
 Left-click an HTTP or HTTPS link in local or SSH terminal output to open it in the default browser on the computer running Dirlume. Hover over a labeled terminal hyperlink to see its destination before opening it.
 
