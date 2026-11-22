@@ -75,6 +75,8 @@ async function openProcesses(page, side) {
 }
 
 async function checkExecutableAlignment(page, side) {
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 1440, height: viewport.height });
   const table = grid(page, side);
   const column = table.locator(".process-col-executable");
   const grip = column.getByRole("separator", { name: "Resize Executable path column", exact: true });
@@ -109,13 +111,14 @@ async function checkExecutableAlignment(page, side) {
     assert.equal(numericAligned, true);
   }
   const clipped = row(page, side, 9102).locator(".process-cell-executable");
-  await clipped.dispatchEvent("pointerover", { pointerType: "mouse" });
+  await clipped.hover();
   const tooltip = page.getByRole("tooltip");
   await tooltip.waitFor();
   assert.equal(await tooltip.textContent(), await clipped.textContent());
-  await clipped.dispatchEvent("pointerout", { pointerType: "mouse" });
+  await page.mouse.move(2, 2);
   await tooltip.waitFor({ state: "hidden" });
   await grip.dispatchEvent("dblclick");
+  await page.setViewportSize(viewport);
 }
 
 const browser = await chromium.launch({ channel: "chrome" });
