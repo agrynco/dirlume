@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
-import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { openMainMenu } from "./menu-header-smoke.mjs";
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -17,6 +16,7 @@ try {
     const root = /Windows/i.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
     const entries = ["service.log", "reader.md"].map((name) => ({ name, directory: false, link: false, hidden: false,
       size: 45, modified: null, readOnly: true }));
+    entries.push({ name: "other", directory: true, link: false, hidden: false, size: null, modified: null, readOnly: true });
     window.bookmarkFixture = {
       "service.log": Array.from({ length: 160 }, (_, i) => "Noise " + (i + 1)).join("\n"),
       "reader.md": "# Heading\n\nBookmarks work in Source.",
@@ -134,13 +134,15 @@ try {
   await button(viewer, "Source").click();
   await viewer.locator(".cm-file-bookmarks .cm-gutterElement").nth(2).click();
   await closeViewer();
-  const field = await editPaneAddress(page);
   const root = await page.locator("#left-path").getAttribute("data-path");
   const other = root + (root.includes("\\") ? "\\other" : "/other");
-  await field.fill(other);
-  await field.press("Enter");
-  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, other);
+  await row("other").dblclick();
+  await page.waitForFunction((path) => {
+    const workspace = JSON.parse(localStorage.getItem("dirlume.workspace.v1"));
+    return workspace?.panels.left.place?.path === path && workspace.documents.length === 0;
+  }, other);
   await page.reload();
+  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, other);
   await commands();
   await bookmark(3).click();
   await options.press("Enter");
