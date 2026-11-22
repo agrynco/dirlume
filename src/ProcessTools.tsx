@@ -402,7 +402,7 @@ export function ProcessBrowser({ side, lockingPath, menuShortcut, onShowExecutab
         <div className="process-menu-heading" role="presentation">
           <strong>{menuProcess.name || t("Process")}</strong><span>PID {menuProcess.pid}</span>
         </div>
-        <Button type="button" role="menuitem" onClick={() => { setRowMenu(null); setProperties(menuProcess); }}>{t("Properties")}</Button>
+        <Button type="button" role="menuitem" onClick={() => { focusTable(); setRowMenu(null); setProperties(menuProcess); }}>{t("Properties")}</Button>
         {!lockingPath && <Button type="button" role="menuitem" disabled={!menuProcess.executable}
           onClick={() => { if (menuProcess.executable) showExecutable(menuProcess.executable); }}>{t("Show in other pane")}</Button>}
         <Button type="button" role="menuitem" onClick={() => copyProcessValue(String(menuProcess.pid), "PID copied to the clipboard.")}>{t("Copy PID")}</Button>
@@ -410,7 +410,7 @@ export function ProcessBrowser({ side, lockingPath, menuShortcut, onShowExecutab
           onClick={() => { if (menuProcess.executable) copyProcessValue(menuProcess.executable, "Path copied to the clipboard."); }}>{t("Copy executable path")}</Button>
         <div role="separator" className="main-menu-separator" />
         <Button type="button" role="menuitem" disabled={!menuProcess.canTerminate}
-          onClick={() => { setRowMenu(null); setEnding([menuProcess]); }}>{t("End process…")}</Button>
+          onClick={() => { focusTable(); setRowMenu(null); setEnding([menuProcess]); }}>{t("End process…")}</Button>
       </FileContextMenu>}
       {partial && <p role="status" className="pane-error">{t("Only some files could be checked.")}</p>}
       {error && <p role="alert" className="pane-error">{errorText(error)}</p>}
@@ -419,12 +419,11 @@ export function ProcessBrowser({ side, lockingPath, menuShortcut, onShowExecutab
         <Button type="button" disabled={!marked.length} onClick={() => setEnding(marked)}>{t("End selected")}</Button></div>
       {properties && <ProcessProperties process={properties} onClose={() => setProperties(null)} onEnd={() => setEnding([properties])} />}
       {ending.length > 0 && (
-        <EndProcesses items={ending} onClose={() => { setEnding([]); requestAnimationFrame(focusTable); }} onAttempted={() => setRevision((previous) => previous + 1)} onFinished={() => {
+        <EndProcesses items={ending} onClose={() => setEnding([])} onAttempted={() => setRevision((previous) => previous + 1)} onFinished={() => {
           const ended = new Set(ending.map(processKey));
           setEnding([]);
           setProperties(null);
           setSelected((current) => current.filter((key) => !ended.has(key)));
-          requestAnimationFrame(focusTable);
         }} />
       )}
     </div>

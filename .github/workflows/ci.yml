@@ -173,6 +173,9 @@ jobs:
       - name: Verify environment variable panes and copy review
         if: github.event.action != 'closed'
         run: node scripts/environment-panes-smoke.mjs
+      - name: Verify process context menu actions and identity
+        if: github.event.action != 'closed'
+        run: node scripts/process-context-menu-smoke.mjs
       - name: Verify workspace source and folder bookmark shortcuts
         if: github.event.action != 'closed'
         run: node scripts/workspace-source-shortcuts-smoke.mjs
