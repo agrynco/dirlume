@@ -11,9 +11,11 @@ export function useTimestamps(values: readonly Timestamp[], style: Style = "date
   const [formatted, setFormatted] = useState<{
     style: Style; refresh: number; labels: Map<number, string | null>;
   }>({ style, refresh, labels: new Map() });
-  const labels = formatted.style === style && formatted.refresh === refresh ? formatted.labels : undefined;
+  // Keep the displayed labels steady while refreshing the system format on focus.
+  const labels = formatted.style === style ? formatted.labels : undefined;
+  const fresh = formatted.refresh === refresh ? labels : undefined;
   const missing = [...new Set(values.filter((value): value is number =>
-    value != null && Number.isSafeInteger(value) && !labels?.has(value)))].join(",");
+    value != null && Number.isSafeInteger(value) && !fresh?.has(value)))].join(",");
 
   useEffect(() => {
     const update = () => setRefresh((previous) => previous + 1);
@@ -28,19 +30,20 @@ export function useTimestamps(values: readonly Timestamp[], style: Style = "date
     for (let start = 0; start < timestamps.length; start += batchSize) {
       batches.push(timestamps.slice(start, start + batchSize));
     }
-    const fallback = () => {
+    const fallback = (cached?: ReadonlyMap<number, string | null>) => {
       const formatter = new Intl.DateTimeFormat(undefined, {
         dateStyle: style !== "time" ? "short" : undefined,
         timeStyle: style !== "date" ? "short" : undefined,
       });
       return timestamps.map((time) => {
+        if (cached?.has(time)) return cached.get(time) ?? null;
         const date = new Date(time * 1000);
         return Number.isFinite(date.getTime()) ? formatter.format(date) : null;
       });
     };
     let mounted = true;
     const result = isTauri()
-      ? Promise.all(batches.map((batch) => api.formatTimestamps(batch, style))).then((parts) => parts.flat(), fallback)
+      ? Promise.all(batches.map((batch) => api.formatTimestamps(batch, style))).then((parts) => parts.flat(), () => fallback(labels))
       : Promise.resolve(fallback());
     void result.then((next) => {
       if (!mounted) return;
@@ -58,7 +61,7 @@ export function useTimestamps(values: readonly Timestamp[], style: Style = "date
       });
     });
     return () => { mounted = false; };
-  }, [missing, refresh, style]);
+  }, [labels, missing, refresh, style]);
 
   return (value: Timestamp) => value == null ? null : labels?.get(value) ?? null;
 }

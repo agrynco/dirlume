@@ -2,6 +2,7 @@
   "version": "0.1.23",
   "highlights": [
     "Copy terminal selections with a configurable shortcut. Right-click web links in local and SSH terminals to open them or copy their addresses.",
-    "Open saved connections from the source breadcrumb in a remote file pane. Back returns to the exact folder you left."
+    "Open saved connections from the source breadcrumb in a remote file pane. Back returns to the exact folder you left.",
+    "File panes stay steady when Dirlume regains focus and updates system date and time formats."
   ]
 }

@@ -185,6 +185,9 @@ jobs:
       - name: Verify remote connection breadcrumbs and history
         if: github.event.action != 'closed'
         run: node scripts/connection-breadcrumbs-smoke.mjs
+      - name: Verify file pane stability when the window regains focus
+        if: github.event.action != 'closed'
+        run: node scripts/pane-focus-smoke.mjs
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
