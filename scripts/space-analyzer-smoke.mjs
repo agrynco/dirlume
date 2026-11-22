@@ -54,7 +54,9 @@ async function fixture(browser, layout, source = "local") {
       if (segments.at(-1) === "outside-root") return listing([]);
       return listing([file("remote.dat", 1234, withAllocations ? 4096 : undefined)]);
     };
-    localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ layout, kswitcher: "Fixture bridge" }));
+    if (!localStorage.getItem("dirlume.preferences.v1")) {
+      localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ layout, kswitcher: "Fixture bridge" }));
+    }
     localStorage.setItem("dirlume.remote-connections", JSON.stringify([
       { kind: "server", id: "server", label: "Server fixture", credential: "fixture-invitation" },
       { kind: "kswitcher", id: "kswitcher", label: "Bridge fixture", peer: "fixture-peer" },
@@ -66,8 +68,15 @@ async function fixture(browser, layout, source = "local") {
         switch (command) {
           case "locations": return [{ label: "Home", path: folder }, { label: "Downloads", path: other }];
           case "disk_space": return source === "local" ? { available: 1_000_000, total: 2_000_000 } : null;
+          case "volume_information":
+            window.spaceCalls.push({ command, path: args.path });
+            return { path: base, share: source === "unc" || source === "mounted", label: "Fixture disk",
+              filesystem: windows ? "NTFS" : "smbfs", capacity: source === "unc" ? null : { total: 4096, available: 1024 } };
           case "space_mount": return { path: base, share: source === "unc" || source === "mounted" };
           case "list_directory":
+            if (window.spaceOperationFixture && (args.path.endsWith(joiner + "alpha") || args.path.endsWith(joiner + "beta"))) {
+              return { path: args.path, parent: null, ...listing([file("same.txt", 13, 4096)]) };
+            }
             return { path: args.path, parent: null, ...listing(args.path === folder
               ? [dir("branch"), ...Array.from({ length: 135 }, (_, i) => file("row-" + i, i))] : [fileA]) };
           case "connect_smb":
@@ -190,7 +199,7 @@ try {
   await analyzer.getByRole("combobox", { name: "Size metric" }).selectOption("logical");
   assert.equal(await grid.locator(".space-entry-label").nth(1).textContent(), "branch");
   await button(analyzer, "Treemap").click();
-  await analyzer.getByRole("button", { name: /^branch,/ }).click();
+  assert.equal(await analyzer.locator(".space-map-heading > span").textContent(), "branch");
   await analyzer.getByRole("button", { name: /^sub,/ }).click();
   await analyzer.getByRole("button", { name: /^payload.dat,/ }).click();
   await assertBreadcrumbs(analyzer, ["mount", "open", "branch", "sub"]);
@@ -208,6 +217,7 @@ try {
   await local.keyboard.press("Digit5");
   await local.keyboard.up("ControlLeft");
   await local.waitForFunction(() => window.finishOldSpace);
+  await button(analyzer, "Tree").click();
   await row(analyzer, "branch").waitFor();
   const rootsBeforeSwap = await local.evaluate(() => window.spaceCalls.filter(({ command }) => command === "scan_local_space").length);
   await button(analyzer, "Stop").press("Control+u");
@@ -232,6 +242,70 @@ try {
   await button(left, "Analyze space").click();
   await analyzer.getByRole("alert").getByText(/Could not scan the folder/).waitFor();
   await local.close();
+
+  for (const source of ["local", "unc", "mounted"]) {
+    const page = await fixture(browser, "standard", source);
+    const left = pane(page, "left");
+    const right = pane(page, "right");
+    const disk = page.getByRole("region", { name: "Disk information", exact: true });
+    const chart = page.locator(".space-analyzer-left");
+    const files = left.getByRole("listbox");
+    const prior = await files.getAttribute("aria-activedescendant");
+    await files.press("Control+Shift+l");
+    await disk.getByText("Fixture disk", { exact: true }).waitFor();
+    assert.equal(await disk.getByText(source === "mounted" ? "/mnt/samba" : source === "unc" ? "\\\\fixture\\storage" : "C:\\fixture\\mount", { exact: true }).count(), 1);
+    assert.deepEqual(await page.evaluate(() => window.spaceCalls.map(({ command }) => command)), ["volume_information"]);
+    assert.equal(await disk.getByText(source === "unc" ? "Unavailable" : "25%", { exact: true }).count(), source === "unc" ? 2 : 1);
+    if (source === "local") await page.evaluate(() => { window.spaceOperationFixture = { beta: "same.txt", hold: false }; });
+    await button(disk, source === "local" ? "Scan volume" : "Scan share").click();
+    await finished(chart);
+    assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
+    if (source !== "local") {
+      await chart.getByRole("button", { name: /^root-only / }).waitFor();
+      await button(chart, "Close").click();
+      await files.waitFor();
+      assert.equal(await files.getAttribute("aria-activedescendant"), prior);
+      await page.close();
+      continue;
+    }
+    assert.equal(await chart.locator(".sunburst-chart path[data-depth='1']").count(), 2);
+    const matches = chart.getByRole("button", { name: /^same\.txt / });
+    await matches.nth(0).click();
+    const betaFile = matches.nth(1);
+    await betaFile.press("Shift+F10");
+    const menu = page.getByRole("menu", { name: "File actions", exact: true });
+    await menu.getByRole("menuitem", { name: "Copy", exact: true }).click();
+    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.ok((await copy.locator("label[data-tooltip]").filter({ hasText: "same.txt" }).getAttribute("data-tooltip")).endsWith("\\beta"));
+    await button(copy, "Cancel").click();
+    assert.equal(await betaFile.evaluate((node) => node === document.activeElement), true);
+    const [x, y] = await chart.locator(".sunburst-chart path[data-depth='1']").nth(1).evaluate((sector) => {
+      const bounds = sector.getBoundingClientRect();
+      for (let y = Math.ceil(bounds.top); y < bounds.bottom; y += 4) {
+        for (let x = Math.ceil(bounds.left); x < bounds.right; x += 4) {
+          if (document.elementFromPoint(x, y) === sector) return [x, y];
+        }
+      }
+      throw new Error("The chart has no visible target for this sector.");
+    });
+    await page.mouse.click(x, y, { button: "right" });
+    await menu.getByRole("menuitem", { name: "Show in other pane", exact: true }).click();
+    await pane(page, "right").getByRole("option", { name: /^same\.txt/, selected: true }).waitFor();
+    assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
+    if (process.env.DIRLUME_SUNBURST_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SUNBURST_SCREENSHOT });
+    await button(chart, "Sunburst").click();
+    await button(right, "Analyze space").click();
+    const rightChart = page.locator(".space-analyzer-right");
+    await finished(rightChart);
+    assert.equal(await button(rightChart, "Sunburst").getAttribute("aria-pressed"), "true");
+    await button(rightChart, "Treemap").click();
+    assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
+    await page.reload();
+    await button(left, "Analyze space").click();
+    await finished(chart);
+    assert.equal(await button(chart, "Treemap").getAttribute("aria-pressed"), "true");
+    await page.close();
+  }
 
   for (const [layout, source, label] of [["twin", "local", "Analyze volume"], ["classic", "unc", "Analyze share"], ["standard", "mounted", "Analyze share"]]) {
     const page = await fixture(browser, layout, source);

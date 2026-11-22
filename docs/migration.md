@@ -26,4 +26,6 @@ Local Space Analyzer tree rows support the Windows Shell menu and Dirlume's Copy
 
 Each pane can show its own Space Analyzer. Its breadcrumbs navigate the scan, Tree marks operate on the selected paths, and Tab switches panes while preserving each pane's selection. The active local or SSH analyzer and its matching terminal follow the same current folder. A switch to Full browses that folder. Closing the analyzer restores the previous file view.
 
+Disk information resolves the current folder's volume or filesystem-backed share and reads capacity before scanning. The volume scan uses the same analyzer. Sunburst and Treemap can reveal files or folders in the other pane and offer local file operations for the item under the pointer or keyboard focus.
+
 Either local file pane can use List or Tree independently of its column preset. Tree loads expanded branches and keeps marks by location across branches. Both views can show streaming folder totals from the Space Analyzer scanner.

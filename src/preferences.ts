@@ -88,6 +88,7 @@ export const commands = {
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
   environmentVariables: { label: "Environment variables", key: "" },
   analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
+  diskInformation: { label: "Disk information", key: "Ctrl+Shift+L" },
   cancelMeasure: { label: "Cancel folder operation or clear command line", key: "Escape" },
   edit: { label: "Edit text", key: "F4" },
   newFile: { label: "New file", key: "Shift+F4" },
@@ -280,6 +281,7 @@ export function assignShortcut(bindings: Bindings, command: Command, key: string
 
 export const panelLayouts = { standard: "Standard", twin: "Twin panels", classic: "Classic commander" } as const;
 export type PanelLayout = keyof typeof panelLayouts;
+export type SpaceAnalyzerView = "tree" | "treemap" | "sunburst";
 
 export const actionButtonWidths = { full: "Full width", compact: "Compact" } as const;
 export type ActionButtonWidth = keyof typeof actionButtonWidths;
@@ -305,6 +307,7 @@ export interface Preferences {
   retainedFonts?: RetainedFonts;
   hidden: boolean;
   rightClickSelection: boolean;
+  spaceAnalyzerView?: SpaceAnalyzerView;
   paneViews: { left: "list" | "tree"; right: "list" | "tree" };
   refreshEnvironment: boolean;
   terminalPasteOnRightClick: boolean;
@@ -487,6 +490,8 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
   rightClickSelection: { group: "filePanels", portable: true, read: (value) => value === true },
+  spaceAnalyzerView: { group: "filePanels", portable: true, read: (value) =>
+    value === "tree" || value === "treemap" || value === "sunburst" ? value : undefined },
   paneViews: { group: "filePanels", portable: true, read: (value) => {
     const saved = value as Partial<Preferences["paneViews"]> | null | undefined;
     return { left: saved?.left === "tree" ? "tree" : "list", right: saved?.right === "tree" ? "tree" : "list" };

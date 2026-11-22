@@ -181,7 +181,7 @@ try {
       const close = analyzer.getByRole("button", { name: "Close", exact: true });
       const tree = analyzer.getByRole("treegrid");
       const stop = analyzer.getByRole("button", { name: "Stop", exact: true });
-      const treemap = analyzer.getByRole("button", { name: "Treemap", exact: true });
+      const sunburst = analyzer.getByRole("button", { name: "Sunburst", exact: true });
       const metric = analyzer.getByRole("combobox", { name: "Size metric", exact: true });
       await stop.waitFor();
       await drive.hover();
@@ -196,7 +196,7 @@ try {
       assert.match(await guide.locator(".help-reading").innerText(), /current folder/);
       await closeHelp(workspace, guide, tree);
 
-      await treemap.focus();
+      await sunburst.focus();
       await drive.hover();
       await workspace.keyboard.press("Tab");
       assert.equal(await metric.evaluate((node) => node === document.activeElement), true);
