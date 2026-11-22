@@ -8,7 +8,8 @@ import { api, describeError, smbHost, watchDirectory, windowsClient, type FileLo
 import { FileContextMenu } from "./FileContextMenu";
 import { errorText, locale, t } from "./i18n";
 import { formatSize, type Side } from "./panes";
-import { bindingMatches, eventShortcut, type Bindings, type PanelLayout } from "./preferences";
+import { bindingMatches, eventShortcut, type Bindings, type PanelLayout, type SpaceAnalyzerView } from "./preferences";
+import { SpaceSunburst } from "./SpaceSunburst";
 import { useRightClickSelection } from "./useRightClickSelection";
 import {
   canAnalyze, initialSpaceResult, nearestSpaceNode, scanSpace, sortedSpaceChildren, spaceLocalItem, spaceLocation, spacePath, spaceSegments,
@@ -228,6 +229,8 @@ function tilesIn(tiles: Tile[], x = 0, y = 0, width = 100, height = 100) {
   }
 }
 
+type ChartMenu = (entry: SpaceNode, x: number, y: number, returnFocus?: HTMLElement) => void;
+
 function TreemapTileLabel({ name, size }: { name: string; size: string }) {
   const label = useRef<HTMLSpanElement>(null);
   const value = useRef<HTMLSpanElement>(null);
@@ -256,50 +259,50 @@ function TreemapTileLabel({ name, size }: { name: string; size: string }) {
   </span>;
 }
 
-function Treemap({ folder, metric, selected, select, browse, showTree }: {
+function Treemap({ folder, metric, selected, onActivate, openMenu }: {
   folder: SpaceNode;
   metric: Metric;
   selected: number;
-  select: (id: number) => void;
-  browse: (entry: SpaceNode) => void;
-  showTree: () => void;
+  onActivate: (entry: SpaceNode | null) => void;
+  openMenu: ChartMenu;
 }) {
   const children = sortedSpaceChildren(folder, metric).filter((child) => child[metric] > 0);
   const limit = 64;
   const tiles: Tile[] = children.slice(0, limit).map((entry) => ({ entry, size: entry[metric] }));
   if (children.length > limit) tiles.push({ entry: null, size: children.slice(limit).reduce((sum, child) => sum + child[metric], 0) });
   tilesIn(tiles);
-  return <div className="space-map" data-help-topic="spaceTreemap">
-    <div className="space-map-heading">
-      <Button className="icon-button" aria-label={t("Parent folder")} disabled={!folder.parent}
-        onClick={() => { if (folder.parent) browse(folder.parent); }}><ArrowLeft /></Button>
-      <span title={folder.name}>{folder.name}</span><strong>{formatSize(folder[metric])}</strong>
-    </div>
-    {tiles.length ? <div className="space-map-canvas" aria-label={t("Treemap")}>
-      {tiles.map(({ entry, size, style }) => {
-        const name = entry?.name ?? t("More items");
-        const formatted = formatSize(size);
-        return <Button key={entry?.id ?? "more"} className="space-tile" style={style}
-          data-folder={entry?.directory || undefined} data-selected={entry?.id === selected || undefined}
-          aria-label={t("{0}, {1}", name, formatted)} onClick={() => {
-            if (!entry) showTree();
-            else if (entry.directory) browse(entry);
-            else select(entry.id);
-          }}>
-          <TreemapTileLabel name={name} size={formatted} />
-        </Button>;
-      })}
-    </div> : <p className="pane-empty">{t("No space to display.")}</p>}
-  </div>;
+  return tiles.length ? <div className="space-map-canvas" aria-label={t("Treemap")}>
+    {tiles.map(({ entry, size, style }) => {
+      const name = entry?.name ?? t("More items");
+      const formatted = formatSize(size);
+      return <Button key={entry?.id ?? "more"} className="space-tile" style={style}
+        data-folder={entry?.directory || undefined} data-selected={entry?.id === selected || undefined}
+        aria-label={t("{0}, {1}", name, formatted)} onClick={() => onActivate(entry)}
+        onContextMenu={entry ? (event) => {
+          event.preventDefault();
+          openMenu(entry, event.clientX, event.clientY, event.currentTarget);
+        } : undefined} onKeyDown={(event) => {
+          if (!entry || !(event.key === "ContextMenu" || event.shiftKey && event.key === "F10")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const bounds = event.currentTarget.getBoundingClientRect();
+          openMenu(entry, bounds.left + 12, bounds.bottom, event.currentTarget);
+        }}>
+        <TreemapTileLabel name={name} size={formatted} />
+      </Button>;
+    })}
+  </div> : <p className="pane-empty">{t("No space to display.")}</p>;
 }
 
 const treeActions = ["copy", "move", "recycle", "recycleAlternate", "delete"] as const;
 
-export type SpaceNavigation = { segments: readonly string[]; focus: boolean };
+export type SpaceNavigation = { segments: readonly string[]; focus: boolean; revealTree?: boolean };
 export type SpaceAnalyzerHandle = { focus: () => void; runAction: (command: SpaceItemCommand) => void };
+type ItemMenu = { x: number; y: number } & ({ kind: "tree"; item: SpaceLocalItem } |
+  { kind: "chart"; path: string[]; returnFocus?: HTMLElement });
 
 export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigation, active, layout, fileRevision, shortcuts, operationsAvailable,
-  rightClickSelection, onItemAction, onClose, onFocus, onNavigate, onLocation, onReveal, resolvePlace }: {
+  rightClickSelection, initialView, onViewChoice, onItemAction, onClose, onFocus, onNavigate, onLocation, onReveal, resolvePlace }: {
   ref?: Ref<SpaceAnalyzerHandle>;
   side: Side;
   place: SpacePlace;
@@ -311,6 +314,8 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
   shortcuts: Bindings;
   operationsAvailable: boolean;
   rightClickSelection: boolean;
+  initialView: SpaceAnalyzerView;
+  onViewChoice: (view: SpaceAnalyzerView) => void;
   onItemAction: (items: readonly SpaceLocalItem[], command: SpaceItemCommand) => void;
   onClose: () => void;
   onFocus: () => void;
@@ -322,16 +327,17 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
   const [result, setResult] = useState(() => initialSpaceResult(place));
   const scan = useRef<AbortController | null>(null);
   const tree = useRef<HTMLDivElement>(null);
+  const viewModes = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const revealRequest = useRef(0);
   const [revision, setRevision] = useState(0);
   const [metricChoice, setMetric] = useState<Metric | null>(null);
-  const [view, setView] = useState<"tree" | "treemap">("tree");
+  const [view, setView] = useState<SpaceAnalyzerView>(initialView);
   const [expandedPaths, setExpandedPaths] = useState(() => new Map<string, string[]>([["[]", []]]));
   const [selectedPath, setSelectedPath] = useState<readonly string[]>([]);
   const [marked, setMarked] = useState<ReadonlySet<string>>(() => new Set());
   const [zoomPath, setZoomPath] = useState<string[]>([]);
-  const [menu, setMenu] = useState<{ item: SpaceLocalItem; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<ItemMenu | null>(null);
   const menuRequest = useRef(0);
   const [revealError, setRevealError] = useState("");
   const metric = result.supportsAllocation ? metricChoice ?? "allocated" : "logical";
@@ -347,24 +353,20 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
   const watchPath = currentFolder.kind === "local" ? currentFolder.path : undefined;
   const localRevision = place.kind === "local" ? fileRevision : 0;
 
-  function focus() { (tree.current ?? closeButton.current)?.focus({ preventScroll: true }); }
+  function focus() {
+    (tree.current ?? viewModes.current?.querySelector<HTMLButtonElement>('[aria-pressed="true"]') ?? closeButton.current)
+      ?.focus({ preventScroll: true });
+  }
   useImperativeHandle(ref, () => ({ focus, runAction: (command) => runAction(entry, command) }));
 
   useLayoutEffect(() => {
-    const { segments, focus: focusTree } = navigation;
+    const { segments, focus: moveFocus, revealTree } = navigation;
     setSelectedPath(segments);
     setZoomPath([...segments]);
-    setExpandedPaths((previous) => {
-      const next = new Map(previous);
-      for (let index = 0; index < segments.length; index++) {
-        const parent = segments.slice(0, index);
-        next.set(JSON.stringify(parent), parent);
-      }
-      return next;
-    });
-    if (!focusTree) return;
-    setView("tree");
-    const frame = requestAnimationFrame(() => (tree.current ?? closeButton.current)?.focus({ preventScroll: true }));
+    expandPath(segments);
+    if (revealTree) setView("tree");
+    if (!moveFocus) return;
+    const frame = requestAnimationFrame(focus);
     return () => cancelAnimationFrame(frame);
   }, [navigation]);
   useEffect(() => () => { menuRequest.current++; }, []);
@@ -439,6 +441,35 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
     select(folder.id);
   }
 
+  function expandPath(path: readonly string[], includeFolder = false) {
+    setExpandedPaths((previous) => {
+      const next = new Map(previous);
+      for (let depth = 0; depth < path.length + Number(includeFolder); depth++) {
+        const parent = path.slice(0, depth);
+        next.set(JSON.stringify(parent), parent);
+      }
+      return next;
+    });
+  }
+
+  function changeView(next: SpaceAnalyzerView) {
+    onViewChoice(next);
+    if (next === view) return;
+    const current = entry.directory ? entry : entry.parent;
+    if (next === "tree") expandPath(spaceSegments(entry), entry.directory);
+    else setZoomPath(spaceSegments(current));
+    setView(next);
+  }
+
+  function activateChartEntry(node: SpaceNode | null) {
+    if (!node) {
+      expandPath(spaceSegments(folder), true);
+      setView("tree");
+      requestAnimationFrame(focus);
+    } else if (node.directory) browse(node);
+    else select(node.id);
+  }
+
   function runAction(node: SpaceNode, command: SpaceItemCommand) {
     if (!operationsAvailable || view !== "tree") return;
     const selectedNodes = marked.size ? [...marked].flatMap((key) => {
@@ -472,7 +503,7 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
     tree.current?.focus({ preventScroll: true });
     const request = ++menuRequest.current;
     setMenu(null);
-    if (!isTauri() || !windowsClient || marked.size > 0) { setMenu({ item, x, y }); return; }
+    if (!isTauri() || !windowsClient || marked.size > 0) { setMenu({ kind: "tree", item, x, y }); return; }
     void api.windowsItemMenu(item.place.path, item.entry.name).then((invoked) => {
       if (menuRequest.current !== request) return;
       tree.current?.focus({ preventScroll: true });
@@ -480,21 +511,44 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
       scan.current?.abort();
       setRevision((value) => value + 1);
     }).catch(() => {
-      if (menuRequest.current === request) setMenu({ item, x, y });
+      if (menuRequest.current === request) setMenu({ kind: "tree", item, x, y });
     });
   }
 
-  function runMenuAction(command: SpaceItemCommand) {
-    if (!menu) return;
-    tree.current?.focus({ preventScroll: true });
-    setMenu(null);
-    runAction(entry, command);
+  function openChartMenu(node: SpaceNode, x: number, y: number, returnFocus?: HTMLElement) {
+    menuRequest.current++;
+    setMenu({ kind: "chart", path: spaceSegments(node), x, y, returnFocus });
   }
 
-  async function reveal() {
+  function returnFromMenu() {
+    if (menu?.kind === "chart" && menu.returnFocus?.isConnected) menu.returnFocus.focus({ preventScroll: true });
+    else focus();
+  }
+
+  function runMenuAction(command: SpaceItemCommand | "reveal") {
+    if (!menu) return;
+    returnFromMenu();
+    setMenu(null);
+    if (menu.kind === "tree") {
+      if (command !== "reveal") runAction(entry, command);
+      return;
+    }
+    const node = nearestSpaceNode(result.root, menu.path);
+    if (spaceSegments(node).length !== menu.path.length) {
+      setRevealError(t("This item is no longer in the scan."));
+      return;
+    }
+    if (command === "reveal") void reveal(node);
+    else {
+      const item = spaceLocalItem(place, node);
+      if (item && operationsAvailable) onItemAction([item], command);
+    }
+  }
+
+  async function reveal(node = entry) {
     const request = ++revealRequest.current;
     setRevealError("");
-    const target = spaceLocation(resolvePlace(place), entry);
+    const target = spaceLocation(resolvePlace(place), node);
     try {
       await onReveal(target.place, target.reveal);
     } catch (error) {
@@ -518,9 +572,10 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
     <div className="space-target" data-help-topic="spacePath"><CompactAddressBreadcrumbs place={currentFolder} path={spacePath(currentFolder)}
       goTo={(target: FileLocation) => { if (canAnalyze(target)) onNavigate(target); }} /></div>
     <div className="space-toolbar">
-      <div className="space-view-modes" role="group" aria-label={t("View")}>
-        <Button data-help-topic="spaceTree" aria-pressed={view === "tree"} onClick={() => setView("tree")}>{t("Tree")}</Button>
-        <Button data-help-topic="spaceTreemap" aria-pressed={view === "treemap"} onClick={() => setView("treemap")}>{t("Treemap")}</Button>
+      <div ref={viewModes} className="space-view-modes" role="group" aria-label={t("View")}>
+        <Button data-help-topic="spaceTree" aria-pressed={view === "tree"} onClick={() => changeView("tree")}>{t("Tree")}</Button>
+        <Button data-help-topic="spaceTreemap" aria-pressed={view === "treemap"} onClick={() => changeView("treemap")}>{t("Treemap")}</Button>
+        <Button data-help-topic="spaceSunburst" aria-pressed={view === "sunburst"} onClick={() => changeView("sunburst")}>{t("Sunburst")}</Button>
       </div>
       {result.supportsAllocation ? <select data-help-topic="spaceMetric" aria-label={t("Size metric")} value={metric}
         onChange={(event) => setMetric(event.target.value as Metric)}>
@@ -536,17 +591,17 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
       itemShortcut={place.kind === "local" ? itemShortcut : undefined}
       marked={marked} changeMarks={changeMarks} clearMarks={() => setMarked(new Set())} bindings={shortcuts}
       rightClickSelection={rightClickSelection} scope={spacePath(place)} /> :
-      <Treemap folder={folder} metric={metric} selected={selected} select={select} browse={browse} showTree={() => {
-        setExpandedPaths((previous) => {
-          const next = new Map(previous);
-          for (let node: SpaceNode | null = folder; node; node = node.parent) {
-            const path = spaceSegments(node);
-            next.set(JSON.stringify(path), path);
-          }
-          return next;
-        });
-        setView("tree");
-      }} />)}
+      <div className="space-map" data-help-topic={view === "treemap" ? "spaceTreemap" : "spaceSunburst"}>
+        <div className="space-map-heading">
+          <Button className="icon-button" aria-label={t("Parent folder")} disabled={!folder.parent}
+            onClick={() => { if (folder.parent) browse(folder.parent); }}><ArrowLeft /></Button>
+          <span title={folder.name}>{folder.name}</span><strong>{formatSize(folder[metric])}</strong>
+        </div>
+        {!entry.directory && <div className="space-chart-selection"><span>{entry.name}</span>
+          <span>{formatSize(entry[metric])} · {percent(spaceShare(entry, metric))}</span></div>}
+        {view === "treemap" ? <Treemap folder={folder} metric={metric} selected={selected} onActivate={activateChartEntry} openMenu={openChartMenu} /> :
+          <SpaceSunburst folder={folder} metric={metric} selected={selected} result={result} onActivate={activateChartEntry} openMenu={openChartMenu} />}
+      </div>)}
     {result.error && <p className="space-error" role="alert" data-help-topic="spaceActions">{t(result.phase === "error" ? "Could not scan the folder." :
       "Connection interrupted. Reconnect and rescan.")} {errorText(result.error)}</p>}
     {revealError && <p className="space-error" role="alert" data-help-topic="spaceActions">{errorText(revealError)}</p>}
@@ -554,12 +609,14 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
       <span role="status">{scanning ? t("Scanning…") : incomplete ? t("Partial results") : ""}</span>
       <Button disabled={result.phase === "error"} onClick={() => void reveal()}>{t("Show in other pane")}</Button>
     </footer>
-    {menu && view === "tree" && <FileContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}
-      onReturn={() => tree.current?.focus({ preventScroll: true })}>
-      <Button role="menuitem" onClick={() => runMenuAction("copy")}>{t("Copy")}</Button>
-      <Button role="menuitem" onClick={() => runMenuAction("move")}>{t("Rename or move")}</Button>
-      {!smbHost(menu.item.place) && <Button role="menuitem" onClick={() => runMenuAction("recycle")}>{t("Move to Trash")}</Button>}
-      <Button role="menuitem" onClick={() => runMenuAction("delete")}>{t("Delete permanently")}</Button>
+    {menu && <FileContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} onReturn={returnFromMenu}>
+      {menu.kind === "chart" && <Button role="menuitem" onClick={() => runMenuAction("reveal")}>{t("Show in other pane")}</Button>}
+      {place.kind === "local" && operationsAvailable && <>
+        <Button role="menuitem" onClick={() => runMenuAction("copy")}>{t("Copy")}</Button>
+        <Button role="menuitem" onClick={() => runMenuAction("move")}>{t("Rename or move")}</Button>
+        {!smbHost(place) && <Button role="menuitem" onClick={() => runMenuAction("recycle")}>{t("Move to Trash")}</Button>}
+        <Button role="menuitem" onClick={() => runMenuAction("delete")}>{t("Delete permanently")}</Button>
+      </>}
     </FileContextMenu>}
   </section>;
 }
