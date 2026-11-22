@@ -12,6 +12,7 @@ const controlHelpTopics = {
   paneSelection: { title: "Current row and marks", keys: ["mark", "selectUpRow", "selectDownRow"] },
   paneStatus: { title: "Pane details and progress", keys: [] },
   paneViews: { title: "File pane view", keys: [] },
+  fileBookmarks: { title: "File bookmarks", keys: ["bookmarkLine", "fileBookmarks"] },
   spaceAnalyzer: { title: "Space Analyzer", keys: ["analyzeSpace"] },
   spaceScope: { title: "Analysis scope", keys: [] },
   spacePath: { title: "Scan path", keys: [] },
@@ -57,7 +58,7 @@ export const helpTopics = {
 export type HelpTopic = keyof typeof helpTopics;
 
 export const helpGroups: readonly { title?: string; topics: readonly HelpTopic[] }[] = [
-  { topics: ["workspace", "files", "operations", "archives", "search", "quickView", "viewer", "editor", "terminal", "terminalShortcuts", "compare", "remote", "processes", "gitView", "environment"] },
+  { topics: ["workspace", "files", "operations", "archives", "search", "quickView", "viewer", "fileBookmarks", "editor", "terminal", "terminalShortcuts", "compare", "remote", "processes", "gitView", "environment"] },
   { title: "File pane controls", topics: ["paneNavigation", "paneAddress", "paneSources", "paneFilter", "paneViews", "paneColumns", "paneSelection", "paneStatus", "actionDialogs"] },
   { title: "Space Analyzer controls", topics: ["spaceAnalyzer", "spaceScope", "spacePath", "spaceTree", "spaceTreemap", "spaceMetric", "spaceActions"] },
   { title: "Options", topics: ["general", "appearance", "window", "panels", "fileTypes", "dialogs", "textTools", "fonts", "viewFonts", "shortcuts"] },

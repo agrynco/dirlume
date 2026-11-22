@@ -37,6 +37,8 @@ import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
+import { FileBookmarksDialog } from "./FileBookmarksDialog";
+import { bookmarkFile, bookmarkKey, lineFingerprint, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
@@ -104,6 +106,7 @@ type AnalysisPane = {
 };
 type DocumentTab = DocumentWindow & {
   position?: MarkdownPosition;
+  bookmarkJump?: BookmarkJump;
   back?: MarkdownLocation[];
   forward?: MarkdownLocation[];
   imageIndex?: number;
@@ -138,6 +141,7 @@ type Modal =
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
+  | { kind: "fileBookmarks"; path?: string }
   | { kind: "sortMenu"; side: Side }
   | { kind: "sortCriteria"; side: Side; mode: SortMode }
   | { kind: "about" | "commandHistory" | "mcp" }
@@ -246,6 +250,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const manualUpdateCheck = useRef(false);
   const installingUpdate = useRef(false);
   const [documents, setDocuments] = useState<DocumentTab[]>(startup?.documents ?? []);
+  const [fileBookmarks, setFileBookmarks] = useState(readFileBookmarks);
+  const bookmarkRequest = useRef(0);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
   const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
   const dirtyDocuments = useRef(new Set<number>());
@@ -638,6 +644,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (ready) saveWorkspace(panes, active, split, terminalHeight, documents, activeDocument, failedFtp.current);
   }, [ready, panes, active, split, terminalHeight, documents, activeDocument]);
 
+  useEffect(() => {
+    try { saveFileBookmarks(fileBookmarks); }
+    catch (error) { setStatus({ text: describeError(error), error: true }); }
+  }, [fileBookmarks]);
+
   const leftPath = (ready || !panes.left.loading) && panes.left.place?.kind === "local" ? panes.left.place.path : null;
   const rightPath = (ready || !panes.right.loading) && panes.right.place?.kind === "local" ? panes.right.place.path : null;
   const showingGit = gitView !== null;
@@ -1029,7 +1040,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side, diagnosticLog?: true) {
+  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side, diagnosticLog?: true, bookmarkJump?: BookmarkJump) {
     const image = !!imageType(file.name);
     const existing = documents.find((item) => item.diagnosticLog === diagnosticLog &&
       (image || item.editing === editing) && sameDocumentFile(item.file, file));
@@ -1038,19 +1049,43 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const imageIndex = imageOrigin ? imagesInPane(imageOrigin, file).findIndex((candidate) => sameDocumentFile(candidate, file)) : undefined;
     const canEdit = editing && (!image || canEditImage(file));
     if (!existing) {
-      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex, diagnosticLog }]);
-    } else if (position || image) {
+      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex, diagnosticLog, bookmarkJump }]);
+    } else if (position || image || bookmarkJump) {
       setDocuments((current) => current.map((tab) => tab.id === id
-        ? { ...tab, position: position ?? tab.position, imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex,
+        ? { ...tab, position: bookmarkJump ? undefined : position ?? tab.position, bookmarkJump,
+          imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex,
           editing: canEdit, imageEditorOpened: image && (tab.imageEditorOpened || tab.editing) }
         : tab));
     }
     selectDocument(id);
   }
 
+  function updateFileBookmark(bookmark: FileBookmark, change: (current: FileBookmark) => FileBookmark | null) {
+    const key = bookmarkKey(bookmark.path, bookmark.line);
+    setFileBookmarks((items) => items.flatMap((item) => {
+      if (bookmarkKey(item.path, item.line) !== key) return [item];
+      const next = change(item);
+      return next ? [next] : [];
+    }));
+  }
+
+  function addFileBookmark(path: string, line: number, text: string) {
+    const key = bookmarkKey(path, line);
+    setFileBookmarks((items) => items.some((item) => bookmarkKey(item.path, item.line) === key) ? items :
+      [...items, { path, line, fingerprint: lineFingerprint(text) }]);
+  }
+
+  function openFileBookmark(bookmark: FileBookmark) {
+    const file = bookmarkFile(bookmark.path);
+    if (!file) return;
+    setModal(null);
+    openDocument(file, false, undefined, undefined, undefined,
+      { line: bookmark.line, fingerprint: bookmark.fingerprint, request: ++bookmarkRequest.current });
+  }
+
   function followMarkdownLink(id: number, from: NamedFile, file: NamedFile, position: MarkdownPosition, scrollTop: number) {
     setDocuments((current) => current.map((tab) => tab.id !== id || tab.file !== from ? tab : {
-      ...tab, file, position, forward: [],
+      ...tab, file, position, bookmarkJump: undefined, forward: [],
       back: [...(tab.back ?? []), { file: from, position: { scrollTop } }],
     }));
   }
@@ -1062,7 +1097,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       const target = history?.at(-1);
       if (tab.id !== id || !history || !target) return tab;
       return {
-        ...tab, ...target,
+        ...tab, ...target, bookmarkJump: undefined,
         [direction]: history.slice(0, -1),
         [opposite]: [...(tab[opposite] ?? []), { file: tab.file, position: { scrollTop } }],
       };
@@ -2265,6 +2300,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function perform(command: Command) {
+    if (command === "fileBookmarks") {
+      if (activeDocument === null) setModal({ kind: "fileBookmarks" });
+      return;
+    }
     if (command === "leftLocations" || command === "rightLocations") {
       toggleSourceMenu(command === "leftLocations" ? "left" : "right");
       return;
@@ -2746,6 +2785,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       { ...commandWithIcon(GitBranch, "gitView", !canToggleGitView), checked: showingGit },
       { ...commandWithIcon(Braces, "environmentVariables", !panesAvailable || !!gitView || showingAnalysis), checked: environmentActive },
       commandWithIcon(FolderTree, "analyzeSpace", !analysis && (!filesAvailable || showingEnvironment || !canAnalyze(pane.place))),
+      commandWithIcon(Bookmark, "fileBookmarks", activeDocument !== null),
       commandWithIcon(Search, "search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       commandWithIcon(FileDiff, "compare", !filesAvailable || comparison === null),
       commandWithIcon(ClipboardCopy, "copyFullPath", currentFullPath === null),
@@ -2966,7 +3006,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
-        {documents.map(({ id, file, editing, position, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0, diagnosticLog }) => {
+        {documents.map(({ id, file, editing, position, bookmarkJump, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0, diagnosticLog }) => {
           const documentKey = JSON.stringify([id, placePath(file.place), file.name]);
           if (imageType(file.name)) {
             const candidates = activeDocument === id ? imagesInPane(imageOrigin ?? active, file) : [];
@@ -3013,6 +3053,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TextWindow key={documentKey}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             diagnosticLog={diagnosticLog}
+            fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmarkLine={addFileBookmark}
+            onFileBookmarks={(path) => setModal({ kind: "fileBookmarks", path })}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}
             shortcuts={shortcuts}
@@ -3306,6 +3348,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           void openFolderShortcut(modal.side, entry);
         }}
         onClose={() => closeFolderShortcuts(modal.side)} />}
+      {modal?.kind === "fileBookmarks" && <FileBookmarksDialog bookmarks={fileBookmarks} path={modal.path} addKey={keyLabel("bookmarkLine")}
+        onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
+        onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setModal(null)} />}
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
         remoteProvider={preferences.provider} bridgeDirectory={preferences.kswitcher}
         onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
