@@ -237,11 +237,15 @@ export async function testCommandCompletion(page, root, docker) {
   await terminalInput.press("Enter");
   await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, childFolder);
 
+  let commandNumber = 0;
   const remember = async (line) => {
-    await terminalInput.pressSequentially(line);
+    const number = ++commandNumber;
+    const command = `${line}; Write-Output ('completion-ready-' + '${number}')`;
+    await terminalInput.pressSequentially(command);
     await terminalInput.press("Enter");
     await page.waitForFunction((expected) => JSON.parse(localStorage.getItem("dirlume.command-history") ?? "[]")
-      .some(({ text }) => text === expected), line);
+      .some(({ text }) => text === expected), command);
+    await screen.getByText(`completion-ready-${number}`, { exact: true }).waitFor();
     await atPrompt();
   };
   await remember(`$env:Path = '${docker.replaceAll("'", "''")};' + $env:Path; $env:DOCKER_CONTEXT = 'fixture-active'`);
@@ -271,6 +275,7 @@ export async function testCommandCompletion(page, root, docker) {
   await terminalOption("worker-child").waitFor();
   await cancel();
   await remember("Set-Location ../..; $env:COMPOSE_FILE = 'alternate.yaml'");
+  await page.waitForFunction((path) => document.querySelector(".terminal-card:not([hidden]) header span")?.textContent === path, cwd);
   await terminalInput.pressSequentially("docker compose logs --tail 20 we");
   await terminalOption("web-alternate").waitFor();
   assert.equal(await terminalOption("web-api").count(), 0);
