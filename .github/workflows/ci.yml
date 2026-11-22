@@ -161,6 +161,9 @@ jobs:
       - name: Verify contextual offline Help
         if: github.event.action != 'closed'
         run: node scripts/contextual-help-smoke.mjs
+      - name: Verify command line paths from parent and file rows
+        if: github.event.action != 'closed'
+        run: node scripts/command-parent-path-smoke.mjs
       - name: Verify Space Analyzer controls and provider scopes
         if: github.event.action != 'closed'
         run: node scripts/space-analyzer-smoke.mjs
