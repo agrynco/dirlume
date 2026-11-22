@@ -197,6 +197,47 @@ fn scan(
     (out.send)(ScanEvent::Finished)
 }
 
+pub fn measure_folder(root: &Path, stop: &AtomicBool) -> Option<(u64, bool)> {
+    if stop.load(Ordering::Relaxed) {
+        return None;
+    }
+    if !fs::symlink_metadata(root)
+        .is_ok_and(|metadata| metadata.is_dir() && !local::is_link(&metadata))
+    {
+        return Some((0, true));
+    }
+
+    let mut bytes = 0u64;
+    let mut incomplete = false;
+    let result = scan(root, stop, &mut |event| {
+        match event {
+            ScanEvent::Start { .. } => {
+                bytes = 0;
+                incomplete = false;
+            }
+            ScanEvent::Batch { changes } => {
+                for change in changes {
+                    match change {
+                        Change::Entry {
+                            directory: false,
+                            size,
+                            ..
+                        } => {
+                            bytes = bytes.saturating_add(size.unwrap_or(0));
+                            incomplete |= size.is_none();
+                        }
+                        Change::Closed { partial, .. } => incomplete |= partial,
+                        _ => {}
+                    }
+                }
+            }
+            ScanEvent::Finished => {}
+        }
+        Ok(())
+    });
+    (!stop.load(Ordering::Relaxed)).then_some((bytes, incomplete || result.is_err()))
+}
+
 fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
     #[cfg(windows)]
     if let Some(volume) = windows_walk::local_ntfs(root) {
@@ -614,6 +655,29 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measures_logical_sizes_within_the_scan_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("selected");
+        let outside = temp.path().join("sibling");
+        let empty = root.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(root.join("first"), b"123").unwrap();
+        fs::hard_link(root.join("first"), root.join("second")).unwrap();
+        fs::write(outside.join("oversize"), [0; 1024]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("redirect")).unwrap();
+        #[cfg(windows)]
+        junction::create(&outside, root.join("redirect")).unwrap();
+        let stop = AtomicBool::new(false);
+        assert_eq!(measure_folder(&root, &stop), Some((6, false)));
+        assert_eq!(measure_folder(&empty, &stop), Some((0, false)));
+        assert_eq!(measure_folder(&root.join("gone"), &stop), Some((0, true)));
+        stop.store(true, Ordering::Relaxed);
+        assert_eq!(measure_folder(&root, &stop), None);
+    }
 
     #[test]
     fn scans_nested_files_counts_hard_links_once_and_skips_redirects() {
