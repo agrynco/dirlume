@@ -386,11 +386,13 @@ export function LockDialog({ paths, onClose }: { paths: string[]; onClose: () =>
             !items.length ? <p role="status">{t("Windows found no processes using these files.")}</p> :
             <Processes items={items} selected={selected} onChange={setSelected} />}
           {partial && <p>{t("Only some files could be checked.")}</p>}
+          <div className="dialog-actions dialog-actions-end">
+            <Button type="button" disabled={!items?.some((process) => process.canTerminate)}
+              onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>{t("Select all")}</Button>
+          </div>
         </div>
         <footer className="dialog-footer">
           <Button type="button" onClick={onClose}>{t("Close")}</Button>
-          <Button type="button" disabled={!items?.some((process) => process.canTerminate)}
-            onClick={() => setSelected(items?.filter((process) => process.canTerminate).map(processKey) ?? [])}>{t("Select all")}</Button>
           <Button type="button" className="negative" disabled={!marked.length} onClick={() => setEnding(true)}>{t("End selected")}</Button>
         </footer>
       </Dialog>

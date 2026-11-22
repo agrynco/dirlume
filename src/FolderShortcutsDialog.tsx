@@ -1,6 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { DialogIconButton } from "./DialogActions";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { folderGroups, normalizeFolderPath, sameFolderShortcut, type FolderGroup, type FolderShortcut, type FolderShortcuts } from "./folderShortcuts";
@@ -109,7 +111,7 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
       </div>
       <footer className="dialog-footer">
         <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
-        <Button type="submit" className="primary">{t("OK")}</Button>
+        <Button type="submit" className="primary">{t("Save")}</Button>
       </footer>
     </form>
   </Dialog>;
@@ -151,18 +153,18 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
   }
 
   const actions = [
-    { command: "pickerAddFolder", label: "Add", disabled: !currentFolder, run: () => {
+    { command: "pickerAddFolder", label: "Add", icon: Plus, disabled: !currentFolder, run: () => {
       if (currentFolder) onScreen({ kind: "edit", group, entry: currentFolder, returnTo: screen });
     } },
-    { command: "pickerEditFolder", label: "Edit", disabled: !entries[selection], run: () => {
+    { command: "pickerEditFolder", label: "Edit", icon: Pencil, disabled: !entries[selection], run: () => {
       onScreen({ kind: "edit", group, entry: entries[selection], index: selection, returnTo: screen });
     } },
-    { command: "pickerRemoveFolder", label: "Remove", disabled: !entries[selection], run: () => {
+    { command: "pickerRemoveFolder", label: "Remove", icon: Trash2, disabled: !entries[selection], run: () => {
       const updated = entries.filter((_, index) => index !== selection);
       save(updated, Math.max(0, Math.min(selection, updated.length - 1)));
     } },
-    { command: "pickerFolderUp", label: "Move up", disabled: selection === 0, run: () => move(-1) },
-    { command: "pickerFolderDown", label: "Move down", disabled: selection >= entries.length - 1, run: () => move(1) },
+    { command: "pickerFolderUp", label: "Move up", icon: ArrowUp, disabled: selection === 0, run: () => move(-1) },
+    { command: "pickerFolderDown", label: "Move down", icon: ArrowDown, disabled: selection >= entries.length - 1, run: () => move(1) },
   ] as const;
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
@@ -171,7 +173,8 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
     if (action) {
       event.preventDefault();
       if (!action.disabled && !event.repeat) action.run();
-    } else if (shortcut === "Enter") {
+    } else if (event.target !== list.current) return;
+    else if (shortcut === "Enter") {
       event.preventDefault();
       if (entries[selection]) onOpen(entries[selection]);
     } else if (["ArrowUp", "ArrowDown", "Home", "End"].includes(shortcut)) {
@@ -183,11 +186,10 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
   }
 
   return <Dialog title={t("Folder shortcuts")} onClose={onClose} dismissOnOutside>
-    <div className="dialog-body folder-shortcut-picker">
+    <div className="dialog-body folder-shortcut-picker" onKeyDown={navigate}>
       <strong>{t("Group {0}", group)}</strong>
       <div ref={list} className="folder-shortcut-list" role="listbox" tabIndex={0} data-initial-focus
-        aria-label={t("Folder shortcuts in group {0}", group)} aria-activedescendant={entries.length ? `${id}-${selection}` : undefined}
-        onKeyDown={navigate}>
+        aria-label={t("Folder shortcuts in group {0}", group)} aria-activedescendant={entries.length ? `${id}-${selection}` : undefined}>
         {entries.map((entry, index) => {
           const host = entry.remote?.name ?? entry.peer?.name;
           const path = host ? host + " · " + entry.path : entry.path;
@@ -201,15 +203,13 @@ function FolderShortcutPicker({ screen, shortcuts, currentFolder, bindings, onSc
           </div>;
         })}
       </div>
+      <div className="dialog-action-strip dialog-actions-end">
+        {[actions.slice(0, 3), actions.slice(3)].map((group, index) => <div className="dialog-action-group" key={index}>
+          {group.map(({ label, command, icon: Icon, disabled, run }) => <DialogIconButton key={command}
+            label={t(label)} disabled={disabled} shortcut={showShortcut(bindings[command][0])} onClick={run}><Icon /></DialogIconButton>)}
+        </div>)}
+      </div>
       {error && <p role="alert" className="dialog-error">{error}</p>}
     </div>
-    <footer className="dialog-footer folder-shortcut-actions">
-      {actions.map(({ label, command, disabled, run }) => {
-        const shortcut = showShortcut(bindings[command][0]);
-        return <Button key={command} type="button" disabled={disabled} shortcut={shortcut} onClick={run}>
-          {t(label)}{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
-        </Button>;
-      })}
-    </footer>
   </Dialog>;
 }

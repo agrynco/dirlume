@@ -41,6 +41,7 @@ const nounForms = {
   file: { en: ["file", "files"], uk: ["файл", "файли", "файлів"], ru: ["файл", "файла", "файлов"] },
   item: { en: ["item", "items"], uk: ["елемент", "елементи", "елементів"], ru: ["элемент", "элемента", "элементов"] },
   match: { en: ["match", "matches"], uk: ["збіг", "збіги", "збігів"], ru: ["совпадение", "совпадения", "совпадений"] },
+  change: { en: ["change", "changes"], uk: ["зміна", "зміни", "змін"], ru: ["изменение", "изменения", "изменений"] },
   process: { en: ["process", "processes"], uk: ["процес", "процеси", "процесів"], ru: ["процесс", "процесса", "процессов"] },
 } as const;
 const plurals = Object.fromEntries(Object.entries(locales).map(([key, value]) => [key, new Intl.PluralRules(value)])) as Record<Language, Intl.PluralRules>;

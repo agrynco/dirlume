@@ -3368,17 +3368,17 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
           </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {!modal.remote && windowsClient && isPermissionError(error) && <ElevationButton directory={modal.path} />}
-        </div>
-        <div className="dialog-footer">
-          {!modal.remote && windowsClient && isLockError(error) && <Button type="button" onClick={() => setLockPaths(
+          {!modal.remote && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
-          )}>{t("Find locking processes")}</Button>}
+          )}>{t("Find locking processes")}</Button></div>}
+        </div>
+        <footer className="dialog-footer">
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
           <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}
           </Button>
-        </div>
+        </footer>
       </form>
     </Dialog>
     {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
@@ -3468,13 +3468,15 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
             <p>{directory ? t("Looking for the KSwitcher bridge…") : t("Choose the KSwitcher installation folder in Options.")}</p>
           )}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+          <div className="dialog-actions">
+            <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
+          </div>
         </div>
-        <div className="dialog-footer">
-          <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
+        <footer className="dialog-footer">
           <Button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" && bridge === null) || (bridge !== false && !value.trim())}>
             {waiting ? t("Connecting…") : bridge === false ? t("Open KSwitcher Files") : t("Connect")}
           </Button>
-        </div>
+        </footer>
       </form>
     </Dialog>
   );

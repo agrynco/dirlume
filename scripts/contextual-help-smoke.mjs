@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { hideComparisonOptions, showComparisonOptions } from "./tool-window-smoke.mjs";
 
 async function openFixture(browser, language = "en", userAgent) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, userAgent });
@@ -123,9 +124,11 @@ try {
   await files.locator('[data-tooltip="note.txt"]').click();
   await files.press("Shift+F11");
   const comparison = page.getByRole("dialog", { name: "Compare files", exact: true });
+  await showComparisonOptions(comparison);
   const layout = comparison.getByRole("combobox", { name: "Layout", exact: true });
   await openHelp(page, layout, "compare");
   await closeHelp(page, help, layout);
+  await hideComparisonOptions(comparison);
   await page.keyboard.press("Escape");
   await comparison.waitFor({ state: "hidden" });
 

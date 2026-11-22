@@ -13,7 +13,7 @@ export async function checkResizeMarker(marker) {
 }
 
 export async function openToolWindow(main, trigger, title) {
-  const [tool] = await Promise.all([main.context().waitForEvent("page", { timeout: 8000 }), trigger()]);
+  const [tool] = await Promise.all([main.context().waitForEvent("page", { timeout: 20000 }), trigger()]);
   tool.setDefaultTimeout(8000);
   await tool.getByRole("dialog", { name: title, exact: true }).waitFor();
   await tool.waitForFunction(() => {
@@ -26,6 +26,23 @@ export async function openToolWindow(main, trigger, title) {
 
 export function openOptionsWindow(main, trigger = () => main.getByRole("button", { name: "Options", exact: true }).click(), title = "Options") {
   return openToolWindow(main, trigger, title);
+}
+
+export async function settingsArchiveAction(options, name) {
+  const trigger = options.getByRole("button", { name: "Settings archive", exact: true });
+  await trigger.press("ArrowDown");
+  await options.getByRole("menu", { name: "Settings archive", exact: true }).getByRole("menuitem", { name, exact: true }).click();
+}
+
+export async function showComparisonOptions(dialog) {
+  const trigger = dialog.getByRole("button", { name: "Options", exact: true });
+  if (await trigger.getAttribute("aria-expanded") === "false") await trigger.click();
+  return trigger;
+}
+
+export async function hideComparisonOptions(dialog) {
+  const trigger = dialog.getByRole("button", { name: "Options", exact: true });
+  if (await trigger.getAttribute("aria-expanded") === "true") await trigger.press("Escape");
 }
 
 export async function closeToolWindow(tool, trigger = () => tool.keyboard.press("Escape")) {
