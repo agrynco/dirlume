@@ -83,6 +83,8 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   await writeFile(join(remoteFolder, "bytes.bin"), Buffer.alloc(2050, 0x42));
   await writeFile(join(lastFolder, "restored.txt"), "Restored FTP folder");
   await writeFile(join(lastFolder, "details.md"), "# Remote details\n");
+  const breadcrumbFolders = ["breadcrumb-one", "breadcrumb-two", "breadcrumb-three", "breadcrumb-four", "breadcrumb-five"];
+  await mkdir(join(remoteFolder, ...breadcrumbFolders), { recursive: true });
   const ftpPort = await port();
   const child = spawn(process.env.DIRLUME_FTP_PYTHON, ["-u", "-c", server, root, String(ftpPort)], {
     windowsHide: true, env: { ...process.env, DIRLUME_FIXTURE_PASSWORD: password, PYTHONIOENCODING: "utf-8" },
@@ -361,6 +363,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
       const panel = page.getByRole("region", { name: "left pane", exact: true });
       await panel.getByRole("option", { name: /^restored.txt/ }).waitFor();
       assert.equal(await panel.locator("#left-path").getAttribute("data-path"), "/start/saved-folder");
+      await button(panel, "Open FTP connection list").waitFor();
       assert.equal(await page.locator("#right-path").getAttribute("data-path"), source);
       await waitForSavedLocation();
     };
@@ -379,6 +382,36 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     page = await restartDesktop();
     await expectRestoredFolder();
     console.log("Verified FTP recovery after restarting, including fallback when the saved folder is unavailable.");
+
+    const deep = "/start/" + breadcrumbFolders.join("/");
+    const waitPath = (path) => page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path &&
+      document.getElementById("left-files")?.getAttribute("aria-busy") === "false", path);
+    const panel = page.getByRole("region", { name: "left pane", exact: true });
+    await button(panel, "Parent folder").click();
+    await waitPath("/start");
+    for (const name of breadcrumbFolders) {
+      await panel.getByRole("option", { name: new RegExp(`^${name}\\b`) }).dblclick();
+    }
+    await waitPath(deep);
+    const divider = page.getByRole("separator", { name: "Pane divider", exact: true });
+    const steps = Math.max(0, Number(await divider.getAttribute("aria-valuenow")) - 28);
+    for (let step = 0; step < steps; step++) await divider.press("ArrowLeft");
+    const breadcrumbs = panel.getByRole("navigation", { name: "left path breadcrumbs", exact: true });
+    const ftpSource = button(breadcrumbs, "Open FTP connection list");
+    await button(breadcrumbs, "Show parent folders").waitFor();
+    await button(panel, "Parent folder").focus();
+    await page.keyboard.press("Tab");
+    assert.equal(await ftpSource.evaluate((node) => document.activeElement === node), true);
+    await page.keyboard.press("Enter");
+    await waitPath("FTP");
+    await button(panel, "Back").click();
+    await waitPath(deep);
+    await button(panel, "Forward").click();
+    await waitPath("FTP");
+    await button(panel, "Back").click();
+    await waitPath(deep);
+    for (let step = 0; step < steps; step++) await divider.press("ArrowRight");
+    console.log("Verified the FTP connection breadcrumb in a narrow pane and exact Back and Forward restoration.");
   } finally {
     try {
       const records = await readFile(profiles, "utf8").then(JSON.parse, () => []);
