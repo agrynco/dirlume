@@ -1224,6 +1224,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .deletion-path > svg { flex: none; width: 21px; height: 21px; color: var(--muted); }
 .deletion-path > div { display: grid; gap: 3px; min-width: 0; }
 .deletion-path span { font-family: var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.deletion-path > .deletion-progress-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .deletion-path[role="alert"] > svg { color: var(--dialog-warning-ink, var(--danger)); }
 .deletion-meter { display: grid; gap: 4px; }
 .deletion-meter > div { display: flex; justify-content: space-between; gap: 8px; }

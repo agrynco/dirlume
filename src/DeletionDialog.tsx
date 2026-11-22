@@ -171,7 +171,7 @@ export function DeletionDialog({ deletion, onClose, onFinished }: {
       <div className="dialog-body deletion-body">
         <div className="deletion-path">
           {event?.phase === "preparing" ? <FolderOpen aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-          <span>{result ? deletion.directory : path}</span>
+          <span className="deletion-progress-path">{result ? deletion.directory : path}</span>
         </div>
         {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
         {cancelling && !result && !error && <p role="status">{t("Cancelling deletion…")}</p>}
