@@ -212,8 +212,9 @@ export async function testAlertDialogStyles() {
                 const counts = { completed: 3, skipped: 0, failed: 0, unprocessed: 0 };
                 args.onProgress.onmessage({ phase: "preparing", selection, path });
                 return new Promise((resolve) => {
-                  window.showDeletionProgress = () => args.onProgress.onmessage({ phase: "removing", selection,
-                    progress: { path: "/fixture/folder/fixture.txt", currentTotal: 5, currentProcessed: 2, counts } });
+                  window.showDeletionProgress = ({ phase, path }) => args.onProgress.onmessage(phase === "preparing"
+                    ? { phase, selection, path }
+                    : { phase, selection, progress: { path, currentTotal: 5, currentProcessed: 2, counts } });
                   window.finishDeletionFixture = () => resolve({ selection, counts: { ...counts, unprocessed: 4 },
                     cancelled: true, availableAfter: 72 * 1024, failures: [] });
                 });
@@ -247,18 +248,38 @@ export async function testAlertDialogStyles() {
         }), true);
         await page.keyboard.press("Escape");
         await alert.waitFor({ state: "hidden" });
-        if (platform.startsWith("Windows") && theme === "dark") {
-          await list.press("Shift+Delete");
-          await alert.getByRole("button", { name: "Delete permanently", exact: true }).click();
+        await page.setViewportSize({ width: 390, height: 680 });
+        for (const [shortcut, title] of [["Shift+Delete", "Delete permanently"], ["F8", "Move to Trash"]]) {
+          await list.press(shortcut);
+          await page.getByRole("dialog", { name: title, exact: true }).getByRole("button", { name: title, exact: true }).click();
           const progress = page.getByRole("dialog", { name: "Deletion progress", exact: true });
           await progress.getByRole("progressbar", { name: "Preparing selection…" }).waitFor();
-          await page.evaluate(() => window.showDeletionProgress());
+          const path = progress.locator(".deletion-progress-path");
+          const bounds = () => progress.evaluate((dialog) => [dialog, ...dialog.querySelectorAll("progress, .dialog-footer button")]
+            .map((element) => { const { x, y, width, height } = element.getBoundingClientRect(); return [x, y, width, height]; }));
+          for (const phase of ["preparing", "removing"]) {
+            const short = "/fixture/note.txt";
+            const long = "/fixture/" + "nested/".repeat(24) + "underscored_filename".repeat(5) + ".txt";
+            const update = async (value) => {
+              await page.evaluate((event) => window.showDeletionProgress(event), { phase, path: value });
+              await progress.getByText(value, { exact: true }).waitFor();
+            };
+            await update(short);
+            const previous = await bounds();
+            assert.equal(await path.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+            await update(long);
+            assert.deepEqual(await bounds(), previous);
+            assert.equal(await path.evaluate((node) => node.scrollWidth > node.clientWidth &&
+              getComputedStyle(node).whiteSpace === "nowrap" && getComputedStyle(node).textOverflow === "ellipsis"), true);
+            await update(short);
+            assert.deepEqual(await bounds(), previous);
+          }
           const overall = progress.getByRole("progressbar", { name: "Overall progress" });
           const current = progress.getByRole("progressbar", { name: "Current item progress" });
           await overall.waitFor();
           assert.deepEqual([await overall.getAttribute("value"), await overall.getAttribute("max")], ["3", "7"]);
           assert.deepEqual([await current.getAttribute("value"), await current.getAttribute("max")], ["2", "5"]);
-          await progress.getByText("Estimated space to reclaim", { exact: true }).waitFor();
+          await progress.getByText(title === "Delete permanently" ? "Estimated space to reclaim" : "Selection size", { exact: true }).waitFor();
           if (process.env.DIRLUME_DELETE_PROGRESS_SCREENSHOT) {
             await progress.screenshot({ path: process.env.DIRLUME_DELETE_PROGRESS_SCREENSHOT, scale: "css" });
           }
