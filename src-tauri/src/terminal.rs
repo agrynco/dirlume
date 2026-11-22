@@ -67,6 +67,12 @@ function global:prompt {
         DOCKER_TLS_VERIFY = $env:DOCKER_TLS_VERIFY
         DOCKER_CERT_PATH = $env:DOCKER_CERT_PATH
         DOCKER_API_VERSION = $env:DOCKER_API_VERSION
+        COMPOSE_FILE = $env:COMPOSE_FILE
+        COMPOSE_PATH_SEPARATOR = $env:COMPOSE_PATH_SEPARATOR
+        COMPOSE_PROJECT_NAME = $env:COMPOSE_PROJECT_NAME
+        COMPOSE_PROFILES = $env:COMPOSE_PROFILES
+        COMPOSE_ENV_FILES = $env:COMPOSE_ENV_FILES
+        COMPOSE_DISABLE_ENV_FILE = $env:COMPOSE_DISABLE_ENV_FILE
     }
     $settingsBytes = [Text.Encoding]::UTF8.GetBytes((Microsoft.PowerShell.Utility\ConvertTo-Json $settings -Compress))
     $settingsMarker = if ($settingsBytes.Length -le 12288) { [Convert]::ToBase64String($settingsBytes) }
@@ -86,9 +92,14 @@ pub(crate) fn unix_prompt(shell: &str, remote: bool) -> String {
     } else {
         ""
     };
+    // A noninteractive subprocess sees the shell's exported environment, including variables set after startup.
+    let environment = crate::completion::DOCKER_COMPLETION_ENVIRONMENT.iter().map(|name| {
+        format!(r#"if [ "${{{name}+x}}" ]; then printf '%s=%s\000' {name} "${{{name}}}"; else printf '%s\000' {name}; fi"#)
+    }).collect::<Vec<_>>().join("; ");
+    let environment = crate::ssh::quote(&environment);
     let marker = format!(
-        r#"printf '\033]2;%s:0:%s:::{editor}{}\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')"{search_path}"#,
-        if remote { ":%s" } else { "" }
+        r#"printf '\033]2;%s:0:%s:::{editor}{}:%s\007' "$DIRLUME_PROMPT_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\n')"{search_path} "$(/bin/sh -c {environment} | /usr/bin/base64 | /usr/bin/tr -d '\n')""#,
+        if remote { ":%s" } else { ":" }
     );
     match shell {
         "bash" => [

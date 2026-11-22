@@ -145,6 +145,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let editable: TerminalDraft | null = null;
     let sshSearchPath: string | null = null;
     let shellEnvironment: ShellCompletionEnvironment | undefined;
+    let environmentMarker = "";
     let editorSupported = false;
     const sessionHistory: string[] = [];
     let revision = 0;
@@ -221,7 +222,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       const recent = current.caret === current.text.length ? [...new Set(history.filter((line) =>
         (windows ? line.toLowerCase() : line).startsWith(prefix)))].slice(0, 5) : [];
       const completion = remote
-        ? sshSearchPath === null ? Promise.resolve(null) : api.completeSshTerminal(session.id, current.text, current.caret, directory, sshSearchPath)
+        ? sshSearchPath === null ? Promise.resolve(null) : api.completeSshTerminal(session.id, current.text, current.caret, directory, sshSearchPath, shellEnvironment)
         : api.completeCommand(current.text, current.caret, directory, session.refreshEnvironment, shellEnvironment);
       const batch = await completion.catch(() => null);
       requesting = false;
@@ -329,6 +330,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       const path = title.slice(separator + 1);
       const previousDirectory = currentDirectory;
       const previousSearchPath = sshSearchPath;
+      const previousEnvironmentMarker = environmentMarker;
       try {
         if (title.slice(promptPrefix.length, separator) === "command") {
           const fields = path.split(":");
@@ -336,16 +338,22 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
           else recordMarker(path);
           return true;
         }
-        const [directory, sequence, encoded, editor, searchPath] = path.split(":");
+        const [directory, sequence, encoded, editor, searchPath, unixEnvironment] = path.split(":");
         if (encoded) recordMarker(encoded, sequence);
         currentDirectory = directory ? decode(directory) : null;
         editorSupported = windows ? editor === "powershell" : editor === "bash" || editor === "zsh";
         sshSearchPath = remote && searchPath !== undefined ? decode(searchPath) : null;
-        if (windows) shellEnvironment = searchPath ? JSON.parse(decode(searchPath)) as ShellCompletionEnvironment : undefined;
+        environmentMarker = (windows ? searchPath : unixEnvironment) || "";
+        shellEnvironment = !environmentMarker || environmentMarker.length > 65_536 ? undefined : windows
+          ? JSON.parse(decode(environmentMarker)) as ShellCompletionEnvironment
+          : Object.fromEntries(decode(environmentMarker).split("\0").filter(Boolean).map((field) => {
+            const separator = field.indexOf("=");
+            return separator < 0 ? [field, null] : [field.slice(0, separator), field.slice(separator + 1)];
+          }));
       } catch { return true; }
       setShellDirectory(currentDirectory ?? "");
       // ConPTY can deliver the prompt redraw for a canceled edit after the next keystroke.
-      if (atPrompt && editable?.text && editorSupported && currentDirectory === previousDirectory && sshSearchPath === previousSearchPath) {
+      if (atPrompt && editable?.text && editorSupported && currentDirectory === previousDirectory && sshSearchPath === previousSearchPath && environmentMarker === previousEnvironmentMarker) {
         return true;
       }
       atPrompt = true;

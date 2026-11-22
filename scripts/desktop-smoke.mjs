@@ -19,7 +19,7 @@ import { testFileSort } from "./file-sort-smoke.mjs";
 import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
-import { testCommandCompletion } from "./command-completion-smoke.mjs";
+import { makeDockerFixture, testCommandCompletion } from "./command-completion-smoke.mjs";
 import { testCompareWorker } from "./compare-smoke.mjs";
 import { testCompareLayouts } from "./compare-layouts-smoke.mjs";
 import { testNewFolder } from "./new-folder-smoke.mjs";
@@ -58,6 +58,7 @@ if (process.env.CI) {
   await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
+const dockerCompletionFixture = await makeDockerFixture(temp);
 const src = join(temp, "from");
 const dst = join(temp, "to");
 const diagnostics = join(temp, "diagnostics");
@@ -110,6 +111,9 @@ async function startDesktop() {
     windowsHide: true,
     env: {
       ...process.env,
+      PATH: `${dockerCompletionFixture};${process.env.PATH ?? process.env.Path ?? ""}`,
+      DOCKER_CONTEXT: "fixture-active",
+      COMPOSE_FILE: "",
       DIRLUME_TEST_PROCESS_ONLY: "launcher-value",
       DIRLUME_TEST_SKIP_UPDATE_CHECK: "1",
       ...(process.env.DIRLUME_INTERNAL_CDP === "1"
@@ -2288,7 +2292,7 @@ try {
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
   await testCompareLayouts(page, temp);
-  await testCommandCompletion(page, temp);
+  await testCommandCompletion(page, temp, dockerCompletionFixture);
   page = await testNewFolder({ page, startDesktop, exitDesktop, root: temp });
   await testShortcutFields(page);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
