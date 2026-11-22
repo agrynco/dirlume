@@ -7,7 +7,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { ArrowDown, ArrowUp, Cpu } from "lucide-react";
 import { api, describeError, type ProcessInfo } from "./api";
 import { Dialog } from "./Dialog";
+import { FileContextMenu } from "./FileContextMenu";
 import { formatSize, type Side } from "./panes";
+import { bindingMatches, eventShortcut } from "./preferences";
 import { useWindowsIcons } from "./useWindowsIcons";
 
 type ElevationTarget = { directory: string; side?: Side; selected?: string };
@@ -158,7 +160,14 @@ function ProcessProperties({ process, onClose, onEnd }: {
   </Dialog>;
 }
 
-export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; lockingPath?: string; onClose: () => void }) {
+export function ProcessBrowser({ side, lockingPath, menuShortcut, onShowExecutable, onFeedback, onClose }: {
+  side: Side;
+  lockingPath?: string;
+  menuShortcut: readonly string[];
+  onShowExecutable: (path: string) => Promise<void>;
+  onFeedback: (text: string, error?: boolean) => void;
+  onClose: () => void;
+}) {
   const [items, setItems] = useState<ProcessInfo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [ending, setEnding] = useState<ProcessInfo[]>([]);
@@ -167,6 +176,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const [checked, setChecked] = useState(0);
   const [partial, setPartial] = useState(false);
   const [properties, setProperties] = useState<ProcessInfo | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const [revision, setRevision] = useState(0);
   const [quickSearch, setQuickSearch] = useQuickSearch(side);
   const [sort, setSort] = useState<{ column: ProcessColumn; asc: boolean }>({ column: "name", asc: true });
@@ -191,6 +201,7 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
   const icons = useWindowsIcons(processIcons, api.processIcons);
   const marked = visible.filter((process) => process.canTerminate && selected.includes(processKey(process)));
   const focusedProcess = visible.find((process) => processKey(process) === focused);
+  const menuProcess = rowMenu && items.find((process) => processKey(process) === rowMenu.key);
   const endRequest = useRef(() => {});
   endRequest.current = () => { if (marked.length) setEnding(marked); };
 
@@ -202,8 +213,16 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
     setSelected([]);
     setFocused("");
     setProperties(null);
+    setRowMenu(null);
     setQuickSearch(null);
   }, [lockingPath]);
+
+  useEffect(() => {
+    if (rowMenu && !menuProcess) {
+      setRowMenu(null);
+      table.current?.focus({ preventScroll: true });
+    }
+  }, [menuProcess, rowMenu]);
 
   useEffect(() => {
     let closed = false;
@@ -281,8 +300,34 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
     }
   }
 
+  function focusTable() {
+    table.current?.focus({ preventScroll: true });
+  }
+
+  function openRowMenu(process: ProcessInfo, x: number, y: number) {
+    if (!loaded) return;
+    focusTable();
+    const key = processKey(process);
+    setFocused(key);
+    setRowMenu({ key, x, y });
+  }
+
+  function copyProcessValue(value: string, success: string) {
+    setRowMenu(null);
+    focusTable();
+    void api.copyText(value).then(() => onFeedback(success), (error: unknown) => {
+      onFeedback(t("Could not copy process details. {0}", errorText(describeError(error))), true);
+    });
+  }
+
+  function showExecutable(path: string) {
+    setRowMenu(null);
+    focusTable();
+    void onShowExecutable(path).catch((error: unknown) => onFeedback(describeError(error), true));
+  }
+
   return (
-    <div className="process-browser">
+    <div className="process-browser" onContextMenu={(event) => event.preventDefault()}>
       {lockingPath && <div className="locking-process-target">
         <span data-tooltip={lockingPath}>{t("Locking processes for {0}", lockingPath)}</span>
         <Button type="button" onClick={() => setRevision((previous) => previous + 1)}>{t("Refresh")}</Button>
@@ -295,7 +340,16 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
           role="grid" aria-label={t("Running processes")} aria-multiselectable="true"
           aria-activedescendant={focused && visible.some((item) => processKey(item) === focused) ? `${side}-process-${focused}` : undefined}
           onKeyDown={(event) => {
-            if (event.target !== event.currentTarget || !visible.length) return;
+            if (event.target !== event.currentTarget) return;
+            if (bindingMatches(menuShortcut, eventShortcut(event))) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (!focusedProcess) return;
+              const bounds = document.getElementById(`${side}-process-${focused}`)?.getBoundingClientRect();
+              if (bounds) openRowMenu(focusedProcess, bounds.left + 12, bounds.bottom);
+              return;
+            }
+            if (!visible.length) return;
             const index = visible.findIndex((item) => processKey(item) === focused);
             const next = event.key === "Home" ? 0 : event.key === "End" ? visible.length - 1 :
               event.key === "ArrowDown" ? Math.min(visible.length - 1, index + 1) :
@@ -334,7 +388,10 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
             return <tr key={key} id={`${side}-process-${key}`} aria-selected={selected.includes(key)}
               data-current={focused === key} onClick={(event) => {
                 changeSelection(index, event.shiftKey, event.ctrlKey || event.metaKey);
-                table.current?.focus({ preventScroll: true });
+                focusTable();
+              }} onContextMenu={(event) => {
+                event.preventDefault();
+                openRowMenu(process, event.clientX, event.clientY);
               }}>
               {displayed.map(({ key }) => <td key={key} className={`process-cell-${key}`}
                 data-tooltip={key === "name" ? process.name : key === "executable" ? process.executable ?? undefined : undefined}>{values[key]}</td>)}
@@ -357,6 +414,21 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
           key, label, checked: !hidden.includes(key), disabled: displayed.length === 1 && !hidden.includes(key),
           toggle: () => toggleColumn(key),
         }))} />}
+      {rowMenu && menuProcess && <FileContextMenu x={rowMenu.x} y={rowMenu.y} label="Process actions"
+        onClose={() => setRowMenu(null)} onReturn={focusTable}>
+        <div className="process-menu-heading" role="presentation">
+          <strong>{menuProcess.name || t("Process")}</strong><span>PID {menuProcess.pid}</span>
+        </div>
+        <Button type="button" role="menuitem" onClick={() => { focusTable(); setRowMenu(null); setProperties(menuProcess); }}>{t("Properties")}</Button>
+        {!lockingPath && <Button type="button" role="menuitem" disabled={!menuProcess.executable}
+          onClick={() => { if (menuProcess.executable) showExecutable(menuProcess.executable); }}>{t("Show in other pane")}</Button>}
+        <Button type="button" role="menuitem" onClick={() => copyProcessValue(String(menuProcess.pid), "PID copied to the clipboard.")}>{t("Copy PID")}</Button>
+        <Button type="button" role="menuitem" disabled={!menuProcess.executable}
+          onClick={() => { if (menuProcess.executable) copyProcessValue(menuProcess.executable, "Path copied to the clipboard."); }}>{t("Copy executable path")}</Button>
+        <div role="separator" className="main-menu-separator" />
+        <Button type="button" role="menuitem" disabled={!menuProcess.canTerminate}
+          onClick={() => { focusTable(); setRowMenu(null); setEnding([menuProcess]); }}>{t("End process…")}</Button>
+      </FileContextMenu>}
       {partial && <p role="status" className="pane-error">{t("Only some files could be checked.")}</p>}
       {error && <p role="alert" className="pane-error">{errorText(error)}</p>}
       <div className="pane-footer"><span>{countText(items.length, "process")}</span>
@@ -365,9 +437,10 @@ export function ProcessBrowser({ side, lockingPath, onClose }: { side: Side; loc
       {properties && <ProcessProperties process={properties} onClose={() => setProperties(null)} onEnd={() => setEnding([properties])} />}
       {ending.length > 0 && (
         <EndProcesses items={ending} onClose={() => setEnding([])} onAttempted={() => setRevision((previous) => previous + 1)} onFinished={() => {
+          const ended = new Set(ending.map(processKey));
           setEnding([]);
           setProperties(null);
-          setSelected([]);
+          setSelected((current) => current.filter((key) => !ended.has(key)));
         }} />
       )}
     </div>

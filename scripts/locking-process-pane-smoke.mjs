@@ -50,6 +50,16 @@ export async function testLockingProcessPane(page, root) {
       assert.equal(cells[0].toLowerCase(), "powershell.exe");
       assert.match(cells[2], /%$/);
       assert.notEqual(cells[3], "0 B");
+      await process.getByRole("gridcell", { name: String(locked.pid), exact: true }).click({ button: "right" });
+      const actions = page.getByRole("menu", { name: "Process actions", exact: true });
+      await actions.getByText(`PID ${locked.pid}`, { exact: true }).waitFor();
+      assert.equal(await actions.getByRole("menuitem", { name: "Show in other pane", exact: true }).count(), 0);
+      await actions.getByRole("menuitem", { name: "End process…", exact: true }).click();
+      const rowConfirmation = dialog("End processes");
+      await rowConfirmation.getByRole("listitem").filter({ hasText: `PID ${locked.pid}` }).waitFor();
+      await button(rowConfirmation, "Cancel").click();
+      assert.equal(locked.exitCode, null);
+      assert.equal(await row(side).getAttribute("data-current"), "true");
       await process.click();
       const confirmation = dialog("End processes");
       if (side === "left") {

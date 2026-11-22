@@ -188,10 +188,13 @@ Mouse-wheel font changes appear on the Options page for the affected feature and
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
-Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a heading to sort or use **Alt+Letter** to start Quick search by process name. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-clicking a local item opens the classic Shell context menu. A sharing violation can open a list of processes Windows reports as using the files. macOS and Linux use Dirlume's file actions menu.
+Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort, or use **Alt+Letter** to search by process name. Windows shows executable icons when they are available. **F8** asks before ending marked processes.
 
-On Windows, select a local file or folder and choose **Find locking processes** from the main menu. The opposite pane shows what Windows found and keeps the source selection. Choose **Properties** for executable details or **Back to files** to return to the previous location. Both **F8** and **End process** in Properties ask for confirmation.
-Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort the table, or search by name or PID. Windows shows executable icons when they are available. **F8** asks before ending selected processes. On Windows, right-click an item or the empty space in a filesystem pane for the classic Shell context menu. Dirlume provides its own context menu for FTP panes. A sharing violation can open a list of processes Windows reports as using the files.
+Right-click a process row or press **Shift+F10** on the focused row to inspect its properties, show its executable in the other pane, copy the PID or executable path, or ask to end that process. The row menu keeps the existing marks. The footer and its shortcut continue to act on the marked processes. Windows lock results omit **Show in other pane** so the locked item stays selected.
+
+On Windows, select a local file or folder and choose **Find locking processes** from the main menu. A sharing violation can also offer this action. The opposite pane shows what Windows found and keeps the source selection. Choose **Properties** for executable details or **Back to files** to return to the previous location. Both **F8** and **End process** in Properties ask for confirmation.
+
+Right-click an item or the empty space in a Windows filesystem pane for the classic Shell context menu. Dirlume provides its own file actions menu for FTP panes and for Linux and macOS.
 
 When Windows denies access, **Open as administrator** requests UAC for a separate Dirlume window with the **Administrator** title bar label. The new window uses the original window's applied preferences and opens the parent and selected item in the requesting pane. It also restores the opposite local folder or reopens Space Analyzer at its local root. Retry the action in the new window after it opens.
 

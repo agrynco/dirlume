@@ -83,6 +83,9 @@ interface PaneProps {
   dropTarget: boolean;
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
+  processContextMenuShortcut: readonly string[];
+  onShowExecutable: (path: string) => Promise<void>;
+  onProcessFeedback: (text: string, error?: boolean) => void;
   onContext: (x: number, y: number, entry?: Entry, preserveMarks?: boolean) => void;
   onAnalyze: (place: SpacePlace) => void;
   spaceDisabled: boolean;
@@ -130,7 +133,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   rightClickSelection, pane, entries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
-  onStartDrag, dropTarget, processView, onProcesses, onContext, onCancelFolderOperation, cancelFolderShortcut,
+  onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
+  onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   useFontZoom(section, zoomShortcut, side, onZoom);
@@ -492,7 +496,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
         {sourceMenu}
       </div>
-      {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)} /> : <>
+      {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)}
+        menuShortcut={processContextMenuShortcut} onShowExecutable={onShowExecutable} onFeedback={onProcessFeedback} /> : <>
       {(filterOpen || pane.filter) && (
         <label className="pane-filter" data-help-topic="paneFilter">
           <Search />
