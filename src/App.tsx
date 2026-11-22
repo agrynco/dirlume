@@ -131,7 +131,7 @@ type Modal =
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
-  | { kind: "verifyConnection"; side: Side; profile: SavedConnection; verification: SshHostVerification }
+  | { kind: "verifyConnection"; side: Side; profile: SavedConnection; verification: SshHostVerification; approvals: readonly SshHostVerification[] }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; side: Side; transfer: Transfer }
   | { kind: "deletion"; deletion: Deletion }
@@ -1413,7 +1413,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  async function openSavedConnection(side: Side, profile: SavedConnection, approval?: SshHostVerification) {
+  async function openSavedConnection(side: Side, profile: SavedConnection, approvals: readonly SshHostVerification[] = []) {
     const location = panes[side].place;
     const { ticket } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
@@ -1434,11 +1434,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           break;
         }
         case "ssh": {
-          const result = await api.connectSsh(profile.id, approval);
+          const result = await api.connectSsh(profile.id, approvals);
           if (result.kind === "verifyHost") {
             if (request.current[side] !== ticket) break;
             if (activeModal.current) throw new Error(t("Open this connection again to verify its host key."));
-            const verification = { kind: "verifyConnection", side, profile, verification: result.verification } as const;
+            const verification = { kind: "verifyConnection", side, profile, verification: result.verification, approvals } as const;
             activeModal.current = verification;
             setModal(verification);
           } else {
@@ -3484,7 +3484,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}
         onCancel={() => connectionDialogsClosed(modal.side)} onApprove={() => {
           connectionDialogsClosed(modal.side);
-          void openSavedConnection(modal.side, modal.profile, modal.verification);
+          void openSavedConnection(modal.side, modal.profile, [...modal.approvals, modal.verification]);
         }} />}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap} onClose={() => setModal(null)} />}
