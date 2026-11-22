@@ -41,6 +41,7 @@ import { testProcessQuickSearch } from "./process-quick-search-smoke.mjs";
 import { testProcessExecutablePath } from "./process-executable-smoke.mjs";
 import { testFolderLockInspector, testLockingProcessPane } from "./locking-process-pane-smoke.mjs";
 import { testOsTimestamps } from "./os-timestamps-smoke.mjs";
+import { testStoppedTransfer } from "./transfer-retry-smoke.mjs";
 import { testNativeQuickView } from "./quick-view-smoke.mjs";
 import { testNativeOptionalStatusBar } from "./status-bar-smoke.mjs";
 import { appendDiagnosticFixture, checkDiagnosticLog } from "./diagnostic-log-smoke.mjs";
@@ -2304,6 +2305,7 @@ try {
   await testLockingProcessPane(page, temp);
   await testFolderLockInspector(page, temp);
   await testProcessColumns(page);
+  await testStoppedTransfer(page, temp);
   await testProcessQuickSearch(page, temp);
   await testProcessExecutablePath(page, child.pid);
   if (process.env.DIRLUME_VERIFY_ARCHIVES === "1") await testArchives(page, temp);

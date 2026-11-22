@@ -312,7 +312,7 @@ export type TransferConflict = {
   incoming: TransferEntryDetails | null; existing: TransferEntryDetails;
 };
 export type TransferOutcome = { kind: "completed" | "skipped" };
-export type TransferProgress = { file: string; bytes: number; total: number | null };
+export type TransferProgress = { file: string; path?: string; bytes: number; total: number | null };
 export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
 
 interface Connection {
@@ -544,7 +544,7 @@ export const api = {
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; multiple: boolean; moving: boolean;
-    policy: ConflictPolicy; askReadOnly: boolean; copyOptions?: CopyOptions;
+    policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
 

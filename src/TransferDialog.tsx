@@ -68,7 +68,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [answering, setAnswering] = useState<TransferConflict | null>(null);
   const [canceling, setCanceling] = useState(false);
   const running = useRef<number | null>(null);
+  const session = useRef<number | null>(null);
   const cancelled = useRef(false);
+  const failedDecision = useRef(false);
+  const reportedBytes = useRef(new Map<string, number>());
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
   const localTarget = !transfer.remoteDestination;
@@ -92,7 +95,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   }, [phase]);
 
   useEffect(() => () => {
-    if (running.current !== null) void api.cancelTransfer(running.current).catch(() => {});
+    const id = session.current;
+    session.current = null;
+    if (id !== null) void api.finishTransfer(id).catch(() => {});
   }, []);
 
   async function resolve(answer: Decision) {
@@ -103,6 +108,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       await api.resolveTransfer(id, answer, remember);
       setConflict((current) => current === conflict ? null : current);
     } catch (failure) {
+      failedDecision.current = true;
       setError(describeError(failure));
       await api.cancelTransfer(id).catch(() => {});
     } finally {
@@ -121,41 +127,32 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     void api.cancelTransfer(running.current).catch(() => {});
   }
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (running.current !== null || phase !== "setup") return;
-    const id = nextTransferId();
+  async function run(retry: boolean) {
+    if (running.current !== null) return;
+    const previousSession = session.current;
+    const id = previousSession ?? nextTransferId();
+    session.current = id;
     running.current = id;
+    failedDecision.current = false;
     setPhase("working");
     setError("");
     setBlocked(undefined);
     let attempted: Transfer["items"][number] | undefined;
     let finished = false;
+    let initialized = previousSession !== null;
     let skippedItems = skipped;
-    let totalBytes = bytes;
-    let previousBytes = 0;
-    const output = new Channel<TransferEvent>();
-    output.onmessage = (event) => {
-      if (event.kind === "conflict") {
-        if (!cancelled.current) { setRemember(false); setConflict(event.conflict); }
-        return;
-      }
-      if (event.bytes === 0) previousBytes = 0;
-      totalBytes += Math.max(0, event.bytes - previousBytes);
-      previousBytes = event.bytes;
-      setBytes(totalBytes);
-      setProgress(event);
-    };
     try {
-      await api.beginTransfer(id);
+      if (!initialized) {
+        await api.beginTransfer(id);
+        initialized = true;
+      }
       const jobs = targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
-      for (const [index, { destination, item }] of jobs.entries()) {
-        if (index < processed) continue;
-        if (cancelled.current) break;
+      for (let index = processed; index < jobs.length; index++) {
+        if (cancelled.current || session.current !== id) break;
+        const { destination, item } = jobs[index];
         attempted = item;
         const { place, entry } = item;
         setProgress({ file: entry.name, bytes: 0, total: null });
-        previousBytes = 0;
         const remoteCopy = !localTarget || isFileServer(transfer.source);
         const target = remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
@@ -164,12 +161,28 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           source: itemSource(place, entry), destination: target, moving,
           ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
           sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
-          multiple: itemCount > 1 || manyDestinations, policy, askReadOnly,
+          multiple: itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
-        const result = await api.transfer(id, request, output);
+        const output = new Channel<TransferEvent>((event) => {
+          if (session.current !== id || cancelled.current) return;
+          if (event.kind === "conflict") {
+            setRemember(false);
+            setConflict(event.conflict);
+            return;
+          }
+          const path = event.path ?? event.file;
+          const previous = reportedBytes.current.get(path) ?? 0;
+          if (event.bytes > previous) {
+            reportedBytes.current.set(path, event.bytes);
+            setBytes((total) => total + event.bytes - previous);
+          }
+          setProgress(event);
+        });
+        const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "completed") setCompleted((count) => count + 1);
         else setSkipped(++skippedItems);
+        reportedBytes.current.clear();
         setProcessed(index + 1);
       }
       finished = true;
@@ -179,15 +192,26 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         setBlocked(attempted);
       }
     } finally {
-      await api.finishTransfer(id).catch(() => {});
+      if (session.current !== id) {
+        await api.finishTransfer(id).catch(() => {});
+        return;
+      }
+      if (finished || cancelled.current || failedDecision.current || !initialized) {
+        session.current = null;
+        await api.finishTransfer(id).catch(() => {});
+      }
       running.current = null;
-      output.onmessage = () => {};
       setConflict(null);
       const success = finished && !cancelled.current && skippedItems === 0;
       onFinished(success);
       if (success) onClose();
       else setPhase("done");
     }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (phase === "setup") void run(false);
   }
 
   const status = error ? "Transfer stopped" : cancelled.current ? "Transfer canceled" : "Transfer complete";
@@ -299,11 +323,13 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                   <ElevationButton directory={blocked.place.path} side={side} selected={blocked.entry.name} />}
           </div>
           <footer className="dialog-footer">
-            {phase === "done" ? (
+            {phase === "done" && error ? (
               <>
-                {lockingMove && <Button type="button" onClick={() => setPhase("setup")}>{t("Retry")}</Button>}
-                <Button ref={action} type="button" className="primary" onClick={onClose}>{t("Done")}</Button>
+                <Button type="button" onClick={cancel}>{t("Cancel")}</Button>
+                <Button ref={action} type="button" className="primary" onClick={() => void run(true)}>{t("Retry")}</Button>
               </>
+            ) : phase === "done" ? (
+              <Button ref={action} type="button" className="primary" onClick={onClose}>{t("Done")}</Button>
             ) : (
               <Button type="button" onClick={cancel} disabled={canceling}>{canceling ? t("Canceling…") : t("Cancel")}</Button>
             )}
