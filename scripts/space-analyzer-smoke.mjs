@@ -88,6 +88,16 @@ async function fixture(browser, layout, source = "local") {
             const child = (parent, entry) => ({ parent, name: entry.name, directory: entry.directory,
               size: entry.size, allocated: entry.allocated ?? null, shared: false });
             const closed = (id, error = null) => ({ closed: id, error, partial: !!error });
+            if (window.denseTreemap) {
+              send({ kind: "start", strategy: "walk" });
+              const media = Array.from({ length: 16 }, (_, i) => file(`media-${i}.dat`, Math.round(1.4 * gib), 2 * gib));
+              const small = Array.from({ length: 54 }, (_, i) => file(`small-${i}.dat`, 8 * 1024 ** 2, 16 * 1024 ** 2));
+              batch(child(0, dir("Recordings")), child(0, file("Archive.dat", 6 * gib, 9 * gib)),
+                ...[...media, ...small].map((entry) => child(0, entry)), closed(0),
+                child(1, file("Video.dat", 10 * gib, 12 * gib)), closed(1));
+              send({ kind: "finished" });
+              return;
+            }
             if (window.spaceOperationFixture) {
               send({ kind: "start", strategy: "walk" });
               batch(child(0, dir("alpha")), child(0, dir("beta")), closed(0),
@@ -166,6 +176,39 @@ async function openSource(page, menu, profile) {
   await button(left, "Locations for left pane").click();
   await button(left, menu).click();
   await left.getByRole("option", { name: new RegExp("^" + profile) }).dblclick();
+}
+
+async function checkTreemapLabels(page, analyzer) {
+  const tile = (name) => analyzer.getByRole("button", { name });
+  const hasLabel = (button, fit) => button.locator(`.space-tile-label[data-fit=${fit}]`);
+  const metric = analyzer.getByRole("combobox", { name: "Size metric" });
+  const tooltip = page.locator(".app-tooltip");
+  await button(analyzer, "Treemap").click();
+  await hasLabel(tile(/^Recordings, 12 GiB$/), "both").waitFor();
+  const more = tile(/^More items, 128 MiB$/);
+  await more.hover();
+  await tooltip.getByText("More items, 128 MiB", { exact: true }).waitFor();
+
+  await page.setViewportSize({ width: 800, height: 500 });
+  const sizeOnly = analyzer.locator('.space-tile-label[data-fit="size"]').first();
+  await sizeOnly.locator(":scope > span").waitFor();
+  assert.equal(await sizeOnly.locator("strong").isVisible(), false);
+  assert.match(await sizeOnly.locator(":scope > span").textContent(), /^\d+(?:[.,]\d+)? [GM]iB$/);
+  const hidden = analyzer.locator('.space-tile:has(.space-tile-label[data-fit="none"])').first();
+  await hidden.hover();
+  const hiddenLabel = await hidden.getAttribute("aria-label");
+  await tooltip.getByText(hiddenLabel, { exact: true }).waitFor();
+  assert.equal(await hidden.locator(".space-tile-label > span").isVisible(), false);
+
+  await page.setViewportSize({ width: 1120, height: 760 });
+  await metric.selectOption("logical");
+  const recordings = tile(/^Recordings, 10 GiB$/);
+  const label = hasLabel(recordings, "both");
+  await label.getByText("10 GiB", { exact: true }).waitFor();
+  await button(analyzer, "Treemap").hover();
+  await recordings.hover();
+  await tooltip.getByText("Recordings, 10 GiB", { exact: true }).waitFor();
+  assert.equal(await tile(/^More items, 64 MiB$/).count(), 1);
 }
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -307,6 +350,14 @@ try {
     await page.close();
   }
 
+  const dense = await fixture(browser, "standard");
+  await dense.evaluate(() => { window.denseTreemap = true; });
+  await button(pane(dense, "left"), "Analyze space").click();
+  const denseAnalyzer = dense.getByRole("region", { name: "Space Analyzer", exact: true });
+  await finished(denseAnalyzer);
+  await checkTreemapLabels(dense, denseAnalyzer);
+  await dense.close();
+
   for (const [layout, source, label] of [["twin", "local", "Analyze volume"], ["classic", "unc", "Analyze share"], ["standard", "mounted", "Analyze share"]]) {
     const page = await fixture(browser, layout, source);
     await page.setViewportSize({ width: 600, height: 500 });
@@ -369,6 +420,10 @@ try {
     else await remote.getByText("File size", { exact: true }).waitFor();
     await row(remote, "broken").getByText("Unavailable").waitFor();
     if (source === "ftp") {
+      await button(remote, "Treemap").click();
+      await remote.getByRole("button", { name: /^nested, 1\.2\d* KiB$/ }).hover();
+      await page.locator(".app-tooltip").getByText(/^nested, 1\.2\d* KiB$/).waitFor();
+      await button(remote, "Tree").click();
       await assertBreadcrumbs(remote, ["fixture", "open"]);
       await page.evaluate(() => { window.spaceFailure = "Connection reset by peer"; });
       await button(remote, "Rescan").click();

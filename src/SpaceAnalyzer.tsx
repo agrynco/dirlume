@@ -231,6 +231,34 @@ function tilesIn(tiles: Tile[], x = 0, y = 0, width = 100, height = 100) {
 
 type ChartMenu = (entry: SpaceNode, x: number, y: number, returnFocus?: HTMLElement) => void;
 
+function TreemapTileLabel({ name, size }: { name: string; size: string }) {
+  const label = useRef<HTMLSpanElement>(null);
+  const value = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const container = label.current;
+    const text = value.current;
+    if (!container || !text) return;
+
+    const fitLabel = () => {
+      const available = container.getBoundingClientRect();
+      const needed = text.getBoundingClientRect();
+      const fitsSize = available.width >= needed.width && available.height >= needed.height;
+      if (!fitsSize) container.dataset.fit = "none";
+      else container.dataset.fit = available.height >= needed.height * 2 ? "both" : "size";
+    };
+
+    fitLabel();
+    const resize = new ResizeObserver(fitLabel);
+    resize.observe(container);
+    resize.observe(text);
+    return () => resize.disconnect();
+  }, []);
+
+  return <span ref={label} className="space-tile-label" aria-hidden="true">
+    <strong>{name}</strong><span ref={value}>{size}</span>
+  </span>;
+}
+
 function Treemap({ folder, metric, selected, onActivate, openMenu }: {
   folder: SpaceNode;
   metric: Metric;
@@ -244,10 +272,12 @@ function Treemap({ folder, metric, selected, onActivate, openMenu }: {
   if (children.length > limit) tiles.push({ entry: null, size: children.slice(limit).reduce((sum, child) => sum + child[metric], 0) });
   tilesIn(tiles);
   return tiles.length ? <div className="space-map-canvas" aria-label={t("Treemap")}>
-      {tiles.map(({ entry, size, style }) => <Button key={entry?.id ?? "more"} className="space-tile" style={style}
+    {tiles.map(({ entry, size, style }) => {
+      const name = entry?.name ?? t("More items");
+      const formatted = formatSize(size);
+      return <Button key={entry?.id ?? "more"} className="space-tile" style={style}
         data-folder={entry?.directory || undefined} data-selected={entry?.id === selected || undefined}
-        aria-label={t("{0}, {1}", entry?.name ?? t("More items"), formatSize(size))}
-        tooltip={entry?.name ?? t("More items")} onClick={() => onActivate(entry)}
+        aria-label={t("{0}, {1}", name, formatted)} onClick={() => onActivate(entry)}
         onContextMenu={entry ? (event) => {
           event.preventDefault();
           openMenu(entry, event.clientX, event.clientY, event.currentTarget);
@@ -258,10 +288,10 @@ function Treemap({ folder, metric, selected, onActivate, openMenu }: {
           const bounds = event.currentTarget.getBoundingClientRect();
           openMenu(entry, bounds.left + 12, bounds.bottom, event.currentTarget);
         }}>
-        <strong>{entry?.name ?? t("More items")}</strong>
-        <span>{formatSize(size)}</span>
-      </Button>)}
-    </div> : <p className="pane-empty">{t("No space to display.")}</p>;
+        <TreemapTileLabel name={name} size={formatted} />
+      </Button>;
+    })}
+  </div> : <p className="pane-empty">{t("No space to display.")}</p>;
 }
 
 const treeActions = ["copy", "move", "recycle", "recycleAlternate", "delete"] as const;
