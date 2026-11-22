@@ -457,7 +457,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {diagnosticVisible && <DiagnosticLog source={document.text} />}
         <div className="source-surface" hidden={!sourceVisible}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
-            <CodeSurface key={sourceRevision} fileName={file.name} editing={editing} locked={saving} active={active && sourceVisible}
+            <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>
@@ -828,7 +828,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
           aria-label={t(side === leftFile ? "Left file" : "Right file")}>
           <div className="comparison-editor-name" data-tooltip={documentPath(files[side])}>{files[side].name}{dirty.includes(side) ? " *" : ""}</div>
           <Suspense fallback={<div className="dialog-body">{t("Loading editor…")}</div>}>
-            <CodeSurface fileName={files[side].name} editing locked={saving} active={editing && side === initialEditor}
+            <CodeSurface file={files[side]} editing locked={saving} active={editing && side === initialEditor}
               value={documents[side]} onChange={(text) => {
                 setDocuments((previous) => previous && { ...previous, [side]: text });
                 setCurrent(0);
