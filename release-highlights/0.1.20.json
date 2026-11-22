@@ -6,6 +6,7 @@
     "Complete Docker container and Compose subcommands, options, container names and IDs, and project services in the command line and terminal.",
     "Open Space Analyzer in either pane, navigate with breadcrumbs, and copy, move, or delete marked items from its local tree. The active analyzer and its matching terminal follow the same working directory.",
     "Set separate fonts for file pane dialogs and Options from Appearance. Font size arrows start from the displayed inherited size.",
-    "Deletion progress stays in place as the path changes. On Windows, Find locking processes has a visible button border when deletion pauses."
+    "Deletion progress stays in place as the path changes. On Windows, Find locking processes has a visible button border when deletion pauses.",
+    "The viewer and editor recognize Nginx configuration files and highlight their syntax, including site files opened over SFTP."
   ]
 }

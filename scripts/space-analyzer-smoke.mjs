@@ -358,7 +358,7 @@ try {
       await button(rightAnalysis, "Close").click();
       await rightFiles.waitFor();
     }
-    const markModifier = source === "mac" ? "Meta" : "Control";
+    const markModifier = process.platform === "darwin" ? "Meta" : "Control";
     await duplicate.nth(0).click({ modifiers: [markModifier] });
     await duplicate.nth(1).click({ modifiers: [markModifier] });
     assert.equal(await tree.locator(".marked").count(), 2);
