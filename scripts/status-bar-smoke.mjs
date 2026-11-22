@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { openMainMenu } from "./menu-header-smoke.mjs";
-import { checkResizeMarker, closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
+import { checkResizeMarker, closeToolWindow, openOptionsWindow, settingsArchiveAction } from "./tool-window-smoke.mjs";
 
 const button = (scope, name) => scope.getByRole("button", { name, exact: true });
 const optionsOf = (page) => page.getByRole("dialog", { name: "Options", exact: true });
@@ -243,7 +243,7 @@ async function testStatusBar() {
       await button(page, "Options").click();
       await openStatusSetting(options);
       assert.equal(await showStatusBar(options).isChecked(), false);
-      await button(options, "Export settings").click();
+      await settingsArchiveAction(options, "Export settings");
       await button(page.getByRole("dialog", { name: "Export settings", exact: true }), "Export").click();
       await page.waitForFunction(() => Boolean(window.statusFixture.exported));
       assert.equal(await page.evaluate(() => window.statusFixture.exported.groups.appearance.showStatusBar), false);
@@ -257,7 +257,7 @@ async function testStatusBar() {
       await button(terminal, "Close terminal").click();
       await button(page, "Options").click();
       await page.evaluate(() => { window.statusFixture.imported = JSON.stringify(window.statusFixture.exported); });
-      await button(options, "Import settings").click();
+      await settingsArchiveAction(options, "Import settings");
       await button(page.getByRole("dialog", { name: "Import settings", exact: true }), "Import").click();
       await status.waitFor({ state: "hidden" });
       await page.close();

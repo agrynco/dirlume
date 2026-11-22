@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { settingsArchiveAction } from "./tool-window-smoke.mjs";
 
 const local = { id: "local", name: "Local palette", base: "light", colors: { canvas: "#f0f0f0" }, fonts: {} };
 const evening = {
@@ -53,11 +54,22 @@ try {
   const exported = () => page.evaluate(() => window.settingsExport);
   await openOptions();
   const options = dialog("Options");
+  const archiveMenuTrigger = button(options, "Settings archive");
+  await archiveMenuTrigger.press("ArrowDown");
+  const archiveMenu = options.getByRole("menu", { name: "Settings archive", exact: true });
+  const importItem = archiveMenu.getByRole("menuitem", { name: "Import settings", exact: true });
+  const exportItem = archiveMenu.getByRole("menuitem", { name: "Export settings", exact: true });
+  assert.ok(await importItem.evaluate((element) => document.activeElement === element));
+  await importItem.press("End");
+  assert.ok(await exportItem.evaluate((element) => document.activeElement === element));
+  await exportItem.press("Escape");
+  await archiveMenu.waitFor({ state: "hidden" });
+  assert.ok(await archiveMenuTrigger.evaluate((element) => document.activeElement === element));
   const exportDialog = dialog("Export settings");
   const importDialog = dialog("Import settings");
   const startImport = async (file) => {
     await page.evaluate((contents) => { window.settingsInput = contents; }, file);
-    await button(options, "Import settings").click();
+    await settingsArchiveAction(options, "Import settings");
   };
 
   async function assertAdjacent(control) {
@@ -133,7 +145,7 @@ try {
   assert.equal(await actionBar.locator("button > svg").count(), 0);
   await openOptions();
 
-  await button(options, "Export settings").click();
+  await settingsArchiveAction(options, "Export settings");
   const groupChecks = exportDialog.getByRole("group", { name: "Settings groups", exact: true }).getByRole("checkbox");
   const allChecks = exportDialog.getByRole("checkbox");
   const assertDefaultSelection = async () => {
@@ -153,7 +165,7 @@ try {
   assert.equal(Object.keys(fullFile.groups).length, groupCount);
   assert.deepEqual(fullFile.schemes.map(({ id }) => id), [local.id, evening.id]);
 
-  await button(options, "Export settings").click();
+  await settingsArchiveAction(options, "Export settings");
   await assertDefaultSelection();
   for (const group of await groupChecks.all()) await group.uncheck();
   await button(exportDialog, "Export").click();
@@ -165,7 +177,7 @@ try {
   assert.deepEqual(themeFile.schemes[1].fonts.markdown, evening.fonts.markdown);
   assert.deepEqual(themeFile.schemes[1].colors, evening.colors);
 
-  await button(options, "Export settings").click();
+  await settingsArchiveAction(options, "Export settings");
   await assertDefaultSelection();
   for (const item of await allChecks.all()) await item.uncheck();
   assert.equal(await button(exportDialog, "Export").isDisabled(), true);
@@ -241,7 +253,7 @@ try {
     assert.deepEqual(await readPreferences(), after);
   }
   await startImport(null);
-  await button(options, "Import settings").waitFor();
+  await button(options, "Settings archive").waitFor();
   assert.equal(await importDialog.count(), 0);
   assert.deepEqual(await readPreferences(), after);
 
@@ -292,7 +304,7 @@ try {
   });
   await page.reload();
   await openOptions();
-  await button(options, "Export settings").click();
+  await settingsArchiveAction(options, "Export settings");
   await assertDefaultSelection();
   assert.equal(await exportDialog.getByRole("group", { name: "Color schemes", exact: true }).count(), 0);
   await button(exportDialog, "Cancel").click();
@@ -366,7 +378,7 @@ try {
   assert.equal(afterDeletion.systemDarkScheme, "dark");
   assert.deepEqual(afterDeletion.schemes, [{ ...localBefore, name: "Daylight renamed" }]);
   await openOptions();
-  await button(options, "Export settings").click();
+  await settingsArchiveAction(options, "Export settings");
   assert.ok(await check(exportDialog, "Daylight renamed").isVisible());
   assert.equal(await check(exportDialog, evening.name).count(), 0);
   await button(exportDialog, "Cancel").click();

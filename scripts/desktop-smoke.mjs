@@ -937,7 +937,7 @@ try {
   await left.getByRole("option", { name: /^overlap/ }).click();
   await page.keyboard.press("F5");
   await startTransfer("Copy");
-  await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
+  await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
   await conflict.getByText("Incoming", { exact: true }).waitFor();
   await conflict.getByText("2 B", { exact: true }).waitFor();
   assert.equal(await conflict.getByRole("button", { name: "Skip", exact: true }).evaluate((button) => document.activeElement === button), true);
@@ -1347,7 +1347,7 @@ try {
     await mergeRow.click();
     await page.keyboard.press("F6");
     await startTransfer("Move", otherVolume);
-    await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
+    await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
     await conflict.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByRole("dialog", { name: "Transfer canceled" }).getByRole("button", { name: "Done" }).click();
     assert.equal(await readFile(join(src, "merge", "update.txt"), "utf8"), "New contents");
@@ -1355,7 +1355,7 @@ try {
     await mergeRow.click();
     await page.keyboard.press("F6");
     await startTransfer("Move", otherVolume);
-    await folderConflict.getByRole("button", { name: "Overwrite", exact: true }).click();
+    await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
     await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
     await waitForCompletedTransfer();
     await assert.rejects(readFile(join(src, "merge", "update.txt")), { code: "ENOENT" });

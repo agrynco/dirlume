@@ -1,5 +1,5 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
-import { closeToolWindow, openOptionsWindow, openToolWindow } from "./tool-window-smoke.mjs";
+import { closeToolWindow, hideComparisonOptions, openOptionsWindow, openToolWindow, showComparisonOptions } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -54,12 +54,15 @@ export async function testCompareLayouts(page, root) {
   const active = list.locator(".diff-block.current");
 
   await list.waitFor();
+  const comparisonOptions = await showComparisonOptions(dialog);
   await layout().press("F1");
   const help = window.getByRole("dialog", { name: "Help", exact: true });
   await help.locator('.help-contents [aria-current="location"][href="#help-compare"]').waitFor();
   await window.keyboard.press("Escape");
   await help.waitFor({ state: "hidden" });
-  assert.equal(await layout().evaluate((element) => element === document.activeElement), true);
+  await window.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Layout");
+  await layout().press("Escape");
+  assert.ok(await comparisonOptions.evaluate((element) => element === document.activeElement));
   const options = await openOptionsWindow(page);
   const settings = options.getByRole("dialog", { name: "Options", exact: true });
   await settings.getByRole("button", { name: "Pick an element", exact: true }).click();
@@ -68,9 +71,11 @@ export async function testCompareLayouts(page, root) {
   await settings.getByRole("heading", { name: "Compare files", exact: true }).waitFor();
   await settings.getByLabel("Compare files text hex", { exact: true }).waitFor();
   await closeToolWindow(options);
+  await showComparisonOptions(dialog);
   await layout().selectOption("side-by-side");
   await connectors.check();
   await whitespace.check();
+  await hideComparisonOptions(dialog);
   await list.locator('[data-change="3"]').waitFor();
   assert.equal(await list.locator(".diff-connector path").count(), 3);
   assert.equal(await list.locator(".diff-connector path.added").getAttribute("data-ends"), "0,100");
@@ -117,6 +122,7 @@ export async function testCompareLayouts(page, root) {
     }));
     await assertAlignment();
   }
+  await showComparisonOptions(dialog);
   await connectors.uncheck();
   assert.equal(await list.locator(".diff-connector").count(), 0);
   await connectors.check();
@@ -128,6 +134,7 @@ export async function testCompareLayouts(page, root) {
   assert.equal(await first.count(), 1);
   assert.deepEqual(await first.locator(".diff-number").allTextContents(), ["1", "1"]);
   assert.deepEqual(await active.locator(".diff-text").allTextContents(), ["switch = 100;", longLine, "switch = 999;"]);
+  await hideComparisonOptions(dialog);
   await list.press("Control+u");
   assert.deepEqual(await list.locator(".comparison-head span[data-tooltip]").allTextContents(), ["original.txt", "revised.txt"]);
   await list.press("F8");
@@ -135,14 +142,17 @@ export async function testCompareLayouts(page, root) {
   await list.press("F7");
   assert.equal(await active.getAttribute("data-change"), "1");
   const collapse = dialog.getByRole("checkbox", { name: "Collapse unchanged sections" });
+  await showComparisonOptions(dialog);
   await collapse.check();
   const folded = dialog.getByRole("button", { name: /^Show \d+ unchanged lines/ });
   await folded.first().click();
+  await showComparisonOptions(dialog);
   await collapse.uncheck();
   await layout().selectOption("side-by-side");
   assert.equal(await active.getAttribute("data-change"), "1");
   if (process.env.DIRLUME_COMPARE_SCREENSHOT) await dialog.screenshot({ path: process.env.DIRLUME_COMPARE_SCREENSHOT });
   await layout().selectOption("unified");
+  await hideComparisonOptions(dialog);
   await closeToolWindow(window);
 
   await row("left", "original.txt").click();
@@ -152,9 +162,11 @@ export async function testCompareLayouts(page, root) {
   dialog = currentDialog();
   list = differences();
   await list.waitFor();
+  await showComparisonOptions(dialog);
   assert.equal(await layout().inputValue(), "unified");
   assert.equal(await list.locator("[data-change]").count(), 0);
   assert.equal(await dialog.getByRole("button", { name: "Next", exact: true }).isEnabled(), false);
+  await hideComparisonOptions(dialog);
   await closeToolWindow(window);
   console.log("Verified both comparison layouts, original line numbers, intraline marks, ribbons, resizing, scrolling, and navigation.");
 
@@ -163,11 +175,24 @@ export async function testCompareLayouts(page, root) {
   window = await compare();
   dialog = currentDialog();
   list = differences();
+  await showComparisonOptions(dialog);
   await layout().selectOption("side-by-side");
   await list.press("Control+u");
   assert.deepEqual(await list.locator(".comparison-head span[data-tooltip]").allTextContents(), ["revised.txt", "original.txt"]);
   assert.deepEqual(await list.locator('[data-change="1"] mark').allTextContents(), ["999", "100"]);
-  await dialog.getByRole("button", { name: "Apply to left", exact: true }).click();
+  await dialog.evaluate((node) => { node.style.width = "620px"; });
+  const apply = dialog.getByRole("button", { name: "Apply", exact: true });
+  await apply.press("ArrowDown");
+  const applyMenu = dialog.getByRole("menu", { name: "Apply", exact: true });
+  const applyLeft = applyMenu.getByRole("menuitem", { name: "Apply to left", exact: true });
+  const applyRight = applyMenu.getByRole("menuitem", { name: "Apply to right", exact: true });
+  await applyLeft.press("ArrowDown");
+  assert.ok(await applyRight.evaluate((element) => element === document.activeElement));
+  await applyRight.press("Escape");
+  assert.ok(await apply.evaluate((element) => element === document.activeElement));
+  await apply.press("Enter");
+  await applyLeft.press("Enter");
+  await showComparisonOptions(dialog);
   await dialog.getByRole("checkbox", { name: "Edit files", exact: true }).check();
   for (const [side, text] of [["Left", "right edit"], ["Right", "left edit"]]) {
     await dialog.getByRole("region", { name: `${side} file` }).locator(".cm-content").press("Control+End");

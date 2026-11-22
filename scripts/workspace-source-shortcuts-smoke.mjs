@@ -148,7 +148,55 @@ try {
       await page.locator(`.quick-view-${side}`).waitFor({ state: "hidden" });
       assert.equal(await page.locator(`#${opposite(side)}-path`).getAttribute("data-path"), initialPath(opposite(side)));
     }
+    const localized = {
+      Windows: { language: "en", title: "Folder shortcuts", up: "Move up", down: "Move down" },
+      Ubuntu: { language: "uk", title: "Закладки папок", up: "Перемістити вгору", down: "Перемістити вниз" },
+      macOS: { language: "ru", title: "Закладки папок", up: "Переместить вверх", down: "Переместить вниз" },
+    }[client];
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate(({ language, theme }) => {
+        localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
+          language, theme, bindingDefaults: 8, activeShortcutScheme: "fixture",
+          shortcutSchemes: [{ id: "fixture", name: "Fixture", bindings: { pickerFolderUp: ["Ctrl+Shift+ArrowUp"], pickerFolderDown: [] } }],
+        }));
+      }, { language: localized.language, theme });
+      await page.setViewportSize({ width: theme === "dark" ? 330 : 1100, height: 680 });
+      await page.reload();
+      await page.locator(`html[lang=${localized.language}][data-theme=${theme}]`).waitFor();
+      await waitForPath("left", home);
+      await files("left").focus();
+      await pressBookmark(9);
+      const picker = page.getByRole("dialog", { name: localized.title, exact: true });
+      const list = picker.getByRole("listbox");
+      await list.waitFor();
+      const strip = picker.locator(".dialog-action-strip");
+      await picker.evaluate((element) => { element.style.setProperty("--dialog-size", "20px"); });
+      assert.ok(await strip.evaluate((element) => {
+        const actions = [...element.querySelectorAll("button")];
+        const boxes = actions.map((action) => action.getBoundingClientRect());
+        return actions.length === 5 && element.scrollWidth === element.clientWidth &&
+          boxes.every(({ top, width, height }) => top === boxes[0].top && width === 32 && height === 32) &&
+          actions.every((action) => action.getAttribute("aria-label") && action.textContent === "");
+      }));
+      const up = button(picker, localized.up);
+      const down = button(picker, localized.down);
+      assert.ok(await up.isDisabled());
+      assert.ok(await down.isEnabled());
+      await list.press("End");
+      assert.ok(await down.isDisabled());
+      assert.equal(await down.getAttribute("data-tooltip"), localized.down);
+      await list.press("Control+ArrowUp");
+      assert.match(await list.getByRole("option", { selected: true }).innerText(), /^Downloads folder/);
+      await list.press("Tab");
+      const add = strip.getByRole("button").first();
+      assert.ok(await add.evaluate((element) => document.activeElement === element && getComputedStyle(element).outlineWidth === "2px"));
+      await up.press("Control+Shift+ArrowUp");
+      assert.match(await list.getByRole("option").first().innerText(), /^Downloads folder/);
+      assert.equal(await up.isDisabled(), true);
+      assert.match(await up.getAttribute("data-tooltip"), /↑/);
+    }
     console.log(`Verified workspace sources and numbered bookmarks with ${client} bindings.`);
+    console.log(`Verified one-row bookmark controls, localized labels, focus and remapped shortcuts with ${client} settings.`);
     await page.close();
   }
 } finally {

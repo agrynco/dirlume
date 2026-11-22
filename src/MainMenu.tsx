@@ -260,9 +260,6 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
   }
 
   return <Dialog title={t("About")} onClose={onClose} footer={<>
-    <Button type="button" className="primary about-donate" onClick={() => openLink(donationUrl)}>
-      <Coffee aria-hidden="true" /><span>{t("Donate via monobank")}</span>
-    </Button>
     <Button data-initial-focus type="button" onClick={onClose}><X aria-hidden="true" />{t("Close")}</Button>
   </>}>
     <div className="dialog-body about-body">
@@ -293,6 +290,9 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
             <Icon aria-hidden="true" /><span>{t(label)}</span>
           </Button>
         ))}
+        <Button type="button" onClick={() => openLink(donationUrl)}>
+          <Coffee aria-hidden="true" /><span>{t("Donate via monobank")}</span>
+        </Button>
       </div>
       {linkError && <p role="alert" className="dialog-error">{errorText(linkError)}</p>}
     </div>

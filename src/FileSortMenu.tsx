@@ -1,7 +1,8 @@
 import { useState, type KeyboardEvent } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronUp, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp, ArrowUpDown, ArrowUpNarrowWide, Check, Plus, RotateCcw } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { DialogIconButton, RowOrderActions } from "./DialogActions";
 import { t } from "./i18n";
 import {
   defaultSortCriteria, sortModeIds, sortModes, usesSortGroups, type FileSort, type SortCriterion, type SortGroup, type SortMode,
@@ -29,28 +30,28 @@ export function SortMenu({ sort, mode, available, bindings, onMode, onDirection,
   onClose: () => void;
 }) {
   const directions = [
-    { command: "sortAscending", label: "Sort ascending", run: () => onDirection(true) },
-    { command: "sortDescending", label: "Sort descending", run: () => onDirection(false) },
-    { command: "sortReverse", label: "Reverse sort direction", run: () => onDirection(!sort.asc) },
-    { command: "sortEditCriteria", label: "Edit sort tie-breakers", run: () => onCriteria(mode) },
+    { command: "sortAscending", label: "Sort ascending", icon: ArrowUpNarrowWide, run: () => onDirection(true) },
+    { command: "sortDescending", label: "Sort descending", icon: ArrowDownWideNarrow, run: () => onDirection(false) },
+    { command: "sortReverse", label: "Reverse sort direction", icon: ArrowUpDown, run: () => onDirection(!sort.asc) },
   ] as const;
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.getModifierState("AltGraph")) return;
     const key = eventShortcut(event);
     const action = directions.find(({ command }) => bindingMatches(bindings[command], key));
+    const editCriteria = bindingMatches(bindings.sortEditCriteria, key);
     const priority = toggles.find(({ command }) => bindingMatches(bindings[command], key));
     const criterion = sortModeIds.find((item) => available(item) && bindingMatches(bindings[sortModeCommand(item)], key));
-    if (action || priority || criterion) {
+    if (action || editCriteria || priority || criterion) {
       event.preventDefault();
       event.stopPropagation();
       if (event.repeat) return;
-      if (action?.command === "sortEditCriteria") {
+      if (action) action.run();
+      else if (editCriteria) {
         const selected = (event.target as HTMLElement).closest<HTMLElement>("[data-sort-mode]")?.dataset.sortMode as SortMode | undefined;
         const target = selected ?? mode;
         if (target !== "unsorted" && available(target)) onCriteria(target);
-      } else if (action) action.run();
-      else if (priority) onToggle(priority.field);
+      } else if (priority) onToggle(priority.field);
       else if (criterion) onMode(criterion);
       return;
     }
@@ -95,10 +96,13 @@ export function SortMenu({ sort, mode, available, bindings, onMode, onDirection,
       <p className="sort-mode-note" id="sort-mode-unavailable">{t("Dimmed modes require metadata unavailable at this location.")}</p>
       {!available(mode) && <p className="sort-mode-note">{t("This pane uses Name order here and restores the chosen order where supported.")}</p>}
       {sort.groups && !usesSortGroups(mode) && <p className="sort-mode-note">{t("Sort groups apply to Name, Name only, and Extension.")}</p>}
-      <div className="sort-menu-actions">
-        {directions.map(({ command, label, run }, index) => <Button key={command} type="button"
-          disabled={index === 3 && (mode === "unsorted" || !available(mode))}
-          shortcut={showShortcut(bindings[command][0])} onClick={run}>{t(label)}</Button>)}
+      <div className="dialog-actions dialog-actions-end">
+        <div className="dialog-action-group">
+          {directions.map(({ command, label, icon: Icon, run }) => <DialogIconButton key={command}
+            label={t(label)} shortcut={showShortcut(bindings[command][0])} onClick={run}><Icon /></DialogIconButton>)}
+        </div>
+        <Button type="button" disabled={mode === "unsorted" || !available(mode)}
+          shortcut={showShortcut(bindings.sortEditCriteria[0])} onClick={() => onCriteria(mode)}>{t("Edit sort tie-breakers")}</Button>
       </div>
     </div>
   </Dialog>;
@@ -107,13 +111,8 @@ export function SortMenu({ sort, mode, available, bindings, onMode, onDirection,
 function SequenceControls({ index, length, move, remove }: {
   index: number; length: number; move: (next: number) => void; remove: () => void;
 }) {
-  return <div className="sort-sequence-actions">
-    <Button type="button" className="icon-button" aria-label={t("Move row {0} up", index + 1)}
-      disabled={index === 0} onClick={() => move(index - 1)}><ChevronUp /></Button>
-    <Button type="button" className="icon-button" aria-label={t("Move row {0} down", index + 1)}
-      disabled={index + 1 === length} onClick={() => move(index + 1)}><ChevronDown /></Button>
-    <Button type="button" className="icon-button" aria-label={t("Remove row {0}", index + 1)} onClick={remove}><Trash2 /></Button>
-  </div>;
+  return <RowOrderActions up={t("Move row {0} up", index + 1)} down={t("Move row {0} down", index + 1)} remove={t("Remove row {0}", index + 1)}
+    first={index === 0} last={index + 1 === length} onMove={(offset) => move(index + offset)} onRemove={remove} />;
 }
 
 function moveItem<T>(items: T[], index: number, next: number) {
@@ -154,9 +153,8 @@ export function SortCriteriaDialog({ mode, criteria, onSave, onClose }: {
         <SequenceControls index={index} length={draft.length} move={(next) => setDraft(moveItem(draft, index, next))}
           remove={() => setDraft(draft.filter((_, i) => i !== index))} />
       </div>)}
-      <Button type="button" disabled={!unused} onClick={() => { if (unused) setDraft([...draft, { mode: unused, asc: true }]); }}>
-        <Plus /> {t("Add criterion")}
-      </Button>
+      <DialogIconButton label={t("Add criterion")} disabled={!unused}
+        onClick={() => { if (unused) setDraft([...draft, { mode: unused, asc: true }]); }}><Plus /></DialogIconButton>
     </div>
   </Dialog>;
 }
@@ -181,6 +179,6 @@ export function SortGroupsSettings({ groups, onChange }: { groups: SortGroup[]; 
         remove={() => onChange(groups.filter((_, i) => i !== index))} />
       {!group.mask.trim() && <p className="dialog-error" role="alert">{t("Enter a filename mask.")}</p>}
     </div>)}
-    <Button type="button" onClick={() => onChange([...groups, { mask: "", position: "before" }])}><Plus /> {t("Add sort group")}</Button>
+    <DialogIconButton label={t("Add sort group")} onClick={() => onChange([...groups, { mask: "", position: "before" }])}><Plus /></DialogIconButton>
   </div>;
 }

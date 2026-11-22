@@ -5,6 +5,7 @@ import { Pipette } from "lucide-react";
 import { isHexColor } from "./appearance";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { DialogIconButton } from "./DialogActions";
 import { isTauri } from "@tauri-apps/api/core";
 import { api } from "./api";
 import { reportFrontendError } from "./diagnostics";
@@ -130,14 +131,12 @@ export function ColorPicker({ label, initial, onChange, onCommit, onCancel }: {
               <HistoryField historyKey="appearance-hex" aria-label="HEX" data-initial-focus type="text" value={hex} maxLength={7} spellCheck={false}
                 aria-invalid={!valid} onValueChange={changeHex} />
             </label>
+            {(desktop || EyeDropper) && <DialogIconButton label={t("Pick a color from the screen")}
+              disabled={sampling} onClick={() => { void sampleScreen(); }}><Pipette /></DialogIconButton>}
             <div className="color-picker-swatches">
               <span data-tooltip={t("Original color {0}", initial)} style={{ "--swatch": initial } as CSSProperties} />
               <span data-tooltip={t("Selected color {0}", current)} style={{ "--swatch": current } as CSSProperties} />
             </div>
-            {(desktop || EyeDropper) && <Button type="button" className="icon-button"
-              aria-label={t("Pick a color from the screen")} disabled={sampling} onClick={() => { void sampleScreen(); }}>
-              <Pipette />
-            </Button>}
           </div>
           {sampling && <p role="status">{t("Click a visible color anywhere on the screen. Press Esc to cancel.")}</p>}
           {sampleError && <p role="alert">{t("Could not pick a color from the screen.")}</p>}

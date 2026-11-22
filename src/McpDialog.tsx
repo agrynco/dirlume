@@ -1,9 +1,11 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import { api, describeError, type McpConnection } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { DialogIconButton } from "./DialogActions";
 import { errorText, t } from "./i18n";
 import { executeMcp, type McpAction, type McpApproval, type McpContext, type McpRevisions } from "./mcp";
 
@@ -89,15 +91,18 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
   return <Dialog title={t("MCP server")} onClose={onClose}>
     <div className="dialog-body">
       {connection ? <>
-        <label className="field">{t("MCP connection configuration")}
-          <textarea aria-label={t("MCP connection configuration")} readOnly rows={6} value={configuration}
-            onFocus={(event) => event.currentTarget.select()} />
-        </label>
+        <div className="mcp-configuration">
+          <label className="field">{t("MCP connection configuration")}
+            <textarea aria-label={t("MCP connection configuration")} readOnly rows={6} value={configuration}
+              onFocus={(event) => event.currentTarget.select()} />
+          </label>
+          <DialogIconButton label={t("Copy connection configuration")} onClick={() => {
+            void navigator.clipboard.writeText(configuration).then(() => setCopied(true),
+              (failure: unknown) => setError(describeError(failure)));
+          }}>{copied ? <Check /> : <Copy />}</DialogIconButton>
+        </div>
+        {copied && <span className="mcp-copy-status" role="status">{t("Copied")}</span>}
         <p>{t("Use this configuration in a trusted MCP client on this computer.")}</p>
-        <Button type="button" onClick={() => {
-          void navigator.clipboard.writeText(configuration).then(() => setCopied(true),
-            (failure: unknown) => setError(describeError(failure)));
-        }}>{t(copied ? "Copied" : "Copy connection configuration")}</Button>
       </> : <p>{t("Start the local MCP server to connect an AI client.")}</p>}
       {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
     </div>

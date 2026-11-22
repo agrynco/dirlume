@@ -1,5 +1,5 @@
 import { editPaneAddress } from "./pane-address-smoke.mjs";
-import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
+import { closeToolWindow, hideComparisonOptions, openToolWindow, showComparisonOptions } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,9 +33,11 @@ export async function testCompareWorker(page, sameLeft, sameRight) {
 
   await compare("large-diff.txt");
   await busy.waitFor();
+  await showComparisonOptions(dialog);
   await whitespace.check();
   await busy.waitFor();
   assert.equal(await tooDifferent.count(), 0, "Changing settings while the worker is busy must respond immediately.");
+  await hideComparisonOptions(dialog);
   await closeToolWindow(window);
 
   await compare("large-diff.txt");
@@ -50,9 +52,11 @@ export async function testCompareWorker(page, sameLeft, sameRight) {
   await dialog.getByLabel("File differences").waitFor();
   await dialog.getByText("0 changes", { exact: true }).waitFor();
   assert.equal(await next.isEnabled(), false);
+  await showComparisonOptions(dialog);
   await whitespace.check();
   await dialog.getByText("1 change", { exact: true }).waitFor();
   assert.equal(await next.isEnabled(), true);
+  await hideComparisonOptions(dialog);
   await next.click();
   await dialog.getByText("1 / 1", { exact: true }).waitFor();
   await closeToolWindow(window);

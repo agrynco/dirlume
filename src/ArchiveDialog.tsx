@@ -229,8 +229,10 @@ export function ArchiveDialog({ directory, names, showHidden, onClose, onCreated
                 <option value="">{t("Custom")}</option>
                 {profiles.map(({ name, settings }) => <option key={name} disabled={!capabilities?.formats.includes(settings.format)}>{name}</option>)}
               </select></label>
-              <label className="field">{t("Profile name")} <input value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
-              <Button type="button" onClick={saveProfile} disabled={!profileName.trim()}>{t("Save profile")}</Button>
+              <div className="archive-profile-save">
+                <label className="field">{t("Profile name")} <input value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
+                <Button type="button" onClick={saveProfile} disabled={!profileName.trim()}>{t("Save profile")}</Button>
+              </div>
             </div>
           </>}
         </div>
