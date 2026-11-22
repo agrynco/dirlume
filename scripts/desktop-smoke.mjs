@@ -26,6 +26,7 @@ import { testNewFolder } from "./new-folder-smoke.mjs";
 import { testShortcutFields } from "./shortcut-field-smoke.mjs";
 import { testTerminalHistory } from "./terminal-history-smoke.mjs";
 import { testRetainedTerminalDirectory } from "./terminal-directory-smoke.mjs";
+import { testNativeTerminalLinks } from "./terminal-links-smoke.mjs";
 import { testNativeTerminalMenu, testTerminalPaste } from "./terminal-paste-smoke.mjs";
 import { testAppearancePicker, testNativeAppearancePicker } from "./appearance-picker-smoke.mjs";
 import { testArchives } from "./archive-smoke.mjs";
@@ -2301,6 +2302,7 @@ try {
   await testShortcutFields(page);
   page = await testTerminalHistory({ page, root: temp, startDesktop, exitDesktop });
   await testRetainedTerminalDirectory(page, temp);
+  await testNativeTerminalLinks(page);
   await testOsTimestamps(page, temp);
   await testPermanentDelete(page, temp);
   await testBatchDeletion(page, temp);

@@ -146,6 +146,9 @@ jobs:
       - name: Verify terminal directory synchronization
         if: github.event.action != 'closed'
         run: node scripts/terminal-directory-smoke.mjs
+      - name: Verify terminal web links
+        if: github.event.action != 'closed'
+        run: node scripts/terminal-links-smoke.mjs
       - name: Verify current marked row colors and keyboard navigation
         if: github.event.action != 'closed'
         run: node scripts/marked-cursor-smoke.mjs

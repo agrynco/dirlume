@@ -296,6 +296,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Windows environment changed. Reopen the terminal to apply the updated variables.": ["Змінні середовища Windows змінилися. Відкрийте термінал заново, щоб застосувати зміни.", "Переменные среды Windows изменились. Откройте терминал заново, чтобы применить изменения."],
   "Command queued. It will run when the terminal is ready.": ["Команда в черзі. Вона запуститься, щойно термінал буде готовий.", "Команда в очереди. Она запустится, когда терминал будет готов."],
   "Could not submit the command. {0}": ["Не вдалося надіслати команду. {0}", "Не удалось отправить команду. {0}"],
+  "Could not open the terminal link. {0}": ["Не вдалося відкрити посилання з термінала. {0}", "Не удалось открыть ссылку из терминала. {0}"],
   "Commands": ["Команди", "Команды"],
   "MCP server": ["Сервер MCP", "Сервер MCP"],
   "MCP connection configuration": ["Конфігурація підключення MCP", "Конфигурация подключения MCP"],

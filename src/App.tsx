@@ -3188,7 +3188,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
             pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
-            onCommandError={(message) => setStatus({ text: message, error: true })}
+            onTerminalError={(message) => setStatus({ text: message, error: true })}
             pendingCommands={pendingCommands[session.id] ?? noCommands}
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
