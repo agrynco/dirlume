@@ -1,6 +1,7 @@
 """A three-server loopback SSH route with stage-specific forwarding and credentials."""
 
 import errno
+from contextlib import suppress
 import io
 import json
 import logging
@@ -42,10 +43,10 @@ def pump(source, destination):
         pass
     finally:
         for stream in (destination, source):
-            try:
+            with suppress(EOFError, OSError):
+                stream.shutdown(socket.SHUT_RDWR)
+            with suppress(EOFError, OSError):
                 stream.close()
-            except (EOFError, OSError):
-                pass
 
 
 class Server(paramiko.ServerInterface):

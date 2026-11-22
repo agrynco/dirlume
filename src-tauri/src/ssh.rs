@@ -20,7 +20,7 @@ use openssh_sftp_client::Sftp;
 use russh::{
     client,
     keys::{decode_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate},
-    ChannelMsg,
+    ChannelMsg, Disconnect,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -175,10 +175,10 @@ fn handshake(
 }
 
 fn authenticate(
-    mut client: client::Handle<VerifyHost>,
+    client: &mut client::Handle<VerifyHost>,
     settings: &ConnectionSettings,
     secret: Option<&str>,
-) -> Result<client::Handle<VerifyHost>> {
+) -> Result<()> {
     let user = settings.username.as_str();
     let authenticated = match &settings.auth {
         Authentication::Password => {
@@ -208,20 +208,39 @@ fn authenticate(
     if !authenticated.success() {
         return Err("The SSH server rejected the credentials.".to_owned());
     }
-    Ok(client)
+    Ok(())
 }
 
-struct AuthenticatedRoute {
-    destination: client::Handle<VerifyHost>,
-    // Keep the transports alive as long as any caller uses the destination.
-    _jumps: Vec<client::Handle<VerifyHost>>,
-}
+// The destination is last so closing the route can disconnect it before the transports it uses.
+struct AuthenticatedRoute(Vec<client::Handle<VerifyHost>>);
 
 impl Deref for AuthenticatedRoute {
     type Target = client::Handle<VerifyHost>;
 
     fn deref(&self) -> &Self::Target {
-        &self.destination
+        self.0
+            .last()
+            .expect("an authenticated route has a destination")
+    }
+}
+
+impl Drop for AuthenticatedRoute {
+    fn drop(&mut self) {
+        let clients = std::mem::take(&mut self.0);
+        if clients.is_empty() {
+            return;
+        }
+        tauri::async_runtime::spawn(async move {
+            for client in clients.into_iter().rev() {
+                let _ = tokio::time::timeout(Duration::from_secs(1), async {
+                    client
+                        .disconnect(Disconnect::ByApplication, "Closing the SSH route", "")
+                        .await?;
+                    client.await
+                })
+                .await;
+            }
+        });
     }
 }
 
@@ -436,7 +455,7 @@ fn open_route(
         }
     }
     let jumps = hosts.len().saturating_sub(1);
-    let mut clients = Vec::with_capacity(hosts.len());
+    let mut clients = AuthenticatedRoute(Vec::with_capacity(hosts.len()));
     let mut keys = Vec::with_capacity(hosts.len());
     for (index, host) in hosts.into_iter().enumerate() {
         let endpoint = host.settings().endpoint.clone();
@@ -447,30 +466,33 @@ fn open_route(
             .iter()
             .find(|approval| approval.endpoint == endpoint);
         let (client, fingerprint) =
-            match verified_handshake(&endpoint, pinned, approval, clients.last())
+            match verified_handshake(&endpoint, pinned, approval, clients.0.last())
                 .map_err(&explain)?
             {
                 Ok(verified) => verified,
                 Err(verification) => return Ok(Err(verification)),
             };
+        clients.0.push(client);
         let (settings, secret) = host.credentials();
         let secret = secret.map_err(&explain)?;
-        let client = authenticate(client, settings, secret.as_deref().map(String::as_str))
-            .map_err(&explain)?;
-        clients.push(client);
+        authenticate(
+            clients
+                .0
+                .last_mut()
+                .expect("the current SSH host was added"),
+            settings,
+            secret.as_deref().map(String::as_str),
+        )
+        .map_err(&explain)?;
         keys.push(HostKey {
             endpoint,
             fingerprint,
         });
     }
-    let destination = clients.pop().ok_or("The SSH route has no destination.")?;
-    Ok(Ok((
-        AuthenticatedRoute {
-            destination,
-            _jumps: clients,
-        },
-        keys,
-    )))
+    if clients.0.is_empty() {
+        return Err("The SSH route has no destination.".to_owned());
+    }
+    Ok(Ok((clients, keys)))
 }
 
 fn route_approvals(
