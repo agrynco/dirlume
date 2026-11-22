@@ -30,7 +30,10 @@ async function fixture(browser, userAgent, shortcuts) {
     const process = (pid, cpu, canTerminate, path) => ({ pid, started: 10, name: "worker", cpu, memory: 4096, canTerminate, executable: path });
     if (shortcuts) localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ bindingDefaults: 9, activeShortcutScheme: "fixture",
       shortcutSchemes: [{ id: "fixture", name: "Fixture keys", bindings: { processContextMenu: shortcuts } }] }));
-    window.fixtureProcesses = [process(9101, 8, true, executable), process(9102, 6, true, executable),
+    const separator = windows ? "\\" : "/";
+    const short = windows ? "C:\\a.exe" : "/a.exe";
+    const long = directory + separator + "nested-directory".repeat(6) + separator + "long-example.exe";
+    window.fixtureProcesses = [process(9101, 8, true, short), process(9102, 6, true, long),
       process(9103, 4, true, executable), process(9104, 2, false, null)];
     window.clipboardWrites = [];
     window.terminationRequests = [];
@@ -71,6 +74,50 @@ async function openProcesses(page, side) {
   await row(page, side, 9101).waitFor();
 }
 
+async function checkExecutableAlignment(page, side) {
+  const table = grid(page, side);
+  const column = table.locator(".process-col-executable");
+  const grip = column.getByRole("separator", { name: "Resize Executable path column", exact: true });
+  const widths = () => column.evaluate((header) => header.getBoundingClientRect().width);
+  const check = () => table.evaluate((grid) => {
+    const cells = [...grid.querySelectorAll(".process-cell-executable")];
+    const insets = cells.map((cell) => {
+      const text = document.createRange();
+      text.selectNodeContents(cell);
+      return Math.round(text.getBoundingClientRect().left - cell.getBoundingClientRect().left);
+    });
+    const numeric = grid.querySelectorAll(".process-col-pid, .process-col-cpu, .process-col-memory, .process-cell-pid, .process-cell-cpu, .process-cell-memory");
+    return {
+      header: getComputedStyle(grid.querySelector(".process-col-executable")).textAlign,
+      insets,
+      clipped: cells.map((cell) => cell.scrollWidth > cell.clientWidth),
+      overflow: getComputedStyle(cells[1]).textOverflow,
+      numericAligned: numeric.length > 0 && [...numeric].every((cell) => getComputedStyle(cell).textAlign === "right"),
+    };
+  });
+  const initial = await widths();
+  for (const resize of [false, true]) {
+    if (resize) {
+      await grip.press("ArrowLeft");
+      assert.ok(await widths() < initial);
+    }
+    const { header, insets, clipped, overflow, numericAligned } = await check();
+    assert.equal(header, "left");
+    assert.deepEqual(insets, Array(4).fill(insets[0]));
+    assert.deepEqual(clipped.slice(0, 2), [false, true]);
+    assert.equal(overflow, "ellipsis");
+    assert.equal(numericAligned, true);
+  }
+  const clipped = row(page, side, 9102).locator(".process-cell-executable");
+  await clipped.dispatchEvent("pointerover", { pointerType: "mouse" });
+  const tooltip = page.getByRole("tooltip");
+  await tooltip.waitFor();
+  assert.equal(await tooltip.textContent(), await clipped.textContent());
+  await clipped.dispatchEvent("pointerout", { pointerType: "mouse" });
+  await tooltip.waitFor({ state: "hidden" });
+  await grip.dispatchEvent("dblclick");
+}
+
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   for (const [index, userAgent] of platforms.entries()) {
@@ -79,6 +126,7 @@ try {
     const other = side === "left" ? "right" : "left";
     await openProcesses(page, side);
     const table = grid(page, side);
+    await checkExecutableAlignment(page, side);
     const target = row(page, side, 9103);
     await row(page, side, 9101).click();
     await row(page, side, 9102).click({ modifiers: [markModifier] });
