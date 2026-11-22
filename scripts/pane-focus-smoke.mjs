@@ -91,6 +91,8 @@ try {
     }
     const both = () => Promise.all(sides.map((side) => snapshot(page, side)));
     const before = await both();
+    const dateWidths = await page.locator(".file-column.col-date").evaluateAll((columns) =>
+      columns.map((column) => column.getBoundingClientRect().width));
     for (const { date, scroll, current, marks } of before) {
       assert.equal(date, systemDate);
       assert.ok(scroll > 0);
@@ -126,6 +128,9 @@ try {
       if (date === systemDate) assert.deepEqual(await both(), before);
       assert.deepEqual(await counts(), initialCounts);
     }
+    await page.waitForFunction((widths) =>
+      [...document.querySelectorAll(".file-column.col-date")].every((column, index) =>
+        column.getBoundingClientRect().width < widths[index]), dateWidths);
     const rightBefore = await snapshot(page, "right");
     await page.evaluate(() => {
       const fixture = window.focusFixture;
