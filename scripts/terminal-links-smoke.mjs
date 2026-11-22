@@ -30,7 +30,7 @@ async function textPoint(terminal, search, { nextRow = false, offset = 3 } = {})
   }, { search, nextRow, offset });
 }
 
-async function checkLinks(page, terminal, { mac = false } = {}) {
+async function checkLinks(page, terminal, { mac = false, native = false } = {}) {
   const rows = terminal.locator(".xterm-rows");
   const tooltip = page.getByRole("tooltip");
   const requests = () => page.evaluate(() => window.terminalLinks.requests);
@@ -51,13 +51,27 @@ async function checkLinks(page, terminal, { mac = false } = {}) {
   await verifyClick(label, labeledUrl);
 
   const sideMenu = page.getByRole("menu", { name: "Terminal actions", exact: true });
+  const menuAt = async (point) => {
+    await page.mouse.move(point.x, point.y);
+    if (mac) {
+      await page.keyboard.down("Control");
+      try { await page.mouse.click(point.x, point.y); } finally { await page.keyboard.up("Control"); }
+    } else await page.mouse.click(point.x, point.y, { button: "right" });
+    await sideMenu.waitFor();
+  };
+  const action = (name) => sideMenu.getByRole("menuitem", { name, exact: true });
+  await menuAt(label);
+  await action("Open Link").click();
+  await waitForCount(3);
+  assert.equal((await requests()).at(-1), labeledUrl);
+  await menuAt(label);
+  if (!native || process.env.CI) {
+    await action("Copy Link Address").click();
+    await page.waitForFunction(async ({ native, labeledUrl }) => native
+      ? await window.__TAURI_INTERNALS__.invoke("clipboard_text") === labeledUrl
+      : window.terminalLinks.copies.at(-1) === labeledUrl, { native, labeledUrl });
+  } else await page.keyboard.press("Escape");
   const before = await requests();
-  if (mac) {
-    await page.keyboard.down("Control");
-    try { await page.mouse.click(label.x, label.y); } finally { await page.keyboard.up("Control"); }
-  } else await page.mouse.click(label.x, label.y, { button: "right" });
-  await sideMenu.waitFor();
-  await page.keyboard.press("Escape");
   const selectionEnd = await textPoint(terminal, labeled, { offset: labeled.length - 1 });
   await page.mouse.move(label.x, label.y);
   await page.mouse.down();
@@ -66,8 +80,12 @@ async function checkLinks(page, terminal, { mac = false } = {}) {
   await terminal.locator(".xterm-selection div").first().waitFor();
   assert.deepEqual(await requests(), before);
 
-  for (const label of [rejected, malformed]) {
-    const point = await textPoint(terminal, label);
+  for (const invalidLabel of [rejected, malformed]) {
+    const point = await textPoint(terminal, invalidLabel);
+    await menuAt(point);
+    assert.equal(await action("Open Link").count(), 0);
+    assert.equal(await action("Copy Link Address").count(), 0);
+    await page.keyboard.press("Escape");
     await page.mouse.click(point.x, point.y);
   }
   assert.deepEqual(await requests(), before);
@@ -103,7 +121,7 @@ export async function testNativeTerminalLinks(page) {
     await command.press("Enter");
     await terminal.locator(".xterm-helper-textarea").press("Control+o");
     await page.locator(".app.panels-hidden").waitFor();
-    await checkLinks(page, terminal);
+    await checkLinks(page, terminal, { native: true });
     const input = terminal.locator(".xterm-helper-textarea");
     await input.pressSequentially("Write-Output ('dirlume-' + 'terminal-still-works')");
     await input.press("Enter");
@@ -133,7 +151,7 @@ async function testBrowserTerminalLinks() {
         await page.addInitScript(({ output, windows }) => {
           const path = windows ? "C:\\fixture" : "/fixture";
           const file = { name: "fixture.txt", directory: false, hidden: false, link: false, size: 7, modified: null };
-          window.terminalLinks = { requests: [], ssh: false, fail: false };
+          window.terminalLinks = { requests: [], copies: [], ssh: false, fail: false };
           window.__TAURI_INTERNALS__ = {
             transformCallback: () => 1,
             invoke: async (command, args) => {
@@ -152,6 +170,7 @@ async function testBrowserTerminalLinks() {
                 window.terminalLinks.requests.push(args.href);
                 if (window.terminalLinks.fail) throw new Error("Fixture browser could not be opened.");
               }
+              if (command === "copy_path") window.terminalLinks.copies.push(args.path);
               return null;
             },
           };
