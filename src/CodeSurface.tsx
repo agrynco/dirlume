@@ -1,12 +1,12 @@
 import { t } from "./i18n";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { cursorDocEnd, cursorDocStart, defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
-import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, highlightActiveLine, keymap, lineNumbers, type Command } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { languageChoices } from "./syntaxCatalog";
+import type { NamedFile } from "./api";
+import { detectLanguage, languageChoices } from "./syntaxCatalog";
 
 const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.comment, tags.docComment], class: "syntax-comment" },
@@ -29,9 +29,9 @@ export type SourceActions = {
 };
 const managedCommands: Command[] = [selectAll, cursorDocStart, cursorDocEnd];
 
-export default function CodeSurface({ fileName, editing, locked, active, fontSize, readingWidth, value, onChange,
+export default function CodeSurface({ file, editing, locked, active, fontSize, readingWidth, value, onChange,
   ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus }: {
-  fileName: string;
+  file: NamedFile;
   editing: boolean;
   locked: boolean;
   active: boolean;
@@ -51,9 +51,10 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
   const languageSlot = useMemo(() => new Compartment(), []);
   const editSlot = useMemo(() => new Compartment(), []);
   const labelSlot = useMemo(() => new Compartment(), []);
+  const fileName = file.name;
   const label = t(editing ? "Edit {0}" : "View {0}", fileName);
   const [unavailable, setUnavailable] = useState(false);
-  const detected = LanguageDescription.matchFilename(languages, fileName);
+  const detected = useMemo(() => detectLanguage(file), [file]);
   const language = syntaxOverride === "auto" ? detected : languageChoices.find(({ name }) => name === syntaxOverride);
   const managed = Boolean(ref);
   useEffect(() => { onSyntaxInfo?.({ detected: detected?.name, unavailable }); }, [detected, unavailable, onSyntaxInfo]);
@@ -154,7 +155,7 @@ export default function CodeSurface({ fileName, editing, locked, active, fontSiz
       () => { if (!canceled) setUnavailable(true); },
     );
     return () => { canceled = true; };
-  }, [language, languageSlot]);
+  }, [editing, fileName, language, languageSlot, managed]);
 
   return <div className="code-surface" ref={container} />;
 }
