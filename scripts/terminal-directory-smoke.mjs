@@ -157,15 +157,9 @@ async function testBrowserTerminalDirectory() {
       await page.goto("http://dirlume.test/");
       const left = "/fixture/left";
       const right = "/fixture/right with spaces";
-      const address = await editPaneAddress(page, "right");
-      await address.fill(right);
-      await address.press("Enter");
-      await page.waitForFunction(({ left, right }) =>
-        [left, right].every((path, index) => {
-          const side = index === 0 ? "left" : "right";
-          return document.getElementById(`${side}-path`)?.dataset.path === path &&
-            document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false";
-        }), { left, right });
+      await page.waitForFunction((left) => ["left", "right"].every((side) =>
+        document.getElementById(`${side}-path`)?.dataset.path === left &&
+        document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false"), left);
       const leftFiles = page.locator("#left-files");
       await leftFiles.focus();
       const commandBar = page.locator(".command-bar");
@@ -177,12 +171,16 @@ async function testBrowserTerminalDirectory() {
         const state = await page.locator(".app").evaluate((app) => ({
           layout: app.className,
           directory: app.querySelector(".command-bar > span")?.textContent,
-          terminal: app.querySelector(".terminal-card:not([hidden])")?.textContent,
+          terminalDirectory: app.querySelector(".terminal-card:not([hidden]) .terminal-location")?.textContent,
           sessions: window.terminalStarts ?? 0,
         }));
         throw new Error(`Terminal did not start in ${left} with ${platform}. ${JSON.stringify(state)}`, { cause: error });
       });
-      await page.locator("#right-files").focus();
+      const address = await editPaneAddress(page, "right");
+      await address.fill(right);
+      await address.press("Enter");
+      await page.waitForFunction((right) => document.getElementById("right-path")?.dataset.path === right &&
+        document.getElementById("right-files")?.getAttribute("aria-busy") === "false", right);
       await header.getByText(right, { exact: true }).waitFor();
       const field = page.getByRole("combobox", { name: "Command line", exact: true });
       await field.fill("pwd");
@@ -191,6 +189,8 @@ async function testBrowserTerminalDirectory() {
       const submitted = await page.evaluate(() => window.submittedCommands);
       assert.deepEqual(submitted, [{ directory: right, command: "pwd" }]);
       assert.equal(await page.evaluate(() => window.terminalStarts), 1);
+      await leftFiles.focus();
+      await header.getByText(left, { exact: true }).waitFor();
       await page.evaluate(() => { window.rejectTerminalWrite = true; });
       await field.fill("pwd");
       await field.press("Enter");
