@@ -42,7 +42,7 @@ export async function testHeaderMenus(page, windows = false) {
   const connect = page.getByRole("button", { name: "Connect", exact: true });
   const search = page.getByRole("button", { name: "Find files", exact: true });
   await bar.waitFor({ state: "hidden" });
-  assert.equal(await connect.isVisible(), true);
+  assert.equal(await connect.count(), 0);
   assert.equal(await search.isVisible(), true);
   await list.focus();
   await revealMainMenu(page);
@@ -70,13 +70,6 @@ export async function testHeaderMenus(page, windows = false) {
   await page.keyboard.press("Alt");
   await bar.waitFor({ state: "hidden" });
 
-  await openMainMenu(page, "Right");
-  await connect.click();
-  await bar.waitFor({ state: "hidden" });
-  const connection = page.getByRole("dialog", { name: /^Connect (to|through) / });
-  await connection.waitFor();
-  await page.keyboard.press("Escape");
-  await connection.waitFor({ state: "hidden" });
   if (windows) {
     const maximize = page.getByRole("button", { name: "Maximize window", exact: true });
     const restore = page.getByRole("button", { name: "Restore window", exact: true });
@@ -106,7 +99,8 @@ export async function testCommandIcons(page, native = false) {
       fits: item.scrollWidth <= item.clientWidth,
     };
   }));
-  assert.equal(rows.length, native ? 16 : 14);
+  assert.equal(rows.length, native ? 15 : 13);
+  assert.equal(await commands.getByRole("menuitem", { name: "Connect", exact: true }).count(), 0);
   assert.ok(rows.every((row) => row.hidden === "true" && row.focusable === "false" && row.fits));
   assert.equal(new Set(rows.map(({ iconX }) => iconX)).size, 1);
   assert.equal(new Set(rows.map(({ labelX }) => labelX)).size, 1);

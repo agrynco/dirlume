@@ -33,7 +33,7 @@ mod git_view;
 #[cfg(feature = "desktop")]
 mod image_edit;
 #[cfg(feature = "desktop")]
-mod kswitcher;
+mod kswitcher_lan;
 mod local;
 #[cfg(feature = "desktop")]
 mod local_transfer;

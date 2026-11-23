@@ -618,6 +618,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .location-menu[data-overlay="right"] { grid-column: 3; }
 .location-menu[data-overlay] .location-popup { max-width: min(46vw, 320px); }
 .location-source-group { border-block-start: 1px solid var(--line); padding-block-start: 4px; margin-block-start: 4px; }
+.lan-sources > strong, .lan-sources > [role="group"] > span { display: block; padding: 4px 8px; }
+.lan-sources > [role="group"] > button { padding-inline-start: 16px; }
+.lan-sources small, .lan-sources p { color: var(--muted); }
+.lan-sources p { padding-inline: 8px; margin-block: 4px; overflow-wrap: anywhere; }
 .location-popup kbd { min-inline-size: 2ch; margin-inline-start: auto; padding: 0; text-align: center; background: transparent; font-size: .85em; }
 .location-trigger { width: 38px; gap: 2px; border-color: var(--line); }
 .location-trigger svg:last-child { width: 11px; }
@@ -1253,7 +1257,6 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .dialog-heading h2 { margin: 0; font-size: 1.15em; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-form { display: flex; flex-direction: column; min-height: 0; }
 .dialog-body { padding: 16px; overflow: auto; }
-.share-folder-form { display: grid; gap: 10px; }
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
 .release-notes { display: grid; gap: 10px; overflow-wrap: anywhere; }
 .release-notes ul { margin: 0; padding-inline-start: 1.4em; }
@@ -2014,8 +2017,6 @@ button.color-swatch {
   .topbar .main-menu-group > button { padding-inline: 4px; }
   .topbar .top-actions { gap: 2px; }
   .window-titlebar .top-actions { margin-inline-end: 12px; }
-  .topbar-connect { width: 28px; padding-inline: 0; }
-  .topbar-connect span { display: none; }
   .topbar-scheme { width: 104px; }
 }
 @media (max-width: 950px) {
@@ -2681,3 +2682,5 @@ button.color-swatch {
 .pane.active[data-layout="classic"] .file-row.marked[data-current="true"]:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name {
   color: color-mix(in srgb, var(--panel-marked) 55%, var(--panel-selected-ink));
 }
+.computer-settings-list { list-style: none; padding: 0; margin: 0; }
+.computer-settings-list > li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 4px; }

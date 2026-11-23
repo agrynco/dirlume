@@ -15,7 +15,6 @@ import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
-import { testDesktopShare } from "./desktop-share-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
 import { checkAddressFocusLoss, clickBreadcrumbAncestor, editPaneAddress } from "./pane-address-smoke.mjs";
@@ -2304,7 +2303,6 @@ try {
   console.log("Verified Classic blue colors, selection contrast, preview, and custom and built-in theme persistence.");
   page = await testPanelModes({ page, startDesktop, exitDesktop, root: temp });
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
-  await testDesktopShare(page, temp);
   const localSources = page.getByRole("region", { name: "right pane", exact: true });
   await localSources.getByRole("button", { name: "Locations for right pane", exact: true }).click();
   await localSources.getByRole("group", { name: "Right pane sources", exact: true })

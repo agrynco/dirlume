@@ -216,6 +216,43 @@ pub fn locations() -> Vec<Location> {
     locations
 }
 
+#[cfg(feature = "desktop")]
+pub(crate) fn local_share_locations() -> Vec<(String, PathBuf)> {
+    locations()
+        .into_iter()
+        .filter_map(|location| {
+            let path = fs::canonicalize(location.path).ok()?;
+            is_local_location(&path).then_some((location.label, path))
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "desktop", windows))]
+fn is_local_location(path: &Path) -> bool {
+    matches!(drive_type(path), Some(2 | 3 | 5 | 6))
+}
+
+#[cfg(all(feature = "desktop", windows))]
+pub(crate) fn drive_type(path: &Path) -> Option<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+
+    if !matches!(path.components().next(), Some(Component::Prefix(prefix))
+        if matches!(prefix.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)))
+    {
+        return None;
+    }
+    let root: PathBuf = path.components().take(2).collect();
+    let wide: Vec<_> = root.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: wide is a NUL-terminated drive root for the duration of the call.
+    Some(unsafe { GetDriveTypeW(wide.as_ptr()) })
+}
+
+#[cfg(all(feature = "desktop", not(windows)))]
+fn is_local_location(_path: &Path) -> bool {
+    true
+}
+
 #[cfg(windows)]
 fn roots() -> Vec<Location> {
     use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;

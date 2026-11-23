@@ -7,18 +7,16 @@ use tokio::sync::Mutex;
 use crate::{local, message, server::DesktopServer, Result};
 
 #[derive(Default)]
-pub(crate) struct DesktopShare(Mutex<Option<(String, DesktopServer)>>);
+pub(crate) struct DesktopShare(Mutex<Option<DesktopServer>>);
 
 #[derive(Serialize)]
 pub(crate) struct ShareDetails {
-    path: String,
     address: String,
     invitation: String,
 }
 
-fn details(path: &str, server: &DesktopServer) -> ShareDetails {
+fn details(server: &DesktopServer) -> ShareDetails {
     ShareDetails {
-        path: path.into(),
         address: server.address.clone(),
         invitation: server.invitation.clone(),
     }
@@ -31,13 +29,16 @@ fn local_address(ip: IpAddr) -> bool {
     }
 }
 
-#[tauri::command]
-pub(crate) fn suggest_share_address() -> Option<String> {
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    // UDP connect selects a local interface without sending a packet.
-    socket.connect("192.168.0.1:9").ok()?;
-    let ip = socket.local_addr().ok()?.ip();
-    (local_address(ip) && !ip.is_loopback()).then(|| ip.to_string())
+fn pairing_address() -> Result<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(message)?;
+    // Select a network interface without transmitting a discovery packet.
+    socket.connect("192.168.0.1:9").map_err(message)?;
+    let ip = socket.local_addr().map_err(message)?.ip();
+    if local_address(ip) && !ip.is_loopback() {
+        Ok(ip.to_string())
+    } else {
+        Err("No local network address is available for pairing.".to_owned())
+    }
 }
 
 #[tauri::command]
@@ -47,15 +48,16 @@ pub(crate) async fn active_desktop_share(
     let sharing = state.0.lock().await;
     Ok(sharing
         .as_ref()
-        .and_then(|(path, server)| server.is_running().then(|| details(path, server))))
+        .filter(|server| server.is_running())
+        .map(details))
 }
 
 #[tauri::command]
-pub(crate) async fn start_desktop_share(
-    path: String,
-    address: String,
+pub(crate) async fn start_desktop_computer_share(
+    address: Option<String>,
     state: State<'_, DesktopShare>,
 ) -> Result<ShareDetails> {
+    let address = address.map_or_else(pairing_address, Ok)?;
     let ip = address
         .trim()
         .parse::<IpAddr>()
@@ -63,24 +65,25 @@ pub(crate) async fn start_desktop_share(
     if !local_address(ip) {
         return Err("Enter a local network IP address.".to_owned());
     }
-    let root = local::absolute(&path).map_err(message)?;
     let mut sharing = state.0.lock().await;
-    if sharing
-        .as_ref()
-        .is_some_and(|(_, server)| server.is_running())
-    {
+    if sharing.as_ref().is_some_and(DesktopServer::is_running) {
         return Err("Stop the current share before starting another.".to_owned());
     }
-    let server = DesktopServer::start(root, ip).await.map_err(message)?;
-    let result = details(&path, &server);
-    *sharing = Some((path, server));
+    let locations = tokio::task::spawn_blocking(local::local_share_locations)
+        .await
+        .map_err(message)?;
+    let server = DesktopServer::start_computer(locations, ip)
+        .await
+        .map_err(message)?;
+    let result = details(&server);
+    *sharing = Some(server);
     Ok(result)
 }
 
 #[tauri::command]
 pub(crate) async fn stop_desktop_share(state: State<'_, DesktopShare>) -> Result<()> {
     let mut sharing = state.0.lock().await;
-    if let Some((_, mut server)) = sharing.take() {
+    if let Some(mut server) = sharing.take() {
         server.stop().await.map_err(message)?;
     }
     Ok(())

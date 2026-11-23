@@ -19,7 +19,7 @@ required-features = ["server"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:axum", "dep:axum-server", "dep:block2", "dep:cap-std", "dep:ciborium", "dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:gio", "dep:image", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:ntfs-mft", "dep:objc2-app-kit", "dep:png", "dep:portable-pty", "dep:rcgen", "dep:reqwest", "dep:ring", "dep:rustls", "dep:semver", "dep:subtle", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows", "dep:futures-util", "dep:openssh-sftp-client", "dep:russh", "dep:x11rb", "dep:zbus", "dep:zeroize", "dep:zip"]
+desktop = ["dep:axum", "dep:axum-server", "dep:block2", "dep:cap-std", "dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:gio", "dep:image", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:ntfs-mft", "dep:objc2-app-kit", "dep:png", "dep:portable-pty", "dep:rcgen", "dep:reqwest", "dep:ring", "dep:rustls", "dep:semver", "dep:subtle", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows", "dep:futures-util", "dep:openssh-sftp-client", "dep:russh", "dep:x11rb", "dep:zbus", "dep:zeroize", "dep:zip"]
 ui-automation = ["desktop", "tauri/devtools"]
 server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util"]
 
@@ -35,7 +35,6 @@ axum = { version = "0.8", optional = true }
 axum-server = { version = "0.9", features = ["tls-rustls-ring"], optional = true }
 base64 = "0.22"
 cap-std = { version = "4", optional = true }
-ciborium = { version = "0.2", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 clipboard-rs = { version = "0.3", default-features = false, features = ["wayland"], optional = true }
 codepage = { version = "0.1", optional = true }
@@ -65,7 +64,7 @@ tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2.14.1", optional = true }
 tempfile = "3"
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"], optional = true }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "time"], optional = true }
 tokio-util = { version = "0.7", features = ["io", "rt"], optional = true }
 trash = "5"
 url = { version = "2", features = ["serde"] }
@@ -93,4 +92,4 @@ png = { version = "0.18", optional = true }
 zip = { version = "9.7.1", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
 windows = { version = "0.62", features = ["Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_WNet", "Win32_System_Com", "Win32_System_RestartManager", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"], optional = true }
 ntfs-mft = { version = "0.1.0", optional = true }
-windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Globalization", "Win32_NetworkManagement_NetManagement", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Environment", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_Time"] }
+windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Globalization", "Win32_NetworkManagement_NetManagement", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Environment", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_RemoteDesktop", "Win32_System_Threading", "Win32_System_Time"] }

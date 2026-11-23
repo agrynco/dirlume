@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     diagnostics::{self, ReadCause, ReadReason, ReadStage, ReadSurface},
-    ftp, kswitcher, local, local_transfer,
+    ftp, local, local_transfer,
     protocol::{BytePage, ByteRequest, Invitation, RemoteListing, RemotePath},
     remote_transfer, ssh, terminal, watch,
 };
@@ -292,6 +292,29 @@ async fn installed_fonts() -> Result<Vec<String>> {
         Ok(families)
     })
     .await
+}
+
+#[tauri::command]
+async fn computer_name() -> Option<String> {
+    if let Some(name) = std::env::var("COMPUTERNAME")
+        .ok()
+        .filter(|name| !name.trim().is_empty())
+    {
+        return Some(name);
+    }
+    blocking(|| {
+        let output = std::process::Command::new("hostname")
+            .output()
+            .map_err(message)?;
+        Ok(output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .filter(|name| !name.is_empty()))
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[tauri::command]
@@ -789,9 +812,7 @@ enum TransferSource {
         folder: bool,
     },
     Kswitcher {
-        directory: String,
         peer: String,
-        host: Option<String>,
         path: String,
         name: String,
     },
@@ -1173,21 +1194,15 @@ async fn transfer_item(
                     })?;
                 }
             }
-            TransferSource::Kswitcher {
-                directory,
-                peer,
-                host,
-                path,
-                ..
-            } => {
-                kswitcher::download(
-                    &directory,
-                    &peer,
-                    &path,
-                    host.as_deref(),
-                    target,
-                    &mut |path, bytes, total| progress(path, bytes, Some(total)),
-                )?;
+            TransferSource::Kswitcher { peer, path, .. } => {
+                download_to(&target, &session, |file| {
+                    tokio::runtime::Handle::current().block_on(crate::kswitcher_lan::download(
+                        &peer,
+                        &path,
+                        file,
+                        |bytes, total| progress(&target, bytes, total),
+                    ))
+                })?;
             }
         }
         Ok(TransferOutcome::Completed)
@@ -1221,11 +1236,6 @@ struct Connected {
     listing: RemoteListing,
 }
 
-#[tauri::command]
-async fn connect_server(invitation: String, state: State<'_, Connections>) -> Result<Connected> {
-    open_server(&invitation, &state).await
-}
-
 fn server_invitation_entry(credential: uuid::Uuid) -> Result<keyring::Entry> {
     keyring::Entry::new("Dirlume Server", &credential.to_string()).map_err(message)
 }
@@ -1257,24 +1267,60 @@ async fn remove_server_invitation(credential: uuid::Uuid) -> Result<()> {
     .await
 }
 
-#[tauri::command]
-async fn connect_saved_server(
-    credential: uuid::Uuid,
-    state: State<'_, Connections>,
-) -> Result<Connected> {
-    let invitation = blocking(move || {
+async fn read_server_invitation(credential: uuid::Uuid) -> Result<zeroize::Zeroizing<String>> {
+    blocking(move || {
         server_invitation_entry(credential)?
             .get_password()
             .map(zeroize::Zeroizing::new)
             .map_err(|_| "Could not read the saved invitation. Edit the connection to replace its invitation.".to_owned())
     })
-    .await?;
-    open_server(&invitation, &state).await
+    .await
 }
 
-async fn open_server(invitation: &str, state: &Connections) -> Result<Connected> {
+#[tauri::command]
+async fn list_saved_computer_drives(
+    credential: uuid::Uuid,
+) -> Result<Vec<crate::server::ComputerDrive>> {
+    let invitation = read_server_invitation(credential).await?;
+    let connection = Connection::connect(&invitation)?;
+    let response = connection
+        .request("v1/drives", (), Duration::from_secs(5))
+        .await?;
+    serde_json::from_slice(&collect_response(response, 1024 * 1024).await?).map_err(message)
+}
+
+#[tauri::command]
+async fn verify_computer_pairing(invitation: String) -> Result<()> {
+    let invitation = zeroize::Zeroizing::new(invitation);
+    let connection = Connection::connect(&invitation)?;
+    connection
+        .request("v1/drives", (), Duration::from_secs(5))
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn connect_saved_server(
+    credential: uuid::Uuid,
+    segments: Option<Vec<String>>,
+    state: State<'_, Connections>,
+) -> Result<Connected> {
+    let invitation = read_server_invitation(credential).await?;
+    open_server(&invitation, segments.unwrap_or_default(), &state).await
+}
+
+#[tauri::command]
+async fn connect_server(invitation: String, state: State<'_, Connections>) -> Result<Connected> {
+    open_server(&invitation, Vec::new(), &state).await
+}
+
+async fn open_server(
+    invitation: &str,
+    segments: Vec<String>,
+    state: &Connections,
+) -> Result<Connected> {
     let connection = Connection::connect(invitation)?;
-    let listing = connection.list(Vec::new()).await?;
+    let listing = connection.list(segments).await?;
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     let address = connection
         .invitation
@@ -1340,6 +1386,48 @@ fn download_to(
 mod server_download_tests {
     use super::*;
     use std::{net::TcpListener, thread};
+
+    #[tokio::test]
+    async fn desktop_computer_share_lists_and_opens_separate_drive_roots() {
+        let fixture = tempfile::tempdir().unwrap();
+        let first = fixture.path().join("first");
+        let second = fixture.path().join("second");
+        fs::create_dir(&first).unwrap();
+        fs::create_dir(&second).unwrap();
+        fs::write(first.join("first.txt"), "first drive").unwrap();
+        fs::write(second.join("second.txt"), "second drive").unwrap();
+        let roots = vec![("C:".into(), first), ("D:".into(), second)];
+        let ip = "127.0.0.1".parse().unwrap();
+        let mut host = crate::server::DesktopServer::start_computer(roots, ip)
+            .await
+            .unwrap();
+        let guest = Connection::connect(&host.invitation).unwrap();
+        let response = guest
+            .request("v1/drives", (), Duration::from_secs(5))
+            .await
+            .unwrap();
+        let drives: serde_json::Value =
+            serde_json::from_slice(&collect_response(response, 4096).await.unwrap()).unwrap();
+        assert_eq!(drives[0]["name"], "C:");
+        assert!(drives[0]["total"].as_u64().is_some_and(|total| total > 0));
+        let devices = guest.list(Vec::new()).await.unwrap().entries;
+        assert_eq!(
+            devices
+                .iter()
+                .map(|drive| drive.name.as_str())
+                .collect::<Vec<_>>(),
+            ["C:", "D:"]
+        );
+        assert!(devices.iter().all(|drive| drive.directory));
+        for (drive, expected) in [("C:", "first.txt"), ("D:", "second.txt")] {
+            let entries = guest.list(vec![drive.into()]).await.unwrap().entries;
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].name, expected);
+        }
+        assert!(guest.list(vec!["E:".into()]).await.is_err());
+        assert!(guest.list(vec!["C:".into(), "..".into()]).await.is_err());
+        host.stop().await.unwrap();
+    }
 
     #[tokio::test]
     async fn desktop_share_accepts_pinned_tls_and_revokes_access_on_stop() {
@@ -2399,18 +2487,13 @@ async fn save_text_as(path: String, encoding: Encoding, text: String) -> Result<
 }
 
 #[tauri::command]
-async fn kswitcher_peers(directory: String) -> Result<Vec<kswitcher::Peer>> {
-    blocking(move || kswitcher::peers(&directory)).await
+async fn kswitcher_peers() -> Result<serde_json::Value> {
+    crate::kswitcher_lan::peers().await
 }
 
 #[tauri::command]
-async fn list_kswitcher(
-    directory: String,
-    peer: String,
-    path: String,
-    host: Option<String>,
-) -> Result<kswitcher::Listing> {
-    blocking(move || kswitcher::list(&directory, &peer, &path, host.as_deref())).await
+async fn list_kswitcher(peer: String, path: String) -> Result<crate::kswitcher_lan::Listing> {
+    crate::kswitcher_lan::list(&peer, &path).await
 }
 
 pub fn run() {
@@ -2555,6 +2638,7 @@ pub fn run() {
         #[cfg(windows)]
         crate::windows_shell::file_icons,
         installed_fonts,
+        computer_name,
         list_directory,
         disk_space,
         crate::space_analyzer::space_mount,
@@ -2586,12 +2670,13 @@ pub fn run() {
         crate::archives::save_archive_text,
         crate::archives::delete_archive_entries,
         crate::folders::create_folders,
-        connect_server,
-        crate::desktop_share::suggest_share_address,
         crate::desktop_share::active_desktop_share,
-        crate::desktop_share::start_desktop_share,
+        connect_server,
+        crate::desktop_share::start_desktop_computer_share,
         crate::desktop_share::stop_desktop_share,
         connect_saved_server,
+        list_saved_computer_drives,
+        verify_computer_pairing,
         save_server_invitation,
         remove_server_invitation,
         list_server,
