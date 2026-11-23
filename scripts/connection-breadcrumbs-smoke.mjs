@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 
 const platforms = ["Windows NT 10.0; Win64; x64", "X11; Linux x86_64", "Macintosh; Intel Mac OS X 10_15_7"];
 const folders = ["one-long-folder", "two-long-folder", "three-long-folder", "four-long-folder", "leaf-folder"];
@@ -66,7 +67,12 @@ async function fixture(browser, platform) {
         }
         if (command === "connect_smb") return remote({ kind: "shares", server: smbRoot, names: ["share"], warning: null });
         if (command === "list_directory") {
-          if (!args.path.startsWith(smbRoot)) return { path: args.path, parent: null, entries: [], omitted: 0 };
+          if (!args.path.startsWith(smbRoot)) {
+            const separator = windows ? "\\" : "/";
+            const last = args.path.lastIndexOf(separator);
+            const parent = args.path.startsWith(home + separator) ? args.path.slice(0, last) : null;
+            return { path: args.path, parent, entries: [], omitted: 0 };
+          }
           return remote({ path: args.path, parent: args.path.slice(0, args.path.lastIndexOf("\\")), entries: [], omitted: 0 });
         }
         return null;
@@ -120,10 +126,67 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await waitPath(page, side, home);
 }
 
+async function checkLocalResize(page, home) {
+  const separator = home.includes("\\") ? "\\" : "/";
+  const root = separator === "\\" ? home.slice(0, 2) : "/";
+  const path = [home, ...folders].join(separator);
+  const divider = page.getByRole("separator", { name: "Pane divider", exact: true });
+  const dragTo = async (fraction) => {
+    const grip = await divider.boundingBox();
+    const workspace = await page.locator(".workspace").boundingBox();
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(workspace.x + workspace.width * fraction, grip.y + 80);
+    await page.mouse.up();
+  };
+  await page.setViewportSize({ width: 1500, height: 700 });
+  for (const side of ["left", "right"]) {
+    const input = await editPaneAddress(page, side);
+    await input.fill(path);
+    await input.press("Enter");
+    await waitPath(page, side, path);
+  }
+  for (const side of ["left", "right"]) {
+    const other = side === "left" ? "right" : "left";
+    await dragTo(side === "left" ? 0.79 : 0.21);
+    const address = crumbs(page, side);
+    const overflow = button(address, "Show parent folders");
+    await overflow.waitFor({ state: "hidden" });
+    await button(address, root).waitFor();
+    for (const name of ["fixture", ...folders.slice(0, -1)]) await button(address, name).waitFor();
+    await button(crumbs(page, other), "Show parent folders").waitFor();
+    const current = crumbs(page, other).locator("[aria-current=location]").getByText("leaf-folder");
+    await current.waitFor();
+    const currentBounds = await current.boundingBox();
+    const navBounds = await crumbs(page, other).boundingBox();
+    assert.ok(currentBounds.width > 0 && currentBounds.x + currentBounds.width <= navBounds.x + navBounds.width);
+    assert.equal(await page.locator(`#${other}-path`).getAttribute("data-path"), path);
+    await page.setViewportSize({ width: 740, height: 700 });
+    await overflow.waitFor();
+    await page.setViewportSize({ width: 1500, height: 700 });
+    await overflow.waitFor({ state: "hidden" });
+  }
+  await dragTo(0.21);
+  const address = crumbs(page, "left");
+  await button(address, "Show parent folders").click();
+  const parents = address.locator(".address-parents");
+  await button(parents, root).waitFor();
+  await button(parents, "fixture").click();
+  await waitPath(page, "left", home);
+  assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
+  await divider.dblclick();
+  const rightInput = await editPaneAddress(page, "right");
+  await rightInput.fill(home);
+  await rightInput.press("Enter");
+  await waitPath(page, "right", home);
+  await page.setViewportSize({ width: 740, height: 700 });
+}
+
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   for (const [index, platform] of platforms.entries()) {
     const { page, home } = await fixture(browser, platform);
+    await checkLocalResize(page, home);
     const side = index === 1 ? "left" : "right";
     const other = side === "left" ? "right" : "left";
     for (const [source, saved, connectionName] of [["FTP", "Saved FTP", "FTP fixture"],
@@ -167,7 +230,7 @@ try {
     await page.getByRole("dialog", { name: "Add SSH connection", exact: true }).waitFor();
     await page.close();
   }
-  console.log("Verified remote source and root breadcrumbs, catalog history, keyboard access, offline providers, and independent panes.");
+  console.log("Verified local breadcrumb resizing and navigation, and remote source and root breadcrumbs on Windows, Ubuntu, and macOS.");
 } finally {
   await browser.close();
 }

@@ -1,6 +1,7 @@
 {
   "version": "0.1.26",
   "highlights": [
-    "Review staged, unstaged, and untracked files in Git View, preview inline diffs, and open working files in the Viewer or Editor."
+    "Review staged, unstaged, and untracked files in Git View, preview inline diffs, and open working files in the Viewer or Editor.",
+    "File-pane breadcrumbs show the full local path whenever it fits and restore hidden folders as the pane widens."
   ]
 }

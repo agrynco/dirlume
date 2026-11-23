@@ -539,6 +539,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address .editable-dropdown { min-height: 30px; }
 .address input { padding-block: 3px; font: .92em var(--mono); }
 .address-breadcrumbs {
+  --address-overflow-width: 28px;
   position: relative; display: flex; align-items: center; min-height: 30px;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--canvas); color: var(--ink);
   font: .92em var(--mono);
@@ -550,6 +551,14 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-crumb-clip { min-width: 0; overflow: hidden; direction: rtl; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
 .address-ancestor { display: flex; align-items: center; }
+.address-ancestor[hidden] { display: none; }
+.address-crumb-clip[data-fit] { flex: 0 0 auto; max-width: 100%; direction: ltr; }
+.address-crumb-clip[data-fit] .address-crumbs { max-width: 100%; }
+.address-crumb-clip[data-fit] .address-ancestor { flex: none; }
+.address-crumb-clip[data-fit] .address-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.address-crumbs[data-has-hidden] { padding-inline-start: var(--address-overflow-width); }
+.address-crumb-clip[data-fit] .address-crumbs[data-measuring] { max-width: none; padding-inline-start: 0; }
+.address-crumbs[data-measuring] .address-ancestor[hidden] { display: flex; }
 .address-ancestor button { min-height: 28px; padding: 2px 7px; }
 .address-ancestor > span { padding: 2px 7px; }
 .address-ancestor svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
@@ -560,7 +569,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-forward .address-ancestor { min-width: 0; }
 .address-forward button { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: .64; }
 .address-forward button:is(:hover, :focus-visible) { opacity: 1; }
-.address-overflow { position: absolute; inset-inline-start: 0; background: var(--canvas); }
+.address-overflow { position: absolute; inset-inline-start: 0; width: var(--address-overflow-width); background: var(--canvas); }
 .address-breadcrumbs[data-connection-source] > .address-overflow { position: static; flex: none; }
 .address-ellipsis { padding: 2px 7px; pointer-events: none; }
 .address-actions {
