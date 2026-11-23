@@ -190,7 +190,7 @@ Mouse-wheel font changes appear on the Options page for the affected feature and
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
-Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort, or use **Alt+Letter** to search by process name. Windows shows executable icons when they are available. **F8** asks before ending marked processes.
+Open either pane's sources with **Alt+F1** or **Alt+F2**, then choose **Processes** or press **0** to view running processes, CPU usage, and memory. Click a column heading to sort, or use **Alt+Letter** to search by process name. Windows shows executable icons when they are available. **F8** asks before ending marked processes.
 
 Right-click a process row or press **Shift+F10** on the focused row to inspect its properties, show its executable in the other pane, copy the PID or executable path, or ask to end that process. The row menu keeps the existing marks. The footer and its shortcut continue to act on the marked processes. Windows lock results omit **Show in other pane** so the locked item stays selected.
 

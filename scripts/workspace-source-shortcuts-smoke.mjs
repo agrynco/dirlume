@@ -106,7 +106,13 @@ try {
         return page.locator(`.quick-view-${side} .text-view`);
       }
       await page.keyboard.press(sourceKey(side));
-      await button(sources(side), view === "Processes" ? "Processes" : "FTP").click();
+      if (view === "Processes") {
+        assert.equal(await button(sources(side), "Processes").locator("kbd").textContent(), "0");
+        await page.keyboard.press("Digit0");
+        await pane(side).getByRole("grid", { name: "Running processes", exact: true }).waitFor();
+      } else {
+        await button(sources(side), "FTP").click();
+      }
       if (view === "Remote files") await files(side).getByRole("option", { name: /^FTP fixture/ }).dblclick();
       return files(side);
     }
@@ -147,6 +153,30 @@ try {
       await waitForPath(side, initialPath(opposite(side)));
       await page.locator(`.quick-view-${side}`).waitFor({ state: "hidden" });
       assert.equal(await page.locator(`#${opposite(side)}-path`).getAttribute("data-path"), initialPath(opposite(side)));
+    }
+    for (const { saved, expected, version } of [
+      { saved: ["1"], expected: "0", version: 9 },
+      { saved: "1", expected: "0", version: 9 },
+      { saved: ["6"], expected: "6", version: 9 },
+      { saved: [], expected: "", version: 9 },
+      { saved: ["1"], expected: "1", version: 10 },
+    ]) {
+      await page.evaluate(({ saved, version }) => {
+        localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ bindingDefaults: version, activeShortcutScheme: "fixture",
+          shortcutSchemes: [{ id: "fixture", name: "Fixture", bindings: { processSources: saved, imageFit: ["0"] } }] }));
+      }, { saved, version });
+      await enter("Local files", "left");
+      await page.keyboard.press(sourceKey("left"));
+      const processes = button(sources("left"), "Processes").locator("kbd");
+      if (expected) {
+        assert.equal(await processes.textContent(), expected);
+        await page.keyboard.press(`Digit${expected}`);
+        await pane("left").getByRole("grid", { name: "Running processes", exact: true }).waitFor();
+      } else {
+        assert.equal(await processes.count(), 0);
+        await page.keyboard.press("Digit0");
+        assert.equal(await sources("left").isVisible(), true);
+      }
     }
     const localized = {
       Windows: { language: "en", title: "Folder shortcuts", up: "Move up", down: "Move down" },
