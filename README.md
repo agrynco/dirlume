@@ -42,7 +42,7 @@ In Brief and Medium, **Up** and **Down** follow the sort order from the bottom o
 
 In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
 
-The built-in **Full** mode uses automatic Size and Date widths. These widths follow measured folder sizes and system-formatted dates in the current pane font. For a saved layout with fixed widths, set Size, Size in bytes, or Date to **0** to enable that behavior.
+The built-in **Full** mode uses automatic Size and Date widths. These widths follow the displayed values in the current pane font. When **F3** returns a folder measurement, the Size column widens as needed to show the full result, even with a saved width. Set a column width to **0** to fit its displayed values automatically.
 
 After confirming a local deletion or Move to Trash, you can cancel preparation or follow progress for the current item and the full selection. If an item is locked, retry it, skip it, or skip all remaining locks in that batch. On Windows, **Find locking processes** opens the process inspector. Ending a process requires its own confirmation. Permanent deletion keeps a skipped item and its parent folders while continuing with removable siblings. The final free-space reading comes from the source volume.
 
