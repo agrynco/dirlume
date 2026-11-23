@@ -161,7 +161,7 @@ pub(super) fn query(context: &Context, windows: bool) -> Option<Query> {
         return None;
     }
     let (global, group) = split_options(words, GLOBAL_VALUES);
-    let output = match group {
+    match group {
         [container, verb, arguments @ ..]
             if container == "container"
                 && (CONTAINER_SINGLE.contains(&verb.as_str())
@@ -212,7 +212,6 @@ pub(super) fn query(context: &Context, windows: bool) -> Option<Query> {
                     });
                 }
             }
-            Output::Completions
         }
         [] => {
             if words.is_empty()
@@ -223,19 +222,22 @@ pub(super) fn query(context: &Context, windows: bool) -> Option<Query> {
             {
                 return None;
             }
-            Output::Completions
         }
-        [container, ..] if container == "container" => Output::Completions,
+        [container, ..] if container == "container" => {}
         _ => return None,
-    };
-    Some(Query {
+    }
+    Some(completion_query(words, &context.prefix))
+}
+
+fn completion_query(words: &[String], prefix: &str) -> Query {
+    Query {
         args: ["__complete".to_owned()]
             .into_iter()
             .chain(words.iter().cloned())
-            .chain([context.prefix.clone()])
+            .chain([prefix.to_owned()])
             .collect(),
-        output,
-    })
+        output: Output::Completions,
+    }
 }
 
 pub(super) fn extended_query(context: &Context, windows: bool) -> Option<Query> {
@@ -244,15 +246,33 @@ pub(super) fn extended_query(context: &Context, windows: bool) -> Option<Query> 
         if !is_docker(program, windows) {
             return None;
         }
-        Some(Query {
-            args: ["__complete".to_owned()]
-                .into_iter()
-                .chain(words.iter().cloned())
-                .chain([context.prefix.clone()])
-                .collect(),
-            output: Output::Completions,
-        })
+        Some(completion_query(words, &context.prefix))
     })
+}
+
+pub(super) fn flag_query(context: &Context) -> Option<Query> {
+    let (_, words) = context.words.split_first()?;
+    // Cobra can omit flags for an empty token and handles the dash probe in flag-value positions.
+    (context.prefix.is_empty() && context.length == 0 && !words.iter().any(|word| word == "--"))
+        .then(|| completion_query(words, "-"))
+}
+
+pub(super) fn add_flags(result: &mut CompletionBatch, flags: CompletionBatch) {
+    // Keep both kinds of candidates visible even when the positional list fills the popup.
+    let option_limit = (MAX_MATCHES - result.matches.len()).max(MAX_MATCHES / 2);
+    let options: Vec<_> = flags
+        .matches
+        .into_iter()
+        .filter(|option| {
+            option.label.starts_with('-')
+                && !matches!(option.label.as_str(), "-" | "--")
+                && !result.matches.iter().any(|item| item.label == option.label)
+        })
+        .take(option_limit)
+        .collect();
+    result.matches.truncate(MAX_MATCHES - options.len());
+    result.exclusive |= !options.is_empty();
+    result.matches.extend(options);
 }
 
 #[derive(Deserialize)]
@@ -423,8 +443,18 @@ pub(super) fn local(
             .flatten()
     })?;
     let output = local_output(request, &query, cwd).unwrap_or_default();
-    let batch = batch(&query, context, &request.line, &output, cfg!(windows));
-    (!extended || batch.exclusive || !batch.matches.is_empty()).then_some(batch)
+    let mut result = batch(&query, context, &request.line, &output, cfg!(windows));
+    if let Some((flags, output)) = cfg!(any(windows, target_os = "linux"))
+        .then(|| flag_query(context))
+        .flatten()
+        .and_then(|flags| local_output(request, &flags, cwd).map(|output| (flags, output)))
+    {
+        add_flags(
+            &mut result,
+            batch(&flags, context, &request.line, &output, cfg!(windows)),
+        );
+    }
+    (!extended || result.exclusive || !result.matches.is_empty()).then_some(result)
 }
 
 pub(super) fn remote_script(
@@ -539,6 +569,80 @@ mod tests {
         for output in [b":0\n".as_slice(), b":1\n", b""] {
             assert!(!batch(&query, &context, line, output, false).exclusive);
         }
+    }
+
+    #[test]
+    fn adds_options_to_empty_tokens_without_displacing_positional_candidates() {
+        for (line, primary_output, options, expected) in [
+            (
+                "docker ps ",
+                b":4\n".as_slice(),
+                b"--all\n--format\n:4\n".as_slice(),
+                vec!["--all", "--format"],
+            ),
+            (
+                "docker image ",
+                b"ls\n:4\n",
+                b"--help\n:4\n",
+                vec!["ls", "--help"],
+            ),
+            (
+                "docker image ls ",
+                b":4\n",
+                b"--format\n:4\n",
+                vec!["--format"],
+            ),
+            (
+                "docker container logs ",
+                br#"{"ID":"aabb","Names":"web-api"}"#,
+                b"--follow\n:4\n",
+                vec!["web-api", "--follow"],
+            ),
+            (
+                "docker compose up ",
+                b"worker\n",
+                b"--build\n:4\n",
+                vec!["worker", "--build"],
+            ),
+            ("docker ps --format ", b":4\n", b":0\n", vec![]),
+            ("docker ps --format ", b"json\n:4\n", b":0\n", vec!["json"]),
+        ] {
+            let context = shell_context(line, line.len(), false).unwrap();
+            let primary = extended_query(&context, false).unwrap();
+            let flags = flag_query(&context).unwrap();
+            assert_eq!(flags.args.last().unwrap(), "-");
+            let mut result = batch(&primary, &context, line, primary_output, false);
+            add_flags(&mut result, batch(&flags, &context, line, options, false));
+            assert_eq!(result.index, line.len(), "{line}");
+            assert_eq!(result.length, 0, "{line}");
+            assert_eq!(
+                result
+                    .matches
+                    .iter()
+                    .map(|item| item.label.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{line}"
+            );
+        }
+        for line in ["docker ps --fo", "docker ps -- "] {
+            let context = shell_context(line, line.len(), false).unwrap();
+            assert!(flag_query(&context).is_none(), "{line}");
+        }
+        let line = "docker compose up ";
+        let (primary, context) = plan(line);
+        let services = (0..MAX_MATCHES)
+            .map(|index| format!("service-{index}\n"))
+            .collect::<String>();
+        let mut result = batch(&primary, &context, line, services.as_bytes(), false);
+        let flags = flag_query(&context).unwrap();
+        add_flags(
+            &mut result,
+            batch(&flags, &context, line, b"--build\n:4\n", false),
+        );
+        assert_eq!(result.matches.len(), MAX_MATCHES);
+        assert_eq!(result.matches.first().unwrap().label, "service-0");
+        assert_eq!(result.matches.last().unwrap().label, "--build");
     }
 
     #[test]

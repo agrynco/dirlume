@@ -392,13 +392,29 @@ where
         ))
         .await
         .unwrap_or_default();
-        let result = docker::batch(
+        let mut result = docker::batch(
             &query,
             &context,
             &request.line,
             remote_output(&output),
             false,
         );
+        if let Some(flags) = docker::flag_query(&context) {
+            let script = docker::remote_script(request.shell_environment.as_ref(), &flags);
+            let output = run(remote_command(&request, &script, true))
+                .await
+                .unwrap_or_default();
+            docker::add_flags(
+                &mut result,
+                docker::batch(
+                    &flags,
+                    &context,
+                    &request.line,
+                    remote_output(&output),
+                    false,
+                ),
+            );
+        }
         if result.exclusive || !result.matches.is_empty() {
             return Ok(result);
         }
@@ -761,8 +777,13 @@ complete -F _fixture_tool remote-only-tool
         let docker = r#"#!/bin/sh
 case "$*" in
   "__complete co"|"__complete ") printf 'container\ncompose\n:4\n';;
-  "__complete image ls --for") printf '%s\n' '--format' ':4';;
+  "__complete image ls --for"|"__complete image ls -") printf '%s\n' '--format' ':4';;
   "__complete ps ") printf ':4\n';;
+  "__complete ps -") printf '%s\n' '--all' '--format' ':4';;
+  "__complete ps --format ") printf ':4\n';;
+  "__complete ps --format -") printf ':0\n';;
+  "__complete compose up -") printf '%s\n' '--build' ':4';;
+  "__complete container logs -") printf '%s\n' '--follow' ':4';;
   'compose config --services') /bin/cat compose.yaml;;
   *'container ls --all --no-trunc --format'*) /bin/cat containers.json;;
 esac
@@ -799,7 +820,13 @@ esac
             ("cat local-", "local-file.txt"),
             ("local-only-tool ./local-", "local-file.txt"),
             ("docker co", "container"),
+            ("docker ps ", "--all"),
+            ("docker image ls ", "--format"),
             ("docker image ls --for", "--format"),
+            ("docker compose up ", "--build"),
+            ("docker compose up ", "local-web"),
+            ("docker container logs ", "--follow"),
+            ("docker container logs ", "local-container"),
             ("docker compose logs local-", "local-web"),
             ("docker container inspect cc", "ccdd"),
         ] {
@@ -815,7 +842,7 @@ esac
                 "local {line}: missing {expected}"
             );
         }
-        for line in ["local-only-tool local-", "docker ps "] {
+        for line in ["local-only-tool local-", "docker ps --format "] {
             let batch = complete(&CompletionRequest {
                 line: line.into(),
                 caret: line.len(),
@@ -834,7 +861,13 @@ esac
                 ("cat remote-", "remote-file.txt"),
                 ("docker ", "compose"),
                 ("docker co", "container"),
+                ("docker ps ", "--all"),
+                ("docker image ls ", "--format"),
                 ("docker image ls --for", "--format"),
+                ("docker compose up ", "--build"),
+                ("docker compose up ", "remote-web"),
+                ("docker container logs ", "--follow"),
+                ("docker container logs ", "remote-container"),
                 ("docker compose logs remote-", "remote-web"),
                 ("docker container inspect aa", "aabb"),
             ] {
