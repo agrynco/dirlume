@@ -86,7 +86,6 @@ const ACTIONS: &[&str] = &[
     "open_elevated",
     "windows_startup",
     "open_web_link",
-    "open_kswitcher",
     "list_kswitcher",
     "terminate_processes",
 ];
@@ -108,7 +107,6 @@ const OTHER_OPERATIONS: &[&str] = &[
     "resolve_text_link",
     "read_bytes",
     "read_server_bytes",
-    "has_kswitcher_bridge",
     "kswitcher_peers",
     "installed_fonts",
     "show_window",

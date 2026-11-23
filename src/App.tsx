@@ -40,6 +40,7 @@ import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortc
 import { FileBookmarksDialog } from "./FileBookmarksDialog";
 import { bookmarkFile, bookmarkKey, lineFingerprint, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
+import { kswitcherAddress, rememberKSwitcherAddress } from "./kswitcherAddresses";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
@@ -3500,7 +3501,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }}
         onClose={() => setModal({ kind: "sortMenu", side: modal.side })} />}
       {modal?.kind === "folderShortcuts" && <FolderShortcutsDialog screen={modal.screen} shortcuts={folderShortcuts}
-        currentFolder={currentFolderShortcut(modal.side)} bridgeDirectory={preferences.kswitcher} bindings={shortcuts}
+        currentFolder={currentFolderShortcut(modal.side)} kswitcherDirectory={preferences.kswitcher} bindings={shortcuts}
         onScreen={(screen) => setModal({ ...modal, screen })}
         onSave={(next) => { persistFolderShortcuts(next); setFolderShortcuts(next); }}
         onAssigned={(group) => setStatus({ text: t("Folder shortcut saved in group {0}.", group) })}
@@ -3513,7 +3514,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
         onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setModal(null)} />}
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
-        remoteProvider={preferences.provider} bridgeDirectory={preferences.kswitcher}
+        remoteProvider={preferences.provider} kswitcherDirectory={preferences.kswitcher}
         onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
         onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
@@ -3729,26 +3730,26 @@ function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOp
   const [value, setValue] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState("");
-  const [bridge, setBridge] = useState<boolean | null>(null);
+  const [loadingPeers, setLoadingPeers] = useState(false);
   const [peers, setPeers] = useState<KSwitcherPeer[]>([]);
+  const [host, setHost] = useState("");
 
   useEffect(() => {
-    if (provider !== "kswitcher" || !directory) return;
+    if (provider !== "kswitcher") return;
     let current = true;
-    api.hasKSwitcherBridge(directory).then(async (available) => {
+    setLoadingPeers(true);
+    void api.kswitcherPeers(directory).then((result) => {
       if (!current) return;
-      setBridge(available);
-      if (available) {
-        const peers = await api.kswitcherPeers(directory);
-        if (current) {
-          setPeers(peers);
-          setValue(peers[0]?.id ?? "");
-        }
-      }
-    }).catch((error: unknown) => { if (current) setError(describeError(error)); });
+      const id = result[0]?.id ?? "";
+      setPeers(result);
+      setValue(id);
+      setHost(kswitcherAddress(id));
+    }).catch((error: unknown) => { if (current) setError(describeError(error)); })
+      .finally(() => { if (current) setLoadingPeers(false); });
     return () => { current = false; };
   }, [provider, directory]);
 
+  const peer = peers.find((item) => item.id === value);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (waiting) return;
@@ -3756,15 +3757,10 @@ function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOp
     setError("");
     try {
       if (provider === "kswitcher") {
-        if (bridge) {
-          const peer = peers.find((peer) => peer.id === value);
-          if (!peer) return;
-          const listing = await api.listKSwitcher(directory, peer.id, "");
-          onConnect({ kind: "kswitcher", directory, peer: peer.id, address: peer.name, path: "", parent: listing.parent }, listing);
-        } else {
-          await api.openKSwitcher(directory);
-          onClose();
-        }
+        if (!peer) return;
+        const listing = await api.listKSwitcher(directory, peer.id, "", host);
+        rememberKSwitcherAddress(peer.id, host);
+        onConnect({ kind: "kswitcher", directory, peer: peer.id, address: peer.name, path: "", parent: listing.parent }, listing);
       } else {
         const { listing, ...connection } = await api.connect(value);
         onConnect({ kind: "server", ...connection, segments: [] }, listing);
@@ -3787,33 +3783,38 @@ function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOp
                 placeholder={t("Paste the invitation from the remote machine")} value={value}
                 onChange={(event) => setValue(event.target.value)} />
             </label>
-          ) : bridge === true && peers.length ? (
-            <label className="field">{t("Paired machine")}
-              <select data-initial-focus value={value} onChange={(event) => setValue(event.target.value)}>
-                {peers.map((peer) => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
-              </select>
-            </label>
-          ) : bridge === true ? (
-            <p>{t("Run KSwitcher on both computers and enable file browsing for the paired machine.")}</p>
-          ) : bridge === false ? (
-            <p>{t("Open KSwitcher Files and select a paired machine from its source menu.")}</p>
-          ) : (
-            <p>{directory ? t("Looking for the KSwitcher bridge…") : t("Choose the KSwitcher installation folder in Options.")}</p>
-          )}
+          ) : loadingPeers ? <p>{t("Loading paired computers…")}</p> : peers.length ? (
+            <>
+              <label className="field">{t("Paired machine")}
+                <select data-initial-focus value={value} onChange={(event) => {
+                  const id = event.target.value;
+                  setValue(id);
+                  setHost(kswitcherAddress(id));
+                }}>
+                  {peers.map((peer) => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
+                </select>
+              </label>
+              <label className="field">{t("Computer name or IPv4 address")}
+                <input autoComplete="off" spellCheck={false} value={host} placeholder={peer?.name}
+                  onChange={(event) => setHost(event.target.value)} />
+              </label>
+            </>
+          ) : !error && <p>{t("Pair the computers in KSwitcher first.")}</p>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           <div className="dialog-actions">
             <Button type="button" onClick={onShare} disabled={waiting}>{t("Share a folder")}</Button>
             {preferredProvider === "kswitcher" && <Button type="button" disabled={waiting} onClick={() => {
               setValue("");
               setError("");
+              setPeers([]);
               setProvider(provider === "server" ? "kswitcher" : "server");
             }}>{t(provider === "server" ? "Connect through KSwitcher" : "Use a Dirlume invitation")}</Button>}
             <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
           </div>
         </div>
         <footer className="dialog-footer">
-          <Button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" && bridge === null) || (bridge !== false && !value.trim())}>
-            {waiting ? t("Connecting…") : bridge === false ? t("Open KSwitcher Files") : t("Connect")}
+          <Button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" ? loadingPeers || !peer : !value.trim())}>
+            {waiting ? t("Connecting…") : t("Connect")}
           </Button>
         </footer>
       </form>

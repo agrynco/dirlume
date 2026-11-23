@@ -20,7 +20,7 @@ interface Props {
   screen: FolderShortcutScreen;
   shortcuts: FolderShortcuts;
   currentFolder?: FolderShortcut;
-  bridgeDirectory: string;
+  kswitcherDirectory: string;
   bindings: Bindings;
   onScreen: (screen: FolderShortcutScreen) => void;
   onSave: (shortcuts: FolderShortcuts) => void;
@@ -47,7 +47,7 @@ export function FolderShortcutsDialog(props: Props) {
   }
   if (screen.kind === "edit") {
     const cancel = () => screen.returnTo ? onScreen(screen.returnTo) : onClose();
-    return <FolderShortcutEditor group={screen.group} entry={screen.entry} bridgeDirectory={props.bridgeDirectory}
+    return <FolderShortcutEditor group={screen.group} entry={screen.entry} kswitcherDirectory={props.kswitcherDirectory}
       onClose={cancel} onSubmit={(entry) => {
         const group = shortcuts[screen.group];
         if (group.some((existing, index) => index !== screen.index && sameFolderShortcut(existing, entry))) {
@@ -69,10 +69,10 @@ export function FolderShortcutsDialog(props: Props) {
   return <FolderShortcutPicker {...props} screen={screen} />;
 }
 
-function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose }: {
+function FolderShortcutEditor({ group, entry, kswitcherDirectory, onSubmit, onClose }: {
   group: FolderGroup;
   entry: FolderShortcut;
-  bridgeDirectory: string;
+  kswitcherDirectory: string;
   onSubmit: (entry: FolderShortcut) => string | void;
   onClose: () => void;
 }) {
@@ -106,7 +106,7 @@ function FolderShortcutEditor({ group, entry, bridgeDirectory, onSubmit, onClose
           spellCheck={false} value={path} onValueChange={setPath} required /> :
           <PathField id={id} historyKey="folder-shortcut-path" label={pathLabel}
             value={path} onChange={setPath} browse={entry.peer ? undefined : "folder"}
-            kswitcher={entry.peer ? { directory: bridgeDirectory, peer: entry.peer.id } : undefined} required />}
+            kswitcher={entry.peer ? { directory: kswitcherDirectory, peer: entry.peer.id } : undefined} required />}
         {error && <p className="dialog-error" role="alert">{error}</p>}
       </div>
       <footer className="dialog-footer">
