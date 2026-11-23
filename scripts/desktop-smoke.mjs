@@ -2020,6 +2020,14 @@ try {
       assert.equal(await help.locator(`${href} h3`).innerText(), await link.innerText());
       assert.match(await help.locator(`${href} p`).first().innerText(), /\S/);
     }
+    await page.keyboard.press("Control+f");
+    const helpSearch = help.getByRole("searchbox", { name: "Search Help", exact: true });
+    assert.ok(await helpSearch.evaluate((node) => node === document.activeElement));
+    await helpSearch.fill("select all");
+    await help.locator('.help-results a[href="#help-terminal"]').press("Enter");
+    await help.locator("#help-terminal [data-help-match]").filter({ hasText: "Select All" }).waitFor();
+    await help.getByRole("button", { name: "Clear Help search", exact: true }).click();
+    await contents.locator('[aria-current="location"][href="#help-terminal"]').waitFor();
     await page.keyboard.press("Escape");
   } finally {
     await page.context().setOffline(false);

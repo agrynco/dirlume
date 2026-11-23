@@ -127,6 +127,7 @@ export const commands = {
   connect: { label: "Connect to a remote machine", key: "Ctrl+Shift+K" },
   settings: { label: "Options", key: "Ctrl+Alt+S" },
   help: { label: "Help", key: "F1" },
+  searchHelp: { label: "Search Help", key: `${documentModifier}+F` },
   nextDocument: { label: "Next open window", key: "Ctrl+Tab" },
   previousDocument: { label: "Previous open window", key: "Ctrl+Shift+Tab" },
   viewAsHex: { label: "Toggle hexadecimal viewer", key: "F4" },
@@ -229,6 +230,7 @@ export function commandLabel(command: Command) {
 
 export function commandScope(command: Command) {
   if (command === "help" || command === "menu" || command === "menuAlternate") return "global";
+  if (command === "searchHelp") return "help";
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText" || command === "copyTerminalText") return "terminal";
   if (command === "processContextMenu") return "processPane";

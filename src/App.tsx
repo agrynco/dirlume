@@ -3550,7 +3550,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }} />
       )}
       {helpRequest && <Suspense fallback={null}>
-        <HelpDialog initialTopic={helpRequest.topic} side={helpRequest.side} language={preferences.language} copyShortcuts={shortcuts.copy} onClose={() => {
+        <HelpDialog initialTopic={helpRequest.topic} side={helpRequest.side} language={preferences.language}
+          copyShortcuts={shortcuts.copy} searchShortcuts={shortcuts.searchHelp} onClose={() => {
           setHelpTopic(null);
           if (helpTopic === "terminalShortcuts") focusTerminalInput();
         }} />
