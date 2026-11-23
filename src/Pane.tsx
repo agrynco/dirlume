@@ -183,7 +183,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     folderSizes.active && !group.some(({ field }) => field === "size" || field === "bytes")
       ? [...group, { field: "size" as const, width: "0" }] : group);
   const columns = groups.flat();
-  const tracks = panelColumnTracks(columns);
+  const fitMeasuredFolders = !pane.search && pane.sizes.size > 0;
+  const tracks = panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = paneCursorIndex(pane, entries);
@@ -217,29 +218,32 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const automatic = measuredColumnFields.filter((field) => displayedColumns.some((column) => column.field === field && column.width === "0"));
   const autoSize = automatic.includes("size");
   const autoBytes = automatic.includes("bytes");
+  const sampleSize = autoSize || (fitMeasuredFolders && columns.some(({ field }) => field === "size"));
+  const sampleBytes = autoBytes || (fitMeasuredFolders && columns.some(({ field }) => field === "bytes"));
   const language = locale();
   const bytesFormat = useMemo(() => new Intl.NumberFormat(language), [language]);
   const measuredSizes = useMemo(() => {
     const size = new Map<string, string>();
     const bytes = new Map<string, string>();
-    if (!search && (autoSize || autoBytes)) {
-      const measurements = pane.backgroundSizes
-        ? [...pane.backgroundSizes.values()].filter((result) => !result.unavailable && !result.pending)
-        : pane.sizes.values();
-      for (const result of measurements) {
+    if (!search && (sampleSize || sampleBytes)) {
+      const measurements = pane.backgroundSizes ? new Map([...pane.sizes, ...pane.backgroundSizes]) : pane.sizes;
+      for (const [name, result] of measurements) {
+        const background = pane.backgroundSizes?.get(name);
+        if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
+        const measured = pane.sizes.has(name);
         // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
-        if (autoSize) {
+        if (autoSize || (sampleSize && measured)) {
           const sample = sizeLabel(result.bytes, result.incomplete);
           size.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
         }
-        if (autoBytes) {
+        if (autoBytes || (sampleBytes && measured)) {
           const sample = sizeLabel(result.bytes, result.incomplete, bytesFormat);
           bytes.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
         }
       }
     }
     return { size: [...size.values()], bytes: [...bytes.values()] };
-  }, [search, autoSize, autoBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
+  }, [search, autoSize, autoBytes, sampleSize, sampleBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
   const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
   const dateLabel = useTimestamps(displayedFields.includes("date") ? visibleTimestamps : [], "date");
   const timeLabel = useTimestamps(displayedFields.includes("time") ? visibleTimestamps : [], "time");
@@ -403,7 +407,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     }
   }
 
-  const widthSamples: Partial<Record<MeasuredColumnField, string[]>> = {};
+  const widthSamples: Partial<Record<MeasuredColumnField, string[]>> = { ...measuredSizes };
   for (const field of automatic) {
     const samples = new Set(field === "size" || field === "bytes" ? measuredSizes[field] : []);
     for (const index of indices) samples.add(itemValue(entries[index], field));

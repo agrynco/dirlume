@@ -5,10 +5,12 @@ import { chromium } from "playwright-core";
 export async function testFolderMeasurement() {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
-    for (const [layout, userAgent] of [
+    for (const [layout, userAgent, width = "0"] of [
       ["standard", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"],
       ["twin", "Mozilla/5.0 (X11; Linux x86_64)"],
       ["classic", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"],
+      ["standard", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "6"],
+      ["twin", "Mozilla/5.0 (X11; Linux x86_64)", "5%"],
     ]) {
       const page = await browser.newPage({ viewport: { width: 1080, height: 550 }, userAgent });
       page.setDefaultTimeout(8000);
@@ -16,12 +18,12 @@ export async function testFolderMeasurement() {
         const path = new URL(route.request().url()).pathname;
         return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
       });
-      await page.addInitScript((layout) => {
+      await page.addInitScript(({ layout, width }) => {
         const measuredField = layout === "twin" ? "bytes" : "size";
         const preferences = { layout };
-        if (layout === "twin") preferences.panelModes = {
+        if (layout === "twin" || width !== "0") preferences.panelModes = {
           full: {
-            list: [{ field: "name", width: "0" }, { field: measuredField, width: "0" }, { field: "date", width: "0" }],
+            list: [{ field: "name", width: "0" }, { field: measuredField, width }, { field: "date", width: "0" }],
             status: [{ field: "rightName", width: "0" }],
           },
         };
@@ -57,7 +59,8 @@ export async function testFolderMeasurement() {
                     if (index < 0) continue;
                     remaining.splice(index, 1);
                     const large = name === "Measured folder";
-                    args.output.onmessage({ name, bytes: large ? Math.round(14.1 * 1024 ** 3) : 1024, incomplete: large });
+                    const gibibytes = width === "6" ? 17.6 : 14.1;
+                    args.output.onmessage({ name, bytes: large ? Math.round(gibibytes * 1024 ** 3) : 1024, incomplete: large && width !== "6" });
                   }
                   if (!remaining.length) {
                     window.completeFolderMeasurement = undefined;
@@ -80,7 +83,7 @@ export async function testFolderMeasurement() {
             return null;
           },
         };
-      }, layout);
+      }, { layout, width });
       await page.goto("http://dirlume.test/");
       const pane = page.locator("#left-pane");
       assert.equal(await pane.getAttribute("data-layout"), layout);
@@ -98,6 +101,8 @@ export async function testFolderMeasurement() {
         neighbor.boundingBox(),
       ]);
       const before = await positions();
+      const size = folder.locator(".file-size");
+      const sizeBefore = (await size.boundingBox()).width;
       const date = neighbor.locator(".file-date");
       const beforeDate = await date.textContent();
       const rightWidth = await page.locator("#right-pane .file-column.col-size").evaluate((item) => item.getBoundingClientRect().width);
@@ -105,9 +110,14 @@ export async function testFolderMeasurement() {
       await reading.waitFor();
       await pane.getByRole("button", { name: "Cancel folder size calculation" }).waitFor();
       assert.deepEqual(await positions(), before, `The ${layout} pane moved while measuring.`);
+      assert.equal((await size.boundingBox()).width, sizeBefore, "Size changed before F3 returned a result.");
       await page.evaluate(() => window.completeFolderMeasurement());
-      const measured = layout === "twin" ? `≥ ${Math.round(14.1 * 1024 ** 3).toLocaleString("en-US")}` : "≥ 14.1 GiB";
+      const measured = layout === "twin" ? `≥ ${Math.round(14.1 * 1024 ** 3).toLocaleString("en-US")}` :
+        width === "6" ? "17.6 GiB" : "≥ 14.1 GiB";
       await folder.getByText(measured, { exact: true }).waitFor();
+      await size.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.ok(await size.evaluate((item) => item.scrollWidth <= item.clientWidth), `The F3 result is clipped with width ${width}.`);
+      if (width !== "0") assert.ok((await size.boundingBox()).width > sizeBefore, "F3 did not expand the saved Size width.");
       await reading.waitFor({ state: "hidden" });
       assert.deepEqual(await positions(), before, `The ${layout} pane moved when the result appeared.`);
       await page.waitForFunction(() => typeof window.completeFolderDate === "function");
@@ -120,7 +130,6 @@ export async function testFolderMeasurement() {
       await page.evaluate(() => window.completeFolderMeasurement());
       await second.getByText(layout === "twin" ? "1,024" : "1 KiB", { exact: true }).waitFor();
 
-      const size = folder.locator(".file-size");
       const checkFits = async () => {
         for (const [cell, heading] of [[size, ".col-size"], [date, ".col-modified"]]) {
           await cell.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -163,7 +172,7 @@ export async function testFolderMeasurement() {
       await analyzer.getByRole("status").getByText("Partial results", { exact: true }).waitFor();
       await page.close();
     }
-    console.log("Verified stable folder measurement, automatic grouped sizes and native dates, and independent pane widths.");
+    console.log("Verified stable folder measurement, post-F3 resizing for saved widths, native dates, and independent pane widths.");
   } finally {
     await browser.close();
   }
