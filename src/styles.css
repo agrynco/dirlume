@@ -982,6 +982,16 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-details li + li { border-top: 1px solid var(--line); }
 .git-load-more { margin: 6px; }
 .git-pane .git-error { color: var(--danger); }
+.git-tabs { display: flex; flex: 1; gap: 4px; }
+.git-tabs button[aria-pressed="true"] { color: var(--panel-selected-ink); background: var(--panel-selection); }
+.git-change-summary { display: grid; gap: 5px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.git-change-summary strong { overflow-wrap: anywhere; }
+.git-change-summary > span { color: var(--panel-muted); }
+.git-change-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.git-patch { flex: 1; min-height: 0; margin: 0; padding: 6px 8px; overflow: auto; font-family: var(--text-font); }
+.git-patch span { display: block; width: max-content; min-width: 100%; }
+.git-patch [data-diff="added"] { background: var(--compare-added, var(--added)); }
+.git-patch [data-diff="removed"] { background: var(--compare-removed, var(--removed)); }
 .environment-pane { overflow: hidden; }
 .environment-pane .pane-title { flex: 1; }
 .environment-pane .pane-title svg { width: 15px; height: 15px; flex: none; }

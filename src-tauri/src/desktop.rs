@@ -2511,6 +2511,8 @@ pub fn run() {
         crate::space_analyzer::cancel_space_scan,
         crate::git_view::git_repository,
         crate::git_view::git_history,
+        crate::git_view::git_working_changes,
+        crate::git_view::git_working_diff,
         crate::git_view::git_details,
         crate::environment::environment_scope,
         crate::environment::environment_value,

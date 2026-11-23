@@ -247,6 +247,16 @@ export interface GitDetails {
   changes: { status: string; path: string; previousPath: string | null }[];
 }
 
+export type GitChangeGroup = "staged" | "unstaged" | "untracked";
+export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
+export interface GitWorkingDiff {
+  workingPath: string | null;
+  workingText: boolean;
+  patch: string | null;
+  fallback: "binary" | "conflict" | "oversized" | "unsupported" | null;
+  unborn: boolean;
+}
+
 export type EnvironmentScope = "user" | "system" | "process";
 export type EnvironmentKind = "literal" | "expandable";
 export interface EnvironmentRow {
@@ -405,6 +415,8 @@ export const api = {
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
+  gitWorkingChanges: (root: string) => invoke<GitWorkingChange[]>("git_working_changes", { root }),
+  gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
   saveEnvironment: (scope: EnvironmentScope, edits: EnvironmentEdit[], integrate = false) =>
