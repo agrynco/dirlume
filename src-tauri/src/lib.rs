@@ -11,6 +11,8 @@ mod deletion;
 #[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]
+mod desktop_share;
+#[cfg(feature = "desktop")]
 mod diagnostics;
 #[cfg(feature = "desktop")]
 mod disk_space;
@@ -46,7 +48,7 @@ mod protocol;
 mod remote_transfer;
 #[cfg(feature = "desktop")]
 mod screen_color;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 pub mod server;
 #[cfg(feature = "desktop")]
 mod space_analyzer;

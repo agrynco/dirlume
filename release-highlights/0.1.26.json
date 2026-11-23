@@ -3,6 +3,7 @@
   "highlights": [
     "Review staged, unstaged, and untracked files in Git View, preview inline diffs, and open working files in the Viewer or Editor.",
     "File-pane breadcrumbs show the full local path whenever it fits and restore hidden folders as the pane widens.",
-    "Resize text with Ctrl+Wheel in Folder shortcuts, Options, Terminal, the command line, Compare files, and the main interface."
+    "Resize text with Ctrl+Wheel in Folder shortcuts, Options, Terminal, the command line, Compare files, and the main interface.",
+    "Share one folder directly from Dirlume and invite another Dirlume app on the local network to browse and download files."
   ]
 }

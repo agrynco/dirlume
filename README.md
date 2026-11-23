@@ -267,6 +267,8 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder with read access over TLS. Browse and download files and directories, or open and compare text in Dirlume. [Server setup and autostart](docs/server.md).
 
+To share directly from the desktop app, open **Connect → Share a folder**. Choose a local folder and the IP address of the network interface the other computer can reach. Select **Start sharing**, then **Copy invitation**. On the other computer, activate either file pane and paste the invitation into **Connect**. You can also save the invitation in that pane’s **Remote machine** list. Guests can browse and download over TLS. The host can revoke the invitation and end access with **Stop sharing** or by exiting Dirlume.
+
 **KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
 
 ## MCP server

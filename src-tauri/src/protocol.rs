@@ -68,7 +68,7 @@ impl Invitation {
     }
 }
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl Invitation {
     pub fn encode(&self) -> serde_json::Result<String> {
         Ok(format!(
