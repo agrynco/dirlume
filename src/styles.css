@@ -425,7 +425,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 #right-pane, .quick-view-right, .space-analyzer-right, .disk-information-right, .git-pane-right, .environment-right, .recent-right { grid-column: 3; grid-row: 1; }
 .pane[inert] { visibility: hidden; }
 .recent-pane { min-width: 0; min-height: 0; overflow: hidden; }
-.recent-pane .pane-title { flex: 1; min-width: 0; }
+.recent-pane .pane-title { flex: 1; min-width: 0; margin: 0; font-size: 1em; }
 .recent-pane .pane-title svg { width: 16px; height: 16px; flex: none; }
 .recent-filter { padding: 4px 6px; }
 .recent-filter input { width: 100%; min-width: 0; }
@@ -433,7 +433,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .recent-list:empty { flex: none; }
 .recent-pane > .pane-empty { flex: 1; }
 .recent-row {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(48%);
   gap: 1px 6px; padding: 4px 6px; border-bottom: 1px solid var(--line); cursor: default;
 }
 .recent-row > :is(strong, small, .recent-path) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
