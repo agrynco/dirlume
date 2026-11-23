@@ -105,7 +105,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. On Windows, select a drive by letter to open the other pane's local folder on that drive, or open the drive root. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
-| Ctrl+Wheel | Change the font size of the file pane, viewer, or editor under the pointer. |
+| Ctrl+Wheel | Change the font size of the Dirlume area under the pointer. |
 | Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
 | Esc / F10 inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
@@ -188,7 +188,7 @@ Use **F6** or the document's **File** menu to switch modes for the current file.
 
 The Viewer refreshes an open local file when it changes on disk. The Editor offers **Reload from disk** to open the updated file or **Keep editing** to retain the current buffer. Reloading discards any unsaved edits. Saving still checks that the disk contents match the version originally opened or last saved by the Editor.
 
-Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text viewer, the hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing the effective base size clears the wheel adjustment for the affected view. An imported font that is unavailable uses its current inherited fallback and keeps its saved name.
+Use **Ctrl+Wheel** over the main interface, either file pane, a file pane dialog such as **Folder shortcuts**, **Options**, the Terminal, the command line, **Compare files**, or a document view to change its text size. Related dialogs share the same adjustment. The file panes, text Viewer, Hex Viewer, Editor, and Markdown preview each remember their own size. Adjustments persist and appear in **Appearance → View font sizes**, where clearing a value restores the inherited size. **Keyboard shortcuts** lets you reassign or disable **Font zoom with mouse wheel**. An imported font that is unavailable uses its current inherited fallback and keeps its saved name.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 

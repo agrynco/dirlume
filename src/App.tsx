@@ -79,7 +79,8 @@ import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut
 import { countText, errorText, setLanguage, t } from "./i18n";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
-import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
+import { resizeViewFont } from "./viewFonts";
+import { useFontZoom } from "./useFontZoom";
 import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
@@ -764,14 +765,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => window.removeEventListener("storage", sync);
   }, []);
 
-  const zoomViewFont: ZoomViewFont = useCallback((view, change, base) => {
+  useFontZoom(shortcuts.zoomFont, preferences.viewFontSizes, (view, change, base) => {
     setPreferences((current) => {
-      const previous = current.viewFontSizes[view] ?? base;
-      const size = Math.max(minViewFontSize, Math.min(maxViewFontSize, previous + change));
-      if (size === previous) return current;
-      return { ...current, viewFontSizes: { ...current.viewFontSizes, [view]: size } };
+      const sizes = resizeViewFont(current.viewFontSizes, view, change, base);
+      return sizes === current.viewFontSizes ? current : { ...current, viewFontSizes: sizes };
     });
-  }, []);
+  });
 
   useEffect(() => {
     saveCommandHistory(historyItems);
@@ -2929,7 +2928,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   return (
     <ElevationContext value={openAdministrator}>
-    <div className={`app${terminalVisible ? " has-terminal" : ""}${commandLineVisible ? " has-command-line" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
+    <div data-font-zoom="ui" className={`app${terminalVisible ? " has-terminal" : ""}${commandLineVisible ? " has-command-line" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} data-status-bar={preferences.showStatusBar ? undefined : "hidden"}
       style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
@@ -3060,8 +3059,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (item) revealResult(side, item.place, item.entry.name);
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column, true)}
-            sourceMenu={paneSources(side)} zoomShortcut={shortcuts.zoomFont}
-            fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
+            sourceMenu={paneSources(side)} fontSize={preferences.viewFontSizes[side]} />
         ))}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
@@ -3189,7 +3187,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}
             shortcuts={shortcuts}
-            fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
+            fontSizes={preferences.viewFontSizes}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
             onSwitchMode={() => openDocument(file, !editing)}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
@@ -3221,6 +3219,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
             visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
+            fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
             focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
@@ -3239,7 +3238,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
         {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
       </div>}
-      <form className="command-bar" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
+      <form className="command-bar" data-font-zoom="command" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>

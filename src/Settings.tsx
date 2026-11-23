@@ -19,7 +19,7 @@ import {
   panelLayouts, shortcutBindings, shortcutConflicts, showShortcut, wheelBindings, type ActionButtonWidth, type Bindings, type Command,
   type PanelLayout, type Preferences, type Provider,
 } from "./preferences";
-import { viewFonts } from "./viewFonts";
+import { viewFontKeys, viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
 import type { HelpTopic } from "./helpTopics";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
@@ -92,6 +92,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const pageBody = useRef<HTMLDivElement>(null);
   const schemeSelect = useRef<HTMLSelectElement>(null);
   const [preferences, onChange] = useState(saved);
+  const savedZoom = useRef(saved.viewFontSizes);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState(false);
   const [selection, setSelection] = useState<PickHistoryEntry | null>(null);
@@ -161,6 +162,24 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
   }, [initialLocation]);
+
+  useEffect(() => {
+    const previous = savedZoom.current;
+    const sizes = saved.viewFontSizes;
+    savedZoom.current = sizes;
+    const changed = viewFontKeys.filter((key) => previous[key] !== sizes[key]);
+    if (!changed.length) return;
+    onChange((draft) => {
+      const viewFontSizes = { ...draft.viewFontSizes };
+      for (const key of changed) {
+        if (key === "options" || viewFontSizes[key] === previous[key]) {
+          if (sizes[key] === undefined) delete viewFontSizes[key];
+          else viewFontSizes[key] = sizes[key];
+        }
+      }
+      return { ...draft, viewFontSizes };
+    });
+  }, [saved.viewFontSizes]);
 
   useEffect(() => {
     if (page !== "general" || buildVersion) return;

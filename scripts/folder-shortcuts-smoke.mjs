@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { openMainMenu } from "./menu-header-smoke.mjs";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst }) {
   const dialog = () => page.getByRole("dialog", { name: "Folder shortcuts", exact: true });
@@ -11,6 +12,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   const title = () => dialog().getByRole("textbox", { name: "Title (optional)", exact: true });
   const path = () => dialog().getByLabel("Path", { exact: true });
   const confirm = () => dialog().getByRole("button", { name: "Save", exact: true }).click();
+  const size = (locator) => locator.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
   const opened = (side, target) => page.getByRole("region", { name: `${side} pane`, exact: true })
     .getByRole("heading", { name: basename(target), exact: true }).waitFor({ state: "attached" });
 
@@ -31,6 +33,25 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
     await page.keyboard.down("ControlRight");
     await page.keyboard.press(`Digit${digit}`);
     await page.keyboard.up("ControlRight");
+  }
+
+  async function wheel(group, modifier) {
+    await picker(group).hover();
+    await page.keyboard.down(modifier);
+    try {
+      await page.mouse.wheel(0, -120);
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    } finally {
+      await page.keyboard.up(modifier);
+    }
+  }
+
+  async function setZoomBinding(binding) {
+    const tool = await openOptionsWindow(page);
+    const options = tool.getByRole("dialog", { name: "Options", exact: true });
+    await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+    await options.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true }).selectOption(binding);
+    await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
   }
 
   const edited = join(dst, "bookmark-edited");
@@ -97,6 +118,14 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await picker(8).press("Control+ArrowDown");
   assert.match(await picker(8).getByRole("option").first().innerText(), /^Source folder/);
   await picker(8).press("Control+ArrowUp");
+  const dialogFont = await size(dialog());
+  const paneFont = await size(page.locator("#right-pane"));
+  const selection = await picker(8).getAttribute("aria-activedescendant");
+  await wheel(8, "Control");
+  assert.equal(await size(dialog()), dialogFont + 1);
+  assert.equal(await size(page.locator("#right-pane")), paneFont);
+  assert.equal(await picker(8).getAttribute("aria-activedescendant"), selection);
+  assert.equal(await picker(8).evaluate((node) => node === document.activeElement), true);
   await page.mouse.click(5, 5);
   await dialog().waitFor({ state: "hidden" });
   assert.equal(await list("right").evaluate((element) => element === document.activeElement), true);
@@ -113,6 +142,7 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await exitDesktop(page);
   page = await startDesktop();
   await openGroup("right", 8);
+  assert.equal(await size(dialog()), dialogFont + 1);
   assert.match(await picker(8).getByRole("option").first().innerText(), /^Edited folder/);
   assert.match(await picker(8).getByRole("option").last().innerText(), /^Source folder/);
   if (process.env.DIRLUME_BOOKMARKS_SCREENSHOT) {
@@ -136,7 +166,29 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await picker(8).press("Enter");
   await opened("right", edited);
   assert.equal(await page.locator("#left-path").getAttribute("data-path"), src);
+  await setZoomBinding("Alt+Wheel");
   await openGroup("right", 8);
+  await wheel(8, "Control");
+  assert.equal(await size(dialog()), dialogFont + 1);
+  await wheel(8, "Alt");
+  assert.equal(await size(dialog()), dialogFont + 2);
+  await picker(8).press("Escape");
+  await setZoomBinding("");
+  await openGroup("right", 8);
+  await wheel(8, "Alt");
+  assert.equal(await size(dialog()), dialogFont + 2);
+  await picker(8).press("Escape");
+  const tool = await openOptionsWindow(page);
+  const options = tool.getByRole("dialog", { name: "Options", exact: true });
+  await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  await options.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true }).selectOption("Ctrl+Wheel");
+  await options.getByRole("button", { name: "View font sizes", exact: true }).click();
+  const dialogSize = options.getByRole("spinbutton", { name: "File pane dialogs font size", exact: true });
+  assert.equal(await dialogSize.inputValue(), String(dialogFont + 2));
+  await dialogSize.fill("");
+  await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
+  await openGroup("right", 8);
+  assert.equal(await size(dialog()), dialogFont);
   await picker(8).press("Delete");
   assert.equal(await picker(8).getByRole("option").count(), 1);
   assert.equal((await stat(edited)).isDirectory(), true);

@@ -252,7 +252,7 @@ html, body, #root { height: 100%; margin: 0; }
 body {
   background: var(--canvas);
   color: var(--ink);
-  font: var(--ui-size)/1.45 var(--ui-font);
+  font: var(--font-zoom-ui, var(--ui-size))/1.45 var(--ui-font);
   overflow: hidden;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -1130,7 +1130,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .terminal-surface { flex: 1; min-height: 0; margin: 6px 8px; }
 [data-theme="classic-blue"] .terminal-surface .xterm .xterm-scrollable-element > .scrollbar { background: var(--scrollbar-track); }
 [data-theme="classic-blue"] .terminal-surface .xterm .xterm-scrollable-element > .scrollbar > .slider { background: var(--scrollbar-thumb); }
-.command-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 12px; font: var(--terminal-size)/1.4 var(--terminal-font); }
+.command-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 12px; font: var(--font-zoom-command, var(--terminal-size))/1.4 var(--terminal-font); }
 .command-bar[hidden], .terminal-card[hidden] { display: none; }
 .command-bar .toolbar-button { font: var(--ui-size)/1.45 var(--ui-font); }
 .command-bar > span { max-width: 36%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
@@ -1138,7 +1138,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-entry .editable-dropdown { background: var(--command-bg); }
 .command-entry textarea {
   display: block; padding-block: 4px; resize: none;
-  font: var(--command-size)/1.4 var(--command-font); color: var(--command-ink); caret-color: var(--command-caret);
+  font: var(--font-zoom-command, var(--command-size))/1.4 var(--command-font); color: var(--command-ink); caret-color: var(--command-caret);
 }
 .command-entry textarea::selection { background: var(--command-selection); color: var(--command-selection-ink); }
 .command-suggestions {
@@ -1162,7 +1162,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-suggestions [aria-selected="true"] .command-suggestion-label > svg { color: currentColor; }
 .command-suggestions small { flex: none; color: var(--muted); }
 .terminal-card .command-suggestions {
-  position: fixed; width: max-content; font: var(--terminal-size)/1.35 var(--terminal-font); color: var(--ink);
+  position: fixed; width: max-content; font: var(--font-zoom-terminal, var(--terminal-size))/1.35 var(--terminal-font); color: var(--ink);
   box-shadow: 0 4px 12px var(--overlay);
 }
 .terminal-card .command-suggestions [role="option"] span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1180,7 +1180,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   padding: 0;
   color: var(--ink);
   font-family: var(--dialog-font);
-  font-size: var(--dialog-size);
+  font-size: var(--font-zoom-dialog, var(--dialog-size));
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1188,7 +1188,9 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   overflow: hidden;
 }
 .dialog[open] { display: flex; flex-direction: column; }
-.dialog[data-font="options"] { font-family: var(--options-font); font-size: var(--options-size); }
+.dialog[data-font="options"] { font-family: var(--options-font); font-size: var(--font-zoom-options, var(--options-size)); }
+.dialog[data-font-zoom="compare"] { font-size: var(--font-zoom-compare, var(--font-zoom-dialog, var(--dialog-size))); }
+.terminal-card { font-size: var(--font-zoom-terminal, var(--font-zoom-ui, var(--ui-size))); }
 [data-theme="classic-blue"] .dialog {
   --line: #686868;
   --subtle: #ababab;
@@ -1928,7 +1930,7 @@ button.color-swatch {
 .comparison-editor {
   min-width: 0; border-radius: 0;
   --document-font: var(--compare-editor-font);
-  --document-size: var(--compare-editor-size);
+  --document-size: var(--font-zoom-compare, var(--compare-editor-size));
 }
 .comparison-editor-name { padding: 6px 12px; background: var(--dialog-header); }
 .comparison-editor .code-surface { margin: 0; border-radius: 0; }
@@ -1941,7 +1943,7 @@ button.color-swatch {
   scroll-padding-block-start: 2.4em;
   background: var(--compare-bg);
   color: var(--compare-ink);
-  font: var(--compare-size)/1.5 var(--compare-font);
+  font: var(--font-zoom-compare, var(--compare-size))/1.5 var(--compare-font);
 }
 .comparison-head {
   display: flex;

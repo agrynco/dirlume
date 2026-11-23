@@ -52,7 +52,7 @@ function terminalAppearance(): ITerminalOptions {
   const background = value("--terminal-bg");
   return {
     fontFamily: value("--terminal-font"),
-    fontSize: Number.parseFloat(value("--terminal-size")),
+    fontSize: Number.parseFloat(value("--font-zoom-terminal") || value("--terminal-size")),
     minimumContrastRatio: 4.5,
     theme: {
       ...(isLightBackground(background) ? lightAnsi : darkAnsi),
@@ -62,7 +62,7 @@ function terminalAppearance(): ITerminalOptions {
   };
 }
 
-export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
+export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
   history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
   session: TerminalSession;
   directory: string | null;
@@ -70,6 +70,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   focusHint?: React.ReactNode;
   theme: Theme;
   scheme: Scheme | null;
+  fontSize?: number;
   pendingCommands: TerminalCommand[];
   watchEnvironment: boolean;
   history: readonly string[];
@@ -660,7 +661,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     const onChange = () => requestAnimationFrame(update);
     match.addEventListener("change", onChange);
     return () => { cancelAnimationFrame(frame); match.removeEventListener("change", onChange); };
-  }, [theme, scheme]);
+  }, [theme, scheme, fontSize]);
 
   useEffect(() => {
     if (popup && popup.selected >= 0) document.getElementById(`${suggestionId}-${popup.selected}`)?.scrollIntoView({ block: "nearest" });
@@ -679,7 +680,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   }
 
   return (
-    <section className="terminal-card" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
+    <section className="terminal-card" data-font-zoom="terminal" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
       <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}>
         <h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2>
         <span className="terminal-location" data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>

@@ -14,9 +14,8 @@ import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { showShortcut, type PanelLayout } from "./preferences";
-import { useFontZoom } from "./useFontZoom";
 import { useTimestamps } from "./useTimestamps";
-import { viewFontStyle, type ZoomViewFont } from "./viewFonts";
+import { viewFontStyle } from "./viewFonts";
 import { columnGroupTrack, fieldClass, FileColumns, measuredColumnFields, panelColumnTracks, readColumnLayout, saveColumnLayout, type MeasuredColumnField } from "./FileColumns";
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
@@ -75,9 +74,7 @@ interface PaneProps {
   onFilter: (filter: string) => void;
   onSort: (column: SortColumn) => void;
   sourceMenu: ReactNode;
-  zoomShortcut: readonly string[];
   fontSize?: number;
-  onZoom: ZoomViewFont;
   onCloseResults: () => void;
   onRevealResult: (entry: Entry) => void;
   onStartDrag: (entry: Entry, event: ReactPointerEvent) => void;
@@ -133,12 +130,11 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, addressPlace,
   rightClickSelection, pane, entries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
-  onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, zoomShortcut, fontSize, onZoom, onCloseResults, onRevealResult,
+  onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onOpenConnections, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
-  useFontZoom(section, zoomShortcut, side, onZoom);
   const path = pane.place ? placePath(pane.place) : "";
   const catalog = pane.place?.kind === "connections";
   const [filterOpen, setFilterOpen] = useState(false);
@@ -432,7 +428,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         {folderSizes.error && <span className="pane-size-scan" role="status" data-tooltip={errorText(folderSizes.error)}>{t("Partial results")}</span>}
       </div>;
   return (
-    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered}
+    <section ref={section} id={`${side}-pane`} style={viewFontStyle(fontSize)} inert={covered} data-font-zoom={side}
       data-panel-mode={catalog || processView ? undefined : modeId}
       data-help-topic={processView ? "processes" : search ? "search" : catalog ? "remote" : "files"}
       data-drop-pane={side} data-pane-side={side} data-layout={layout} className={`pane${active ? " active" : ""}${dropTarget ? " drop-target" : ""}`}
