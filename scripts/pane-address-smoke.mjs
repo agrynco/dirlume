@@ -20,6 +20,16 @@ export async function editPaneAddress(page, side = "left") {
   return address;
 }
 
+export async function clickBreadcrumbAncestor(breadcrumbs, name) {
+  const visible = breadcrumbs.locator(".address-crumbs").getByRole("button", { name, exact: true });
+  if (await visible.isVisible()) {
+    await visible.click();
+  } else {
+    await breadcrumbs.getByRole("button", { name: "Show parent folders", exact: true }).click();
+    await breadcrumbs.locator(".address-parents").getByRole("button", { name, exact: true }).click();
+  }
+}
+
 export async function checkAddressFocusLoss(page, side, path, name, parentName) {
   const pane = page.locator(`#${side}-pane`);
   const field = pane.getByRole("combobox", { name: side + " path", exact: true });
@@ -48,7 +58,7 @@ export async function checkAddressFocusLoss(page, side, path, name, parentName) 
   await breadcrumbs.waitFor();
   assert.equal(await active(parent), true);
 
-  await breadcrumbs.getByRole("button", { name: parentName, exact: true }).click();
+  await clickBreadcrumbAncestor(breadcrumbs, parentName);
   await breadcrumbs.locator("[aria-current=location]").filter({ hasText: parentName }).waitFor();
   await editPaneAddress(page, side);
   await field.press("Alt+ArrowDown");

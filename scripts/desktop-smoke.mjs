@@ -18,7 +18,7 @@ import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
 import { testDesktopShare } from "./desktop-share-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
-import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
+import { checkAddressFocusLoss, clickBreadcrumbAncestor, editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { makeDockerFixture, testCommandCompletion } from "./command-completion-smoke.mjs";
@@ -397,7 +397,7 @@ try {
   const leftBreadcrumbs = page.getByRole("navigation", { name: "left path breadcrumbs" });
   const currentCrumb = leftBreadcrumbs.locator('[aria-current="location"]');
   const forwardCrumbs = leftBreadcrumbs.locator(".address-forward");
-  await leftBreadcrumbs.getByRole("button", { name: "from", exact: true }).click();
+  await clickBreadcrumbAncestor(leftBreadcrumbs, "from");
   await forwardCrumbs.getByRole("button", { name: "breadcrumb-leaf", exact: true }).waitFor();
   assert.equal(await currentCrumb.innerText(), "from");
   await forwardCrumbs.getByRole("button", { name: "breadcrumb-branch", exact: true }).click();
@@ -405,7 +405,7 @@ try {
   await forwardCrumbs.getByRole("button", { name: "breadcrumb-leaf", exact: true }).click();
   await forwardCrumbs.waitFor({ state: "hidden" });
   assert.equal(await currentCrumb.innerText(), "breadcrumb-leaf");
-  await leftBreadcrumbs.getByRole("button", { name: "from", exact: true }).click();
+  await clickBreadcrumbAncestor(leftBreadcrumbs, "from");
   await forwardCrumbs.waitFor();
   await navigate("left", dst);
   await navigate("left", src);
