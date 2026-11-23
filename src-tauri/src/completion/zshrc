@@ -3,6 +3,11 @@ RPS1=''
 autoload -Uz compinit
 compinit -i -D >/dev/null 2>&1
 
+if [[ $DIRLUME_COMPLETION_ALLOW_DEFAULT_PATHS == no ]]; then
+    # Command-specific completers can still request files with _files.
+    _default() { return 1 }
+fi
+
 compadd() {
     # Some completion functions already query matches through these flags.
     if (( ${argv[(I)-[AOD]]} )); then

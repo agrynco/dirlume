@@ -10,10 +10,15 @@ if (( $# == 1 )) && [[ $prefix != */* ]]; then
         printf 'N%s\0' "$item"
     done < <(compgen -c -- "$prefix" | LC_ALL=C /usr/bin/sort -u | /usr/bin/head -n 40)
 elif [[ $kind != directory && -n $provider ]]; then
+    found=false
     while IFS= read -r -d '' item; do
         printf 'N%s\0' "$item"
+        found=true
     done < <(/bin/bash --noprofile --norc -c "$provider" dirlume-completion "$point" "$line" "$@")
+    $found && exit 0
 fi
+
+[[ $kind == none ]] && exit 0
 
 base=
 name=$prefix

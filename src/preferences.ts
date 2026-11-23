@@ -124,7 +124,6 @@ export const commands = {
   commandName: { label: "Insert selected name in command line", key: "Ctrl+Enter" },
   previousCommand: { label: "Previous command", key: "Ctrl+E" },
   commandHistory: { label: "Command history", key: "Alt+F8" },
-  connect: { label: "Connect to a remote machine", key: "Ctrl+Shift+K" },
   settings: { label: "Options", key: "Ctrl+Alt+S" },
   help: { label: "Help", key: "F1" },
   searchHelp: { label: "Search Help", key: `${documentModifier}+F` },

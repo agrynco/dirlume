@@ -1,0 +1,8 @@
+{
+  "version": "0.1.27",
+  "highlights": [
+    "Open drives on paired KSwitcher computers directly from Dirlume LAN after approving Dirlume in KSwitcher’s Trusted clients list.",
+    "Pair two Dirlume apps in Options and browse or download from the host’s local drives during the sharing session.",
+    "Get command suggestions that respect argument context and shell completion rules in PowerShell, Bash, Zsh, and Linux SSH."
+  ]
+}

@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight, Crosshair, Pencil, Plus, RotateCcw, Search, 
 import { Dialog } from "./Dialog";
 import { DialogDisclosure, DialogIconButton } from "./DialogActions";
 import { AppearanceSettings, OptionalNumberInput, ViewFontSettings, type AppearanceSection } from "./AppearanceSettings";
-import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { SettingsPreview } from "./SettingsPreview";
 import { SettingsArchiveDialog, type SettingsArchiveAction } from "./SettingsArchiveDialog";
@@ -17,10 +16,11 @@ import { api, describeError, windowsClient } from "./api";
 import {
   actionButtonWidths, assignShortcut, commandLabel, commandNames, commands, defaultBindings, captureShortcut, commandPanelMode, folderGroupCommand, maxTerminalResizeRows,
   panelLayouts, shortcutBindings, shortcutConflicts, showShortcut, wheelBindings, type ActionButtonWidth, type Bindings, type Command,
-  type PanelLayout, type Preferences, type Provider,
+  type PanelLayout, type Preferences,
 } from "./preferences";
 import { viewFontKeys, viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
+import { ComputersSettings } from "./ComputersSettings";
 import type { HelpTopic } from "./helpTopics";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
@@ -29,7 +29,7 @@ import { SortGroupsSettings } from "./FileSortMenu";
 import { PanelModeSettings, panelModeSettingsLabels } from "./PanelModeSettings";
 import { defaultPanelModes, isPanelMode, panelModeIds, panelModeName, panelModeNames, validPanelMode, type PanelModeId } from "./panelModes";
 
-type Page = AppearanceSection | FeaturePage | PanelModeId | "sortGroups" | "viewFonts" | "general" | "shortcuts";
+type Page = AppearanceSection | FeaturePage | PanelModeId | "sortGroups" | "viewFonts" | "general" | "shortcuts" | "computers";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
 type ShortcutCapture = { command: Command; replacing?: string };
 type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
@@ -53,6 +53,7 @@ function optionsHelpTopic(page: Page): HelpTopic {
   if (page === "filePanels" || page === "sortGroups" || isPanelMode(page)) return "files";
   if (page === "files") return "fileTypes";
   if (page === "text") return "textTools";
+  if (page === "computers") return "remote";
   return page;
 }
 
@@ -61,7 +62,7 @@ function readOptionsLocation(): OptionsLocation {
   try {
     const saved = JSON.parse(localStorage.getItem(optionsLocationKey) ?? "null") as Partial<OptionsLocation> | null;
     const page = saved?.page;
-    if (!page || (page !== "general" && page !== "shortcuts" && page !== "sortGroups" && !isFeaturePage(page) &&
+    if (!page || (page !== "general" && page !== "computers" && page !== "shortcuts" && page !== "sortGroups" && !isFeaturePage(page) &&
         !isPanelMode(page) && !appearancePages.some(({ id }) => id === page))) return defaults;
     const scrollTop = saved.scrollTop;
     return {
@@ -123,8 +124,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const searching = Boolean(query.trim());
   const terms = searching ? query.trim().toLocaleLowerCase().split(/\s+/) : [];
   const matches = (...labels: string[]) => matchesSettings(terms, labels);
-  const showGeneral = matches("General", "Language", ...Object.values(languages), "Main menu position",
-    ...menuAlignmentTerms, "Remote connection", "Dirlume server", "KSwitcher (Windows)", "KSwitcher installation folder", "Version");
+  const showGeneral = matches("General", "Language", ...Object.values(languages), "Main menu position", ...menuAlignmentTerms, "Version");
+  const showComputers = matches("Computers", "Paired computers", "Forget computer", "This computer",
+    "Remote connection", "Dirlume LAN", "Dirlume server",
+    "Pairing code", "Pair computer");
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
     const terms = feature === "filePanels" ? [
@@ -156,8 +159,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     (allShortcuts || matches(commands[command].label, commandLabel(command), ...shortcuts[command], ...shortcuts[command].map(showShortcut))));
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
-  const isAppearance = !feature && page !== "sortGroups" && !isPanelMode(page) && page !== "general" && page !== "shortcuts";
-  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label : page === "general" ? "General" : page === "sortGroups" ? "Sort groups" : "Keyboard shortcuts");
+  const isAppearance = !feature && page !== "sortGroups" && !isPanelMode(page) &&
+    page !== "general" && page !== "computers" && page !== "shortcuts";
+  const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label :
+    page === "computers" ? "Computers" : page === "general" ? "General" : page === "sortGroups" ? "Sort groups" : "Keyboard shortcuts");
 
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
@@ -395,6 +400,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 if (event.key !== "Enter" || !searching) return;
                 event.preventDefault();
                 if (showGeneral) select("general");
+                else if (showComputers) select("computers");
                 else if (featureMatches.length) select(featureMatches[0]);
                 else if (modesMatch.length) select(modesMatch[0]);
                 else if (showSortGroups) select("sortGroups");
@@ -408,6 +414,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           {pickError && <p role="alert" className="dialog-error">{t("Could not start the appearance picker.")}</p>}
           <nav className="settings-tree" aria-label={t("Options sections")}>
             {showGeneral && <Button type="button" data-help-topic="general" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
+            {showComputers && <Button type="button" data-help-topic="remote" aria-pressed={!selection && page === "computers"} onClick={() => select("computers")}>{t("Computers")}</Button>}
             {featureMatches.map((id) => <Button key={id} type="button" data-help-topic={optionsHelpTopic(id)} aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
             </Button>)}
@@ -459,7 +466,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </section>)}
               </div>
             </>}
-            {!showGeneral && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showSortGroups && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
+            {!showGeneral && !showComputers && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showSortGroups && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
@@ -500,7 +507,9 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           </div>}
           <div className="settings-page-body" ref={pageBody}>
       {selection ? <AppearanceSettings key={selection.id} section="fonts" selection={selection}
-        views={selection.view ? [selection.view] : undefined} preferences={preferences} onChange={onChange} /> : page === "general" ? (
+        views={selection.view ? [selection.view] : undefined} preferences={preferences} onChange={onChange} /> : page === "computers" ? (
+        <ComputersSettings />
+      ) : page === "general" ? (
         <div className="dialog-body settings-general">
           <label className="setting"><SettingSearchLabel label="Language" aliases={Object.values(languages)} />
             <select aria-label={t("Language")} value={preferences.language}
@@ -510,19 +519,6 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           </label>
           <MenuAlignmentSetting label="Main menu position" value={preferences.mainMenuAlignment}
             onChange={(mainMenuAlignment) => onChange({ ...preferences, mainMenuAlignment })} />
-          <label className="setting"><SettingSearchLabel label="Remote connection" aliases={["Dirlume server", "KSwitcher (Windows)"]} />
-            <select value={preferences.provider} onChange={(event) => onChange({ ...preferences, provider: event.target.value as Provider })}>
-              <option value="server">{t("Dirlume server")}</option>
-              <option value="kswitcher" disabled={!windowsClient}>KSwitcher (Windows)</option>
-            </select>
-          </label>
-          {preferences.provider === "kswitcher" && (
-            <div className="settings-path-field">
-              <label htmlFor="kswitcher-folder"><SettingSearchLabel label="KSwitcher installation folder" /></label>
-              <PathField id="kswitcher-folder" label={t("KSwitcher installation folder")} value={preferences.kswitcher}
-                browse="folder" showHidden={preferences.hidden} onChange={(path) => onChange({ ...preferences, kswitcher: path })} />
-            </div>
-          )}
           {buildVersion && <div className="setting"><SettingSearchLabel label="Version" /><code>{buildVersion}</code></div>}
         </div>
       ) : isFeaturePage(page) ? (
@@ -623,7 +619,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </>
       )}
           </div>
-          {((!isPanelMode(page) && page !== "sortGroups") || selection) && <SettingsPreview page={isPanelMode(page) || page === "sortGroups" ? "general" : page} preferences={preferences} pick={selection ?? undefined} />}
+          {page !== "computers" && ((!isPanelMode(page) && page !== "sortGroups") || selection) &&
+            <SettingsPreview page={isPanelMode(page) || page === "sortGroups" ? "general" : page} preferences={preferences} pick={selection ?? undefined} />}
         </div>
       </div>
     </Dialog>

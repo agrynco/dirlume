@@ -13,14 +13,14 @@ import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLa
 import {
   ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
   FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
-  ScanEye, Search, Server, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
+  ScanEye, Search, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
-import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPeer, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
+import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { canAnalyze, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -78,7 +78,6 @@ import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut
   compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import type { TerminalCompletionContext } from "./api";
-import { ShareFolderDialog } from "./ShareFolderDialog";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { resizeViewFont } from "./viewFonts";
@@ -130,8 +129,6 @@ type ActionModal = (
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
-  | { kind: "connect"; side: Side }
-  | { kind: "shareFolder"; side: Side; returnToConnect?: boolean }
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
@@ -178,7 +175,7 @@ function hasTerminalShortcutFocus(target: EventTarget | null) {
 function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | undefined): HelpTopic {
   if (modal === "settings") return "general";
   if (modal === "search" || modal === "compare") return modal;
-  if (modal === "connect" || modal === "smb" || modal === "connectionEditor") return "remote";
+  if (modal === "smb" || modal === "connectionEditor") return "remote";
   if (modal === "createArchive" || modal === "archivePassword") return "archives";
   if (modal === "transfer" || modal === "mkdir" || modal === "delete" || modal === "recycle" || modal === "rename" || modal === "deletion") return "actionDialogs";
   return editing === undefined ? "files" : editing ? "editor" : "viewer";
@@ -984,7 +981,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     revealWorkspaceSide(side);
     if (source === "processes") showProcesses(side, true);
     else if (typeof source === "string") openConnections(side, source);
-    else {
+    else if ("drive" in source) {
+      showProcesses(side, false);
+      const { host, drive } = source;
+      if (host.kind === "dirlume") {
+        void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential }, [], [drive]);
+      } else {
+        void load(side, { kind: "kswitcher", directory: "", peer: host.id,
+          address: host.name, path: drive + "\\", parent: null });
+      }
+    } else {
       const other = panes[opposite(side)].place;
       const otherDrive = other?.kind === "local" && /^([a-z]:)(?:[\\/]|$)/i.exec(other.path)?.[1]?.toUpperCase();
       const path = driveSourceCommand(source) && other?.kind === "local" && otherDrive === source.label.toUpperCase()
@@ -997,7 +1003,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function paneSources(side: Side, overlay = false) {
     return <PaneSources side={side} overlay={overlay} open={sourceMenu?.side === side && (overlay || !paneCovered(side))}
-      locations={locations} shortcuts={shortcuts} onToggle={() => toggleSourceMenu(side)} onClose={closeSourceMenu}
+      locations={locations} shortcuts={shortcuts}
+      onToggle={() => toggleSourceMenu(side)} onClose={closeSourceMenu}
       onPick={(source) => openPaneSource(side, source)} />;
   }
 
@@ -1427,7 +1434,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  async function openSavedConnection(side: Side, profile: SavedConnection, approvals: readonly SshHostVerification[] = []) {
+  async function openSavedConnection(side: Side, profile: SavedConnection, approvals: readonly SshHostVerification[] = [],
+    serverSegments: string[] = []) {
     const location = panes[side].place;
     const { ticket } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
@@ -1479,8 +1487,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           break;
         }
         case "server": {
-          const { listing, ...connected } = await api.connectSavedServer(profile.credential);
-          complete({ kind: "server", ...connected, segments: [] }, listing);
+          const { listing, ...connected } = await api.connectSavedServer(profile.credential, serverSegments);
+          const address = serverSegments.length ? profile.label : connected.address;
+          complete({ kind: "server", ...connected, address, segments: serverSegments }, listing);
           break;
         }
         case "kswitcher": {
@@ -2506,7 +2515,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         return;
       }
       if (!["switchPane", "swap", "back", "forward", "parent",
-        "shrinkLeft", "growLeft", "settings", "help", "menu", "close", "terminal", "commandHistory", "connect"].includes(command)) return;
+        "shrinkLeft", "growLeft", "settings", "help", "menu", "close", "terminal", "commandHistory"].includes(command)) return;
     }
     if (catalog && !processPanels[active]) {
       const [add, edit] = connectionCommands[catalog.source];
@@ -2612,7 +2621,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         break;
       }
       case "commandHistory": setModal({ kind: "commandHistory" }); break;
-      case "connect": setModal({ kind: "connect", side: active }); break;
       case "mark": {
         if (current) {
           selectRow(active, current, false, true);
@@ -2696,9 +2704,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!isTauri()) { setModal({ kind: "settings", page }); return; }
     if (openingOptions.current) return;
     openingOptions.current = true;
-    void api.openToolWindow(t("Options"), readDialogSize("options"), undefined, page).then(() => {
-      setModal((current) => current?.kind === "connect" ? null : current);
-    }).catch((error: unknown) => setStatus({ text: describeError(error), error: true })).finally(() => {
+    void api.openToolWindow(t("Options"), readDialogSize("options"), undefined, page)
+      .catch((error: unknown) => setStatus({ text: describeError(error), error: true })).finally(() => {
       openingOptions.current = false;
     });
   }
@@ -2908,7 +2915,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       commandWithIcon(FileDiff, "compare", !filesAvailable || comparison === null),
       commandWithIcon(ClipboardCopy, "copyFullPath", currentFullPath === null),
       commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
-      commandWithIcon(Server, "connect", activeDocument !== null, "Connect"),
       commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
       commandWithIcon(History, "commandHistory", activeDocument !== null),
       commandWithIcon(Bookmark, "folderShortcuts", !panesAvailable),
@@ -2962,9 +2968,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             shortcut={keyLabel("quickView")} disabled={!canToggleQuickView} onClick={() => perform("quickView")}><ScanEye /></Button>
           <Button className="icon-button" data-help-topic="gitView" aria-label={t("Git View")} aria-pressed={showingGit} shortcut={keyLabel("gitView")}
             disabled={!canToggleGitView} onClick={() => perform("gitView")}><GitBranch /></Button>
-          <Button className="toolbar-button topbar-connect" data-help-topic="remote" aria-label={t("Connect")} shortcut={keyLabel("connect")} disabled={showingGit} onClick={() => perform("connect")}>
-            <Server /> <span>{t("Connect")}</span>
-          </Button>
           <Button className="icon-button" data-help-topic="search" aria-label={t("Find files")} shortcut={keyLabel("search")}
             disabled={!filesAvailable || !pane.place || pane.place.kind === "smbRoot"}
             onClick={() => perform("search")}><Search /></Button>
@@ -3415,10 +3418,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             const { source } = state.place;
             return <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source); }}>{t("Add connection")}</Button>
-              {source === "remote" && <Button role="menuitem" onClick={() => {
-                setFileMenu(null);
-                setModal({ kind: "shareFolder", side });
-              }}>{t("Share a folder")}</Button>}
               {entry?.connection && <>
                 <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>
                 <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source, entry.connection); }}>
@@ -3460,19 +3459,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <Button role="menuitem" onClick={() => { setFileMenu(null); refresh(side); focus(side); }}>{t("Refresh")}</Button>
         </FileContextMenu>;
       })()}
-      {modal?.kind === "connect" && (
-        <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => openSettings()}
-          onShare={() => setModal({ kind: "shareFolder", side: modal.side, returnToConnect: true })}
-          onConnect={(place, listing) => { routeLocation(modal.side, place, listing); setModal(null); }}
-          onClose={() => setModal(null)} />
-      )}
-      {modal?.kind === "shareFolder" && (() => {
-        const place = panes[modal.side].place;
-        const initialPath = place?.kind === "local" && !smbHost(place) ? place.path : "";
-        return <ShareFolderDialog initialPath={initialPath} onClose={() => {
-          setModal(modal.returnToConnect ? { kind: "connect", side: modal.side } : null);
-        }} />;
-      })()}
       {modal?.kind === "smb" && (
         <SmbDialog path={modal.navigation.path} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
           onConnect={(place, listing, warning) => {
@@ -3513,7 +3499,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
         onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setModal(null)} />}
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
-        remoteProvider={preferences.provider} bridgeDirectory={preferences.kswitcher}
+        remoteProvider="server" bridgeDirectory={preferences.kswitcher}
         onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
         onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
@@ -3714,109 +3700,5 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     </Dialog>
     {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
     </>
-  );
-}
-
-function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOptions, onShare, onClose }: {
-  provider: "server" | "kswitcher";
-  directory: string;
-  onConnect: (place: RemotePlace, listing: Listing) => void;
-  onOptions: () => void;
-  onShare: () => void;
-  onClose: () => void;
-}) {
-  const [provider, setProvider] = useState(preferredProvider);
-  const [value, setValue] = useState("");
-  const [waiting, setWaiting] = useState(false);
-  const [error, setError] = useState("");
-  const [bridge, setBridge] = useState<boolean | null>(null);
-  const [peers, setPeers] = useState<KSwitcherPeer[]>([]);
-
-  useEffect(() => {
-    if (provider !== "kswitcher" || !directory) return;
-    let current = true;
-    api.hasKSwitcherBridge(directory).then(async (available) => {
-      if (!current) return;
-      setBridge(available);
-      if (available) {
-        const peers = await api.kswitcherPeers(directory);
-        if (current) {
-          setPeers(peers);
-          setValue(peers[0]?.id ?? "");
-        }
-      }
-    }).catch((error: unknown) => { if (current) setError(describeError(error)); });
-    return () => { current = false; };
-  }, [provider, directory]);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (waiting) return;
-    setWaiting(true);
-    setError("");
-    try {
-      if (provider === "kswitcher") {
-        if (bridge) {
-          const peer = peers.find((peer) => peer.id === value);
-          if (!peer) return;
-          const listing = await api.listKSwitcher(directory, peer.id, "");
-          onConnect({ kind: "kswitcher", directory, peer: peer.id, address: peer.name, path: "", parent: listing.parent }, listing);
-        } else {
-          await api.openKSwitcher(directory);
-          onClose();
-        }
-      } else {
-        const { listing, ...connection } = await api.connect(value);
-        onConnect({ kind: "server", ...connection, segments: [] }, listing);
-      }
-    } catch (error) {
-      setError(describeError(error));
-    } finally {
-      setWaiting(false);
-    }
-  }
-
-  return (
-    <Dialog title={provider === "server" ? t("Connect to Dirlume server") : t("Connect through KSwitcher")}
-      onClose={() => { if (!waiting) onClose(); }}>
-      <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
-        <div className="dialog-body">
-          {provider === "server" ? (
-            <label className="field">{t("Server invitation")}
-              <input data-initial-focus type="password" autoComplete="off" spellCheck={false} required
-                placeholder={t("Paste the invitation from the remote machine")} value={value}
-                onChange={(event) => setValue(event.target.value)} />
-            </label>
-          ) : bridge === true && peers.length ? (
-            <label className="field">{t("Paired machine")}
-              <select data-initial-focus value={value} onChange={(event) => setValue(event.target.value)}>
-                {peers.map((peer) => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
-              </select>
-            </label>
-          ) : bridge === true ? (
-            <p>{t("Run KSwitcher on both computers and enable file browsing for the paired machine.")}</p>
-          ) : bridge === false ? (
-            <p>{t("Open KSwitcher Files and select a paired machine from its source menu.")}</p>
-          ) : (
-            <p>{directory ? t("Looking for the KSwitcher bridge…") : t("Choose the KSwitcher installation folder in Options.")}</p>
-          )}
-          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          <div className="dialog-actions">
-            <Button type="button" onClick={onShare} disabled={waiting}>{t("Share a folder")}</Button>
-            {preferredProvider === "kswitcher" && <Button type="button" disabled={waiting} onClick={() => {
-              setValue("");
-              setError("");
-              setProvider(provider === "server" ? "kswitcher" : "server");
-            }}>{t(provider === "server" ? "Connect through KSwitcher" : "Use a Dirlume invitation")}</Button>}
-            <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
-          </div>
-        </div>
-        <footer className="dialog-footer">
-          <Button type="submit" className="primary" disabled={waiting || (provider === "kswitcher" && bridge === null) || (bridge !== false && !value.trim())}>
-            {waiting ? t("Connecting…") : bridge === false ? t("Open KSwitcher Files") : t("Connect")}
-          </Button>
-        </footer>
-      </form>
-    </Dialog>
   );
 }

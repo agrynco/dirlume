@@ -99,6 +99,18 @@ export interface QuickLocation {
   path: string;
 }
 
+export interface ComputerDrive {
+  name: string;
+  type?: number | null;
+  total: number | null;
+  available: number | null;
+}
+
+export interface ComputerSharing {
+  address: string;
+  invitation: string;
+}
+
 export type FileLocation =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "smbRoot"; path: string }
@@ -116,7 +128,7 @@ export type SavedConnection =
   | ({ kind: "ftp" } & FtpProfile)
   | ({ kind: "ssh" } & SshProfile)
   | { kind: "smb"; id: string; label: string; path: string }
-  | { kind: "server"; id: string; label: string; credential: string }
+  | { kind: "server"; id: string; label: string; credential: string; lan?: boolean }
   | { kind: "kswitcher"; id: string; label: string; peer: string };
 
 export type RemotePlace = Exclude<FileLocation, { kind: "local" | "smbRoot" | "archive" }>;
@@ -190,6 +202,7 @@ export interface NamedFile {
 export interface KSwitcherPeer {
   id: string;
   name: string;
+  online?: boolean;
 }
 
 export const textEncodingLabels = {
@@ -255,12 +268,6 @@ export interface GitWorkingDiff {
   patch: string | null;
   fallback: "binary" | "conflict" | "oversized" | "unsupported" | null;
   unborn: boolean;
-}
-
-export interface DesktopShare {
-  path: string;
-  address: string;
-  invitation: string;
 }
 
 export type EnvironmentScope = "user" | "system" | "process";
@@ -474,12 +481,14 @@ export const api = {
     invoke<FileAttributes>("update_file_attributes", { directory, name, changes }),
   operate: (directory: string, operation: Operation) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
+  connectSavedServer: (credential: string, segments?: string[]) =>
+    invoke<Connection & { share: string }>("connect_saved_server", { credential, segments }),
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),
-  suggestShareAddress: () => invoke<string | null>("suggest_share_address"),
-  activeDesktopShare: () => invoke<DesktopShare | null>("active_desktop_share"),
-  startDesktopShare: (path: string, address: string) => invoke<DesktopShare>("start_desktop_share", { path, address }),
-  stopDesktopShare: () => invoke<void>("stop_desktop_share"),
-  connectSavedServer: (credential: string) => invoke<Connection & { share: string }>("connect_saved_server", { credential }),
+  listSavedComputerDrives: (credential: string) => invoke<ComputerDrive[]>("list_saved_computer_drives", { credential }),
+  activeComputerSharing: () => invoke<ComputerSharing | null>("active_desktop_share"),
+  startComputerSharing: () => invoke<ComputerSharing>("start_desktop_computer_share"),
+  stopComputerSharing: () => invoke<void>("stop_desktop_share"),
+  verifyComputerPairing: (invitation: string) => invoke<void>("verify_computer_pairing", { invitation }),
   saveServerInvitation: (invitation: string) => invoke<string>("save_server_invitation", { invitation }),
   removeServerInvitation: (credential: string) => invoke<void>("remove_server_invitation", { credential }),
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
@@ -545,12 +554,11 @@ export const api = {
   saveImageEdit: (id: string, target: string | null, edit: ImageTransform) =>
     invoke<void>("save_image_edit", { id, target, edit }),
   closeImageEdit: (id: string) => invoke<void>("close_image_edit", { id }),
-  openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
-  hasKSwitcherBridge: (directory: string) => invoke<boolean>("has_kswitcher_bridge", { directory }),
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
   listKSwitcher: (directory: string, peer: string, path: string) =>
-    invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
+    invoke<Listing & { parent: string | null; drives?: ComputerDrive[] | null }>("list_kswitcher", { directory, peer, path }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
+  computerName: () => invoke<string | null>("computer_name"),
   openTerminal: (session: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<boolean>("open_terminal", { request: { id: session.id, directory: session.path, promptToken, rows, cols,
       refreshEnvironment: session.refreshEnvironment,

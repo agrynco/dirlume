@@ -98,6 +98,58 @@ struct Context {
     byte_caret: usize,
 }
 
+impl Context {
+    fn explicit_path(&self, windows: bool) -> bool {
+        let prefix = &self.prefix;
+        if windows {
+            prefix.contains('\\')
+                || prefix.trim_start_matches('/').contains('/')
+                || prefix.as_bytes().get(1) == Some(&b':')
+                || (self.words.is_empty() && prefix.starts_with('/'))
+        } else {
+            prefix.contains('/')
+        }
+    }
+
+    fn directory_argument(&self, windows: bool) -> bool {
+        self.words.first().is_some_and(|command| {
+            if windows {
+                matches!(
+                    command.to_ascii_lowercase().as_str(),
+                    "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
+                )
+            } else {
+                matches!(command.as_str(), "cd" | "pushd")
+            }
+        }) && !self.prefix.starts_with('-')
+    }
+
+    fn allows_path_fallback(&self, windows: bool) -> bool {
+        self.explicit_path(windows)
+            || self.directory_argument(windows)
+            || (!windows
+                && !self.prefix.starts_with('-')
+                && self.words.first().is_some_and(|command| {
+                    // These commands take path operands even on systems without
+                    // a Bash or Zsh completion package.
+                    matches!(
+                        command.rsplit('/').next().unwrap_or(command),
+                        "cat"
+                            | "cp"
+                            | "ls"
+                            | "mkdir"
+                            | "mv"
+                            | "readlink"
+                            | "realpath"
+                            | "rm"
+                            | "rmdir"
+                            | "stat"
+                            | "touch"
+                    )
+                }))
+    }
+}
+
 fn byte_at_utf16(line: &str, caret: usize) -> Option<usize> {
     let mut units = 0;
     for (index, letter) in line.char_indices() {
@@ -347,22 +399,25 @@ where
             remote_output(&output),
             false,
         );
-        if !result.matches.is_empty() {
+        if result.exclusive || !result.matches.is_empty() {
             return Ok(result);
         }
     }
     let shell = include_str!("completion/bash.sh");
     let fallback = include_str!("completion/ssh-paths.sh");
-    let directory_only = context
-        .words
-        .first()
-        .is_some_and(|word| matches!(word.as_str(), "cd" | "pushd"));
+    let path_fallback = if context.directory_argument(false) {
+        "directory"
+    } else if context.allows_path_fallback(false) {
+        "any"
+    } else {
+        "none"
+    };
     let script = format!(
         "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {}",
         crate::ssh::quote(fallback),
         context.byte_caret,
         crate::ssh::quote(&request.line),
-        if directory_only { "directory" } else { "any" },
+        path_fallback,
         if request.line.contains(['$', '`']) {
             "''".to_owned()
         } else {
@@ -535,15 +590,8 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
     let Some(context) = context(&request.line, request.caret) else {
         return CompletionBatch::default();
     };
-    let directory = context.words.first().is_some_and(|first| {
-        matches!(
-            first.to_ascii_lowercase().as_str(),
-            "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
-        )
-    });
-    if let Some(batch) = docker::local(request, &context, cwd)
-        .filter(|batch| !cfg!(target_os = "linux") || !batch.matches.is_empty())
-    {
+    let directory = context.directory_argument(cfg!(windows));
+    if let Some(batch) = docker::local(request, &context, cwd) {
         return batch;
     }
     if cfg!(windows)
@@ -600,7 +648,9 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
     } else {
         Vec::new()
     };
-    matches.extend(paths(cwd, &context.prefix, directory));
+    if cfg!(target_os = "macos") || context.allows_path_fallback(cfg!(windows)) {
+        matches.extend(paths(cwd, &context.prefix, directory));
+    }
     matches.truncate(MAX_MATCHES);
     CompletionBatch {
         index: context.index,
@@ -694,12 +744,25 @@ mod tests {
             format!("export PATH={}\n", crate::ssh::quote(&remote_path)),
         )
         .unwrap();
+        fs::write(
+            home.join(".bash_completion"),
+            r#"_fixture_tool() {
+    case "$3" in
+        remote-only-tool) COMPREPLY=(report);;
+        report) COMPREPLY=(--summary);;
+    esac
+}
+complete -F _fixture_tool remote-only-tool
+"#,
+        )
+        .unwrap();
         fs::write(remote.join("remote-file.txt"), []).unwrap();
         fs::write(local.join("local-file.txt"), []).unwrap();
         let docker = r#"#!/bin/sh
 case "$*" in
   "__complete co"|"__complete ") printf 'container\ncompose\n:4\n';;
   "__complete image ls --for") printf '%s\n' '--format' ':4';;
+  "__complete ps ") printf ':4\n';;
   'compose config --services') /bin/cat compose.yaml;;
   *'container ls --all --no-trunc --format'*) /bin/cat containers.json;;
 esac
@@ -734,6 +797,7 @@ esac
             ("local-only", "local-only-tool"),
             ("ec", "echo"),
             ("cat local-", "local-file.txt"),
+            ("local-only-tool ./local-", "local-file.txt"),
             ("docker co", "container"),
             ("docker image ls --for", "--format"),
             ("docker compose logs local-", "local-web"),
@@ -751,9 +815,21 @@ esac
                 "local {line}: missing {expected}"
             );
         }
+        for line in ["local-only-tool local-", "docker ps "] {
+            let batch = complete(&CompletionRequest {
+                line: line.into(),
+                caret: line.len(),
+                directory: local.to_string_lossy().into_owned(),
+                refresh_environment: false,
+                shell_environment: Some(environment.clone()),
+            });
+            assert!(batch.matches.is_empty(), "local {line}");
+        }
         for live in [false, true] {
             for (line, expected) in [
                 ("remote-only", "remote-only-tool"),
+                ("remote-only-tool rep", "report"),
+                ("remote-only-tool report --sum", "--summary"),
                 ("ec", "echo"),
                 ("cat remote-", "remote-file.txt"),
                 ("docker ", "compose"),
@@ -814,5 +890,56 @@ esac
         let context = shell_context(quoted, quoted.len() - 1, true).unwrap();
         assert_eq!(context.prefix, "C:\\O'Brien\\");
         assert_eq!(context.index + context.length, quoted.len());
+    }
+
+    #[test]
+    fn only_enables_generic_paths_in_path_positions() {
+        for (draft, windows, expected) in [
+            ("git checkout ", true, false),
+            ("git checkout ", false, false),
+            ("ipconfig /n", true, false),
+            ("kubectl get pods ", false, false),
+            ("unknown-tool --flag ", true, false),
+            ("unknown-tool --flag ", false, false),
+            ("unknown-tool .\\assets", true, true),
+            ("unknown-tool ./assets", false, true),
+            ("cd work", true, true),
+            ("cd work", false, true),
+            ("cat notes", false, true),
+            ("cat --", false, false),
+        ] {
+            let context = shell_context(draft, draft.len(), windows).unwrap();
+            assert_eq!(context.allows_path_fallback(windows), expected, "{draft}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn power_shell_suggests_files_for_path_arguments() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("completion-fixture")).unwrap();
+        for (draft, expected) in [
+            ("Get-ChildItem completion-", true),
+            ("Get-ChildItem -Force completion-", true),
+            ("Get-ChildItem -Filter completion-", false),
+            ("where.exe completion-", false),
+            ("where.exe .\\completion-", true),
+        ] {
+            let batch = complete(&CompletionRequest {
+                line: draft.to_owned(),
+                caret: draft.len(),
+                directory: directory.path().to_string_lossy().into_owned(),
+                refresh_environment: false,
+                shell_environment: None,
+            });
+            assert_eq!(
+                batch
+                    .matches
+                    .iter()
+                    .any(|item| item.label == "completion-fixture"),
+                expected,
+                "{draft}"
+            );
+        }
     }
 }
