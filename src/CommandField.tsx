@@ -1,13 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { api, windowsClient, type CommandCompletion } from "./api";
+import { api, placePath, windowsClient, type CommandCompletion, type TerminalCompletionContext, type SshPlace } from "./api";
 import { t } from "./i18n";
 import { EditableDropdown } from "./EditableDropdown";
 import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
 
-export function CommandField({ input, draft, directory, history, refreshEnvironment, onChange }: {
+export function CommandField({ input, draft, directory, remote, terminal, history, refreshEnvironment, onChange }: {
   input: RefObject<HTMLTextAreaElement | null>;
   draft: string;
   directory: string | null;
+  remote: SshPlace | null;
+  terminal?: TerminalCompletionContext & { id: number };
   history: readonly string[];
   refreshEnvironment: boolean;
   onChange: (draft: string) => void;
@@ -21,16 +23,23 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
   const completionCaret = useRef<{ draft: string; position: number } | null>(null);
   const [native, setNative] = useState<{ query: string; result: CommandCompletion } | null>(null);
   const caret = Math.min(position, draft.length);
-  const query = JSON.stringify([draft, caret, directory, refreshEnvironment]);
+  const queryFor = (draft: string, caret: number) =>
+    JSON.stringify([draft, caret, directory, remote?.id, remote?.segments, terminal, refreshEnvironment]);
+  const query = queryFor(draft, caret);
   const selected = selection?.query === query ? selection.index : -1;
   const setSelected = (index: number) => setSelection(index < 0 ? null : { query, index });
   const suggesting = focused && !showHistory && !!draft.trim() && dismissed !== query;
 
   useEffect(() => {
-    if (!suggesting || !directory || draft.includes("\n")) return;
+    if (!suggesting || (!directory && !remote) || draft.includes("\n")) return;
     let current = true;
     const timer = window.setTimeout(() => {
-      void api.completeCommand(draft, caret, directory, refreshEnvironment).then(
+      const request = remote ? terminal?.searchPath !== undefined
+        ? api.completeSshTerminal(terminal.id, draft, caret, placePath(remote), terminal.searchPath, terminal.environment)
+        : api.completeSshCommand(remote.id, remote.segments, draft, caret)
+        : directory ? api.completeCommand(draft, caret, directory, refreshEnvironment, terminal?.environment) : null;
+      if (!request) return;
+      void request.then(
         (result) => { if (current) setNative({ query, result }); },
         () => { if (current) setNative(null); },
       );
@@ -39,7 +48,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
       current = false;
       window.clearTimeout(timer);
     };
-  }, [suggesting, directory, draft, caret, query, refreshEnvironment]);
+  }, [suggesting, directory, remote, terminal, draft, caret, query, refreshEnvironment]);
 
   const prefix = windowsClient ? draft.toLowerCase() : draft;
   const recent = showHistory ? [...new Set(history)].slice(0, 30) : suggesting && caret === draft.length
@@ -78,7 +87,7 @@ export function CommandField({ input, draft, directory, history, refreshEnvironm
     setShowHistory(false);
     const value = draft.slice(0, option.index) + option.text + draft.slice(option.index + option.length);
     const next = option.index + option.text.length;
-    setDismissed(JSON.stringify([value, next, directory, refreshEnvironment]));
+    setDismissed(queryFor(value, next));
     setSelected(-1);
     setPosition(next);
     completionCaret.current = { draft: value, position: next };

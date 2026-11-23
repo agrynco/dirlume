@@ -2305,6 +2305,11 @@ try {
   page = await testPanelModes({ page, startDesktop, exitDesktop, root: temp });
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
   await testDesktopShare(page, temp);
+  const localSources = page.getByRole("region", { name: "right pane", exact: true });
+  await localSources.getByRole("button", { name: "Locations for right pane", exact: true }).click();
+  await localSources.getByRole("group", { name: "Right pane sources", exact: true })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#right-path nav:not([data-connection-source])"));
   await navigate("right", dst);
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);

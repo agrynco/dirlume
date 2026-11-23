@@ -4,6 +4,24 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use super::*;
 
+fn apply_environment(request: &CompletionRequest, mut set: impl FnMut(&str, Option<&str>)) {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    if let Some(environment) = &request.shell_environment {
+        for &name in DOCKER_COMPLETION_ENVIRONMENT {
+            if let Some(value) = environment.get(name) {
+                set(
+                    name,
+                    value
+                        .as_deref()
+                        .filter(|value| value.len() <= 16_384 && !value.contains('\0')),
+                );
+            }
+        }
+    }
+}
+
 pub(super) fn native(
     request: &CompletionRequest,
     context: &Context,
@@ -65,6 +83,13 @@ fn bash(
     shell: &OsStr,
 ) -> Option<Vec<u8>> {
     let mut command = Command::new(shell);
+    apply_environment(request, |name, value| {
+        if let Some(value) = value {
+            command.env(name, value);
+        } else {
+            command.env_remove(name);
+        }
+    });
     command
         .current_dir(cwd)
         .env_remove("BASH_ENV")
@@ -102,6 +127,13 @@ fn zsh(
     let mut reader = pair.master.try_clone_reader().ok()?;
     let mut writer = pair.master.take_writer().ok()?;
     let mut command = CommandBuilder::new(shell);
+    apply_environment(request, |name, value| {
+        if let Some(value) = value {
+            command.env(name, value);
+        } else {
+            command.env_remove(name);
+        }
+    });
     command.args(["-di"]);
     command.cwd(cwd);
     command.env("ZDOTDIR", config.path());

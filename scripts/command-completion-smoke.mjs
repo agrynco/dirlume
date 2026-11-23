@@ -29,6 +29,7 @@ class Program {
       if (command == "compose") options = new[] { "logs", "ps", "up" };
       if (command == "container logs" || command == "compose logs") options = new[] { "--tail", "--follow", "-f" };
       if (command == "compose up") options = new[] { "--build", "-d" };
+      if (command == "image ls") options = new[] { "--format" };
       foreach (string option in options ?? new string[0]) if (option.StartsWith(prefix)) Console.WriteLine(option);
       Console.WriteLine(":4");
       return 0;
@@ -132,6 +133,7 @@ export async function testCommandCompletion(page, root, docker) {
   assert.equal(await input.inputValue(), "reg query");
   await draft("docker co", "container");
   await option("compose").waitFor();
+  await draft("docker image ls --for", "--format");
   await draft("docker container logs --ta", "--tail");
   await draft("docker --context fixture-explicit container logs --tail 20 we", "web-explicit");
   assert.equal(await option("web-api").count(), 0);
@@ -273,6 +275,11 @@ export async function testCommandCompletion(page, root, docker) {
     await atPrompt();
   };
   await remember(`$env:Path = '${docker.replaceAll("'", "''")};' + $env:Path; $env:DOCKER_CONTEXT = 'fixture-active'`);
+  await terminalInput.pressSequentially("docker image ls --for");
+  await terminalOption("--format").waitFor();
+  await terminalInput.press("Escape");
+  await terminalInput.press("Control+c");
+  await atPrompt();
   await terminalInput.pressSequentially("docker cont");
   await terminalOption("container").waitFor();
   await terminalInput.press("Tab");

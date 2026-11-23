@@ -77,6 +77,7 @@ import {
 import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
+import type { TerminalCompletionContext } from "./api";
 import { ShareFolderDialog } from "./ShareFolderDialog";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
@@ -281,6 +282,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [terminalCompletion, setTerminalCompletion] = useState<Record<number, TerminalCompletionContext & { id: number }>>({});
   const [terminalInputFocused, setTerminalInputFocused] = useState(false);
   const [terminalShare, setTerminalShare] = useState(0);
   const [terminalHeight, setTerminalHeight] = useState(() => {
@@ -2165,6 +2167,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!session) return;
     setTerminals(({ [key]: _closed, ...remaining }) => remaining);
     setPendingCommands(({ [session.id]: _closed, ...remaining }) => remaining);
+    setTerminalCompletion(({ [session.id]: _closed, ...remaining }) => remaining);
   }
 
   function toggleTerminal() {
@@ -3234,6 +3237,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               [session.id]: (commands[session.id] ?? []).slice(count),
             }))}
             onCommandSubmitted={(text) => recordCommand(text, session.kind)} onDirectoryChange={(path) => followShellDirectory(session, path)}
+            onCompletionContext={(context) => setTerminalCompletion((current) => {
+              if (context) return { ...current, [session.id]: { id: session.id, ...context } };
+              const { [session.id]: _closed, ...remaining } = current;
+              return remaining;
+            })}
             onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
       </Suspense>
@@ -3246,6 +3254,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </Button>
         <span data-tooltip={terminalLocation ? placePath(terminalLocation) : undefined}>{terminalLocation ? placePath(terminalLocation) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] || terminalPlace?.kind !== "local" ? null : terminalPlace.path}
+          remote={!processPanels[active] && terminalPlace?.kind === "ssh" ? terminalPlace : null}
+          terminal={terminal ? terminalCompletion[terminal.id] : undefined}
           history={terminalPlace?.kind === "ssh" ? [] : commandLineHistory}
           refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />

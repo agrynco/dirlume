@@ -27,36 +27,38 @@ impl RemoteTerminal {
     }
 
     pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-        let mut channel = tokio::time::timeout_at(deadline, self.client.channel_open_session())
-            .await
-            .map_err(message)?
-            .map_err(message)?;
-        let result = tokio::time::timeout_at(deadline, async {
-            channel
-                .exec(true, format!("exec /bin/sh -c {}", quote(script)))
-                .await
-                .map_err(message)?;
-            let mut output = Vec::new();
-            while let Some(event) = channel.wait().await {
-                match event {
-                    ChannelMsg::Data { data } if output.len() + data.len() <= 64 * 1024 => {
-                        output.extend_from_slice(&data);
-                    }
-                    ChannelMsg::Data { .. } | ChannelMsg::Failure => return Ok(Vec::new()),
-                    ChannelMsg::ExitStatus { exit_status } if exit_status != 0 => {
-                        return Ok(Vec::new())
-                    }
-                    ChannelMsg::Close => break,
-                    _ => {}
-                }
-            }
-            Ok(output)
-        })
-        .await;
-        let _ = tokio::time::timeout(Duration::from_millis(100), channel.close()).await;
-        result.map_err(message)?
+        complete(&self.client, script).await
     }
+}
+
+pub(super) async fn complete(client: &AuthenticatedRoute, script: &str) -> Result<Vec<u8>> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut channel = tokio::time::timeout_at(deadline, client.channel_open_session())
+        .await
+        .map_err(message)?
+        .map_err(message)?;
+    let result = tokio::time::timeout_at(deadline, async {
+        channel
+            .exec(true, format!("exec /bin/sh -c {}", quote(script)))
+            .await
+            .map_err(message)?;
+        let mut output = Vec::new();
+        while let Some(event) = channel.wait().await {
+            match event {
+                ChannelMsg::Data { data } if output.len() + data.len() <= 64 * 1024 => {
+                    output.extend_from_slice(&data);
+                }
+                ChannelMsg::Data { .. } | ChannelMsg::Failure => return Ok(Vec::new()),
+                ChannelMsg::ExitStatus { exit_status } if exit_status != 0 => return Ok(Vec::new()),
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        Ok(output)
+    })
+    .await;
+    let _ = tokio::time::timeout(Duration::from_millis(100), channel.close()).await;
+    result.map_err(message)?
 }
 
 impl Drop for RemoteTerminal {

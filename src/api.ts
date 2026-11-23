@@ -300,6 +300,7 @@ export type TerminalSession = { id: number; path: string; refreshEnvironment: bo
   ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });
 export type CommandCompletion = { index: number; length: number; exclusive?: boolean; matches: { label: string; text: string; directory: boolean }[] };
 export type ShellCompletionEnvironment = Record<string, string | null>;
+export type TerminalCompletionContext = { searchPath?: string; environment?: ShellCompletionEnvironment };
 export interface SizeResult {
   name: string;
   bytes: number;
@@ -559,6 +560,8 @@ export const api = {
     invoke<CommandCompletion>("complete_command", { request: { line, caret, directory, refreshEnvironment, shellEnvironment } }),
   completeSshTerminal: (id: number, line: string, caret: number, directory: string, searchPath: string, shellEnvironment?: ShellCompletionEnvironment) =>
     invoke<CommandCompletion>("complete_ssh_terminal", { id, request: { line, caret, directory, searchPath, shellEnvironment } }),
+  completeSshCommand: (id: number, segments: string[], line: string, caret: number) =>
+    invoke<CommandCompletion>("complete_ssh_command", { id, segments, line, caret }),
   writeTerminal: (id: number, data: string) => invoke<void>("write_terminal", { id, data }),
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),

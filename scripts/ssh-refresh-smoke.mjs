@@ -83,6 +83,18 @@ async function fixture(browser, refresh) {
           }
           return listing;
         }
+        if (command === "complete_ssh_command") {
+          state.completion ??= [];
+          state.completion.push(args);
+          const prefix = args.line.split(" ").at(-1);
+          const names = args.segments[0] === "elsewhere" ? ["compose elsewhere"] : ["container", "compose"];
+          if (state.holdCompletion) {
+            state.holdCompletion = false;
+            await new Promise((resolve) => { state.releaseCompletion = resolve; });
+          }
+          return { index: args.caret - prefix.length, length: prefix.length,
+            matches: names.map((label) => ({ label, text: label, directory: false })) };
+        }
         if (command === "transfer_item") {
           if (args.request.sshDestination !== 37) throw new Error("The upload used the wrong SSH connection.");
           const { destination, source } = args.request;
@@ -129,6 +141,29 @@ async function upload(page, side, name, destination = "/destination") {
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
+  {
+    const page = await fixture(browser);
+    await connect(page, "right");
+    const input = page.getByRole("combobox", { name: "Command line", exact: true });
+    const choices = page.getByRole("listbox", { name: "Command suggestions", exact: true });
+    await input.fill("docker co");
+    await choices.getByRole("option", { name: "container", exact: true }).waitFor();
+    assert.equal(await page.locator(".terminal-card:visible").count(), 0);
+    assert.deepEqual(await page.evaluate(() => window.sshFixture.completion.at(-1)),
+      { id: 37, segments: ["destination"], line: "docker co", caret: 9 });
+    await page.evaluate(() => { window.sshFixture.holdCompletion = true; });
+    await input.fill("docker con");
+    await page.waitForFunction(() => window.sshFixture.releaseCompletion);
+    const address = await editPaneAddress(page, "right");
+    await address.fill("/elsewhere");
+    await address.press("Enter");
+    await page.waitForFunction(() => document.getElementById("right-path")?.dataset.path === "/elsewhere");
+    await input.fill("docker co");
+    await choices.getByRole("option", { name: "compose elsewhere", exact: true }).waitFor();
+    await page.evaluate(() => window.sshFixture.releaseCompletion());
+    assert.equal(await choices.getByRole("option", { name: "container", exact: true }).count(), 0);
+    await page.close();
+  }
   for (const sshSide of ["left", "right"]) {
     const localSide = sshSide === "left" ? "right" : "left";
     const page = await fixture(browser);
