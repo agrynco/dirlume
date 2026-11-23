@@ -20,12 +20,15 @@ try {
     const home = windows ? "C:\\fixture" : "/fixture";
     const bookmark = home + (windows ? "\\bookmarked" : "/bookmarked");
     const downloads = home + (windows ? "\\downloads" : "/downloads");
-    await page.addInitScript(({ home, bookmark, downloads }) => {
+    await page.addInitScript(({ home, bookmark, downloads, windows }) => {
       localStorage.removeItem("dirlume.workspace.v1");
       const groups = Array.from({ length: 10 }, () => []);
       groups[8] = [{ title: "Bookmark", path: bookmark }];
       groups[9] = [...groups[8], { title: "Downloads folder", path: downloads }];
       localStorage.setItem("dirlume.folder-shortcuts.v1", JSON.stringify(groups));
+      localStorage.setItem("dirlume.remote-connections", JSON.stringify([
+        { id: "pair", kind: "server", label: "Dirlume test PC", credential: "fixture-credential", lan: true },
+      ]));
       const file = { name: "note.txt", directory: false, link: false, hidden: false, size: 4, modified: null };
       const listing = { entries: [file], omitted: 0 };
       window.__TAURI_INTERNALS__ = {
@@ -50,12 +53,27 @@ try {
             case "ssh_profiles": return [];
             case "connect_ftp": return { id: 1, address: "fixture", origin: "ftp://fixture", segments: ["nested"], listing };
             case "list_ftp": return listing;
+            case "computer_name": return "This test PC";
+            case "list_saved_computer_drives": return [{ name: "Files", total: 1024 ** 3, available: 512 * 1024 ** 2 }];
+            case "connect_saved_server":
+              window.dirlumeDrive = args.segments;
+              return { id: 8, address: "fixture", origin: "https://fixture", share: "fixture", listing };
+            case "kswitcher_peers": return windows ? [
+              { id: "online", name: "KSwitcher PC", online: true },
+              { id: "offline", name: "Offline KSwitcher PC", online: false },
+            ] : [];
+            case "list_kswitcher":
+              if (args.peer === "offline") throw new Error("An offline peer must not be queried.");
+              if (args.path === "") return { ...listing, entries: [], parent: null,
+                drives: [{ name: "C:", type: 3, total: 1024 ** 3, available: 256 * 1024 ** 2 }] };
+              window.kswitcherDrive = args.path;
+              return { ...listing, parent: "" };
             case "file_icons": return args.items.map(() => null);
             default: return null;
           }
         },
       };
-    }, { home, bookmark, downloads });
+    }, { home, bookmark, downloads, windows });
 
     const button = (scope, name) => scope.getByRole("button", { name, exact: true });
     const files = (side) => page.locator(`#${side}-files`);
@@ -74,6 +92,29 @@ try {
       await page.waitForFunction(({ side, path }) => document.getElementById(`${side}-path`)?.dataset.path === path &&
         document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false", { side, path });
     }
+    await page.goto("http://dirlume.test/");
+    await waitForPath("left", home);
+    assert.equal(await button(page.locator(".topbar"), "Connect").count(), 0);
+    await files("left").press("Alt+F1");
+    const lan = sources("left").getByRole("group", { name: "Dirlume LAN", exact: true });
+    await lan.getByRole("group", { name: "Dirlume test PC", exact: true }).getByRole("button", { name: /^Files/ }).click();
+    await page.waitForFunction(() => window.dirlumeDrive?.[0] === "Files");
+    if (windows) {
+      await files("right").press("Alt+F2");
+      const lan = sources("right").getByRole("group", { name: "Dirlume LAN", exact: true });
+      await lan.getByRole("group", { name: "Offline KSwitcher PC", exact: true }).getByText("Offline", { exact: true }).waitFor();
+      await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
+      await page.waitForFunction(() => window.kswitcherDrive === "C:\\");
+      await files("right").getByRole("option", { name: /^note\.txt/ }).waitFor();
+    }
+    await button(page, "Options").click();
+    const options = page.getByRole("dialog", { name: "Options", exact: true });
+    await button(options, "Computers").click();
+    await options.getByRole("heading", { name: "Computers", exact: true }).waitFor();
+    await options.getByText("This test PC", { exact: true }).waitFor();
+    await options.getByText("Dirlume test PC", { exact: true }).waitFor();
+    await button(options, "Done").click();
+
     async function enter(view, side) {
       await page.goto("http://dirlume.test/");
       await waitForPath(side, initialPath(side));

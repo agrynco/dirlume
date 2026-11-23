@@ -86,8 +86,30 @@ impl Identity {
 }
 
 struct Share {
-    root: Dir,
+    roots: ShareRoots,
     authorization: String,
+}
+
+enum ShareRoots {
+    Folder(Dir),
+    #[cfg(feature = "desktop")]
+    Computer(std::collections::BTreeMap<String, ComputerRoot>),
+}
+
+#[cfg(feature = "desktop")]
+struct ComputerRoot {
+    directory: Dir,
+    path: PathBuf,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ComputerDrive {
+    name: String,
+    #[serde(rename = "type")]
+    kind: Option<u32>,
+    total: Option<u64>,
+    available: Option<u64>,
 }
 
 impl Share {
@@ -98,6 +120,28 @@ impl Share {
             }
             _ => Err(StatusCode::UNAUTHORIZED),
         }
+    }
+
+    fn resolve(&self, path: RemotePath) -> io::Result<(&Dir, PathBuf)> {
+        let root = match &self.roots {
+            ShareRoots::Folder(root) => root,
+            #[cfg(feature = "desktop")]
+            ShareRoots::Computer(roots) => {
+                let mut path = path;
+                if path.segments.is_empty() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Choose a drive",
+                    ));
+                }
+                let name = path.segments.remove(0);
+                let root = roots.get(&name).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "The drive is unavailable")
+                })?;
+                return Ok((&root.directory, relative_path(path)?));
+            }
+        };
+        Ok((root, relative_path(path)?))
     }
 }
 
@@ -117,7 +161,34 @@ fn list(share: &Share, request: ListRequest) -> io::Result<ListPage> {
     #[cfg(any(unix, windows))]
     use cap_std::fs::MetadataExt;
 
-    let directory = share.root.open_dir(relative_path(request.path)?)?;
+    #[cfg(feature = "desktop")]
+    if let ShareRoots::Computer(roots) = &share.roots {
+        if request.path.segments.is_empty() {
+            let entries = roots
+                .keys()
+                .filter(|name| request.after.as_ref().is_none_or(|after| *name > after))
+                .map(|name| {
+                    Entry::new(
+                        name.clone(),
+                        true,
+                        false,
+                        local::EntryAttributes::default(),
+                        None,
+                        None,
+                    )
+                })
+                .collect();
+            return Ok(ListPage {
+                listing: RemoteListing {
+                    entries,
+                    omitted: 0,
+                },
+                next: None,
+            });
+        }
+    }
+    let (root, path) = share.resolve(request.path)?;
+    let directory = root.open_dir(path)?;
     let mut entries = Vec::new();
     let mut omitted = 0;
     const PAGE_SIZE: usize = 512;
@@ -255,14 +326,14 @@ async fn download(
 }
 
 fn open_regular_file(share: &Share, path: RemotePath) -> io::Result<fs::File> {
-    let path = relative_path(path)?;
-    if !share.root.symlink_metadata(&path)?.is_file() {
+    let (root, path) = share.resolve(path)?;
+    if !root.symlink_metadata(&path)?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Choose a regular file",
         ));
     }
-    let file = share.root.open(path)?;
+    let file = root.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -295,7 +366,7 @@ async fn read_bytes(
 
 fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
     Ok(Arc::new(Share {
-        root: Dir::open_ambient_dir(root, ambient_authority())?,
+        roots: ShareRoots::Folder(Dir::open_ambient_dir(root, ambient_authority())?),
         authorization: format!("Bearer {token}"),
     }))
 }
@@ -370,12 +441,38 @@ pub(crate) struct DesktopServer {
 
 #[cfg(feature = "desktop")]
 impl DesktopServer {
+    #[cfg(test)]
     pub(crate) async fn start(root: &Path, ip: std::net::IpAddr) -> Result<Self> {
+        let roots = ShareRoots::Folder(Dir::open_ambient_dir(root, ambient_authority())?);
+        Self::start_with_roots(roots, ip).await
+    }
+
+    pub(crate) async fn start_computer(
+        locations: Vec<(String, PathBuf)>,
+        ip: std::net::IpAddr,
+    ) -> Result<Self> {
+        let roots = locations
+            .into_iter()
+            .filter_map(|(label, path)| {
+                let directory = Dir::open_ambient_dir(&path, ambient_authority()).ok()?;
+                Some((label, ComputerRoot { directory, path }))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        if roots.is_empty() {
+            return Err("There are no accessible local drives.".into());
+        }
+        Self::start_with_roots(ShareRoots::Computer(roots), ip).await
+    }
+
+    async fn start_with_roots(roots: ShareRoots, ip: std::net::IpAddr) -> Result<Self> {
         let listener = std::net::TcpListener::bind(SocketAddr::new(ip, 0))?;
         listener.set_nonblocking(true)?;
         let address = advertised_url(&ip.to_string(), listener.local_addr()?.port())?;
         let identity = Identity::generate(address.clone())?;
-        let share = make_share(root, &identity.invitation.token)?;
+        let share = Arc::new(Share {
+            roots,
+            authorization: format!("Bearer {}", identity.invitation.token),
+        });
         let invitation = identity.invitation.encode()?;
         let shutdown = axum_server::Handle::new();
         let server =
@@ -393,7 +490,7 @@ impl DesktopServer {
         .await
         {
             Ok(Some(_)) => Ok(result),
-            _ => Err("The folder share could not start listening.".into()),
+            _ => Err("The direct connection could not start listening.".into()),
         }
     }
 
@@ -416,12 +513,47 @@ impl Drop for DesktopServer {
 }
 
 fn router(share: Arc<Share>) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/v1/list", post(list_directory))
         .route("/v1/download", post(download))
-        .route("/v1/bytes", post(read_bytes))
+        .route("/v1/bytes", post(read_bytes));
+    #[cfg(feature = "desktop")]
+    let router = router.route("/v1/drives", post(computer_drives));
+    router
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(share)
+}
+
+#[cfg(feature = "desktop")]
+async fn computer_drives(
+    State(share): State<Arc<Share>>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Vec<ComputerDrive>>, StatusCode> {
+    share.authorize(&headers)?;
+    spawn_blocking(move || {
+        let ShareRoots::Computer(roots) = &share.roots else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        Ok(Json(
+            roots
+                .iter()
+                .map(|(name, root)| {
+                    let space = crate::disk_space::query(&root.path).ok();
+                    ComputerDrive {
+                        name: name.clone(),
+                        #[cfg(windows)]
+                        kind: local::drive_type(&root.path),
+                        #[cfg(not(windows))]
+                        kind: None,
+                        total: space.map(|space| space.total),
+                        available: space.map(|space| space.available),
+                    }
+                })
+                .collect(),
+        ))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 pub fn invitation(directory: &Path) -> Result<String> {

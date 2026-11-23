@@ -1,13 +1,19 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { Activity, ChevronDown, Folder, HardDrive, Server } from "lucide-react";
-import { windowsClient, type ConnectionSource, type QuickLocation } from "./api";
+import { api, describeError, windowsClient, type ComputerDrive, type ConnectionSource, type QuickLocation } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
-import type { Side } from "./panes";
+import { formatSize, type Side } from "./panes";
 import { bindingMatches, driveSourceCommand, eventShortcut, showShortcut, type Bindings } from "./preferences";
+import { readRemoteProfiles } from "./savedConnections";
 
-export type PaneSource = QuickLocation | ConnectionSource | "processes";
+type LanHost = { kind: "dirlume"; id: string; name: string; credential: string } |
+  { kind: "kswitcher"; id: string; name: string; online?: boolean };
+type RemoteDrive = { host: LanHost; drive: string };
+type LanComputer = { host: LanHost; drives?: ComputerDrive[]; error?: string };
+export type PaneSource = QuickLocation | RemoteDrive | ConnectionSource | "processes";
+const driveTypes = ["", "", "Removable", "Fixed", "Network", "Optical", "RAM disk"];
 
 export function PaneSources({ side, overlay, open, locations, shortcuts, onToggle, onClose, onPick }: {
   side: Side;
@@ -21,9 +27,43 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
 }) {
   const box = useRef<HTMLDivElement>(null);
   const popup = useRef<HTMLDivElement>(null);
+  const [computers, setComputers] = useState<LanComputer[]>([]);
+  const [kswitcherError, setKSwitcherError] = useState("");
   const dismiss = useEffectEvent(() => onClose(false));
   useLayoutEffect(() => {
     if (open) popup.current?.querySelector("button")?.focus();
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    const hosts = readRemoteProfiles().flatMap((profile): LanHost[] => profile.kind === "server" && profile.lan === true ?
+      [{ kind: "dirlume", id: profile.id, name: profile.label, credential: profile.credential }] : []);
+    setComputers(hosts.map((host) => ({ host })));
+    setKSwitcherError("");
+    async function load(host: LanHost) {
+      let update: Pick<LanComputer, "drives" | "error">;
+      try {
+        const drives = host.kind === "dirlume" ? await api.listSavedComputerDrives(host.credential) :
+          (await api.listKSwitcher("", host.id, "")).drives ?? [];
+        update = { drives };
+      } catch (error) {
+        update = { error: describeError(error) };
+      }
+      if (current) setComputers((computers) => computers.map((item) => item.host === host ? { host, ...update } : item));
+    }
+    for (const host of hosts) void load(host);
+    if (windowsClient) void api.kswitcherPeers("").then(async (peers) => {
+      if (!current) return;
+      const paired = (peers ?? []).map((peer): LanHost => ({ kind: "kswitcher", ...peer }));
+      setComputers((computers) => [...computers, ...paired.map((host) => ({ host }))]);
+      for (const host of paired) {
+        if (!current) break;
+        if (host.kind === "kswitcher" && host.online !== false) await load(host);
+      }
+    }, (error: unknown) => {
+      if (current) setKSwitcherError(describeError(error));
+    });
+    return () => { current = false; };
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -81,6 +121,23 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
     }}>
       {folders.map(sourceButton)}
       <div className="location-source-group" role="group" aria-label={t("Sources")}>{sources.map(sourceButton)}</div>
+      {(computers.length > 0 || kswitcherError) && <div className="location-source-group lan-sources" role="group" aria-label={t("Dirlume LAN")}>
+        <strong>{t("Dirlume LAN")}</strong>
+        {kswitcherError && <p role="status">{kswitcherError}</p>}
+        {computers.map(({ host, drives, error }) =>
+            <div key={host.kind + host.id} role="group" aria-label={host.name}>
+              <span>{host.name}</span>
+              {host.kind === "kswitcher" && host.online === false ? <p>{t("Offline")}</p> :
+                error ? <p role="status">{error}</p> :
+                !drives ? <p role="status">{t("Loading drives…")}</p> :
+                drives.length === 0 ? <p>{t("No drives.")}</p> : drives.map(({ name, type, total, available }) =>
+                  <Button key={name} type="button" onClick={() => onPick({ host, drive: name })}>
+                    <HardDrive /> <span>{name}</span>
+                    {type != null && driveTypes[type] && <small>{t(driveTypes[type])}</small>}
+                    {total !== null && total > 0 && available !== null && <small>{t("{0} free of {1}", formatSize(available), formatSize(total))}</small>}
+                  </Button>)}
+            </div>)}
+      </div>}
     </div>}
   </div>;
 }

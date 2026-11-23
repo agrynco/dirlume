@@ -26,7 +26,7 @@ export function readSmbLocations(): SmbProfile[] {
   });
 }
 
-function readRemoteProfiles(): RemoteProfile[] {
+export function readRemoteProfiles(): RemoteProfile[] {
   return readItems(remoteKey).filter((value): value is RemoteProfile => {
     const item = value as Partial<RemoteProfile> | null;
     return typeof item?.id === "string" && typeof item.label === "string" &&
@@ -46,7 +46,8 @@ export function saveSmbLocation(label: string, path: string, existing?: SmbProfi
   return profile.id;
 }
 
-export async function saveRemoteConnection(label: string, provider: "server" | "kswitcher", value: string, existing?: RemoteProfile) {
+export async function saveRemoteConnection(label: string, provider: "server" | "kswitcher", value: string,
+  existing?: RemoteProfile, lan = existing?.kind === "server" && existing.lan === true) {
   const id = existing?.id ?? connectionId();
   const previous = existing?.kind === "server" ? existing.credential : undefined;
   const replacement = provider === "server" && value ? await api.saveServerInvitation(value) : undefined;
@@ -58,7 +59,7 @@ export async function saveRemoteConnection(label: string, provider: "server" | "
     } else {
       const credential = replacement ?? previous;
       if (!credential) throw new Error(t("Enter a valid Dirlume server invitation."));
-      profile = { kind: provider, id, label, credential };
+      profile = { kind: provider, id, label, credential, ...(lan ? { lan } : {}) };
     }
     localStorage.setItem(remoteKey, JSON.stringify([...readRemoteProfiles().filter((item) => item.id !== id), profile]));
   } catch (error) {
