@@ -279,6 +279,7 @@ pub(super) fn batch(
 ) -> CompletionBatch {
     let mut names = BTreeSet::new();
     let text = std::str::from_utf8(output).unwrap_or_default();
+    let mut exclusive = true;
     match query.output {
         Output::Containers => {
             for row in text
@@ -307,13 +308,14 @@ pub(super) fn batch(
         ),
         Output::Completions => {
             // A Cobra directive separates completion results from diagnostics and requests for file completion.
-            if text
+            let directive = text
                 .lines()
                 .next_back()
                 .and_then(|line| line.strip_prefix(':'))
                 .and_then(|value| value.parse::<u32>().ok())
-                .is_some_and(|directive| directive & (1 | 8 | 16) == 0)
-            {
+                .filter(|directive| directive & 1 == 0);
+            exclusive = directive.is_some_and(|directive| directive & 4 != 0);
+            if directive.is_some_and(|directive| directive & (8 | 16) == 0) {
                 names.extend(
                     text.lines()
                         .map(|row| row.split('\t').next().unwrap_or_default())
@@ -331,7 +333,7 @@ pub(super) fn batch(
         .chars()
         .next()
         .filter(|first| matches!(first, '\'' | '"'));
-    let matches = names
+    let matches: Vec<_> = names
         .into_iter()
         .filter(|label| {
             if windows {
@@ -356,8 +358,8 @@ pub(super) fn batch(
     CompletionBatch {
         index: context.index,
         length: context.length,
+        exclusive: exclusive || !matches.is_empty(),
         matches,
-        exclusive: true,
     }
 }
 
@@ -422,7 +424,7 @@ pub(super) fn local(
     })?;
     let output = local_output(request, &query, cwd).unwrap_or_default();
     let batch = batch(&query, context, &request.line, &output, cfg!(windows));
-    (!extended || !batch.matches.is_empty()).then_some(batch)
+    (!extended || batch.exclusive || !batch.matches.is_empty()).then_some(batch)
 }
 
 pub(super) fn remote_script(
@@ -523,6 +525,19 @@ mod tests {
                     .label,
                 "--format"
             );
+        }
+    }
+
+    #[test]
+    fn keeps_a_successful_empty_response_that_disallows_files() {
+        let line = "docker ps ";
+        let context = shell_context(line, line.len(), false).unwrap();
+        let query = extended_query(&context, false).unwrap();
+        let result = batch(&query, &context, line, b":4\n", false);
+        assert!(result.matches.is_empty());
+        assert!(result.exclusive);
+        for output in [b":0\n".as_slice(), b":1\n", b""] {
+            assert!(!batch(&query, &context, line, output, false).exclusive);
         }
     }
 

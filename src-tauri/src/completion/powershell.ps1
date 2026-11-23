@@ -152,14 +152,30 @@ function Get-CompletionCommand($request) {
         $node.Extent.EndOffset -eq $prefix.Length
     }, $true) | Select-Object -Last 1;
 }
-function Test-NoCommandArguments($command) {
+function Test-PathArgument($command, $replacementIndex) {
     if (!$command) { return $false }
     $name = $command.GetCommandName();
     if (!$name) { return $false }
     $info = Get-Command -Name ([WildcardPattern]::Escape($name)) -ErrorAction SilentlyContinue;
     if ($info -is [System.Management.Automation.AliasInfo]) { $info = $info.ResolvedCommand }
-    return ($info -is [System.Management.Automation.FunctionInfo] -or
-            $info -is [System.Management.Automation.CmdletInfo]) -and $info.Parameters.Count -eq 0;
+    if ($info -isnot [System.Management.Automation.FunctionInfo] -and
+        $info -isnot [System.Management.Automation.CmdletInfo]) { return $false }
+    $elements = @($command.CommandElements | Where-Object { $_.Extent.EndOffset -le $replacementIndex });
+    $previous = $elements | Select-Object -Last 1;
+    $parameters = $info.Parameters.Values;
+    if ($previous -is [System.Management.Automation.Language.CommandParameterAst]) {
+        $parameters = @($parameters | Where-Object {
+            $_.Name -like "$($previous.ParameterName)*" -or $_.Aliases -contains $previous.ParameterName
+        });
+    } else {
+        $parameters = @($parameters | Where-Object {
+            $_.ParameterSets.Values | Where-Object { $_.Position -ge 0 }
+        });
+    }
+    return [bool]($parameters | Where-Object {
+        $_.Name -match '(Path|File|Directory|Folder)$' -or
+        $_.ParameterType -in [System.IO.FileInfo], [System.IO.DirectoryInfo], [System.IO.FileSystemInfo]
+    } | Select-Object -First 1);
 }
 while ($null -ne ($line = [Console]::ReadLine())) {
     try {
@@ -182,8 +198,9 @@ while ($null -ne ($line = [Console]::ReadLine())) {
         if ($command -and $command.GetCommandName() -in 'cd','sl','chdir','Set-Location','pushd','Push-Location') {
             $candidates = $candidates | Where-Object { $_.ResultType -ne 'ProviderItem' };
         }
-        if ($candidates.Count -and $candidates[0].ResultType -in 'ProviderItem','ProviderContainer' -and
-            ($script:adapterArguments -or (Test-NoCommandArguments $command))) {
+        if (($candidates | Where-Object { $_.ResultType -in 'ProviderItem','ProviderContainer' } | Select-Object -First 1) -and
+            ($script:adapterArguments -or (!$request.allowPaths -and ($request.commandPosition -or
+                !(Test-PathArgument $command $result.ReplacementIndex))))) {
             $candidates = $candidates | Where-Object { $_.ResultType -notin 'ProviderItem','ProviderContainer' };
         }
         $items = @($candidates | Select-Object -First 100 | ForEach-Object {

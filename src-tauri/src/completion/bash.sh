@@ -30,11 +30,21 @@ if [[ -z $spec ]] && declare -F _completion_loader >/dev/null; then
     _completion_loader "$program" >/dev/null 2>&1
     spec=$(complete -p -- "$program" 2>/dev/null)
 fi
+COMPREPLY=()
 if [[ $spec =~ [[:space:]]-F[[:space:]]([[:alnum:]_][[:alnum:]_.:-]*) ]]; then
     function_name=${BASH_REMATCH[1]}
     if declare -F "$function_name" >/dev/null; then
-        COMPREPLY=()
         "$function_name" "$program" "$current" "$previous" >/dev/null 2>&1
         if (( ${#COMPREPLY[@]} )); then printf '%s\0' "${COMPREPLY[@]:0:80}"; fi
     fi
+fi
+
+if [[ $spec == *' -o plusdirs '* ]] ||
+    { (( ${#COMPREPLY[@]} == 0 )) && [[ $spec == *' -o dirnames '* ]]; }; then
+    while IFS= read -r choice; do printf '%s/\0' "${choice%/}"; done < <(compgen -d -- "$current" | head -n 80)
+elif (( ${#COMPREPLY[@]} == 0 )) && [[ $spec == *' -o default '* ]]; then
+    while IFS= read -r choice; do
+        [[ -d $choice ]] && choice="${choice%/}/"
+        printf '%s\0' "$choice"
+    done < <(compgen -f -- "$current" | head -n 80)
 fi

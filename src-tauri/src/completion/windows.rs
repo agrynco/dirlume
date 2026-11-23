@@ -54,6 +54,8 @@ pub(super) fn native(
             "line": request.line,
             "caret": request.caret,
             "directory": request.directory,
+            "allowPaths": context.allows_path_fallback(true),
+            "commandPosition": context.words.is_empty(),
         }),
     )
     .ok()?;
