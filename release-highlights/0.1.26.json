@@ -1,0 +1,6 @@
+{
+  "version": "0.1.26",
+  "highlights": [
+    "Review staged, unstaged, and untracked files in Git View, preview inline diffs, and open working files in the Viewer or Editor."
+  ]
+}

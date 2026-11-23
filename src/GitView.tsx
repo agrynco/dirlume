@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { GitBranch, GitCommitHorizontal } from "lucide-react";
-import { api, type GitBranch as Branch, type GitCommit, type GitDetails, type GitHistory, type GitRepository } from "./api";
+import { GitCommitHorizontal } from "lucide-react";
+import { api, type GitBranch as Branch, type GitCommit, type GitDetails, type GitHistory, type GitRepository, type NamedFile } from "./api";
 import { Button } from "./Button";
+import { GitChanges } from "./GitChanges";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
 import { opposite, type Side } from "./panes";
@@ -90,28 +91,32 @@ function History({ root, tip }: { root: string; tip?: string }) {
   </div>;
 }
 
-export default function GitView({ path, side, refresh, onRefresh, onClose }: {
+export default function GitView({ path, side, refresh, onRefresh, onClose, onOpen, canEdit }: {
   path: string;
   side: Side;
   refresh: number;
   onRefresh: () => void;
   onClose: () => void;
+  onOpen: (file: NamedFile, editing: boolean) => void;
+  canEdit: (file: NamedFile) => boolean;
 }) {
   const [repository, setRepository] = useState<GitRepository | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
+  const [changes, setChanges] = useState(false);
+  const [selectedChange, setSelectedChange] = useState("");
   const filterField = useRef<HTMLInputElement>(null);
   const branches = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { filterField.current?.focus(); }, []);
+  useLayoutEffect(() => { if (!changes) filterField.current?.focus(); }, [changes]);
   useEffect(() => {
     let canceled = false;
-    setRepository(null);
     setError("");
     void api.gitRepository(path).then((repository) => {
       if (canceled) return;
       setRepository(repository);
-      setSelected(repository.headRef ?? "HEAD");
+      setSelected((current) => repository.branches.some(({ reference }) => reference === current)
+        ? current : repository.headRef ?? "HEAD");
     }, (error: unknown) => { if (!canceled) setError(gitError(error)); });
     return () => { canceled = true; };
   }, [path, refresh]);
@@ -148,24 +153,33 @@ export default function GitView({ path, side, refresh, onRefresh, onClose }: {
     </div>;
   }
 
+  const header = <header className="pane-heading">
+    <div className="git-tabs" role="group" aria-label={t("Git View")}>
+      <Button aria-pressed={!changes} onClick={() => setChanges(false)}>{t("Branches")}</Button>
+      <Button aria-pressed={changes} onClick={() => setChanges(true)}>{t("Changes")}</Button>
+    </div>
+    <Button onClick={onRefresh}>{t("Refresh")}</Button>
+    <Button onClick={onClose}>{t("Close Git View")}</Button>
+  </header>;
+  const location = <div className="git-repository">
+    {repository && <strong>{repository.name}</strong>}
+    <span title={repository?.root ?? path}>{repository?.root ?? path}</span>
+  </div>;
+  if (changes && repository && !error) return <GitChanges key={repository.root} root={repository.root}
+    side={side} refresh={refresh} selected={selectedChange} onSelect={setSelectedChange} header={header}
+    repository={location} onOpen={onOpen} canEdit={canEdit} />;
+
   return <>
-    <section className={"pane git-pane git-pane-" + side} aria-label={t("Branches")} data-help-topic="gitView" data-pane-side={side}>
-      <header className="pane-heading">
-        <span className="pane-title"><GitBranch aria-hidden="true" />{t("Branches")}</span>
-        <Button onClick={onRefresh}>{t("Refresh")}</Button>
-        <Button onClick={onClose}>{t("Close Git View")}</Button>
-      </header>
-      <div className="git-repository">
-        {repository && <strong>{repository.name}</strong>}
-        <span title={repository?.root ?? path}>{repository?.root ?? path}</span>
-      </div>
-      <input className="git-filter" ref={filterField} type="search" value={filter} aria-label={t("Filter branches")}
+    <section className={"pane git-pane git-pane-" + side} aria-label={t(changes ? "Changes" : "Branches")} data-help-topic="gitView" data-pane-side={side}>
+      {header}
+      {location}
+      {!changes && <input className="git-filter" ref={filterField} type="search" value={filter} aria-label={t("Filter branches")}
         placeholder={t("Filter branches")} onChange={(event) => setFilter(event.target.value)}
         onKeyDown={(event) => {
           if (event.key !== "ArrowDown" || !visible.length) return;
           event.preventDefault();
           branches.current?.querySelector<HTMLElement>("[role=option][tabindex='0']")?.focus();
-        }} />
+        }} />}
       {error ? <p className="pane-empty git-error" role="alert">{error}</p> : repository ?
         <div className="git-scroll" ref={branches} role="listbox" aria-label={t("Git branches")} onKeyDown={handleBranchKeys}>
           {branchGroup(false)}
@@ -178,7 +192,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose }: {
         <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
         {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
       </header>
-      {repository && <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />}
+      {repository && !changes && <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />}
     </section>
   </>;
 }

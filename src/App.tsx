@@ -1011,7 +1011,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         });
         if (row) updatePane(source, (pane) => ({ ...pane, selected: row.name }));
       }
-      requestAnimationFrame(() => focus(source));
+      requestAnimationFrame(() => {
+        if (gitView) (window.document.querySelector<HTMLElement>(".git-pane [role=option][aria-selected=true]") ??
+          window.document.querySelector<HTMLElement>(".git-pane .git-filter"))?.focus();
+        else focus(source);
+      });
     }
   }
 
@@ -3074,6 +3078,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
           <GitView side={gitView.side} path={gitView.path} refresh={gitRefresh}
+            onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
         {(["left", "right"] as const).map((side) => diskPanes[side] && <DiskInformation key={side + diskPanes[side]}
@@ -3167,6 +3172,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                   if (dirty) dirtyDocuments.current.add(id);
                   else dirtyDocuments.current.delete(id);
                 }} onSaved={(replaced) => {
+                  if (gitView) setGitRefresh((revision) => revision + 1);
                   if (replaced) setDocuments((current) => current.map((tab) => sameDocumentFile(tab.file, file)
                     ? { ...tab, imageRevision: (tab.imageRevision ?? 0) + 1 } : tab));
                   for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
@@ -3198,6 +3204,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
+              if (gitView) setGitRefresh((revision) => revision + 1);
               if (editing && file.place.kind !== "local") {
                 // A remote Viewer reloads after a save because it has no local directory watch.
                 setDocuments((current) => current.map((tab) => !tab.editing && sameDocumentFile(tab.file, file)
