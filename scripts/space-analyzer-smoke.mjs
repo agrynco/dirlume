@@ -18,7 +18,7 @@ async function assertBreadcrumbs(analyzer, names) {
   assert.equal(await bar.locator(".address-ancestor > button").count(), names.length - 1);
 }
 
-async function fixture(browser, layout, source = "local") {
+async function fixture(browser, layout, source = "local", diskBinding) {
   const windows = ["local", "long", "unc", "kswitcher"].includes(source);
   const page = await browser.newPage({ viewport: { width: 1120, height: 760 },
     userAgent: windows ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" : source === "mac" ?
@@ -28,13 +28,13 @@ async function fixture(browser, layout, source = "local") {
     const path = new URL(route.request().url()).pathname;
     return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
   });
-  await page.addInitScript(({ windows, layout, source }) => {
+  await page.addInitScript(({ windows, layout, source, diskBinding }) => {
     const joiner = windows ? "\\" : "/";
     const base = source === "unc" ? "\\\\fixture\\storage" : source === "long" ?
       "C:\\A long directory with many characters\\Another long directory with many characters" :
       windows ? "C:\\fixture\\mount" : source === "mac" ? "/Users/fixture" : "/mnt/samba";
     const folder = base + joiner + "open";
-    const other = windows ? "C:\\other" : "/other";
+    const other = windows ? "D:\\other" : "/other";
     const gib = 1024 ** 3;
     const file = (name, size, allocated, allocationId) => ({
       name, directory: false, link: false, hidden: name.startsWith("."), size, allocated, allocationId, modified: null,
@@ -55,7 +55,11 @@ async function fixture(browser, layout, source = "local") {
       return listing([file("remote.dat", 1234, withAllocations ? 4096 : undefined)]);
     };
     if (!localStorage.getItem("dirlume.preferences.v1")) {
-      localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ layout, kswitcher: "Fixture bridge" }));
+      const preferences = { layout, kswitcher: "Fixture bridge" };
+      if (diskBinding !== undefined) Object.assign(preferences, { bindingDefaults: 9,
+        activeShortcutScheme: "fixture", shortcutSchemes: [{ id: "fixture", name: "Fixture keys",
+          bindings: { diskInformation: diskBinding ? [diskBinding] : [] } }] });
+      localStorage.setItem("dirlume.preferences.v1", JSON.stringify(preferences));
     }
     localStorage.setItem("dirlume.remote-connections", JSON.stringify([
       { kind: "server", id: "server", label: "Server fixture", credential: "fixture-invitation" },
@@ -70,6 +74,8 @@ async function fixture(browser, layout, source = "local") {
           case "disk_space": return source === "local" ? { available: 1_000_000, total: 2_000_000 } : null;
           case "volume_information":
             window.spaceCalls.push({ command, path: args.path });
+            if (args.path === other) return { path: other, share: false, label: "Other fixture disk", filesystem: windows ? "NTFS" : "ext4",
+              capacity: { total: 8192, available: 4096 } };
             return { path: base, share: source === "unc" || source === "mounted", label: "Fixture disk",
               filesystem: windows ? "NTFS" : "smbfs", capacity: source === "unc" ? null : { total: 4096, available: 1024 } };
           case "space_mount": return { path: base, share: source === "unc" || source === "mounted" };
@@ -165,7 +171,7 @@ async function fixture(browser, layout, source = "local") {
         }
       },
     };
-  }, { windows, layout, source });
+  }, { windows, layout, source, diskBinding });
   await page.goto("http://dirlume.test/");
   await button(pane(page, "left"), "Analyze space").waitFor();
   return page;
@@ -289,13 +295,14 @@ try {
   for (const source of ["local", "unc", "mounted"]) {
     const page = await fixture(browser, "standard", source);
     const left = pane(page, "left");
-    const right = pane(page, "right");
     const disk = page.getByRole("region", { name: "Disk information", exact: true });
-    const chart = page.locator(".space-analyzer-left");
+    const chart = page.locator(".space-analyzer-right");
     const files = left.getByRole("listbox");
     const prior = await files.getAttribute("aria-activedescendant");
     await files.press("Control+Shift+l");
     await disk.getByText("Fixture disk", { exact: true }).waitFor();
+    assert.equal(await disk.getAttribute("data-pane-side"), "right");
+    assert.equal(await files.isVisible(), true);
     assert.equal(await disk.getByText(source === "mounted" ? "/mnt/samba" : source === "unc" ? "\\\\fixture\\storage" : "C:\\fixture\\mount", { exact: true }).count(), 1);
     assert.deepEqual(await page.evaluate(() => window.spaceCalls.map(({ command }) => command)), ["volume_information"]);
     assert.equal(await disk.getByText(source === "unc" ? "Unavailable" : "25%", { exact: true }).count(), source === "unc" ? 2 : 1);
@@ -333,20 +340,78 @@ try {
     });
     await page.mouse.click(x, y, { button: "right" });
     await menu.getByRole("menuitem", { name: "Show in other pane", exact: true }).click();
-    await pane(page, "right").getByRole("option", { name: /^same\.txt/, selected: true }).waitFor();
+    await left.getByRole("option", { name: /^same\.txt/, selected: true }).waitFor();
     assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
     if (process.env.DIRLUME_SUNBURST_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_SUNBURST_SCREENSHOT });
     await button(chart, "Sunburst").click();
-    await button(right, "Analyze space").click();
-    const rightChart = page.locator(".space-analyzer-right");
-    await finished(rightChart);
-    assert.equal(await button(rightChart, "Sunburst").getAttribute("aria-pressed"), "true");
-    await button(rightChart, "Treemap").click();
+    await button(left, "Analyze space").click();
+    const leftChart = page.locator(".space-analyzer-left");
+    await finished(leftChart);
+    assert.equal(await button(leftChart, "Sunburst").getAttribute("aria-pressed"), "true");
+    await button(leftChart, "Treemap").click();
     assert.equal(await button(chart, "Sunburst").getAttribute("aria-pressed"), "true");
     await page.reload();
     await button(left, "Analyze space").click();
-    await finished(chart);
-    assert.equal(await button(chart, "Treemap").getAttribute("aria-pressed"), "true");
+    await finished(leftChart);
+    assert.equal(await button(leftChart, "Treemap").getAttribute("aria-pressed"), "true");
+    await page.close();
+  }
+
+  for (const source of ["local", "mounted", "mac"]) {
+    const page = await fixture(browser, "standard", source);
+    const disk = page.getByRole("region", { name: "Disk information", exact: true });
+    const state = (side) => page.evaluate((side) => ({
+      path: document.getElementById(`${side}-path`).dataset.path,
+      current: document.querySelector(`#${side}-files [data-current="true"]`)?.dataset.tooltip,
+    }), side);
+    for (const [sourceSide, coveredSide, label] of [["left", "right", "Fixture disk"], ["right", "left", "Other fixture disk"]]) {
+      const origin = pane(page, sourceSide).getByRole("listbox");
+      const covered = pane(page, coveredSide).getByRole("listbox");
+      await covered.locator(coveredSide === "left" ? '[data-tooltip="row-5"]' : '[data-tooltip="payload.dat"]').click();
+      const originBefore = await state(sourceSide);
+      const coveredBefore = await state(coveredSide);
+      await origin.focus();
+      await page.locator(`#${sourceSide}-pane.active`).waitFor();
+      await page.keyboard.press("Control+Shift+l");
+      await disk.locator(".disk-identity strong").waitFor();
+      assert.equal(await disk.locator(".disk-identity strong").textContent(), label, `${source} ${sourceSide}: ${originBefore.path}`);
+      assert.equal(await disk.getAttribute("data-pane-side"), coveredSide);
+      assert.equal(await origin.isVisible(), true);
+      assert.deepEqual(await state(sourceSide), originBefore);
+      assert.deepEqual(await page.evaluate(() => window.spaceCalls.filter(({ command }) => command === "volume_information").at(-1)?.path), originBefore.path);
+      await origin.press(source === "mac" ? "Meta+Shift+l" : "Control+Shift+l");
+      await covered.waitFor();
+      await disk.waitFor({ state: "hidden" });
+      assert.deepEqual(await state(coveredSide), coveredBefore);
+    }
+    await button(pane(page, "right"), "Analyze space").click();
+    const analyzer = page.locator(".space-analyzer-right");
+    await finished(analyzer);
+    const origin = pane(page, "left").getByRole("listbox");
+    await origin.focus();
+    await page.locator("#left-pane.active").waitFor();
+    await page.keyboard.press("Control+Shift+l");
+    await disk.waitFor();
+    await analyzer.waitFor({ state: "hidden" });
+    await button(disk, "Close").press("Control+Shift+l");
+    await analyzer.waitFor();
+    assert.equal(await disk.count(), 0);
+    await page.close();
+  }
+
+  for (const binding of ["Ctrl+Alt+L", null]) {
+    const page = await fixture(browser, "standard", "local", binding);
+    const disk = page.getByRole("region", { name: "Disk information", exact: true });
+    const origin = pane(page, "left").getByRole("listbox");
+    await origin.press("Control+Shift+l");
+    assert.equal(await disk.count(), 0);
+    await origin.press("Control+Alt+l");
+    if (binding) {
+      await disk.getByText("Fixture disk", { exact: true }).waitFor();
+      assert.equal(await disk.getAttribute("data-pane-side"), "right");
+      await origin.press("Control+Alt+l");
+      await disk.waitFor({ state: "hidden" });
+    } else assert.equal(await disk.count(), 0);
     await page.close();
   }
 

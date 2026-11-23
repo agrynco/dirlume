@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderTree, HardDrive } from "lucide-react";
 import { api, describeError, type VolumeInformation } from "./api";
 import { Button } from "./Button";
@@ -13,10 +13,8 @@ export function DiskInformation({ side, path, active, onClose, onFocus, onScan }
   onFocus: () => void;
   onScan: (root: string) => void;
 }) {
-  const pane = useRef<HTMLElement>(null);
   const [information, setInformation] = useState<VolumeInformation | null>(null);
   const [error, setError] = useState("");
-  useLayoutEffect(() => { pane.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     let current = true;
     void api.volumeInformation(path).then((result) => {
@@ -31,7 +29,7 @@ export function DiskInformation({ side, path, active, onClose, onFocus, onScan }
   const available = capacity && capacity.total > 0 ? Math.min(1, capacity.available / capacity.total) : null;
   const free = available === null ? "" : new Intl.NumberFormat(locale(), { style: "percent", maximumFractionDigits: 1 }).format(available);
 
-  return <section ref={pane} id={`${side}-disk-information`} tabIndex={-1} aria-label={t("Disk information")}
+  return <section id={`${side}-disk-information`} tabIndex={-1} aria-label={t("Disk information")}
     className={`pane disk-information disk-information-${side}${active ? " active" : ""}`} data-pane-side={side} data-help-topic="diskInformation"
     onFocusCapture={onFocus} onKeyDown={(event) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;

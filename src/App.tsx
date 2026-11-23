@@ -244,10 +244,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
   const [environmentRevision, setEnvironmentRevision] = useState(0);
   const active = quickViewSource ?? focusedSide;
-  const analysis = analysisPanes[active];
   const diskActive = diskPanes[active] !== null;
+  const diskSide = diskPanes.left ? "left" : diskPanes.right ? "right" : null;
+  const analysis = diskActive ? null : analysisPanes[active];
   const showingAnalysis = Boolean(analysisPanes.left || analysisPanes.right);
-  const environmentActive = environmentPanels[active] !== null;
+  const environmentActive = !diskActive && environmentPanels[active] !== null;
   const showingEnvironment = environmentPanels.left !== null || environmentPanels.right !== null;
   const previewSide = quickViewSource === null ? null : opposite(quickViewSource);
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
@@ -926,11 +927,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (workspaceMenuHasFocus()) return;
     side = quickViewSource ?? side;
     setActive(side);
+    const disk = document.getElementById(side + "-disk-information");
+    if (disk) {
+      disk.focus({ preventScroll: true });
+      return;
+    }
     if (analysisHandles.current[side]) {
       analysisHandles.current[side]?.focus();
       return;
     }
-    document.getElementById(side + (diskPanes[side] ? "-disk-information" : environmentPanels[side] ? "-environment" : "-files"))?.focus();
+    document.getElementById(side + (environmentPanels[side] ? "-environment" : "-files"))?.focus({ preventScroll: true });
   }
 
   function paneCovered(side: Side) {
@@ -1245,18 +1251,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return place?.kind === "local" ? place.path : null;
   }
 
-  function openDiskInformation(side: Side) {
+  function toggleDiskInformation(side: Side) {
+    if (diskSide) {
+      closeDiskInformation(diskSide);
+      return;
+    }
     const path = diskPath(side);
     if (!path || !canSelectPanelMode(side)) return;
-    if (diskPanes[side]) { focus(side); return; }
-    setAnalysisPanes((current) => ({ ...current, [side]: null }));
-    setDiskPanes((current) => ({ ...current, [side]: path }));
-    setActive(side);
+    setDiskPanes((current) => ({ ...current, [opposite(side)]: path }));
   }
 
   function closeDiskInformation(side: Side) {
     setDiskPanes((current) => ({ ...current, [side]: null }));
-    focusRevealedSide(side);
+    if (active === side) requestAnimationFrame(() => focus(side));
   }
 
   function openSpaceAnalyzer(side: Side, place: SpacePlace, moveFocus = true, defaultView: SpaceAnalyzerView = "tree") {
@@ -2372,7 +2379,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : "-files");
     requestAnimationFrame(() => {
       if (movedFocus?.isConnected) movedFocus.focus({ preventScroll: true });
-      else if (analysisHandles.current[next]) analysisHandles.current[next]?.focus();
+      else if (!diskActive && analysisHandles.current[next]) analysisHandles.current[next]?.focus();
       else document.getElementById(id)?.focus({ preventScroll: true });
     });
   }
@@ -2429,7 +2436,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return;
     }
     if (command === "diskInformation") {
-      openDiskInformation(active);
+      toggleDiskInformation(active);
       return;
     }
     if (analysis && (command === "copy" || command === "move" || command === "recycle" || command === "recycleAlternate" || command === "delete")) {
@@ -2772,7 +2779,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       refresh(onFiles.id === "left-files" ? "left" : "right");
       return;
     }
-    if (!event.repeat || (!["hidden", "attributes", "quickView", "gitView", "analyzeSpace", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
+    if (!event.repeat || (!["hidden", "attributes", "quickView", "gitView", "analyzeSpace", "diskInformation", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
         !folderGroupCommand(command) && !commandPanelMode(command) && !command.startsWith("sort"))) {
       perform(command);
     }
@@ -2856,8 +2863,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             if (analysisPanes[side]) focus(side);
             else if (canAnalyze(target.place)) openSpaceAnalyzer(side, target.place);
           } },
-        { ...menuCommand("diskInformation", !canSelectPanelMode(side) || !diskPath(side)),
-          checked: Boolean(diskPanes[side]), run: () => openDiskInformation(side) },
+        { ...menuCommand("diskInformation", !diskSide && (!canSelectPanelMode(side) || !diskPath(side))),
+          checked: diskSide === opposite(side), run: () => toggleDiskInformation(side) },
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
         menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
@@ -3550,7 +3557,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }} />
       )}
       {helpRequest && <Suspense fallback={null}>
-        <HelpDialog initialTopic={helpRequest.topic} side={helpRequest.side} language={preferences.language} copyShortcuts={shortcuts.copy} onClose={() => {
+        <HelpDialog initialTopic={helpRequest.topic} side={helpRequest.side} language={preferences.language}
+          copyShortcuts={shortcuts.copy} searchShortcuts={shortcuts.searchHelp} onClose={() => {
           setHelpTopic(null);
           if (helpTopic === "terminalShortcuts") focusTerminalInput();
         }} />

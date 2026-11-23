@@ -68,7 +68,7 @@ In the local **Space Analyzer → Tree**, right-click a file or folder for its a
 
 Open **Space Analyzer** in either pane from the Left or Right menu, the free-space control, or **left Ctrl+5** on the number row. Each pane keeps its own scan and selection. The breadcrumbs show the selected folder or file's parent. Choose a breadcrumb within the scan to reveal its folder, or choose a folder above the root to scan it. In a local or matching SSH terminal, successful directory changes follow the same rules. In Tree, **Tab** switches panes and marked items take precedence for file actions. Choose a file panel mode such as **Full** to browse the current folder and keep the selected file. **Close** or **Esc** restores the previous file view.
 
-Choose **Disk information** from the Left or Right menu, or press **Ctrl+Shift+L**, to see the current local folder's volume or filesystem-backed share. **Scan volume** or **Scan share** opens Space Analyzer at that root. **Sunburst** shows two levels of storage use. Its item list supports keyboard selection and **Shift+F10** for context actions. Right-click a Sunburst sector or Treemap tile to reveal that exact item in the other pane or use the available local file actions. Selecting a view saves it as the default for future scans.
+Choose **Disk information** from the Left or Right menu, or press **Ctrl+Shift+L**, to inspect the current folder's volume or filesystem-backed share in the opposite pane. Invoke it again to restore the previous view. **Scan volume** or **Scan share** opens Space Analyzer at that root. **Sunburst** shows two levels of storage use. Its item list supports keyboard selection and **Shift+F10** for context actions. Right-click a Sunburst sector or Treemap tile to reveal that exact item in the other pane or use the available local file actions. Selecting a view saves it as the default for future scans.
 
 The status row below each file list puts the configured current-item details on the left and counts and marked size on the right. Hover over shortened text to see the full details.
 
@@ -98,7 +98,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 
 | Default keys | Action |
 | --- | --- |
-| F1 | Open offline Help for the control under the pointer or the most recent keyboard focus. In an open dialog, Help stays within that dialog. Follow related sections in the guide and press Esc to return to the previous control. Change or disable Help under Options → Keyboard shortcuts. |
+| F1 | Open offline Help for the control under the pointer or the most recent keyboard focus. In an open dialog, Help stays within that dialog. Use Search Help to find topics and passages across the current language, then press Esc to return to the previous control. Configure Help and Search Help under Options → Keyboard shortcuts. |
 | Alt or F9 | Show or hide the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to hide the menu and return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
@@ -190,7 +190,7 @@ Mouse-wheel font changes appear on the Options page for the affected feature and
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
-Choose **Processes** under **Alt+F1** or **Alt+F2** to view running processes, CPU usage, and memory. Click a column heading to sort, or use **Alt+Letter** to search by process name. Windows shows executable icons when they are available. **F8** asks before ending marked processes.
+Open either pane's sources with **Alt+F1** or **Alt+F2**, then choose **Processes** or press **0** to view running processes, CPU usage, and memory. Click a column heading to sort, or use **Alt+Letter** to search by process name. Windows shows executable icons when they are available. **F8** asks before ending marked processes.
 
 Right-click a process row or press **Shift+F10** on the focused row to inspect its properties, show its executable in the other pane, copy the PID or executable path, or ask to end that process. The row menu keeps the existing marks. The footer and its shortcut continue to act on the marked processes. Windows lock results omit **Show in other pane** so the locked item stays selected.
 

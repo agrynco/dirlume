@@ -1,0 +1,8 @@
+{
+  "version": "0.1.25",
+  "highlights": [
+    "Search the offline Help in English, Ukrainian, or Russian and jump to a matching passage. Updated Help covers terminal context actions and SSH/SFTP jump hosts.",
+    "Disk information opens in the opposite pane and restores that pane’s previous view when toggled off.",
+    "Press 0 in either pane’s sources menu to open Processes."
+  ]
+}

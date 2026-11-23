@@ -908,6 +908,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   overflow-wrap: anywhere; background: var(--danger-bg); color: var(--danger);
 }
 .disk-information { overflow: hidden; }
+.workspace:has(.disk-information-left) :is(.space-analyzer-left, .environment-left, .quick-view-left),
+.workspace:has(.disk-information-right) :is(.space-analyzer-right, .environment-right, .quick-view-right) { display: none; }
 .disk-information:focus-visible { outline-offset: -3px; }
 .disk-information .pane-title svg { flex: none; width: 16px; height: 16px; }
 .disk-content { display: grid; align-content: start; gap: 14px; overflow: auto; padding: 14px; }
@@ -1248,20 +1250,36 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   display: grid; grid-template-columns: minmax(130px, 29%) minmax(0, 1fr); min-height: 0;
   height: min(62vh, 570px); color: var(--dialog-ink);
 }
+.help-sidebar {
+  display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0;
+  background: var(--dialog-header); border-inline-end: 1px solid var(--line);
+}
+.help-search { display: grid; gap: 5px; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+.help-search label { font-weight: 600; }
+.help-search-field { display: flex; align-items: center; gap: 5px; }
+.help-search-field > svg { flex: none; width: 15px; height: 15px; color: var(--dialog-muted); }
+.help-search-field input { flex: 1; min-width: 0; width: 100%; }
+.help-search-field input::-webkit-search-cancel-button { display: none; }
 .help-contents {
-  overflow: auto; padding: 14px 10px; background: var(--dialog-header); border-right: 1px solid var(--line);
+  overflow: auto; padding: 14px 10px;
 }
 .help-contents h3, .help-contents h4 { font-size: 1em; margin: 0 8px 6px; }
 .help-topic-group + .help-topic-group { margin-top: 14px; }
-.help-topic-group a { display: block; color: inherit; padding: 6px 8px; border-radius: 5px; text-decoration: none; }
-.help-topic-group a:hover { background: var(--hover); }
-.help-topic-group a[aria-current] { background: var(--active-row); }
-.help-topic-group a:focus-visible { outline-offset: -2px; }
+.help-contents a { display: block; color: inherit; padding: 6px 8px; border-radius: 5px; text-decoration: none; }
+.help-contents a:hover { background: var(--hover); }
+.help-contents a[aria-current] { background: var(--active-row); }
+.help-contents a:focus-visible { outline-offset: -2px; }
+.help-results { overflow-wrap: anywhere; }
+.help-results p { margin: 0 8px 8px; color: var(--dialog-muted); }
+.help-results ul { list-style: none; margin: 0; padding: 0; }
+.help-results a span { display: block; margin-top: 3px; color: var(--dialog-muted); font-size: .9em; }
 .help-reading { overflow: auto; padding: 16px 22px; line-height: 1.6; overflow-wrap: anywhere; }
 .help-reading h3 { margin: 0 0 8px; font-size: 1.2em; }
 .help-reading h4 { margin: 18px 0 6px; font-size: 1em; }
 .help-reading p, .help-keys, .help-keys dd { margin: 0; }
 .help-reading p + p { margin-top: 0.8em; }
+.help-reading [data-help-match] { outline-offset: 4px; }
+.help-reading mark { scroll-margin-block: 16px; color: inherit; background: var(--active-row); text-decoration: underline; }
 .help-reading p a, .help-related a { color: var(--accent); text-decoration: underline; }
 .help-related { margin: 12px 0 0; padding-inline-start: 22px; }
 .help-keys > div { display: grid; grid-template-columns: minmax(9em, 35%) 1fr; gap: 8px; margin-block: 4px; }
