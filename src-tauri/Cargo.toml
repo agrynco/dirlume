@@ -25,7 +25,10 @@ server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen",
 
 [lib]
 name = "dirlume_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
+
+[profile.dev]
+debug = "line-tables-only"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
