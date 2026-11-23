@@ -172,6 +172,14 @@ async function checkLocalResize(page, home, path) {
   await button(parents, "fixture").click();
   await waitPath(page, "left", home);
   assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
+  const forward = address.locator(".address-forward");
+  await forward.waitFor();
+  assert.ok((await forward.boundingBox()).width > 0);
+  await dragTo(0.79);
+  const first = button(forward, folders[0]);
+  await first.click();
+  const separator = home.includes("\\") ? "\\" : "/";
+  await waitPath(page, "left", home + separator + folders[0]);
 }
 
 const browser = await chromium.launch({ channel: "chrome" });

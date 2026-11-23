@@ -58,12 +58,13 @@ function useBreadcrumbClip(editing = false, fitAncestors = false, location = "")
     if (editing || !viewport || !content) return;
     const address = viewport.parentElement;
     if (!address) return;
+    const forward = fitAncestors ? address.querySelector<HTMLElement>(":scope > .address-forward") : null;
     const measure = () => {
       if (!fitAncestors) {
         setClipped(content.offsetWidth > viewport.clientWidth);
         return;
       }
-      const available = address.clientWidth;
+      const available = address.clientWidth - (forward?.getBoundingClientRect().width ?? 0);
       content.setAttribute("data-measuring", "");
       const widths = Array.from(content.children, (crumb) => crumb.getBoundingClientRect().width);
       content.removeAttribute("data-measuring");
@@ -83,6 +84,7 @@ function useBreadcrumbClip(editing = false, fitAncestors = false, location = "")
     const observer = new ResizeObserver(measure);
     observer.observe(fitAncestors ? address : viewport);
     observer.observe(content);
+    if (forward) observer.observe(forward);
     return () => observer.disconnect();
   }, [editing, fitAncestors, location]);
 

@@ -552,7 +552,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
 .address-ancestor { display: flex; align-items: center; }
 .address-ancestor[hidden] { display: none; }
-.address-crumb-clip[data-fit] { flex: 0 0 auto; max-width: 100%; direction: ltr; }
+.address-crumb-clip[data-fit] { flex: 0 1 auto; max-width: 100%; direction: ltr; }
 .address-crumb-clip[data-fit] .address-crumbs { max-width: 100%; }
 .address-crumb-clip[data-fit] .address-ancestor { flex: none; }
 .address-crumb-clip[data-fit] .address-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -566,6 +566,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-source button { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 .address-current { padding: 3px 8px; }
 .address-forward { display: flex; min-width: 0; max-width: 45%; overflow: hidden; white-space: nowrap; }
+.address-crumb-clip[data-fit] + .address-forward { flex: none; }
 .address-forward .address-ancestor { min-width: 0; }
 .address-forward button { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: .64; }
 .address-forward button:is(:hover, :focus-visible) { opacity: 1; }
