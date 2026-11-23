@@ -1283,6 +1283,21 @@ async fn list_saved_computer_drives(
 ) -> Result<Vec<crate::server::ComputerDrive>> {
     let invitation = read_server_invitation(credential).await?;
     let connection = Connection::connect(&invitation)?;
+    computer_drive_metadata(&connection).await
+}
+
+#[tauri::command]
+async fn list_connected_computer_drives(
+    id: u32,
+    state: State<'_, Connections>,
+) -> Result<Vec<crate::server::ComputerDrive>> {
+    let connection = state.get(id)?;
+    computer_drive_metadata(&connection).await
+}
+
+async fn computer_drive_metadata(
+    connection: &Connection,
+) -> Result<Vec<crate::server::ComputerDrive>> {
     let response = connection
         .request("v1/drives", (), Duration::from_secs(5))
         .await?;
@@ -2676,6 +2691,7 @@ pub fn run() {
         crate::desktop_share::stop_desktop_share,
         connect_saved_server,
         list_saved_computer_drives,
+        list_connected_computer_drives,
         verify_computer_pairing,
         save_server_invitation,
         remove_server_invitation,
