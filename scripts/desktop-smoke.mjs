@@ -997,15 +997,11 @@ try {
   assert.equal(await optionsContent.locator("mark").innerText(), "menu");
   await searchSettings.fill("");
   assert.equal(await optionsContent.locator("mark, .setting-search-alias").count(), 0);
-  const provider = optionsDialog.getByLabel("Remote connection");
-  await provider.selectOption("kswitcher");
-  const bridgePath = optionsDialog.getByRole("combobox", { name: "KSwitcher installation folder", exact: true });
-  await optionsDialog.getByRole("button", { name: "Browse for a folder", exact: true }).waitFor();
-  await bridgePath.fill(join(src, "me"));
-  await optionsDialog.getByRole("listbox", { name: "KSwitcher installation folder suggestions", exact: true })
-    .getByRole("option", { name: "measured", exact: true }).click();
-  assert.equal(await bridgePath.inputValue(), join(src, "measured"));
-  await provider.selectOption("server");
+  await optionsDialog.getByRole("button", { name: "Computers", exact: true }).click();
+  await optionsDialog.getByRole("heading", { name: "Computers", exact: true }).waitFor();
+  await optionsDialog.getByLabel("Pairing code", { exact: true }).waitFor();
+  assert.equal(await optionsDialog.getByRole("button", { name: "Pair computer", exact: true }).isEnabled(), false);
+  assert.equal(await optionsDialog.getByLabel("KSwitcher installation folder", { exact: true }).count(), 0);
   await closeToolWindow(optionsPage);
   await showOptions(() => page.locator("#left-files").dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true }));
   await optionsDialog.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
