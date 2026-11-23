@@ -140,6 +140,14 @@ fn zsh(
     command.env("TERM", "xterm-256color");
     command.env("DIRLUME_COMPLETION_DRAFT", &request.line);
     command.env(
+        "DIRLUME_COMPLETION_ALLOW_DEFAULT_PATHS",
+        if cfg!(target_os = "macos") || context.allows_path_fallback(false) {
+            "yes"
+        } else {
+            "no"
+        },
+    );
+    command.env(
         "DIRLUME_COMPLETION_CURSOR",
         request.line[..context.byte_caret]
             .chars()
