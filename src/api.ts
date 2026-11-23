@@ -257,6 +257,12 @@ export interface GitWorkingDiff {
   unborn: boolean;
 }
 
+export interface DesktopShare {
+  path: string;
+  address: string;
+  invitation: string;
+}
+
 export type EnvironmentScope = "user" | "system" | "process";
 export type EnvironmentKind = "literal" | "expandable";
 export interface EnvironmentRow {
@@ -468,6 +474,10 @@ export const api = {
   operate: (directory: string, operation: Operation) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),
+  suggestShareAddress: () => invoke<string | null>("suggest_share_address"),
+  activeDesktopShare: () => invoke<DesktopShare | null>("active_desktop_share"),
+  startDesktopShare: (path: string, address: string) => invoke<DesktopShare>("start_desktop_share", { path, address }),
+  stopDesktopShare: () => invoke<void>("stop_desktop_share"),
   connectSavedServer: (credential: string) => invoke<Connection & { share: string }>("connect_saved_server", { credential }),
   saveServerInvitation: (invitation: string) => invoke<string>("save_server_invitation", { invitation }),
   removeServerInvitation: (credential: string) => invoke<void>("remove_server_invitation", { credential }),

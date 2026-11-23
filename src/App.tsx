@@ -77,6 +77,7 @@ import {
 import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
+import { ShareFolderDialog } from "./ShareFolderDialog";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { resizeViewFont } from "./viewFonts";
@@ -129,6 +130,7 @@ type ActionModal = (
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
   | { kind: "connect"; side: Side }
+  | { kind: "shareFolder"; side: Side; returnToConnect?: boolean }
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
@@ -3403,6 +3405,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             const { source } = state.place;
             return <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source); }}>{t("Add connection")}</Button>
+              {source === "remote" && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                setModal({ kind: "shareFolder", side });
+              }}>{t("Share a folder")}</Button>}
               {entry?.connection && <>
                 <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>
                 <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source, entry.connection); }}>
@@ -3446,9 +3452,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       })()}
       {modal?.kind === "connect" && (
         <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => openSettings()}
+          onShare={() => setModal({ kind: "shareFolder", side: modal.side, returnToConnect: true })}
           onConnect={(place, listing) => { routeLocation(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}
+      {modal?.kind === "shareFolder" && (() => {
+        const place = panes[modal.side].place;
+        const initialPath = place?.kind === "local" && !smbHost(place) ? place.path : "";
+        return <ShareFolderDialog initialPath={initialPath} onClose={() => {
+          setModal(modal.returnToConnect ? { kind: "connect", side: modal.side } : null);
+        }} />;
+      })()}
       {modal?.kind === "smb" && (
         <SmbDialog path={modal.navigation.path} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
           onConnect={(place, listing, warning) => {
@@ -3693,13 +3707,15 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   );
 }
 
-function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
+function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOptions, onShare, onClose }: {
   provider: "server" | "kswitcher";
   directory: string;
   onConnect: (place: RemotePlace, listing: Listing) => void;
   onOptions: () => void;
+  onShare: () => void;
   onClose: () => void;
 }) {
+  const [provider, setProvider] = useState(preferredProvider);
   const [value, setValue] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState("");
@@ -3776,6 +3792,12 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
           )}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           <div className="dialog-actions">
+            <Button type="button" onClick={onShare} disabled={waiting}>{t("Share a folder")}</Button>
+            {preferredProvider === "kswitcher" && <Button type="button" disabled={waiting} onClick={() => {
+              setValue("");
+              setError("");
+              setProvider(provider === "server" ? "kswitcher" : "server");
+            }}>{t(provider === "server" ? "Connect through KSwitcher" : "Use a Dirlume invitation")}</Button>}
             <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
           </div>
         </div>

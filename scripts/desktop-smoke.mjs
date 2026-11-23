@@ -15,6 +15,7 @@ import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testDesktopShare } from "./desktop-share-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
 import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
@@ -2303,6 +2304,8 @@ try {
   console.log("Verified Classic blue colors, selection contrast, preview, and custom and built-in theme persistence.");
   page = await testPanelModes({ page, startDesktop, exitDesktop, root: temp });
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
+  await testDesktopShare(page, temp);
+  await navigate("right", dst);
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
   await testCompareLayouts(page, temp);
