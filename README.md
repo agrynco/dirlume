@@ -215,6 +215,8 @@ npm ci
 npm run tauri -- dev
 ```
 
+Before starting the local desktop dev server, Dirlume measures the debug files in Cargo's target and build directories. If their combined file size exceeds 30 GiB, it runs `cargo clean --profile dev -p dirlume` to remove Dirlume's development artifacts. To apply the same check before a direct Cargo build or test, run `node scripts/clean-debug-artifacts.mjs` from the repository root.
+
 Run the checks and build the desktop app and standalone server.
 
 ```sh
