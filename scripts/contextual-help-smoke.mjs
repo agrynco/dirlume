@@ -58,6 +58,38 @@ async function closeHelp(page, help, previous) {
   finally { await control.dispose(); }
 }
 
+async function checkSearch(page, help, practice) {
+  const field = help.getByRole("searchbox", { name: practice.label });
+  const results = help.getByRole("region", { name: practice.results });
+  const contents = help.locator(".help-contents").and(help.locator("nav"));
+  const result = (topic) => results.locator(`a[href="#help-${topic}"]`);
+
+  await page.keyboard.press(practice.key);
+  assert.ok(await field.evaluate((node) => document.activeElement === node));
+  await field.fill("no match [.*]");
+  await results.getByRole("status").getByText(practice.empty).waitFor();
+  assert.equal(await contents.isVisible(), false);
+  await field.fill(practice.terminal.toUpperCase().replace(" ", "  "));
+  assert.match(await result("terminal").innerText(), new RegExp(practice.terminal, "iu"));
+  await result("terminal").press("Enter");
+  const passage = help.locator("#help-terminal [data-help-match]");
+  await passage.waitFor();
+  assert.ok(await passage.evaluate((node) => {
+    const reading = node.closest(".help-reading").getBoundingClientRect();
+    const mark = node.querySelector("mark").getBoundingClientRect();
+    return document.activeElement === node && mark.top >= reading.top && mark.top < reading.bottom;
+  }));
+  assert.equal(await result("terminal").getAttribute("aria-current"), "location");
+  await help.getByRole("button", { name: practice.clear, exact: true }).click();
+  await currentTopic(help, "terminal").waitFor({ state: "visible" });
+  await field.fill(practice.jumps);
+  await result("remote").click();
+  await help.locator("#help-remote [data-help-match]").waitFor();
+  assert.ok((await help.locator("#help-remote [data-help-match]").innerText()).includes(practice.jumps));
+  await field.fill(practice.title);
+  await result("remote").waitFor();
+}
+
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   const page = await openFixture(browser);
@@ -239,7 +271,24 @@ try {
     await closeHelp(localized, guide, pane);
     await localized.close();
   }
+  for (const [language, platform, helpLabel, key, label, results, empty, clear, terminal, jumps, title] of [
+    ["en", "Windows NT 10.0; Win64; x64", "Help", "Control+f", "Search Help", "Help search results",
+      "No matching Help topics.", "Clear Help search", "Select All", "Jump hosts", "Remote connection"],
+    ["uk", "X11; Linux x86_64", "Довідка", "Control+f", "Пошук у довідці", "Результати пошуку в довідці",
+      "Відповідних тем довідки немає.", "Очистити пошук у довідці", "Вибрати все", "Проміжні SSH-сервери", "Віддалене підключення"],
+    ["ru", "Macintosh; Intel Mac OS X 10_15_7", "Справка", "Meta+f", "Поиск по справке", "Результаты поиска по справке",
+      "Подходящих тем справки нет.", "Очистить поиск по справке", "Выбрать всё", "Промежуточные SSH-серверы", "Удалённое подключение"],
+  ]) {
+    const offline = await openFixture(browser, language, `Mozilla/5.0 (${platform})`);
+    await offline.context().setOffline(true);
+    const files = offline.locator("#left-files");
+    const guide = await openHelp(offline, files, "files", helpLabel);
+    await checkSearch(offline, guide, { key, label, results, empty, clear, terminal, jumps, title });
+    await closeHelp(offline, guide, files);
+    await offline.close();
+  }
   console.log("Verified pointer and keyboard Help in both panes, scan continuity, deferred focus, related links, three offline languages, and remappable F1.");
+  console.log("Verified offline Help title and passage search, localized snippets, keyboard and pointer results, and focus restoration.");
 } finally {
   await browser.close();
 }

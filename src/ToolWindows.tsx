@@ -90,7 +90,8 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
       return next;
     }} />}
     {help && <Suspense fallback={null}>
-      <HelpDialog initialTopic={help.topic} side={help.side} language={preferences.language} onClose={() => setHelp(null)} />
+      <HelpDialog initialTopic={help.topic} side={help.side} language={preferences.language}
+        searchShortcuts={shortcuts.searchHelp} onClose={() => setHelp(null)} />
     </Suspense>}
   </>;
 }

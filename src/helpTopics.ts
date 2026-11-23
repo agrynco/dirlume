@@ -54,7 +54,7 @@ export const helpTopics = {
   textTools: { title: colorGroups.text.label, keys: [] },
   fonts: { title: "Fonts", keys: [] },
   viewFonts: { title: "View font sizes", keys: ["zoomFont"] },
-  shortcuts: { title: "Keyboard shortcuts", keys: ["help", "settings"] },
+  shortcuts: { title: "Keyboard shortcuts", keys: ["help", "searchHelp", "settings"] },
 } as const satisfies Record<string, { title: string; keys: readonly Command[] }>;
 
 export type HelpTopic = keyof typeof helpTopics;
