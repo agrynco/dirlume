@@ -164,10 +164,16 @@ function Test-PathArgument($command, $replacementIndex) {
     $previous = $elements | Select-Object -Last 1;
     $parameters = $info.Parameters.Values;
     if ($previous -is [System.Management.Automation.Language.CommandParameterAst]) {
-        $parameters = @($parameters | Where-Object {
+        $named = @($parameters | Where-Object {
             $_.Name -like "$($previous.ParameterName)*" -or $_.Aliases -contains $previous.ParameterName
         });
-    } else {
+        if ($named.Count -eq 1 -and $named[0].ParameterType -eq [switch]) {
+            $previous = $null;
+        } else {
+            $parameters = $named;
+        }
+    }
+    if ($previous -isnot [System.Management.Automation.Language.CommandParameterAst]) {
         $parameters = @($parameters | Where-Object {
             $_.ParameterSets.Values | Where-Object { $_.Position -ge 0 }
         });

@@ -920,6 +920,7 @@ esac
         fs::create_dir(directory.path().join("completion-fixture")).unwrap();
         for (draft, expected) in [
             ("Get-ChildItem completion-", true),
+            ("Get-ChildItem -Force completion-", true),
             ("Get-ChildItem -Filter completion-", false),
             ("where.exe completion-", false),
             ("where.exe .\\completion-", true),
