@@ -60,6 +60,10 @@ export function ViewFontSettings({ preferences, onChange, views }: {
         {fields(views)}
       </fieldset>
     ))}
+    <fieldset className="view-font-group">
+      <legend>{t("Terminal")}</legend>
+      {fields(["terminal", "command"])}
+    </fieldset>
   </div>;
 }
 
