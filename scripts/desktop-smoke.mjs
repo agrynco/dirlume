@@ -2361,6 +2361,19 @@ try {
 async function testNativeSpaceAnalyzer(page) {
   const exactButton = (scope, name) => scope.getByRole("button", { name, exact: true });
   const pane = page.getByRole("region", { name: "left pane", exact: true });
+  const leftFiles = pane.getByRole("listbox", { name: "left files", exact: true });
+  const rightFiles = page.getByRole("listbox", { name: "right files", exact: true });
+  const selected = await rightFiles.getAttribute("aria-activedescendant");
+  const rightPath = await page.locator("#right-path").getAttribute("data-path");
+  await leftFiles.press("Control+Shift+l");
+  const disk = page.getByRole("region", { name: "Disk information", exact: true });
+  await exactButton(disk, "Scan volume").waitFor();
+  assert.equal(await disk.getAttribute("data-pane-side"), "right");
+  assert.equal(await leftFiles.isVisible(), true);
+  await leftFiles.press("Control+Shift+l");
+  await rightFiles.waitFor();
+  assert.equal(await rightFiles.getAttribute("aria-activedescendant"), selected);
+  assert.equal(await page.locator("#right-path").getAttribute("data-path"), rightPath);
   const nested = join(attributes, "system-folder", "scan-nested");
   await mkdir(nested);
   await writeFile(join(nested, "scan-report.txt"), "Scan fixture");
