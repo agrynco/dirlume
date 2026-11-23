@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 
+test("pull request builds cover every platform and releases package Windows and Linux", () => {
+  const runner = resolve("scripts/package.mjs");
+  const platforms = (publish) => JSON.parse(spawnSync(process.execPath, [runner, "platforms", publish], { encoding: "utf8" }).stdout);
+  assert.deepEqual(platforms("false"), ["windows-x64", "linux-x64", "macos-arm64", "macos-x64"]);
+  assert.deepEqual(platforms("true"), ["windows-x64", "linux-x64"]);
+});
+
 test("release metadata pairs the signed packages with their platform and exact version", async () => {
   const scratch = await realpath(tmpdir());
   const directory = await mkdtemp(join(scratch, "dirlume-package-"));
@@ -16,8 +23,6 @@ test("release metadata pairs the signed packages with their platform and exact v
   const formats = {
     "windows-x64": ["setup.exe", "setup.exe.sig"],
     "linux-x64": ["deb", "AppImage", "AppImage.sig"],
-    "macos-x64": ["dmg", "app.tar.gz", "app.tar.gz.sig"],
-    "macos-arm64": ["dmg", "app.tar.gz", "app.tar.gz.sig"],
   };
   try {
     for (const [platform, extensions] of Object.entries(formats)) {
@@ -43,6 +48,7 @@ test("release metadata pairs the signed packages with their platform and exact v
     const result = run(`v${product}`);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /^## What's new\n\n- A fixture change\./);
+    assert.doesNotMatch(result.stdout, /macOS|macos-/i);
     for (const [platform, extensions] of Object.entries(formats)) {
       for (const suffix of [`.${extensions[0]}`, "-portable.zip"]) {
         assert.ok(result.stdout.includes(`https://github.com/agrynco/dirlume/releases/download/v${product}/Dirlume-${label}-${platform}${suffix}`));
@@ -55,13 +61,15 @@ test("release metadata pairs the signed packages with their platform and exact v
       "windows-x86_64": `Dirlume-${label}-windows-x64.setup.exe`,
       "windows-x86_64-portable": `Dirlume-${label}-windows-x64-portable.zip`,
       "linux-x86_64": `Dirlume-${label}-linux-x64.AppImage`,
-      "darwin-x86_64": `Dirlume-${label}-macos-x64.app.tar.gz`,
-      "darwin-aarch64": `Dirlume-${label}-macos-arm64.app.tar.gz`,
     };
     assert.deepEqual(manifest.platforms, Object.fromEntries(Object.entries(packages).map(([target, name]) => [target, {
       signature: `${name}.sig`, url: `https://github.com/agrynco/dirlume/releases/download/v${product}/${name}`,
     }])));
     await rm(join(release, "latest.json"));
+    const mac = join(release, `Dirlume-${label}-macos-x64.dmg`);
+    await writeFile(mac, "unexpected macOS bundle");
+    assert.match(run(`v${product}`).stderr, /release artifact set does not match/);
+    await rm(mac);
     const zip = join(release, `Dirlume-${label}-windows-x64-portable.zip`);
     await rm(zip);
     assert.notEqual(run(`v${product}`).status, 0);
