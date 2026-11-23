@@ -52,8 +52,9 @@ pub(crate) async fn active_desktop_share(
 
 #[tauri::command]
 pub(crate) async fn start_desktop_share(
-    path: String,
+    path: Option<String>,
     address: String,
+    share_computer: Option<bool>,
     state: State<'_, DesktopShare>,
 ) -> Result<ShareDetails> {
     let ip = address
@@ -63,7 +64,6 @@ pub(crate) async fn start_desktop_share(
     if !local_address(ip) {
         return Err("Enter a local network IP address.".to_owned());
     }
-    let root = local::absolute(&path).map_err(message)?;
     let mut sharing = state.0.lock().await;
     if sharing
         .as_ref()
@@ -71,9 +71,21 @@ pub(crate) async fn start_desktop_share(
     {
         return Err("Stop the current share before starting another.".to_owned());
     }
-    let server = DesktopServer::start(root, ip).await.map_err(message)?;
-    let result = details(&path, &server);
-    *sharing = Some((path, server));
+    let share_computer = share_computer.unwrap_or(false);
+    let server = if share_computer {
+        DesktopServer::start_computer(local::local_share_locations(), ip).await
+    } else {
+        let root = local::absolute(path.as_deref().unwrap_or_default()).map_err(message)?;
+        DesktopServer::start(root, ip).await
+    }
+    .map_err(message)?;
+    let label = if share_computer {
+        String::new()
+    } else {
+        path.unwrap_or_default()
+    };
+    let result = details(&label, &server);
+    *sharing = Some((label, server));
     Ok(result)
 }
 

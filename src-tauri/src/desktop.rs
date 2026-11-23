@@ -1333,6 +1333,40 @@ mod server_download_tests {
     use std::{net::TcpListener, thread};
 
     #[tokio::test]
+    async fn desktop_computer_share_lists_and_opens_separate_drive_roots() {
+        let fixture = tempfile::tempdir().unwrap();
+        let first = fixture.path().join("first");
+        let second = fixture.path().join("second");
+        fs::create_dir(&first).unwrap();
+        fs::create_dir(&second).unwrap();
+        fs::write(first.join("first.txt"), "first drive").unwrap();
+        fs::write(second.join("second.txt"), "second drive").unwrap();
+        let roots = vec![("C:".into(), first), ("D:".into(), second)];
+        let ip = "127.0.0.1".parse().unwrap();
+        let mut host = crate::server::DesktopServer::start_computer(roots, ip)
+            .await
+            .unwrap();
+        let guest = Connection::connect(&host.invitation).unwrap();
+        let devices = guest.list(Vec::new()).await.unwrap().entries;
+        assert_eq!(
+            devices
+                .iter()
+                .map(|drive| drive.name.as_str())
+                .collect::<Vec<_>>(),
+            ["C:", "D:"]
+        );
+        assert!(devices.iter().all(|drive| drive.directory));
+        for (drive, expected) in [("C:", "first.txt"), ("D:", "second.txt")] {
+            let entries = guest.list(vec![drive.into()]).await.unwrap().entries;
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].name, expected);
+        }
+        assert!(guest.list(vec!["E:".into()]).await.is_err());
+        assert!(guest.list(vec!["C:".into(), "..".into()]).await.is_err());
+        host.stop().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn desktop_share_accepts_pinned_tls_and_revokes_access_on_stop() {
         let fixture = tempfile::tempdir().unwrap();
         let root = fixture.path().join("shared folder ł");
