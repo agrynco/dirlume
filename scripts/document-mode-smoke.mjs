@@ -39,6 +39,14 @@ export async function testDocumentMode(page, root) {
   assert.equal(await readFile(file, "utf8"), "Still a draft");
 
   const label = "Switch between Viewer and Editor";
+  const verifyViewerShortcutHint = async (shortcut) => {
+    const menu = viewer.getByRole("menubar", { name: "Document menu" });
+    await menu.getByRole("menuitem", { name: "File", exact: true }).click();
+    const hint = menu.getByRole("menuitem", { name: "Open in Editor", exact: true }).locator("kbd");
+    if (shortcut) assert.equal(await hint.textContent(), shortcut);
+    else assert.equal(await hint.count(), 0);
+    await page.keyboard.press("Escape");
+  };
   const editBinding = async (change) => {
     const tool = await openOptionsWindow(page);
     const options = tool.getByRole("dialog", { name: "Options", exact: true });
@@ -53,6 +61,7 @@ export async function testDocumentMode(page, root) {
     await options.getByRole("button", { name: `Change F6 for ${label}`, exact: true }).click();
     await options.getByRole("textbox", { name: `New shortcut to replace F6 for ${label}`, exact: true }).press("Control+Shift+F6");
   });
+  await verifyViewerShortcutHint("Ctrl+Shift+F6");
   await viewer.press("F6");
   assert.equal(await viewer.isVisible(), true);
   await viewer.press("Control+Shift+F6");
@@ -60,12 +69,14 @@ export async function testDocumentMode(page, root) {
   await editBinding((options) => options.getByRole("button", { name: `Remove Ctrl+Shift+F6 from ${label}`, exact: true }).click());
   await editor.press("Control+Shift+F6");
   assert.equal(await editor.isVisible(), true);
+  await editor.getByRole("button", { name: "Close document", exact: true }).click();
+  await verifyViewerShortcutHint("");
+  await viewer.press("Control+Shift+F6");
+  assert.equal(await viewer.isVisible(), true);
   await editBinding(async (options) => {
     await options.getByRole("button", { name: `Add shortcut for ${label}`, exact: true }).click();
     await options.getByRole("textbox", { name: `New shortcut for ${label}`, exact: true }).press("F6");
   });
-  await editor.press("F10");
-  await viewer.waitFor();
   await viewer.press("F10");
   await pane.press("F6");
   const rename = page.getByRole("dialog", { name: "Rename or move", exact: true });

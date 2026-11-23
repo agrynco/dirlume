@@ -67,12 +67,45 @@ try {
   const waitForTerminalStyle = (element, color) => page.waitForFunction(({ css, color }) =>
     [...document.querySelectorAll(css + " style")].some((node) => node.textContent.includes(color)),
   { css: element, color });
+  const documentShortcuts = documentWindow.locator(".document-shortcuts");
+  const invokeDocumentMenu = async (group, action) => {
+    const menu = documentWindow.getByRole("menubar", { name: "Document menu" });
+    await menu.getByRole("menuitem", { name: group, exact: true }).press("ArrowDown");
+    const item = menu.getByRole("menu", { name: group, exact: true }).getByRole("menuitem", { name: action });
+    await item.press("Enter");
+  };
+  const verifyReadingArea = async (surface) => {
+    assert.equal(await documentShortcuts.count(), 0);
+    const bottom = await surface.evaluate((node) => node.closest(".text-window").getBoundingClientRect().bottom -
+      node.getBoundingClientRect().bottom - parseFloat(getComputedStyle(node).marginBottom));
+    assert.ok(bottom <= 2, "The Viewer reading area should fill the space below the toolbar");
+  };
 
   await showDocument("guide.md", "F3");
   const markdown = documentWindow.locator(".markdown");
   assert.equal(await style(markdown, "background-color"), "rgb(221, 238, 255)");
   assert.equal(await style(markdown, "font-size"), "26px");
+  await verifyReadingArea(markdown);
+  await page.setViewportSize({ width: 1100, height: 420 });
+  await verifyReadingArea(markdown);
+  const toolbarSearch = exactButton(documentWindow, "Search");
+  await toolbarSearch.click();
+  await documentWindow.locator(".markdown-search").waitFor({ state: "visible" });
+  await exactButton(documentWindow, "Close search").click();
+  await documentWindow.locator(".markdown-search").waitFor({ state: "hidden" });
+  await invokeDocumentMenu("Navigate", "Search");
+  await documentWindow.locator(".markdown-search").waitFor({ state: "visible" });
+  await exactButton(documentWindow, "Source").click();
+  await verifyReadingArea(documentWindow.locator(".source-surface:not([hidden])"));
+  await invokeDocumentMenu("Navigate", "Hex");
+  await verifyReadingArea(documentWindow.locator(".hex-view"));
+  await invokeDocumentMenu("Navigate", "Hex");
+  await invokeDocumentMenu("File", "Open in Editor");
+  await documentShortcuts.getByRole("button", { name: /Save/ }).waitFor({ state: "visible" });
   await closeDocument();
+  await verifyReadingArea(documentWindow.locator(".source-surface:not([hidden])"));
+  await invokeDocumentMenu("File", "Close");
+  await page.setViewportSize({ width: 1100, height: 770 });
   await showDocument("sample.rs", "F3");
   await documentWindow.getByRole("button", { name: "Hex", exact: true }).click();
   assert.equal(await style(documentWindow.locator(".hex-view"), "font-size"), "27px");

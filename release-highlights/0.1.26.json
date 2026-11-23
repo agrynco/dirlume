@@ -5,6 +5,7 @@
     "File-pane breadcrumbs show the full local path whenever it fits and restore hidden folders as the pane widens.",
     "Resize text with Ctrl+Wheel in Folder shortcuts, Options, Terminal, the command line, Compare files, and the main interface.",
     "Share one folder directly from Dirlume and invite another Dirlume app on the local network to browse and download files.",
-    "Complete remote commands and paths before opening a Linux SSH terminal. Get broader Docker command suggestions in the Terminal and Command line on Windows and Linux."
+    "Complete remote commands and paths before opening a Linux SSH terminal. Get broader Docker command suggestions in the Terminal and Command line on Windows and Linux.",
+    "Text Viewer gives more space to Markdown, source text, and hexadecimal content by removing the shortcut footer."
   ]
 }

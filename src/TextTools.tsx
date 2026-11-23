@@ -356,7 +356,6 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         '[data-menu-group="' + menuGroups.findIndex(({ label }) => label === "Syntax") + '"]') ?? null) },
     ] }] : []),
   ];
-  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), switchMode, closeAction];
   function openSyntax(opener: HTMLElement | null) {
     syntaxOpener.current = opener;
     setChoosingSyntax(true);
@@ -493,10 +492,10 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           </Suspense>
         </div>
       </>}
-      <footer className="document-shortcuts" aria-label={t("Document shortcuts")}>
-        {hints.map((hint) => hint.shortcut && <Button type="button" key={hint.label} disabled={hint.disabled}
+      {editing && <footer className="document-shortcuts" aria-label={t("Document shortcuts")}>
+        {fileActions.map((hint) => hint.shortcut && <Button type="button" key={hint.label} disabled={hint.disabled}
           shortcut={hint.shortcut} tooltip={t(hint.label)} onClick={hint.run}><kbd>{hint.shortcut}</kbd> {t(hint.label)}</Button>)}
-      </footer>
+      </footer>}
       {choosingSyntax && sourceVisible && <Suspense>
         <SyntaxPicker syntax={syntax} editing={editing} onSelect={(choice) => { setSyntax(choice); closeSyntax(); }} onClose={closeSyntax} />
       </Suspense>}
