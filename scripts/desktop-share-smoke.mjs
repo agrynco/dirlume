@@ -7,7 +7,7 @@ const sharing = (page) => page.getByRole("dialog", { name: "Share a folder", exa
 
 async function connectDialog(page) {
   await button(page.locator(".topbar"), "Connect").click();
-  const provider = page.getByRole("dialog", { name: "Connect through KSwitcher", exact: true });
+  const provider = page.getByRole("dialog", { name: "Connect to KSwitcher", exact: true });
   const dialog = page.getByRole("dialog", { name: "Connect to Dirlume server", exact: true });
   await dialog.or(provider).waitFor();
   if (await provider.isVisible()) await button(provider, "Use a Dirlume invitation").click();

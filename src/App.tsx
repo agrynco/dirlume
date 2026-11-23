@@ -3773,7 +3773,7 @@ function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOp
   }
 
   return (
-    <Dialog title={provider === "server" ? t("Connect to Dirlume server") : t("Connect through KSwitcher")}
+    <Dialog title={provider === "server" ? t("Connect to Dirlume server") : t("Connect to KSwitcher")}
       onClose={() => { if (!waiting) onClose(); }}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
@@ -3808,7 +3808,7 @@ function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOp
               setError("");
               setPeers([]);
               setProvider(provider === "server" ? "kswitcher" : "server");
-            }}>{t(provider === "server" ? "Connect through KSwitcher" : "Use a Dirlume invitation")}</Button>}
+            }}>{t(provider === "server" ? "Connect to KSwitcher" : "Use a Dirlume invitation")}</Button>}
             <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
           </div>
         </div>

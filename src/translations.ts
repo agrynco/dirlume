@@ -903,7 +903,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Delete contents": ["Видалити вміст", "Удалить содержимое"],
   "Create": ["Створити", "Создать"],
   "Connect to Dirlume server": ["Підключитися до сервера Dirlume", "Подключиться к серверу Dirlume"],
-  "Connect through KSwitcher": ["Підключитися через KSwitcher", "Подключиться через KSwitcher"],
+  "Connect to KSwitcher": ["Підключитися до KSwitcher", "Подключиться к KSwitcher"],
   "Connecting…": ["Підключення…", "Подключение…"],
   "System": ["Системна", "Системная"],
   "Favorite light scheme": ["Обрана світла схема", "Избранная светлая схема"],
