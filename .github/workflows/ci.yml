@@ -30,6 +30,7 @@ jobs:
       product-version: ${{ steps.resolve.outputs.product-version }}
       build-number: ${{ steps.resolve.outputs.build-number }}
       publish: ${{ steps.resolve.outputs.publish }}
+      platforms: ${{ steps.platforms.outputs.platforms }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,25 +77,30 @@ jobs:
           PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'closed' }}
           CHECK_NEXT_RELEASE_HIGHLIGHTS: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'prerelease' }}
         run: node scripts/build-version.mjs resolve
+      - name: Select build platforms
+        if: steps.resolve.outputs.product-version != ''
+        id: platforms
+        env:
+          PUBLISH_RELEASE: ${{ steps.resolve.outputs.publish }}
+        run: |
+          platforms="$(node scripts/package.mjs platforms "$PUBLISH_RELEASE")"
+          printf 'platforms=%s\n' "$platforms" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and test (${{ matrix.platform }})
     if: needs.version.outputs.product-version != ''
     needs: version
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ needs.version.outputs.publish == 'true' && startsWith(matrix.platform, 'macos-') && 120 || 45 }}
+    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[matrix.platform] }}
+    timeout-minutes: 45
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
       DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
+      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage","macos-arm64":"app,dmg","macos-x64":"app,dmg"}')[matrix.platform] }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { platform: windows-x64, runner: windows-2025, bundles: nsis }
-          - { platform: linux-x64, runner: ubuntu-22.04, bundles: 'deb,appimage' }
-          - { platform: macos-arm64, runner: macos-15, bundles: 'app,dmg' }
-          - { platform: macos-x64, runner: macos-15-intel, bundles: 'app,dmg' }
+        platform: ${{ fromJSON(needs.version.outputs.platforms) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -234,11 +240,6 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_API_ISSUER || '' }}
-          APPLE_API_KEY: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_API_KEY || '' }}
-          APPLE_API_KEY_P8: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_API_KEY_P8 || '' }}
         run: |
           $configArgs = @()
           if ($env:DIRLUME_SIGNED_RELEASE -eq 'true') {
@@ -246,12 +247,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $configArgs = @('--config', 'src-tauri/target/updater-config.json')
           }
-          $buildArgs = @('build', '--ci', '--bundles', '${{ matrix.bundles }}') + $configArgs + @('--', '--locked')
-          if ($IsMacOS -and $env:DIRLUME_SIGNED_RELEASE -eq 'true') {
-            bash scripts/macos-release.sh bundle @buildArgs
-          } else {
-            npm run tauri -- @buildArgs
-          }
+          npm run tauri -- build --ci --bundles "$env:DIRLUME_BUNDLES" @configArgs -- --locked
           exit $LASTEXITCODE
       - name: Retain build-matched JavaScript source maps
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -290,10 +286,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'Windows' && needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ runner.os == 'Windows' && needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         run: node scripts/package.mjs collect "${{ matrix.platform }}"
-      - name: Verify macOS release packages
-        if: runner.os == 'macOS' && needs.version.outputs.publish == 'true'
-        shell: bash
-        run: bash scripts/macos-release.sh verify
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dirlume-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}
@@ -330,7 +322,7 @@ jobs:
         run: |
           set -euo pipefail
           notes="$(node scripts/package.mjs verify-release)"
-          (cd release && sha256sum --check --strict *.sha256)
+          (cd release && sha256sum --check --strict ./*.sha256)
           node scripts/build-version.mjs check-release
           if [[ "$GITHUB_REF_TYPE" != tag ]]; then
             tag_ref="repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG"
