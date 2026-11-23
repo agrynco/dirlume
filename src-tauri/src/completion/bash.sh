@@ -26,8 +26,14 @@ fi
 program=${COMP_WORDS[0]}
 previous=${COMP_WORDS[COMP_CWORD-1]}
 spec=$(complete -p -- "$program" 2>/dev/null)
-if [[ -z $spec ]] && declare -F _completion_loader >/dev/null; then
-    _completion_loader "$program" >/dev/null 2>&1
+if [[ -z $spec ]]; then
+    # Load a command's rules without installing bash-completion's blanket
+    # filename fallback for commands that have no rules of their own.
+    if declare -F _comp_load >/dev/null; then
+        _comp_load -- "$program" >/dev/null 2>&1
+    elif declare -F __load_completion >/dev/null; then
+        __load_completion "$program" >/dev/null 2>&1
+    fi
     spec=$(complete -p -- "$program" 2>/dev/null)
 fi
 COMPREPLY=()
