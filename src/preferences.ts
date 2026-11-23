@@ -164,7 +164,7 @@ export const commands = {
   previousChange: { label: "Previous difference", key: "F7" },
   nextChange: { label: "Next difference", key: "F8" },
   folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
-  processSources: { label: "Select Processes in the sources menu", key: "1" },
+  processSources: { label: "Select Processes in the sources menu", key: "0" },
   ftpSources: { label: "Select FTP in the sources menu", key: "2" },
   smbSources: { label: "Select SMB in the sources menu", key: "3" },
   remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
@@ -335,7 +335,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
-export const preferenceBindingVersion = 9;
+export const preferenceBindingVersion = 10;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -384,7 +384,8 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
       return defaultBindings.analyzeSpace.map((key) => ({ command, key, configured: false }));
     }
     const group = folderGroupCommand(command);
-    const legacyDefault = group && !group.add && version < 7 ? `Ctrl+${group.group}` : undefined;
+    const legacyDefault = command === "processSources" && version < 10 ? "1" :
+      group && !group.add && version < 7 ? `Ctrl+${group.group}` : undefined;
     const migrated = legacyDefault && (value === legacyDefault ||
       (Array.isArray(value) && value.length === 1 && value[0] === legacyDefault));
     if (migrated) return defaultBindings[command].map((key) => ({ command, key, configured: false }));
