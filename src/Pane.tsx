@@ -8,7 +8,7 @@ import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
@@ -27,6 +27,27 @@ import { useRightClickSelection } from "./useRightClickSelection";
 function sizeLabel(bytes: number, incomplete?: boolean, formatter?: Intl.NumberFormat) {
   const value = formatter ? formatter.format(bytes) : formatSize(bytes);
   return incomplete ? `≥ ${value}` : value;
+}
+
+function driveSpace(drive?: ComputerDrive): DiskSpace | null {
+  if (!drive || drive.total == null || drive.available == null ||
+      drive.total <= 0 || drive.available < 0 || drive.available > drive.total) return null;
+  return { total: drive.total, available: drive.available };
+}
+
+function paneSpaceTarget(place: Place | null): { key: string; read: () => Promise<DiskSpace | null> } | null {
+  if (place?.kind === "local") return { key: JSON.stringify([place.kind, place.path]), read: () => api.diskSpace(place.path) };
+  if (place?.kind === "server" && place.pairedComputer && place.segments.length) {
+    const [drive] = place.segments;
+    return { key: JSON.stringify([place.kind, place.id, drive]), read: async () =>
+      driveSpace((await api.listConnectedComputerDrives(place.id)).find(({ name }) => name === drive)) };
+  }
+  if (place?.kind === "kswitcher") {
+    const drive = /^([a-z]:)[\\/]/i.exec(place.path)?.[1].toUpperCase();
+    if (drive) return { key: JSON.stringify([place.kind, place.directory, place.peer, drive]), read: async () =>
+      driveSpace((await api.listKSwitcher(place.directory, place.peer, "")).drives?.find(({ name }) => name.toUpperCase() === drive)) };
+  }
+  return null;
 }
 
 interface PaneProps {
@@ -257,18 +278,19 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   }
   const icons = useWindowsIcons(fileIcons, api.fileIcons);
   const localFolder = pane.place?.kind === "local" ? pane.place.path : null;
-  const [space, setSpace] = useState<{ folder: string; value: DiskSpace } | null>(null);
+  const spaceTarget = useMemo(() => paneSpaceTarget(pane.place), [pane.place]);
+  const [space, setSpace] = useState<{ key: string; value: DiskSpace } | null>(null);
   useEffect(() => {
-    if (!localFolder || pane.loading) return;
+    if (!spaceTarget || pane.loading) return;
     let cancelled = false;
-    api.diskSpace(localFolder).then((value) => {
-      if (!cancelled) setSpace(value ? { folder: localFolder, value } : null);
+    spaceTarget.read().then((value) => {
+      if (!cancelled) setSpace(value ? { key: spaceTarget.key, value } : null);
     }, () => {
       if (!cancelled) setSpace(null);
     });
     return () => { cancelled = true; };
-  }, [localFolder, pane.loading, pane.entries]);
-  const free = localFolder && space?.folder === localFolder ? space.value : null;
+  }, [spaceTarget, pane.loading, pane.entries]);
+  const free = !pane.loading && space && space.key === spaceTarget?.key ? space.value : null;
   const spaceControl = !processView && canAnalyze(pane.place)
     ? <SpaceControl place={pane.place} free={free} onAnalyze={onAnalyze} disabled={spaceDisabled || pane.loading} /> : null;
 

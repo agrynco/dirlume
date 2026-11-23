@@ -114,7 +114,7 @@ export interface ComputerSharing {
 export type FileLocation =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "smbRoot"; path: string }
-  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[] }
+  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; address: string }
   | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; catalogSource?: "ftp" }
@@ -485,6 +485,7 @@ export const api = {
     invoke<Connection & { share: string }>("connect_saved_server", { credential, segments }),
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),
   listSavedComputerDrives: (credential: string) => invoke<ComputerDrive[]>("list_saved_computer_drives", { credential }),
+  listConnectedComputerDrives: (id: number) => invoke<ComputerDrive[]>("list_connected_computer_drives", { id }),
   activeComputerSharing: () => invoke<ComputerSharing | null>("active_desktop_share"),
   startComputerSharing: () => invoke<ComputerSharing>("start_desktop_computer_share"),
   stopComputerSharing: () => invoke<void>("stop_desktop_share"),
