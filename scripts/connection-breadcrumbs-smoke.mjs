@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
-import { editPaneAddress } from "./pane-address-smoke.mjs";
 
 const platforms = ["Windows NT 10.0; Win64; x64", "X11; Linux x86_64", "Macintosh; Intel Mac OS X 10_15_7"];
 const folders = ["one-long-folder", "two-long-folder", "three-long-folder", "four-long-folder", "leaf-folder"];
@@ -18,20 +17,28 @@ const waitPath = (page, side, path) => page.waitForFunction(({ side, path }) =>
   document.getElementById(`${side}-path`)?.dataset.path === path &&
   document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false", { side, path });
 
-async function fixture(browser, platform) {
+async function fixture(browser, platform, nestedLocal = false) {
   const windows = platform.startsWith("Windows");
   const home = windows ? "C:\\fixture" : "/fixture";
+  const separator = windows ? "\\" : "/";
+  const path = nestedLocal ? [home, ...folders].join(separator) : home;
   const page = await browser.newPage({ userAgent: `Mozilla/5.0 (${platform})`, viewport: { width: 740, height: 700 }, locale: "en-US" });
   page.setDefaultTimeout(8000);
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
   });
-  await page.addInitScript(({ home, folders, smbRoot, windows }) => {
+  await page.addInitScript(({ home, folders, smbRoot, windows, path, separator, nestedLocal }) => {
     const folder = (name) => ({ name, directory: true, hidden: false, link: false, size: null, modified: null });
     const entries = (depth) => depth < folders.length ? [folder(folders[depth])] : [];
     const listing = (depth) => ({ entries: entries(depth), omitted: 0, elevated: false });
     const state = window.connectionFixture = { attempts: 0, offline: false, failProfiles: false, emptySsh: false };
+    if (nestedLocal) {
+      const place = { kind: "local", path, parent: path.slice(0, path.lastIndexOf(separator)) };
+      localStorage.setItem("dirlume.workspace.v1", JSON.stringify({
+        panels: { left: { place }, right: { place } }, active: "left", split: 50, documents: [],
+      }));
+    }
     localStorage.setItem("dirlume.smb-locations", JSON.stringify([smbRoot]));
     localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ kswitcher: "fixture-bridge" }));
     localStorage.setItem("dirlume.remote-connections", JSON.stringify([
@@ -68,7 +75,6 @@ async function fixture(browser, platform) {
         if (command === "connect_smb") return remote({ kind: "shares", server: smbRoot, names: ["share"], warning: null });
         if (command === "list_directory") {
           if (!args.path.startsWith(smbRoot)) {
-            const separator = windows ? "\\" : "/";
             const last = args.path.lastIndexOf(separator);
             const parent = args.path.startsWith(home + separator) ? args.path.slice(0, last) : null;
             return { path: args.path, parent, entries: [], omitted: 0 };
@@ -78,10 +84,10 @@ async function fixture(browser, platform) {
         return null;
       },
     };
-  }, { home, folders, smbRoot, windows });
+  }, { home, folders, smbRoot, windows, path, separator, nestedLocal });
   await page.goto("http://dirlume.test/");
-  await Promise.all([waitPath(page, "left", home), waitPath(page, "right", home)]);
-  return { page, home };
+  await Promise.all([waitPath(page, "left", path), waitPath(page, "right", path)]);
+  return { page, home, path };
 }
 
 async function enterFromCatalog(page, side, name, saved) {
@@ -126,10 +132,8 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await waitPath(page, side, home);
 }
 
-async function checkLocalResize(page, home) {
-  const separator = home.includes("\\") ? "\\" : "/";
-  const root = separator === "\\" ? home.slice(0, 2) : "/";
-  const path = [home, ...folders].join(separator);
+async function checkLocalResize(page, home, path) {
+  const root = home.includes("\\") ? home.slice(0, 2) : "/";
   const divider = page.getByRole("separator", { name: "Pane divider", exact: true });
   const dragTo = async (fraction) => {
     const grip = await divider.boundingBox();
@@ -140,12 +144,6 @@ async function checkLocalResize(page, home) {
     await page.mouse.up();
   };
   await page.setViewportSize({ width: 1500, height: 700 });
-  for (const side of ["left", "right"]) {
-    const input = await editPaneAddress(page, side);
-    await input.fill(path);
-    await input.press("Enter");
-    await waitPath(page, side, path);
-  }
   for (const side of ["left", "right"]) {
     const other = side === "left" ? "right" : "left";
     await dragTo(side === "left" ? 0.79 : 0.21);
@@ -174,19 +172,15 @@ async function checkLocalResize(page, home) {
   await button(parents, "fixture").click();
   await waitPath(page, "left", home);
   assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
-  await divider.dblclick();
-  const rightInput = await editPaneAddress(page, "right");
-  await rightInput.fill(home);
-  await rightInput.press("Enter");
-  await waitPath(page, "right", home);
-  await page.setViewportSize({ width: 740, height: 700 });
 }
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   for (const [index, platform] of platforms.entries()) {
+    const local = await fixture(browser, platform, true);
+    await checkLocalResize(local.page, local.home, local.path);
+    await local.page.close();
     const { page, home } = await fixture(browser, platform);
-    await checkLocalResize(page, home);
     const side = index === 1 ? "left" : "right";
     const other = side === "left" ? "right" : "left";
     for (const [source, saved, connectionName] of [["FTP", "Saved FTP", "FTP fixture"],
