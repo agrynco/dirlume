@@ -50,6 +50,10 @@ export function ViewFontSettings({ preferences, onChange, views }: {
   </div>;
   return <div className="font-settings">
     <p className="appearance-hint">{t("Font sizes are in pixels. Clear a size to use the scheme default.")}</p>
+    <fieldset className="view-font-group">
+      <legend>{t("Appearance")}</legend>
+      {fields(["ui", "dialog", "options", "compare"])}
+    </fieldset>
     {Object.values(featureOptions).filter(({ views }) => views.length).map(({ label, views }) => (
       <fieldset className="view-font-group" key={label}>
         <legend>{t(label)}</legend>

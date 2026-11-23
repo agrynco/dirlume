@@ -7,6 +7,12 @@ export const viewFonts = {
   hex: { label: "Hexadecimal view", group: "hex", family: "--hex-font", sample: "00000000  48 65 6C 6C 6F" },
   editor: { label: "Text editor", group: "editor", family: "--editor-font", sample: "let count = 42;" },
   markdown: { label: "Markdown reading view", group: "markdown", family: "--markdown-font", sample: "Getting started" },
+  ui: { label: "Main window", group: "ui", family: "--ui-font", sample: "Commands" },
+  dialog: { label: "File pane dialogs", group: "dialog", family: "--dialog-font", sample: "Folder shortcuts" },
+  options: { label: "Options window", group: "options", family: "--options-font", sample: "Appearance" },
+  terminal: { label: "Terminal", group: "terminal", family: "--terminal-font", sample: "Get-Location" },
+  command: { label: "Command line", group: "command", family: "--command-font", sample: "dir" },
+  compare: { label: "Compare files", group: "compare", family: "--compare-font", sample: "File differences" },
 } as const;
 
 export type ViewFont = keyof typeof viewFonts;
@@ -28,4 +34,12 @@ export function migrateSharedViewerZoom(value: unknown): unknown {
 
 export function viewFontStyle(size?: number): CSSProperties | undefined {
   return size === undefined ? undefined : { "--view-font-size": `${size}px` } as CSSProperties;
+}
+
+export const sharedViewFonts = ["ui", "dialog", "options", "terminal", "command", "compare"] as const;
+
+export function resizeViewFont(sizes: ViewFontSizes, view: ViewFont, change: number, base: number): ViewFontSizes {
+  const previous = sizes[view] ?? base;
+  const size = Math.max(minViewFontSize, Math.min(maxViewFontSize, previous + change));
+  return size === previous ? sizes : { ...sizes, [view]: size };
 }

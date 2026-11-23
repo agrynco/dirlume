@@ -154,6 +154,26 @@ try {
       await page.locator(`.quick-view-${side}`).waitFor({ state: "hidden" });
       assert.equal(await page.locator(`#${opposite(side)}-path`).getAttribute("data-path"), initialPath(opposite(side)));
     }
+    // Open a populated group and keep the selection while scaling its shared dialog font.
+    await enter("Local files", "left");
+    await pressBookmark(9);
+    const initialSize = await folderPicker.evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize));
+    const picker = folderPicker.getByRole("listbox");
+    const selection = await picker.getAttribute("aria-activedescendant");
+    await picker.dispatchEvent("wheel", { deltaY: -120, ctrlKey: true, bubbles: true, cancelable: true });
+    await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--font-zoom-dialog") !== "");
+    assert.equal(await folderPicker.evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize)), initialSize + 1);
+    assert.equal(await picker.getAttribute("aria-activedescendant"), selection);
+    assert.ok(await picker.evaluate((node) => document.activeElement === node));
+    await picker.press("Escape");
+    await folderPicker.waitFor({ state: "hidden" });
+    await pressBookmark(9);
+    assert.equal(await folderPicker.evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize)), initialSize + 1);
+    await picker.press("Escape");
+    await folderPicker.waitFor({ state: "hidden" });
+    const mainFont = page.locator(".topbar");
+    await mainFont.dispatchEvent("wheel", { deltaY: -120, ctrlKey: true, bubbles: true, cancelable: true });
+    await page.waitForFunction(() => document.documentElement.style.getPropertyValue("--font-zoom-ui") !== "");
     for (const { saved, expected, version } of [
       { saved: ["1"], expected: "0", version: 9 },
       { saved: "1", expected: "0", version: 9 },
