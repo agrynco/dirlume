@@ -46,11 +46,18 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
     }
   }
 
-  async function setZoomBinding(binding) {
+  async function openKeyboardOptions() {
     const tool = await openOptionsWindow(page);
     const options = tool.getByRole("dialog", { name: "Options", exact: true });
+    await options.getByRole("searchbox", { name: "Search settings", exact: true }).fill("");
     await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-    await options.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true }).selectOption(binding);
+    const zoomBinding = options.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true });
+    return { tool, options, zoomBinding };
+  }
+
+  async function setZoomBinding(binding) {
+    const { tool, options, zoomBinding } = await openKeyboardOptions();
+    await zoomBinding.selectOption(binding);
     await closeToolWindow(tool, () => options.getByRole("button", { name: "Done", exact: true }).click());
   }
 
@@ -178,10 +185,8 @@ export async function testFolderShortcuts({ page, startDesktop, exitDesktop, src
   await wheel(8, "Alt");
   assert.equal(await size(dialog()), dialogFont + 2);
   await picker(8).press("Escape");
-  const tool = await openOptionsWindow(page);
-  const options = tool.getByRole("dialog", { name: "Options", exact: true });
-  await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
-  await options.getByLabel("Change shortcut for Font zoom with mouse wheel", { exact: true }).selectOption("Ctrl+Wheel");
+  const { tool, options, zoomBinding } = await openKeyboardOptions();
+  await zoomBinding.selectOption("Ctrl+Wheel");
   await options.getByRole("button", { name: "View font sizes", exact: true }).click();
   const dialogSize = options.getByRole("spinbutton", { name: "File pane dialogs font size", exact: true });
   assert.equal(await dialogSize.inputValue(), String(dialogFont + 2));

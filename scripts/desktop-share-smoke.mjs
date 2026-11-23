@@ -61,7 +61,8 @@ export async function testDesktopShare(host, root, guest = host) {
   await button(dialog, "Close dialog").click();
   await hostConnect.waitFor();
   await button(hostConnect, "Close dialog").click();
-  await right.press("Control+r");
-  await guest.locator("#right-pane").getByRole("alert").waitFor();
+  const pane = guest.locator("#right-pane");
+  await button(pane, "Refresh folder").click();
+  await pane.getByRole("alert").waitFor();
   console.log("Verified desktop share setup, guest invitation and read-only browsing, and revocation.");
 }
