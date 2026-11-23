@@ -1488,7 +1488,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }
         case "server": {
           const { listing, ...connected } = await api.connectSavedServer(profile.credential, serverSegments);
-          complete({ kind: "server", ...connected, address: profile.label, segments: serverSegments }, listing);
+          const address = serverSegments.length ? profile.label : connected.address;
+          complete({ kind: "server", ...connected, address, segments: serverSegments }, listing);
           break;
         }
         case "kswitcher": {
