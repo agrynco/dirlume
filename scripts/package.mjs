@@ -86,9 +86,12 @@ async function collectPortable(platform, target, serverBinary, output) {
     } else if (platform === "linux-x64") {
       await copyFile(await findBundle(target, "appimage", ".AppImage"), join(stage, "Dirlume.AppImage"));
     } else {
-      await cp(await findBundle(target, "macos", ".app"), join(stage, "Dirlume.app"), {
-        recursive: true, verbatimSymlinks: true,
-      });
+      const app = await findBundle(target, "macos", ".app");
+      const copy = spawnSync("ditto", [app, join(stage, "Dirlume.app")], { stdio: "inherit" });
+      if (copy.status !== 0) throw copy.error ?? new Error("Could not stage the macOS app bundle.");
+      const archive = spawnSync("ditto", ["-c", "-k", "--sequesterRsrc", stage, resolve(output)], { stdio: "inherit" });
+      if (archive.status !== 0) throw archive.error ?? new Error("Could not archive the portable macOS package.");
+      return;
     }
 
     const files = await readdir(stage);

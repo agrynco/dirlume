@@ -82,7 +82,7 @@ jobs:
     if: needs.version.outputs.product-version != ''
     needs: version
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ needs.version.outputs.publish == 'true' && startsWith(matrix.platform, 'macos-') && 120 || 45 }}
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
@@ -234,6 +234,11 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_KEY_P8: ${{ runner.os == 'macOS' && needs.version.outputs.publish == 'true' && secrets.APPLE_API_KEY_P8 || '' }}
         run: |
           $configArgs = @()
           if ($env:DIRLUME_SIGNED_RELEASE -eq 'true') {
@@ -241,7 +246,12 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $configArgs = @('--config', 'src-tauri/target/updater-config.json')
           }
-          npm run tauri -- build --ci --bundles "${{ matrix.bundles }}" @configArgs -- --locked
+          $buildArgs = @('build', '--ci', '--bundles', '${{ matrix.bundles }}') + $configArgs + @('--', '--locked')
+          if ($IsMacOS -and $env:DIRLUME_SIGNED_RELEASE -eq 'true') {
+            bash scripts/macos-release.sh bundle @buildArgs
+          } else {
+            npm run tauri -- @buildArgs
+          }
           exit $LASTEXITCODE
       - name: Retain build-matched JavaScript source maps
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -280,6 +290,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'Windows' && needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ runner.os == 'Windows' && needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         run: node scripts/package.mjs collect "${{ matrix.platform }}"
+      - name: Verify macOS release packages
+        if: runner.os == 'macOS' && needs.version.outputs.publish == 'true'
+        shell: bash
+        run: bash scripts/macos-release.sh verify
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dirlume-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}

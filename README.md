@@ -338,12 +338,24 @@ Prepare one to eight short English highlights in `release-highlights/X.Y.Z.json`
 
 To publish manually, open **Actions → CI and releases → Run workflow** and select `main`. A manual release runs the full build and test suite before publishing.
 
-For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
+For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums.
 
 The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime.
 
 Windows Portable uses **Install and restart** to update its current folder. Extract it into a folder you can write to. Move the whole folder to carry the portable marker and `dirlume-settings.json` with the app. Copies in separate folders keep separate Options preferences. For earlier ZIPs that lack the portable marker, extract a current ZIP to start using in-place updates.
 
 The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
+
+For macOS desktop releases, add these repository secrets under **Settings → Secrets and variables → Actions**. Use a [Developer ID Application certificate](https://developer.apple.com/help/account/certificates/create-developer-id-certificates) and an [App Store Connect team API key for notarization](https://v2.tauri.app/distribute/sign/macos/#notarization).
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE` | Base64-encoded `.p12` export containing the Developer ID Application certificate and its private key |
+| `APPLE_CERTIFICATE_PASSWORD` | Password used to export the `.p12` |
+| `APPLE_API_ISSUER` | App Store Connect team API issuer ID |
+| `APPLE_API_KEY` | App Store Connect team API key ID |
+| `APPLE_API_KEY_P8` | Full text of the downloaded `AuthKey_*.p8` file, including its PEM header and footer |
+
+The Apple credentials are used only for publishing builds on macOS. CI signs the desktop app and disk image, notarizes both, and checks the disk image plus the app extracted from the portable ZIP and updater archive before publishing. Missing credentials or a failed Apple verification stop the release. After the first signed release, test both the DMG and ZIP downloaded through a browser on a Mac that has never opened that build. See [Apple's distribution testing guide](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
 
 The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks signature rejection, installation, restored pane settings, and release highlights before and after install. The Ubuntu job also checks the manual Debian upgrade path.
