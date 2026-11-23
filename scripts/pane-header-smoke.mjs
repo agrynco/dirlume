@@ -57,7 +57,7 @@ export async function testFolderNavigationHeader() {
         if (layout === "twin") {
           const control = capacity("2 KiB free of 4 KiB");
           await control.waitFor();
-          assert.equal(await control.getAttribute("data-tooltip"), "Open Space Analyzer to scan the current folder.");
+          assert.equal(await control.getAttribute("data-tooltip"), "2 KiB free of 4 KiB, 2 KiB used");
         }
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
         const before = await bounds();
