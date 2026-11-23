@@ -57,7 +57,7 @@ function global:prompt {
         [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($location.ProviderPath))
     }
     $global:DirlumePromptCount++
-    $editor = if ($global:DirlumeTracksSubmissions) { 'powershell' }
+    $editor = 'powershell'
     $settings = @{
         PATH = $env:PATH
         DOCKER_CONFIG = $env:DOCKER_CONFIG

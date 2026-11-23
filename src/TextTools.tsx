@@ -19,8 +19,7 @@ import type { SourceActions, SourceStatus } from "./CodeSurface";
 import { bookmarkKey, bookmarkPath, type BookmarkJump, type BookmarkResult, type FileBookmark } from "./fileBookmarks";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
-import { useFontZoom } from "./useFontZoom";
-import { viewFontStyle, type ViewFontSizes, type ZoomViewFont } from "./viewFonts";
+import { viewFontStyle, type ViewFontSizes } from "./viewFonts";
 import { normalized, restoreLineEndings } from "./textFormat";
 import type { CompareRequest, DiffBlock, DiffLine, DiffResult } from "./compare.worker";
 import { SplitDivider } from "./SplitDivider";
@@ -35,7 +34,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
 }
 
 export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors, diagnosticLog,
-  onZoom, onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
+  onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
   fileBookmarks, bookmarkJump, onBookmarkLine, onFileBookmarks }: {
   file: NamedFile;
   editing: boolean;
@@ -47,7 +46,6 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   viewerMarkdownContentWidth?: number | "full";
   colors?: Palette;
   diagnosticLog?: boolean;
-  onZoom: ZoomViewFont;
   onOptions: () => void;
   onSwitchMode: () => void;
   position?: MarkdownPosition;
@@ -122,7 +120,6 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const fileSize = hex ? hexSize ?? byteSize : byteSize;
   const fontView = hex ? "hex" : preview ? "markdown" : editing ? "editor" : "viewer";
   const fontSize = fontSizes[fontView];
-  useFontZoom(section, shortcuts.zoomFont, fontView, onZoom);
   const light = isLightTheme(theme);
 
   useLayoutEffect(() => {
@@ -359,7 +356,6 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         '[data-menu-group="' + menuGroups.findIndex(({ label }) => label === "Syntax") + '"]') ?? null) },
     ] }] : []),
   ];
-  const hints = [...(editing ? [saveAction] : markdownViewer ? [searchAction] : [hexAction]), switchMode, closeAction];
   function openSyntax(opener: HTMLElement | null) {
     syntaxOpener.current = opener;
     setChoosingSyntax(true);
@@ -376,7 +372,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     <section ref={section} style={{ ...viewFontStyle(fontSize),
       "--viewer-content-width": typeof contentWidth === "number" ? `${contentWidth}px` : undefined,
     } as CSSProperties}
-      hidden={!active} className="text-window" data-text-surface={fontView}
+      hidden={!active} className="text-window" data-text-surface={fontView} data-font-zoom={fontView}
       data-help-topic={editing ? "editor" : "viewer"} data-editing={editing}
       data-limited-width={typeof contentWidth === "number" || undefined}
       aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
@@ -496,10 +492,10 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           </Suspense>
         </div>
       </>}
-      <footer className="document-shortcuts" aria-label={t("Document shortcuts")}>
-        {hints.map((hint) => hint.shortcut && <Button type="button" key={hint.label} disabled={hint.disabled}
+      {editing && <footer className="document-shortcuts" aria-label={t("Document shortcuts")}>
+        {fileActions.map((hint) => hint.shortcut && <Button type="button" key={hint.label} disabled={hint.disabled}
           shortcut={hint.shortcut} tooltip={t(hint.label)} onClick={hint.run}><kbd>{hint.shortcut}</kbd> {t(hint.label)}</Button>)}
-      </footer>
+      </footer>}
       {choosingSyntax && sourceVisible && <Suspense>
         <SyntaxPicker syntax={syntax} editing={editing} onSelect={(choice) => { setSyntax(choice); closeSyntax(); }} onClose={closeSyntax} />
       </Suspense>}
@@ -793,7 +789,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
     { label: t("Apply to right"), disabled: !activeGroup?.ranges, run: () => merge(leftFile, rightFile) },
   ];
   return <>
-    <Dialog title={t("Compare files")} helpTopic="compare" wide standalone={standalone} onClose={requestClose}
+    <Dialog title={t("Compare files")} helpTopic="compare" fontZoom="compare" wide standalone={standalone} onClose={requestClose}
       onKeyDownCapture={(event) => {
         if (!split || saving || confirm || event.nativeEvent.isComposing || !bindingMatches(swapShortcut, eventShortcut(event))) return;
         event.preventDefault();

@@ -1,10 +1,11 @@
 use std::{
-    env, fs, io,
-    path::{Path, PathBuf},
+    env, fs,
+    io::{self, Read},
+    path::{Component, Path, PathBuf},
     process::{Command, Output, Stdio},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +18,9 @@ pub enum GitError {
 
 type Result<T> = std::result::Result<T, GitError>;
 const PAGE_SIZE: usize = 50;
+const STATUS_LIMIT: u64 = 8 * 1024 * 1024;
+const PATCH_LIMIT: u64 = 512 * 1024;
+const PATCH_LINES: usize = 4000;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,7 +111,7 @@ fn executable() -> Result<PathBuf> {
     Err(GitError::MissingGit)
 }
 
-fn run(git: &Path, path: &Path, args: &[&str]) -> Result<Output> {
+fn command(git: &Path, path: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(git);
     for (key, _) in env::vars_os() {
         if key
@@ -139,10 +143,46 @@ fn run(git: &Path, path: &Path, args: &[&str]) -> Result<Output> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
-    command.output().map_err(|error| match error.kind() {
+    command
+}
+
+fn process_error(error: io::Error) -> GitError {
+    match error.kind() {
         io::ErrorKind::NotFound => GitError::MissingGit,
         _ => GitError::Unreadable,
-    })
+    }
+}
+
+fn run(git: &Path, path: &Path, args: &[&str]) -> Result<Output> {
+    command(git, path, args).output().map_err(process_error)
+}
+
+fn bounded(git: &Path, path: &Path, args: &[&str], limit: u64) -> Result<Option<Vec<u8>>> {
+    let mut child = command(git, path, args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(process_error)?;
+    let mut bytes = Vec::new();
+    let read = child
+        .stdout
+        .take()
+        .ok_or(GitError::Unreadable)?
+        .take(limit + 1)
+        .read_to_end(&mut bytes);
+    let oversized = bytes.len() as u64 > limit;
+    if oversized || read.is_err() {
+        let _ = child.kill();
+    }
+    let status = child.wait().map_err(process_error)?;
+    read.map_err(process_error)?;
+    if oversized {
+        Ok(None)
+    } else if status.success() {
+        Ok(Some(bytes))
+    } else {
+        Err(GitError::Unreadable)
+    }
 }
 
 fn success(output: Output) -> Result<Vec<u8>> {
@@ -381,6 +421,226 @@ async fn query<T: Send + 'static>(
         .map_err(|_| GitError::Unreadable)?
 }
 
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangeGroup {
+    Staged,
+    Unstaged,
+    Untracked,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingChange {
+    group: ChangeGroup,
+    status: char,
+    path: String,
+    previous_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingDiff {
+    working_path: Option<String>,
+    working_text: bool,
+    patch: Option<String>,
+    fallback: Option<&'static str>,
+    unborn: bool,
+}
+
+fn working_changes(git: &Path, root: &Path) -> Result<Vec<WorkingChange>> {
+    let bytes = bounded(
+        git,
+        root,
+        &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--renames",
+            "--ignore-submodules=none",
+        ],
+        STATUS_LIMIT,
+    )?
+    .ok_or(GitError::Unreadable)?;
+    let status = String::from_utf8(bytes).map_err(|_| GitError::Unreadable)?;
+    let mut records = status.split_terminator('\0');
+    let mut changes = Vec::new();
+    while let Some(record) = records.next() {
+        let (flags, path) = record.split_at_checked(3).ok_or(GitError::Unreadable)?;
+        let [index, worktree, b' '] = flags.as_bytes() else {
+            return Err(GitError::Unreadable);
+        };
+        let previous_path = if matches!(index, b'R' | b'C') || matches!(worktree, b'R' | b'C') {
+            Some(records.next().ok_or(GitError::Unreadable)?)
+        } else {
+            None
+        };
+        let mut push = |group, status| {
+            changes.push(WorkingChange {
+                group,
+                status: char::from(status),
+                path: path.into(),
+                previous_path: matches!(status, b'R' | b'C')
+                    .then_some(previous_path)
+                    .flatten()
+                    .map(str::to_owned),
+            })
+        };
+        match &flags[..2] {
+            "??" => push(ChangeGroup::Untracked, b'?'),
+            "!!" => {}
+            "DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU" => push(ChangeGroup::Unstaged, b'U'),
+            _ => {
+                if *index != b' ' {
+                    push(ChangeGroup::Staged, *index);
+                }
+                if *worktree != b' ' {
+                    push(ChangeGroup::Unstaged, *worktree);
+                }
+            }
+        }
+    }
+    Ok(changes)
+}
+
+fn relative_file(path: &str) -> Result<&Path> {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty()
+        || !path
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
+    {
+        return Err(GitError::Unreadable);
+    }
+    Ok(path)
+}
+
+fn working_file(root: &Path, relative: &Path) -> Option<PathBuf> {
+    let path = root.join(relative);
+    let resolved = path.canonicalize().ok()?;
+    let resolved_root = root.canonicalize().ok()?;
+    let metadata = path.symlink_metadata().ok()?;
+    (metadata.is_file() && resolved.starts_with(resolved_root)).then_some(path)
+}
+
+fn text_patch(bytes: Vec<u8>) -> std::result::Result<String, &'static str> {
+    if bytes.contains(&0) {
+        return Err("binary");
+    }
+    let text = String::from_utf8(bytes).map_err(|_| "binary")?;
+    if text.lines().nth(PATCH_LINES).is_some() {
+        return Err("oversized");
+    }
+    Ok(text)
+}
+
+fn working_diff(git: &Path, root: &Path, change: &WorkingChange) -> Result<WorkingDiff> {
+    let relative = relative_file(&change.path)?;
+    if let Some(previous) = &change.previous_path {
+        relative_file(previous)?;
+    }
+    let working = working_file(root, relative);
+    let working_path = working
+        .as_ref()
+        .filter(|_| change.status != 'D')
+        .and_then(|path| path.to_str())
+        .map(str::to_owned);
+    let working_text = working_path.as_ref().is_some_and(|path| {
+        fs::File::open(path).is_ok_and(|file| crate::desktop::decode_text(file).is_ok())
+    });
+    let unborn = change.group == ChangeGroup::Staged
+        && optional_line(run(
+            git,
+            root,
+            &["rev-parse", "--verify", "--quiet", "HEAD"],
+        )?)?
+        .is_none();
+    let preview = if change.status == 'U' {
+        Err("conflict")
+    } else if change.group == ChangeGroup::Untracked {
+        if let Some(path) = working {
+            let mut bytes = Vec::new();
+            fs::File::open(path)
+                .and_then(|file| file.take(PATCH_LIMIT + 1).read_to_end(&mut bytes))
+                .map_err(|_| GitError::Unreadable)?;
+            if bytes.len() as u64 > PATCH_LIMIT {
+                Err("oversized")
+            } else {
+                text_patch(bytes).map(|text| {
+                    text.split_inclusive('\n')
+                        .map(|line| format!("+{line}"))
+                        .collect()
+                })
+            }
+        } else {
+            Err("unsupported")
+        }
+    } else if change.group == ChangeGroup::Unstaged
+        && working
+            .as_ref()
+            .and_then(|path| path.metadata().ok())
+            .is_some_and(|metadata| metadata.len() > PATCH_LIMIT)
+    {
+        Err("oversized")
+    } else {
+        let mut args = vec![
+            "--literal-pathspecs",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-relative",
+            "--find-renames",
+            "--ignore-submodules=none",
+            "--submodule=short",
+        ];
+        if change.group == ChangeGroup::Staged {
+            args.push("--cached");
+        }
+        args.extend(["--", &change.path]);
+        if let Some(previous) = &change.previous_path {
+            args.push(previous);
+        }
+        match bounded(git, root, &args, PATCH_LIMIT)? {
+            Some(bytes) => text_patch(bytes).and_then(|patch| {
+                if patch
+                    .lines()
+                    .any(|line| line.starts_with("Binary files ") && line.ends_with(" differ"))
+                {
+                    Err("binary")
+                } else if patch.is_empty() {
+                    Err("unsupported")
+                } else {
+                    Ok(patch)
+                }
+            }),
+            None => Err("oversized"),
+        }
+    };
+    let (patch, fallback) = match preview {
+        Ok(patch) => (Some(patch), None),
+        Err(reason) => (None, Some(reason)),
+    };
+    Ok(WorkingDiff {
+        working_path,
+        working_text,
+        patch,
+        fallback,
+        unborn,
+    })
+}
+
+#[tauri::command]
+pub async fn git_working_changes(root: String) -> Result<Vec<WorkingChange>> {
+    query(move || working_changes(&executable()?, directory(&root)?)).await
+}
+
+#[tauri::command]
+pub async fn git_working_diff(root: String, change: WorkingChange) -> Result<WorkingDiff> {
+    query(move || working_diff(&executable()?, directory(&root)?, &change)).await
+}
+
 #[tauri::command]
 pub async fn git_repository(path: String) -> Result<Repository> {
     query(move || repository(&executable()?, directory(&path)?)).await
@@ -408,6 +668,82 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         line(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn separates_index_and_working_tree_without_modifying_either() {
+        let exe = executable().unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        let path = "nested ł.txt";
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Fixture Author"]);
+        git(root, &["config", "user.email", "fixture@example.invalid"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+        fs::write(root.join(path), "first\n").unwrap();
+        git(root, &["add", "--", path]);
+        let initial = working_changes(&exe, root).unwrap();
+        let added = working_diff(&exe, root, &initial[0]).unwrap();
+        assert!(added.unborn && added.patch.unwrap().contains("+first"));
+        fs::write(root.join("move.txt"), "rename content\n").unwrap();
+        fs::write(root.join("remove.txt"), "deleted content\n").unwrap();
+        git(root, &["add", "--", "move.txt", "remove.txt"]);
+        git(root, &["commit", "-m", "Initial"]);
+        fs::write(root.join(path), "staged\n").unwrap();
+        git(root, &["add", "--", path]);
+        fs::write(root.join(path), "working\n").unwrap();
+        fs::write(root.join(".gitignore"), "*.ignored\n").unwrap();
+        fs::write(root.join("other.ignored"), "private\n").unwrap();
+        fs::write(root.join("fresh.txt"), "new\n").unwrap();
+        fs::write(root.join("binary"), [0, 1]).unwrap();
+        git(root, &["mv", "move.txt", "moved ł.txt"]);
+        fs::remove_file(root.join("remove.txt")).unwrap();
+        fs::write(root.join("large.bin"), vec![b'a'; PATCH_LIMIT as usize + 1]).unwrap();
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let changes = working_changes(&exe, root).unwrap();
+        assert!(!changes.iter().any(|change| change.path == "other.ignored"));
+        let diff = |group, name: &str| {
+            let change = changes
+                .iter()
+                .find(|change| change.path == name && change.group == group)
+                .unwrap();
+            working_diff(&exe, root, change).unwrap()
+        };
+        let staged = diff(ChangeGroup::Staged, path);
+        assert!(!staged.unborn && staged.working_path.is_some());
+        assert!(staged.patch.unwrap().contains("+staged"));
+        assert!(diff(ChangeGroup::Unstaged, path)
+            .patch
+            .unwrap()
+            .contains("+working"));
+        assert_eq!(
+            diff(ChangeGroup::Untracked, "fresh.txt").patch.as_deref(),
+            Some("+new\n")
+        );
+        assert_eq!(
+            diff(ChangeGroup::Untracked, "binary").fallback,
+            Some("binary")
+        );
+        assert_eq!(
+            diff(ChangeGroup::Untracked, "large.bin").fallback,
+            Some("oversized")
+        );
+        let deleted = diff(ChangeGroup::Unstaged, "remove.txt");
+        assert!(deleted.working_path.is_none());
+        assert!(deleted.patch.unwrap().contains("-deleted content"));
+        let rename = changes
+            .iter()
+            .find(|change| change.path == "moved ł.txt")
+            .unwrap();
+        assert_eq!(rename.previous_path.as_deref(), Some("move.txt"));
+        assert!(working_diff(&exe, root, rename)
+            .unwrap()
+            .patch
+            .unwrap()
+            .contains("rename from move.txt"));
+        assert!(relative_file("../outside.txt").is_err());
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        assert_eq!(fs::read_to_string(root.join(path)).unwrap(), "working\n");
     }
 
     #[test]

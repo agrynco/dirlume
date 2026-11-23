@@ -45,7 +45,7 @@ export function ImageDocument({ file, active, shortcuts, previous, next, revisio
   const key = (command: Command) => showShortcuts(shortcuts[command]);
   const shortcut = (command: Command) => shortcuts[command].join(" ") || undefined;
 
-  return <section ref={section} hidden={!active} className="text-window image-document" aria-label={file.name} tabIndex={-1}
+  return <section ref={section} hidden={!active} className="text-window image-document" data-font-zoom="none" aria-label={file.name} tabIndex={-1}
     data-help-topic="viewer" onKeyDownCapture={(event) => {
       const pressed = eventShortcut(event);
       const target = event.target as HTMLElement;

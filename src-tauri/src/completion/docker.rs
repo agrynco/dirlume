@@ -147,14 +147,17 @@ fn expects_target(words: &[String], verb: &str, many: bool, compose: bool, prefi
     !value && (!options || !prefix.starts_with('-')) && (many || position == 0)
 }
 
-pub(super) fn query(context: &Context, windows: bool) -> Option<Query> {
-    let (program, words) = context.words.split_first()?;
-    let recognized = if windows {
+fn is_docker(program: &str, windows: bool) -> bool {
+    if windows {
         program.eq_ignore_ascii_case("docker") || program.eq_ignore_ascii_case("docker.exe")
     } else {
         program == "docker"
-    };
-    if !recognized {
+    }
+}
+
+pub(super) fn query(context: &Context, windows: bool) -> Option<Query> {
+    let (program, words) = context.words.split_first()?;
+    if !is_docker(program, windows) {
         return None;
     }
     let (global, group) = split_options(words, GLOBAL_VALUES);
@@ -232,6 +235,23 @@ pub(super) fn query(context: &Context, windows: bool) -> Option<Query> {
             .chain([context.prefix.clone()])
             .collect(),
         output,
+    })
+}
+
+pub(super) fn extended_query(context: &Context, windows: bool) -> Option<Query> {
+    query(context, windows).or_else(|| {
+        let (program, words) = context.words.split_first()?;
+        if !is_docker(program, windows) {
+            return None;
+        }
+        Some(Query {
+            args: ["__complete".to_owned()]
+                .into_iter()
+                .chain(words.iter().cloned())
+                .chain([context.prefix.clone()])
+                .collect(),
+            output: Output::Completions,
+        })
     })
 }
 
@@ -393,24 +413,24 @@ pub(super) fn local(
     context: &Context,
     cwd: &Path,
 ) -> Option<CompletionBatch> {
-    let query = query(context, cfg!(windows))?;
+    let legacy = query(context, cfg!(windows));
+    let extended = legacy.is_none();
+    let query = legacy.or_else(|| {
+        cfg!(any(windows, target_os = "linux"))
+            .then(|| extended_query(context, cfg!(windows)))
+            .flatten()
+    })?;
     let output = local_output(request, &query, cwd).unwrap_or_default();
-    Some(batch(
-        &query,
-        context,
-        &request.line,
-        &output,
-        cfg!(windows),
-    ))
+    let batch = batch(&query, context, &request.line, &output, cfg!(windows));
+    (!extended || !batch.matches.is_empty()).then_some(batch)
 }
 
-pub(super) fn remote_script(request: &RemoteCompletionRequest, query: &Query) -> String {
-    let mut script = format!(
-        "CDPATH= cd -- {} || exit\nexport PATH={}\n",
-        crate::ssh::quote(&request.directory),
-        crate::ssh::quote(&request.search_path)
-    );
-    if let Some(environment) = &request.shell_environment {
+pub(super) fn remote_script(
+    environment: Option<&HashMap<String, Option<String>>>,
+    query: &Query,
+) -> String {
+    let mut script = String::new();
+    if let Some(environment) = environment {
         for name in ENVIRONMENT.iter().copied().filter(|name| *name != "PATH") {
             if let Some(value) = environment.get(name) {
                 if let Some(value) = value
@@ -480,6 +500,30 @@ mod tests {
         assert!(batch(&query, &context, draft, b"", false)
             .matches
             .is_empty());
+    }
+
+    #[test]
+    fn completes_docker_commands_outside_the_container_and_compose_groups() {
+        for (line, windows) in [
+            ("docker image ls --for", false),
+            ("DOCKER.EXE image ls --for", true),
+        ] {
+            let context = shell_context(line, line.len(), windows).unwrap();
+            let plan = extended_query(&context, windows).unwrap();
+            assert_eq!(plan.args, ["__complete", "image", "ls", "--for"]);
+            assert_eq!(
+                batch(
+                    &plan,
+                    &context,
+                    line,
+                    b"--format\tOutput format\n:4\n",
+                    windows
+                )
+                .matches[0]
+                    .label,
+                "--format"
+            );
+        }
     }
 
     #[test]
@@ -576,16 +620,29 @@ exec /bin/cat -- "${COMPOSE_FILE:-compose.yaml}"
             line: line.to_owned(),
             caret: line.len(),
             directory: remote_project.to_string_lossy().into_owned(),
-            search_path: bin.to_string_lossy().into_owned(),
+            search_path: Some(bin.to_string_lossy().into_owned()),
             shell_environment: Some(environment),
         };
+        let script = super::super::remote_command(
+            &remote,
+            &remote_script(remote.shell_environment.as_ref(), &query),
+            false,
+        );
         let output = Command::new("/bin/sh")
-            .args(["-c", &remote_script(&remote, &query)])
+            .args(["-c", &script])
             .output()
             .unwrap();
         assert!(output.status.success());
         assert_eq!(
-            batch(&query, &context, line, &output.stdout, false).matches[0].label,
+            batch(
+                &query,
+                &context,
+                line,
+                super::super::remote_output(&output.stdout),
+                false
+            )
+            .matches[0]
+                .label,
             "web-remote"
         );
     }

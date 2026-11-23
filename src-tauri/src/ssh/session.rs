@@ -1,5 +1,6 @@
 use std::{
     io::{Read, SeekFrom, Write},
+    sync::Arc,
     time::SystemTime,
 };
 
@@ -37,7 +38,7 @@ const MAX_DEPTH: usize = 128;
 
 pub struct Session {
     sftp: Sftp,
-    client: AuthenticatedRoute,
+    client: Arc<AuthenticatedRoute>,
 }
 
 #[derive(Debug)]
@@ -126,7 +127,14 @@ fn valid_name(name: &str) -> bool {
 
 impl Session {
     pub(super) fn new(client: AuthenticatedRoute, sftp: Sftp) -> Self {
-        Self { client, sftp }
+        Self {
+            client: Arc::new(client),
+            sftp,
+        }
+    }
+
+    pub(super) fn completion_client(&self) -> Arc<AuthenticatedRoute> {
+        Arc::clone(&self.client)
     }
 
     pub(super) fn is_closed(&self) -> bool {

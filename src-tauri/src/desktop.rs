@@ -1332,6 +1332,57 @@ mod server_download_tests {
     use super::*;
     use std::{net::TcpListener, thread};
 
+    #[tokio::test]
+    async fn desktop_share_accepts_pinned_tls_and_revokes_access_on_stop() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("shared folder ł");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("nested/file.txt"), "test file").unwrap();
+        fs::write(fixture.path().join("outside.txt"), "outside").unwrap();
+        let ip = "127.0.0.1".parse().unwrap();
+        let mut host = crate::server::DesktopServer::start(&root, ip)
+            .await
+            .unwrap();
+        let guest = Connection::connect(&host.invitation).unwrap();
+        let entries = guest.list(Vec::new()).await.unwrap().entries;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "nested");
+        let path = RemotePath {
+            segments: vec!["nested".into(), "file.txt".into()],
+        };
+        let response = guest
+            .request("v1/download", &path, Duration::from_secs(3))
+            .await
+            .unwrap();
+        assert_eq!(response.bytes().await.unwrap().as_ref(), b"test file");
+        let parent = RemotePath {
+            segments: vec!["..".into(), "outside.txt".into()],
+        };
+        assert!(guest
+            .request("v1/download", &parent, Duration::from_secs(3))
+            .await
+            .is_err());
+        assert!(guest
+            .request("v1/write", &path, Duration::from_secs(3))
+            .await
+            .is_err());
+        let mut wrong_token = Invitation::parse(&host.invitation).unwrap();
+        wrong_token.token = URL_SAFE_NO_PAD.encode([0; 32]);
+        let unauthorized = Connection::connect(&wrong_token.encode().unwrap()).unwrap();
+        assert!(matches!(unauthorized.list(Vec::new()).await, Err(error) if error.contains("401")));
+        host.stop().await.unwrap();
+        assert!(guest
+            .request("v1/download", &path, Duration::from_secs(3))
+            .await
+            .is_err());
+        let restarted = crate::server::DesktopServer::start(&root, ip)
+            .await
+            .unwrap();
+        let new_invitation = Invitation::parse(&restarted.invitation).unwrap();
+        assert_ne!(new_invitation.token, guest.invitation.token);
+        assert_ne!(new_invitation.certificate, guest.invitation.certificate);
+    }
+
     #[test]
     fn cancel_interrupts_stalled_server_headers_and_body_without_publishing() {
         for send_headers in [false, true] {
@@ -2423,6 +2474,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(crate::updates::PendingUpdate::default())
         .manage(Connections::default())
+        .manage(crate::desktop_share::DesktopShare::default())
         .manage(crate::archives::Archives::default())
         .manage(crate::archive_create::ArchiveJobs::default())
         .manage(crate::deletion::DeleteJobs::default())
@@ -2511,6 +2563,8 @@ pub fn run() {
         crate::space_analyzer::cancel_space_scan,
         crate::git_view::git_repository,
         crate::git_view::git_history,
+        crate::git_view::git_working_changes,
+        crate::git_view::git_working_diff,
         crate::git_view::git_details,
         crate::environment::environment_scope,
         crate::environment::environment_value,
@@ -2533,6 +2587,10 @@ pub fn run() {
         crate::archives::delete_archive_entries,
         crate::folders::create_folders,
         connect_server,
+        crate::desktop_share::suggest_share_address,
+        crate::desktop_share::active_desktop_share,
+        crate::desktop_share::start_desktop_share,
+        crate::desktop_share::stop_desktop_share,
         connect_saved_server,
         save_server_invitation,
         remove_server_invitation,
@@ -2591,6 +2649,7 @@ pub fn run() {
         terminal::open_terminal,
         crate::completion::complete_command,
         crate::completion::complete_ssh_terminal,
+        crate::completion::complete_ssh_command,
         terminal::write_terminal,
         terminal::resize_terminal,
         terminal::close_terminal,

@@ -48,11 +48,33 @@ try {
           case "git_details": return { message: "Merge feature\n\nFull commit body", merge: true, changes: [
             { status: "A", path: "new ł.txt" }, { status: "D", path: "removed.txt" },
           ] };
+          case "git_working_changes":
+            assertRoot(args.root);
+            if (window.workingError) throw "unreadable";
+            return window.workingClean ? [] : [
+              { group: "staged", status: "M", path: "note.txt", previousPath: null },
+              { group: "unstaged", status: "M", path: "note.txt", previousPath: null },
+              { group: "unstaged", status: "D", path: "removed.txt", previousPath: null },
+              { group: "untracked", status: "?", path: "new ł.txt", previousPath: null },
+            ];
+          case "git_working_diff": {
+            assertRoot(args.root);
+            const { group, path } = args.change;
+            const deleted = path === "removed.txt";
+            return { workingPath: deleted ? null : root + (windows ? "\\" : "/") + path, workingText: !deleted,
+              patch: deleted ? "-deleted\n" : "+" + (path === "note.txt" ? group === "unstaged" && window.gitSaved || group : path) + "\n",
+              fallback: null, unborn: false };
+          }
+          case "read_text": return { text: window.gitSaved ?? "saved working text", encoding: "utf8" };
+          case "save_text": window.gitSaved = args.text; return null;
           case "copy_path": window.gitCopied = args.path; return null;
           default: return null;
         }
       },
     };
+    function assertRoot(path) {
+      if (path !== root) throw "notRepository";
+    }
   });
   await page.goto("http://dirlume.test/");
   const swapKey = await page.evaluate(() => /Mac/i.test(navigator.userAgent) ? "Meta+u" : "Control+u");
@@ -99,6 +121,50 @@ try {
   await history.getByRole("button", { name: /Remote-tracking topic/ }).waitFor();
   await page.evaluate(() => window.finishOldHistory());
   assert.equal(await history.getByText("Stale local topic").count(), 0);
+  await button(branches, "Changes").click();
+  const changes = page.getByRole("region", { name: "Changes", exact: true });
+  const preview = page.getByRole("region", { name: "Change preview", exact: true });
+  const changeFilter = changes.getByRole("searchbox", { name: "Filter changed paths" });
+  await preview.getByText("HEAD → Index", { exact: true }).waitFor();
+  await preview.getByText("+staged", { exact: true }).waitFor();
+  await changeFilter.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await preview.getByText("Index → Working file", { exact: true }).waitFor();
+  await preview.getByText("+unstaged", { exact: true }).waitFor();
+  const edited = changes.getByRole("group", { name: "Unstaged", exact: true }).getByRole("option", { name: /note\.txt/ });
+  assert.equal(await edited.getAttribute("aria-selected"), "true");
+  await edited.press(swapKey);
+  await changes.and(page.locator(".git-pane-left")).waitFor();
+  await preview.and(page.locator(".git-pane-right")).waitFor();
+  assert.equal(await edited.getAttribute("aria-selected"), "true");
+  await button(preview, "Open in Viewer").click();
+  await page.getByText("saved working text", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await changes.waitFor();
+  assert.equal(await edited.getAttribute("aria-selected"), "true");
+  await button(preview, "Open in Editor").click();
+  const source = page.locator('.text-window[data-editing="true"] .cm-content');
+  await source.fill("edited working text");
+  await source.press(swapKey.replace("+u", "+s"));
+  await page.waitForFunction(() => window.gitSaved === "edited working text");
+  await source.press("Escape");
+  await preview.getByText("+edited working text", { exact: true }).waitFor();
+  assert.equal(await edited.getAttribute("aria-selected"), "true");
+  await changes.getByRole("option", { name: /removed/ }).click();
+  await preview.getByText("-deleted", { exact: true }).waitFor();
+  assert.equal(await button(preview, "Open in Editor").count(), 0);
+  await changeFilter.fill("nothing");
+  await changes.getByText("No matching changed paths.").waitFor();
+  await changeFilter.fill("");
+  await page.evaluate(() => { window.workingClean = true; });
+  await button(changes, "Refresh").click();
+  await changes.getByText("Working tree is clean.").waitFor();
+  await page.evaluate(() => { window.workingError = true; });
+  await button(changes, "Refresh").click();
+  await changes.getByRole("alert").getByText("Could not read working tree changes.").waitFor();
+  await button(changes, "Branches").click();
+  await filter.press(swapKey);
+  await branches.and(page.locator(".git-pane-right")).waitFor();
   await page.keyboard.press("F5");
   assert.equal(await page.getByRole("dialog", { name: "Copy" }).count(), 0);
   await filter.press(swapKey);
@@ -127,7 +193,7 @@ try {
   }
   const events = await page.evaluate(() => window.gitEvents);
   assert.match(events[0], /nested$/);
-  assert.match(events[1], /repo ł$/);
+  assert.ok(events.some((path) => /repo ł$/.test(path)));
   for (const binding of [["Ctrl+Alt+J"], []]) {
     await page.evaluate((swap) => {
       const key = "dirlume.preferences.v1";

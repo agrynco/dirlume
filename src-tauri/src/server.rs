@@ -45,7 +45,7 @@ impl Identity {
         )?)?)
     }
 
-    fn init(directory: &Path, address: Url) -> Result<Self> {
+    fn generate(address: Url) -> Result<Self> {
         let host = match address.host().ok_or("Missing advertised host")? {
             url::Host::Domain(name) => name.to_owned(),
             url::Host::Ipv4(ip) => ip.to_string(),
@@ -57,19 +57,31 @@ impl Identity {
         SystemRandom::new()
             .fill(&mut token)
             .map_err(|_| "Could not generate the server token")?;
-        let identity = Self {
+        Ok(Self {
             invitation: Invitation {
                 address,
                 certificate: URL_SAFE_NO_PAD.encode(cert.der()),
                 token: URL_SAFE_NO_PAD.encode(token),
             },
             key: signing_key.serialize_der(),
-        };
+        })
+    }
+
+    fn init(directory: &Path, address: Url) -> Result<Self> {
+        let identity = Self::generate(address)?;
         let mut output = tempfile::NamedTempFile::new_in(directory)?;
         output.write_all(&serde_json::to_vec(&identity)?)?;
         output.as_file().sync_all()?;
         output.persist_noclobber(directory.join("identity.json"))?;
         Ok(identity)
+    }
+
+    async fn tls(&self) -> Result<axum_server::tls_rustls::RustlsConfig> {
+        let certificate = URL_SAFE_NO_PAD.decode(&self.invitation.certificate)?;
+        Ok(
+            axum_server::tls_rustls::RustlsConfig::from_der(vec![certificate], self.key.clone())
+                .await?,
+        )
     }
 }
 
@@ -338,9 +350,7 @@ pub async fn serve(root: &Path, directory: &Path, bind: SocketAddr, host: &str) 
         return Err("This state directory belongs to a different advertised address. Choose another state directory.".into());
     }
     let share = make_share(root, &identity.invitation.token)?;
-    let certificate = URL_SAFE_NO_PAD.decode(identity.invitation.certificate)?;
-    let tls =
-        axum_server::tls_rustls::RustlsConfig::from_der(vec![certificate], identity.key).await?;
+    let tls = identity.tls().await?;
     let listener = std::net::TcpListener::bind(bind)?;
     listener.set_nonblocking(true)?;
     println!("Dirlume server listening on {bind} for {address}");
@@ -348,6 +358,61 @@ pub async fn serve(root: &Path, directory: &Path, bind: SocketAddr, host: &str) 
         .serve(router(share).into_make_service())
         .await?;
     Ok(())
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) struct DesktopServer {
+    pub(crate) invitation: String,
+    pub(crate) address: String,
+    shutdown: axum_server::Handle<SocketAddr>,
+    task: tokio::task::JoinHandle<std::io::Result<()>>,
+}
+
+#[cfg(feature = "desktop")]
+impl DesktopServer {
+    pub(crate) async fn start(root: &Path, ip: std::net::IpAddr) -> Result<Self> {
+        let listener = std::net::TcpListener::bind(SocketAddr::new(ip, 0))?;
+        listener.set_nonblocking(true)?;
+        let address = advertised_url(&ip.to_string(), listener.local_addr()?.port())?;
+        let identity = Identity::generate(address.clone())?;
+        let share = make_share(root, &identity.invitation.token)?;
+        let invitation = identity.invitation.encode()?;
+        let shutdown = axum_server::Handle::new();
+        let server =
+            axum_server::from_tcp_rustls(listener, identity.tls().await?)?.handle(shutdown.clone());
+        let result = Self {
+            invitation,
+            address: address.to_string(),
+            shutdown,
+            task: tokio::spawn(server.serve(router(share).into_make_service())),
+        };
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            result.shutdown.listening(),
+        )
+        .await
+        {
+            Ok(Some(_)) => Ok(result),
+            _ => Err("The folder share could not start listening.".into()),
+        }
+    }
+
+    pub(crate) fn is_running(&self) -> bool {
+        !self.task.is_finished()
+    }
+
+    pub(crate) async fn stop(&mut self) -> Result<()> {
+        self.shutdown.shutdown();
+        (&mut self.task).await??;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "desktop")]
+impl Drop for DesktopServer {
+    fn drop(&mut self) {
+        self.shutdown.shutdown();
+    }
 }
 
 fn router(share: Arc<Share>) -> Router {

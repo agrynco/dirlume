@@ -105,7 +105,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. On Windows, select a drive by letter to open the other pane's local folder on that drive, or open the drive root. |
 | F2 / Ctrl+R | Refresh the active pane. F2 saves when editing a text file. |
 | F3 / F4 / Shift+F4 | View text or Markdown, edit text, or create and edit a new file. F3 measures folders. |
-| Ctrl+Wheel | Change the font size of the file pane, viewer, or editor under the pointer. |
+| Ctrl+Wheel | Change the font size of the Dirlume area under the pointer. |
 | Ctrl+Click | Open a linked Markdown document in a separate viewer tab. Command+Click also works on macOS. |
 | F4 inside the viewer | Toggle the read-only hexadecimal view of the original bytes. |
 | Esc / F10 inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
@@ -138,7 +138,7 @@ Right-click local or SSH terminal output to open **Copy**, **Paste**, and **Sele
 
 Left-click an HTTP or HTTPS link in local or SSH terminal output to open it in the default browser on the computer running Dirlume. Hover over a labeled terminal hyperlink to see its destination before opening it.
 
-In the Windows PowerShell terminal, `cd` suggests directories as you type. Select a folder to continue into its children. With Docker installed, both inputs complete subcommands and options for `docker container` and `docker compose`. Container suggestions use the active Docker context or an explicit `--context`. Compose suggests services from the current project, including projects selected through `-f` or `COMPOSE_FILE`. A supported SSH terminal uses the connected host and the environment of its prompt.
+In the Windows PowerShell terminal, `cd` suggests directories as you type. Select a folder to continue into its children. For a Linux SSH connection, the Command line retrieves suggestions from the selected remote folder even before you open the Terminal. Supported prompts use their current shell environment. On Windows and Linux, both inputs can complete Docker subcommands and options, including commands outside `docker container` and `docker compose`. Container suggestions use the active Docker context or an explicit `--context`. Compose suggests services from the current project, including projects selected through `-f` or `COMPOSE_FILE`.
 
 At a supported PowerShell, Bash, or Zsh prompt, the terminal shows suggestions next to the caret as you edit a single-line command. Use **↑/↓** to select, **Tab** to insert the selected or first suggestion, or **Esc** to dismiss. Click a suggestion or press **Enter** with one selected to insert it. **Enter** submits the command when the list has no selection. Dirlume SSH terminals use the remote working directory and search path. If you run `ssh` yourself, the parent terminal suspends suggestions until it recognizes its prompt again.
 
@@ -166,6 +166,8 @@ Use **F4** on a local single-frame PNG or JPEG to edit it, or **F6** to switch b
 
 With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Git View works offline with locally available objects and leaves the working tree and index intact. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
 
+Select **Changes** to review staged, unstaged, and untracked files across the repository. Filter by path and use the arrow keys to read each inline diff in the opposite pane. Staged changes compare HEAD with the index, and unstaged changes compare the index with the working file. **Open in Viewer** or **Open in Editor** opens the current working file. Saving refreshes Changes and leaves staged content intact. Use **Refresh** to pick up changes made in other applications.
+
 ### Environment variables
 
 Choose **Commands → Environment variables** in either pane, then open **User variables**, **System variables**, or the read-only **Dirlume process environment**. The list shows variable names and definition sources in aligned columns. With the list focused, press **Alt+Letter** or **Alt+0–9** to start Quick search by name prefix. On macOS, use **Option** for Alt. Use **Up** or **Down** to cycle through matches, **Enter** to inspect the current match, and **Escape** to return to the list. Quick search works within the rows shown by **Filter variables** and uses the **Quick search by name prefix** binding in Options.
@@ -178,7 +180,7 @@ In **New file** (**Shift+F4**), choose UTF-8, UTF-8 with BOM, UTF-16 LE, or UTF-
 
 In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Use **Back** and **Forward** to revisit documents and restore reading positions in the current tab. **Search** finds text in the rendered document. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
 
-The Viewer and Editor have document-specific menus and a shortcut strip. The header shows the active file's full path and document status. Choose **Options** beside the document menu to open the settings for that mode.
+The Viewer and Editor have document-specific menus that show configured shortcuts. The Editor also has a shortcut strip. In Text Viewer, use **File** to open an editable file in the Editor or close the document. **Navigate** offers **Search** in rendered Markdown and **Hex** in source and hexadecimal views. The header shows the active file's full path and document status. Choose **Options** beside the document menu to open the settings for that mode.
 
 In the local text Viewer, click beside a line number or use **Navigate → Bookmark line**. Markdown supports bookmarks in **Source** mode. **File bookmarks** in the Viewer shows the current file's bookmarks. **Commands → File bookmarks** in the file panes shows every saved bookmark, including entries for closed files. Press **Enter** on an entry to open its line. You can rename or remove a bookmark from either list. Bookmarks persist across restarts and keep their saved line numbers if the file changes.
 
@@ -186,7 +188,7 @@ Use **F6** or the document's **File** menu to switch modes for the current file.
 
 The Viewer refreshes an open local file when it changes on disk. The Editor offers **Reload from disk** to open the updated file or **Keep editing** to retain the current buffer. Reloading discards any unsaved edits. Saving still checks that the disk contents match the version originally opened or last saved by the Editor.
 
-Mouse-wheel font changes appear on the Options page for the affected feature and in **Appearance → View font sizes**. Each file pane, the text viewer, the hex viewer, the editor, and the Markdown preview remember their own size. The Markdown preview keeps its size when you follow links or restart Dirlume. Changing the effective base size clears the wheel adjustment for the affected view. An imported font that is unavailable uses its current inherited fallback and keeps its saved name.
+Use **Ctrl+Wheel** over the main interface, either file pane, a file pane dialog such as **Folder shortcuts**, **Options**, the Terminal, the command line, **Compare files**, or a document view to change its text size. Related dialogs share the same adjustment. The file panes, text Viewer, Hex Viewer, Editor, and Markdown preview each remember their own size. Adjustments persist and appear in **Appearance → View font sizes**, where clearing a value restores the inherited size. **Keyboard shortcuts** lets you reassign or disable **Font zoom with mouse wheel**. An imported font that is unavailable uses its current inherited fallback and keeps its saved name.
 
 Drag marked files and folders into the other local pane to open the transfer dialog. Select **Move instead of copying** to move local items. Both local panes watch their folders, and connected sources are refreshed periodically.
 
@@ -264,6 +266,8 @@ At startup, Dirlume reconnects to the saved FTP profile and reopens the last FTP
 Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also measures folders. **F4** opens a text file for editing and **F2** saves it back to the server if the original revision still matches. **F6** renames an item and **F8** prompts before permanently deleting selected items, with an additional confirmation for nonempty folders. FTP files can be included in a text comparison. The viewer and editor show the full address of a remote file, including the protocol, host, any non-default port, and filename.
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder with read access over TLS. Browse and download files and directories, or open and compare text in Dirlume. [Server setup and autostart](docs/server.md).
+
+To share directly from the desktop app, open **Connect → Share a folder**. Choose a local folder and the IP address of the network interface the other computer can reach. Select **Start sharing**, then **Copy invitation**. On the other computer, activate either file pane and paste the invitation into **Connect**. You can also save the invitation in that pane’s **Remote machine** list. Guests can browse and download over TLS. The host can revoke the invitation and end access with **Stop sharing** or by exiting Dirlume.
 
 **KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
 

@@ -15,9 +15,10 @@ import { testMarkdownNoWrap } from "./markdown-nowrap-smoke.mjs";
 import { testNewFileEncoding } from "./new-file-encoding-smoke.mjs";
 import { testTerminalEnvironment } from "./terminal-environment-smoke.mjs";
 import { testFolderShortcuts } from "./folder-shortcuts-smoke.mjs";
+import { testDesktopShare } from "./desktop-share-smoke.mjs";
 import { testPanelModes } from "./panel-modes-smoke.mjs";
 import { testFileSort } from "./file-sort-smoke.mjs";
-import { checkAddressFocusLoss, editPaneAddress } from "./pane-address-smoke.mjs";
+import { checkAddressFocusLoss, clickBreadcrumbAncestor, editPaneAddress } from "./pane-address-smoke.mjs";
 import { testFolderNavigationHeader } from "./pane-header-smoke.mjs";
 import { testFolderMeasurement } from "./folder-measurement-smoke.mjs";
 import { makeDockerFixture, testCommandCompletion } from "./command-completion-smoke.mjs";
@@ -396,7 +397,7 @@ try {
   const leftBreadcrumbs = page.getByRole("navigation", { name: "left path breadcrumbs" });
   const currentCrumb = leftBreadcrumbs.locator('[aria-current="location"]');
   const forwardCrumbs = leftBreadcrumbs.locator(".address-forward");
-  await leftBreadcrumbs.getByRole("button", { name: "from", exact: true }).click();
+  await clickBreadcrumbAncestor(leftBreadcrumbs, "from");
   await forwardCrumbs.getByRole("button", { name: "breadcrumb-leaf", exact: true }).waitFor();
   assert.equal(await currentCrumb.innerText(), "from");
   await forwardCrumbs.getByRole("button", { name: "breadcrumb-branch", exact: true }).click();
@@ -404,7 +405,7 @@ try {
   await forwardCrumbs.getByRole("button", { name: "breadcrumb-leaf", exact: true }).click();
   await forwardCrumbs.waitFor({ state: "hidden" });
   assert.equal(await currentCrumb.innerText(), "breadcrumb-leaf");
-  await leftBreadcrumbs.getByRole("button", { name: "from", exact: true }).click();
+  await clickBreadcrumbAncestor(leftBreadcrumbs, "from");
   await forwardCrumbs.waitFor();
   await navigate("left", dst);
   await navigate("left", src);
@@ -2303,6 +2304,13 @@ try {
   console.log("Verified Classic blue colors, selection contrast, preview, and custom and built-in theme persistence.");
   page = await testPanelModes({ page, startDesktop, exitDesktop, root: temp });
   page = await testFolderShortcuts({ page, startDesktop, exitDesktop, src, dst });
+  await testDesktopShare(page, temp);
+  const localSources = page.getByRole("region", { name: "right pane", exact: true });
+  await localSources.getByRole("button", { name: "Locations for right pane", exact: true }).click();
+  await localSources.getByRole("group", { name: "Right pane sources", exact: true })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#right-path nav:not([data-connection-source])"));
+  await navigate("right", dst);
   if (process.env.CI || process.env.DIRLUME_VERIFY_WINDOWS_ENVIRONMENT === "1") await testTerminalEnvironment(page);
   await testCompareWorker(page, src, dst);
   await testCompareLayouts(page, temp);

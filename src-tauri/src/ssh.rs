@@ -276,6 +276,15 @@ pub struct Connection {
 }
 
 impl Connection {
+    pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {
+        let client = self
+            .listing
+            .try_lock()
+            .map_err(message)?
+            .completion_client();
+        terminal::complete(&client, script).await
+    }
+
     fn authenticated_client(&self) -> Result<AuthenticatedRoute> {
         match open_route(
             self.profile.route().map(RouteHost::Saved).collect(),

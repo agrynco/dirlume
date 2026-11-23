@@ -8,7 +8,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { X } from "lucide-react";
 import { FileContextMenu } from "./FileContextMenu";
-import { api, describeError, windowsClient, type ShellCompletionEnvironment, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
+import { api, describeError, windowsClient, type ShellCompletionEnvironment, type TerminalCompletionContext, type TerminalCommand, type TerminalOutput, type TerminalSession } from "./api";
 import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
 import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
@@ -52,7 +52,7 @@ function terminalAppearance(): ITerminalOptions {
   const background = value("--terminal-bg");
   return {
     fontFamily: value("--terminal-font"),
-    fontSize: Number.parseFloat(value("--terminal-size")),
+    fontSize: Number.parseFloat(value("--font-zoom-terminal") || value("--terminal-size")),
     minimumContrastRatio: 4.5,
     theme: {
       ...(isLightBackground(background) ? lightAnsi : darkAnsi),
@@ -62,14 +62,15 @@ function terminalAppearance(): ITerminalOptions {
   };
 }
 
-export default function TerminalPanel({ session, directory, visible, theme, scheme, pendingCommands, watchEnvironment,
-  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, focusRequested, focusHint, onClose }: {
+export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
+  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
   focusHint?: React.ReactNode;
   theme: Theme;
   scheme: Scheme | null;
+  fontSize?: number;
   pendingCommands: TerminalCommand[];
   watchEnvironment: boolean;
   history: readonly string[];
@@ -81,6 +82,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
   onDirectoryChange: (directory: string) => void;
+  onCompletionContext: (context: TerminalCompletionContext | null) => void;
   rowHeight: { current: number };
   focusRequested: { current: number | null };
   onClose: () => void;
@@ -106,6 +108,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   record.current = onCommandSubmitted;
   const reportDirectory = useRef(onDirectoryChange);
   reportDirectory.current = onDirectoryChange;
+  const reportCompletion = useRef(onCompletionContext);
+  reportCompletion.current = onCompletionContext;
   const reportError = useRef(onTerminalError);
   reportError.current = onTerminalError;
   const clipboard = useRef({ copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, visible });
@@ -431,6 +435,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
           }));
       } catch { return true; }
       setShellDirectory(currentDirectory ?? "");
+      if (sshSearchPath !== previousSearchPath || environmentMarker !== previousEnvironmentMarker) {
+        reportCompletion.current({ searchPath: sshSearchPath ?? undefined, environment: shellEnvironment });
+      }
       // ConPTY can deliver the prompt redraw for a canceled edit after the next keystroke.
       if (atPrompt && editable?.text && editorSupported && currentDirectory === previousDirectory && sshSearchPath === previousSearchPath && environmentMarker === previousEnvironmentMarker) {
         return true;
@@ -451,6 +458,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     output.onmessage = (message) => {
       if (stopped) return;
       if (message.event === "closed") {
+        reportCompletion.current(null);
         rejectQueuedCommands(new Error(t("This terminal session has closed.")));
         editable = null;
         hideSuggestions();
@@ -660,7 +668,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     const onChange = () => requestAnimationFrame(update);
     match.addEventListener("change", onChange);
     return () => { cancelAnimationFrame(frame); match.removeEventListener("change", onChange); };
-  }, [theme, scheme]);
+  }, [theme, scheme, fontSize]);
 
   useEffect(() => {
     if (popup && popup.selected >= 0) document.getElementById(`${suggestionId}-${popup.selected}`)?.scrollIntoView({ block: "nearest" });
@@ -679,7 +687,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   }
 
   return (
-    <section className="terminal-card" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
+    <section className="terminal-card" data-font-zoom="terminal" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
       <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}>
         <h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2>
         <span className="terminal-location" data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>

@@ -229,6 +229,12 @@ export async function testSmbNavigation() {
     assert.equal(await page.evaluate(() => !!window.unexpectedLocalCompletion), false);
     await sshInput.press("Tab");
     await page.waitForFunction(() => window.terminalWrites.at(-1)?.endsWith("web-remote"));
+    const commandLine = page.getByRole("combobox", { name: "Command line", exact: true });
+    await commandLine.fill("docker compose logs --tail 20 we");
+    const lineOptions = page.locator(".command-entry").getByRole("listbox", { name: "Command suggestions", exact: true });
+    await lineOptions.getByRole("option", { name: "web-remote", exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.lastSshCompletion), remoteDraft);
+    await commandLine.fill("");
     await sshInput.focus();
     await right.focus();
     await terminalHint.waitFor({ state: "hidden" });

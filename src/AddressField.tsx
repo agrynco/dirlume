@@ -46,36 +46,63 @@ function breadcrumbPlaces(place: FileLocation | null, limit = 4, inSameSource = 
   return places.reverse();
 }
 
-function useBreadcrumbClip(editing = false) {
+function useBreadcrumbClip(editing = false, fitAncestors = false, location = "") {
   const clip = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const [clipped, setClipped] = useState(false);
+  const [hidden, setHidden] = useState(0);
 
   useLayoutEffect(() => {
     const viewport = clip.current;
     const content = track.current;
     if (editing || !viewport || !content) return;
-    const measure = () => setClipped(content.offsetWidth > viewport.clientWidth);
+    const address = viewport.parentElement;
+    if (!address) return;
+    const forward = fitAncestors ? address.querySelector<HTMLElement>(":scope > .address-forward") : null;
+    const measure = () => {
+      if (!fitAncestors) {
+        setClipped(content.offsetWidth > viewport.clientWidth);
+        return;
+      }
+      const available = address.clientWidth - (forward?.getBoundingClientRect().width ?? 0);
+      content.setAttribute("data-measuring", "");
+      const widths = Array.from(content.children, (crumb) => crumb.getBoundingClientRect().width);
+      content.removeAttribute("data-measuring");
+      const overflowWidth = Number.parseFloat(getComputedStyle(address).getPropertyValue("--address-overflow-width"));
+      let remaining = widths.reduce((sum, width) => sum + width, 0);
+      const clipped = remaining > available;
+      let hidden = 0;
+      if (clipped) {
+        while (hidden < widths.length - 1 && remaining + overflowWidth > available) {
+          remaining -= widths[hidden++];
+        }
+      }
+      setHidden(hidden);
+      setClipped(clipped);
+    };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
+    observer.observe(fitAncestors ? address : viewport);
     observer.observe(content);
+    if (forward) observer.observe(forward);
     return () => observer.disconnect();
-  }, [editing]);
+  }, [editing, fitAncestors, location]);
 
-  return { clip, track, clipped };
+  return { clip, track, clipped, hidden: fitAncestors ? hidden : 0 };
 }
 
-function BreadcrumbTrack({ clip, track, ancestors, current, goTo }: {
+function BreadcrumbTrack({ clip, track, ancestors, current, goTo, fitAncestors = false, hidden = 0 }: {
   clip: Ref<HTMLDivElement>;
   track: Ref<HTMLDivElement>;
   ancestors: readonly FileLocation[];
   current: string;
   goTo?: (place: FileLocation) => void;
+  fitAncestors?: boolean;
+  hidden?: number;
 }) {
-  return <div ref={clip} className="address-crumb-clip">
-    <div ref={track} className="address-crumbs">
-      {ancestors.map((ancestor) => <div key={placeKey(ancestor)} className="address-ancestor">
+  return <div ref={clip} className="address-crumb-clip" data-fit={fitAncestors || undefined}>
+    <div ref={track} className="address-crumbs" data-has-hidden={hidden > 0 || undefined}>
+      {ancestors.map((ancestor, index) => <div key={placeKey(ancestor)} className="address-ancestor" hidden={index < hidden}>
         {goTo ? <button type="button" onClick={() => goTo(ancestor)}>{folderLabel(ancestor)}</button> :
           <span>{folderLabel(ancestor)}</span>}
         <ChevronRight aria-hidden="true" />
@@ -136,17 +163,19 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
   const root = useRef<HTMLDivElement>(null);
   const browsing = useRef(false);
   const [editing, setEditing] = useState(false);
-  const { clip, track, clipped } = useBreadcrumbClip(editing);
+  const fitAncestors = place?.kind === "local" && !source;
+  const { clip, track, clipped, hidden } = useBreadcrumbClip(editing, fitAncestors, location);
   const [overflow, setOverflow] = useState(false);
   const [hoverX, setHoverX] = useState<number>();
   const [draft, setDraft] = useState(path);
   const [branch, setBranch] = useState<FileLocation[]>([]);
   const branchIndex = branch.findIndex((folder) => placeKey(folder) === location);
   const forward = branchIndex < 0 ? [] : branch.slice(branchIndex + 1);
-  const crumbs = breadcrumbPlaces(place);
+  const crumbs = breadcrumbPlaces(place, fitAncestors ? Infinity : undefined);
   const ancestors = crumbs.slice(0, -1);
-  const shortened = clipped || (ancestors.length === 3 && Boolean(parentPlace(ancestors[0])));
-  const parents = overflow && source ? breadcrumbPlaces(place, Infinity).slice(0, -1) : ancestors;
+  const shortened = clipped || (!fitAncestors && ancestors.length === 3 && Boolean(parentPlace(ancestors[0])));
+  const parents = fitAncestors ? ancestors.slice(0, hidden) :
+    overflow && source ? breadcrumbPlaces(place, Infinity).slice(0, -1) : ancestors;
   const label = t(side === "left" ? "left path" : "right path");
 
   function startEditing() {
@@ -178,6 +207,10 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
     if (branch.length && branchIndex < 0) setBranch([]);
   }, [branch, branchIndex]);
 
+  useEffect(() => {
+    if (!shortened) setOverflow(false);
+  }, [shortened]);
+
   useLayoutEffect(() => {
     if (editing) root.current?.querySelector("input")?.focus({ preventScroll: true });
   }, [editing]);
@@ -191,7 +224,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
     focusFiles();
   }
 
-  const overflowButton = shortened && ancestors.length > 0 && <Button type="button" className="icon-button address-overflow"
+  const overflowButton = shortened && (fitAncestors ? hidden > 0 : ancestors.length > 0) && <Button type="button" className="icon-button address-overflow"
     aria-label={t("Show parent folders")} aria-expanded={overflow} onClick={() => setOverflow(!overflow)}>…</Button>;
 
   return <div className="address" ref={root} id={side + "-path"} data-path={path} data-help-topic="paneAddress" onBlur={(event) => {
@@ -236,8 +269,9 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
           }}>{sourceName}</Button>
           <ChevronRight aria-hidden="true" />
         </div>}
-        {source && overflowButton}
+        {overflowButton}
         <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} goTo={(ancestor) => goTo(ancestor, true)}
+          fitAncestors={fitAncestors} hidden={hidden}
           current={place ? folderLabel(place) : t("Enter a path")} />
         {forward.length > 0 && <div className="address-forward">
           {forward.map((folder) => <div key={placeKey(folder)} className="address-ancestor">
@@ -246,8 +280,7 @@ export function AddressField({ side, place, showHidden, onNavigate, onNavigateAn
               onClick={() => goTo(folder)}>{folderLabel(folder)}</Button>
           </div>)}
         </div>}
-        {!source && overflowButton}
-        {overflow && <div className="location-popup address-parents">
+        {shortened && overflow && parents.length > 0 && <div className="location-popup address-parents">
           {parents.map((ancestor) => <Button type="button" key={placeKey(ancestor)}
             tooltip={placePath(ancestor)} onClick={() => goTo(ancestor, true)}>{folderLabel(ancestor)}</Button>)}
         </div>}

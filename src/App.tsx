@@ -77,9 +77,12 @@ import {
 import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
+import type { TerminalCompletionContext } from "./api";
+import { ShareFolderDialog } from "./ShareFolderDialog";
 import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
-import { maxViewFontSize, minViewFontSize, type ZoomViewFont } from "./viewFonts";
+import { resizeViewFont } from "./viewFonts";
+import { useFontZoom } from "./useFontZoom";
 import { shellArgument } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
@@ -128,6 +131,7 @@ type ActionModal = (
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
   | { kind: "connect"; side: Side }
+  | { kind: "shareFolder"; side: Side; returnToConnect?: boolean }
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
@@ -278,6 +282,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [terminalCompletion, setTerminalCompletion] = useState<Record<number, TerminalCompletionContext & { id: number }>>({});
   const [terminalInputFocused, setTerminalInputFocused] = useState(false);
   const [terminalShare, setTerminalShare] = useState(0);
   const [terminalHeight, setTerminalHeight] = useState(() => {
@@ -764,14 +769,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => window.removeEventListener("storage", sync);
   }, []);
 
-  const zoomViewFont: ZoomViewFont = useCallback((view, change, base) => {
+  useFontZoom(shortcuts.zoomFont, preferences.viewFontSizes, (view, change, base) => {
     setPreferences((current) => {
-      const previous = current.viewFontSizes[view] ?? base;
-      const size = Math.max(minViewFontSize, Math.min(maxViewFontSize, previous + change));
-      if (size === previous) return current;
-      return { ...current, viewFontSizes: { ...current.viewFontSizes, [view]: size } };
+      const sizes = resizeViewFont(current.viewFontSizes, view, change, base);
+      return sizes === current.viewFontSizes ? current : { ...current, viewFontSizes: sizes };
     });
-  }, []);
+  });
 
   useEffect(() => {
     saveCommandHistory(historyItems);
@@ -1011,7 +1014,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         });
         if (row) updatePane(source, (pane) => ({ ...pane, selected: row.name }));
       }
-      requestAnimationFrame(() => focus(source));
+      requestAnimationFrame(() => {
+        if (gitView) (window.document.querySelector<HTMLElement>(".git-pane [role=option][aria-selected=true]") ??
+          window.document.querySelector<HTMLElement>(".git-pane .git-filter"))?.focus();
+        else focus(source);
+      });
     }
   }
 
@@ -2160,6 +2167,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!session) return;
     setTerminals(({ [key]: _closed, ...remaining }) => remaining);
     setPendingCommands(({ [session.id]: _closed, ...remaining }) => remaining);
+    setTerminalCompletion(({ [session.id]: _closed, ...remaining }) => remaining);
   }
 
   function toggleTerminal() {
@@ -2925,7 +2933,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   return (
     <ElevationContext value={openAdministrator}>
-    <div className={`app${terminalVisible ? " has-terminal" : ""}${commandLineVisible ? " has-command-line" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
+    <div data-font-zoom="ui" className={`app${terminalVisible ? " has-terminal" : ""}${commandLineVisible ? " has-command-line" : ""}${panelsHidden ? " panels-hidden" : ""}${activeDocument !== null ? " document-active" : ""}`}
       data-layout={preferences.layout} data-status-bar={preferences.showStatusBar ? undefined : "hidden"}
       style={{ "--terminal-height": `${terminalShare}fr`, "--panes-height": `${100 - terminalShare}fr` } as CSSProperties}
       onKeyDown={keyDown} onKeyDownCapture={documentKeys}
@@ -3056,8 +3064,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (item) revealResult(side, item.place, item.entry.name);
             }}
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column, true)}
-            sourceMenu={paneSources(side)} zoomShortcut={shortcuts.zoomFont}
-            fontSize={preferences.viewFontSizes[side]} onZoom={zoomViewFont} />
+            sourceMenu={paneSources(side)} fontSize={preferences.viewFontSizes[side]} />
         ))}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
@@ -3074,6 +3081,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
           <GitView side={gitView.side} path={gitView.path} refresh={gitRefresh}
+            onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
         {(["left", "right"] as const).map((side) => diskPanes[side] && <DiskInformation key={side + diskPanes[side]}
@@ -3167,6 +3175,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                   if (dirty) dirtyDocuments.current.add(id);
                   else dirtyDocuments.current.delete(id);
                 }} onSaved={(replaced) => {
+                  if (gitView) setGitRefresh((revision) => revision + 1);
                   if (replaced) setDocuments((current) => current.map((tab) => sameDocumentFile(tab.file, file)
                     ? { ...tab, imageRevision: (tab.imageRevision ?? 0) + 1 } : tab));
                   for (const side of ["left", "right"] as const) if (!latest.current[side].sudoListing) refresh(side);
@@ -3183,7 +3192,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}
             shortcuts={shortcuts}
-            fontSizes={preferences.viewFontSizes} onZoom={zoomViewFont}
+            fontSizes={preferences.viewFontSizes}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
             onSwitchMode={() => openDocument(file, !editing)}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
@@ -3198,6 +3207,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
+              if (gitView) setGitRefresh((revision) => revision + 1);
               if (editing && file.place.kind !== "local") {
                 // A remote Viewer reloads after a save because it has no local directory watch.
                 setDocuments((current) => current.map((tab) => !tab.editing && sameDocumentFile(tab.file, file)
@@ -3214,6 +3224,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
             visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
+            fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
             focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
@@ -3226,18 +3237,25 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               [session.id]: (commands[session.id] ?? []).slice(count),
             }))}
             onCommandSubmitted={(text) => recordCommand(text, session.kind)} onDirectoryChange={(path) => followShellDirectory(session, path)}
+            onCompletionContext={(context) => setTerminalCompletion((current) => {
+              if (context) return { ...current, [session.id]: { id: session.id, ...context } };
+              const { [session.id]: _closed, ...remaining } = current;
+              return remaining;
+            })}
             onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
       </Suspense>
       {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
         {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
       </div>}
-      <form className="command-bar" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
+      <form className="command-bar" data-font-zoom="command" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>
         <span data-tooltip={terminalLocation ? placePath(terminalLocation) : undefined}>{terminalLocation ? placePath(terminalLocation) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] || terminalPlace?.kind !== "local" ? null : terminalPlace.path}
+          remote={!processPanels[active] && terminalPlace?.kind === "ssh" ? terminalPlace : null}
+          terminal={terminal ? terminalCompletion[terminal.id] : undefined}
           history={terminalPlace?.kind === "ssh" ? [] : commandLineHistory}
           refreshEnvironment={terminals.local?.refreshEnvironment ?? preferences.refreshEnvironment}
           onChange={(draft) => { historyIndex.current = -1; setCommandLine(draft); }} />
@@ -3397,6 +3415,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             const { source } = state.place;
             return <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source); }}>{t("Add connection")}</Button>
+              {source === "remote" && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                setModal({ kind: "shareFolder", side });
+              }}>{t("Share a folder")}</Button>}
               {entry?.connection && <>
                 <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>
                 <Button role="menuitem" onClick={() => { setFileMenu(null); editConnection(side, source, entry.connection); }}>
@@ -3440,9 +3462,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       })()}
       {modal?.kind === "connect" && (
         <ConnectDialog provider={preferences.provider} directory={preferences.kswitcher} onOptions={() => openSettings()}
+          onShare={() => setModal({ kind: "shareFolder", side: modal.side, returnToConnect: true })}
           onConnect={(place, listing) => { routeLocation(modal.side, place, listing); setModal(null); }}
           onClose={() => setModal(null)} />
       )}
+      {modal?.kind === "shareFolder" && (() => {
+        const place = panes[modal.side].place;
+        const initialPath = place?.kind === "local" && !smbHost(place) ? place.path : "";
+        return <ShareFolderDialog initialPath={initialPath} onClose={() => {
+          setModal(modal.returnToConnect ? { kind: "connect", side: modal.side } : null);
+        }} />;
+      })()}
       {modal?.kind === "smb" && (
         <SmbDialog path={modal.navigation.path} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
           onConnect={(place, listing, warning) => {
@@ -3687,13 +3717,15 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   );
 }
 
-function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
+function ConnectDialog({ provider: preferredProvider, directory, onConnect, onOptions, onShare, onClose }: {
   provider: "server" | "kswitcher";
   directory: string;
   onConnect: (place: RemotePlace, listing: Listing) => void;
   onOptions: () => void;
+  onShare: () => void;
   onClose: () => void;
 }) {
+  const [provider, setProvider] = useState(preferredProvider);
   const [value, setValue] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState("");
@@ -3770,6 +3802,12 @@ function ConnectDialog({ provider, directory, onConnect, onOptions, onClose }: {
           )}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           <div className="dialog-actions">
+            <Button type="button" onClick={onShare} disabled={waiting}>{t("Share a folder")}</Button>
+            {preferredProvider === "kswitcher" && <Button type="button" disabled={waiting} onClick={() => {
+              setValue("");
+              setError("");
+              setProvider(provider === "server" ? "kswitcher" : "server");
+            }}>{t(provider === "server" ? "Connect through KSwitcher" : "Use a Dirlume invitation")}</Button>}
             <Button type="button" onClick={onOptions} disabled={waiting}>{t("Connection options")}</Button>
           </div>
         </div>

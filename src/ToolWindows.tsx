@@ -12,6 +12,8 @@ import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
 import { pickFromDesktop } from "./AppearancePicker";
 import { windowsClient, type NamedFile } from "./api";
+import { useFontZoom } from "./useFontZoom";
+import { resizeViewFont } from "./viewFonts";
 
 const HelpDialog = lazy(() => import("./HelpDialog"));
 
@@ -22,6 +24,14 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
   const shortcuts = shortcutBindings(preferences);
+  useFontZoom(shortcuts.zoomFont, preferences.viewFontSizes, (view, change, base) => {
+    const current = readPreferences();
+    const sizes = resizeViewFont(current.viewFontSizes, view, change, base);
+    if (sizes === current.viewFontSizes) return;
+    const next = { ...current, viewFontSizes: sizes };
+    persistPreferences(next);
+    setPreferences(next);
+  });
   const [help, setHelp] = useHelpShortcut(shortcuts.help, comparison ? "compare" : "general");
   const { scheme, theme } = resolveAppearance(preferences, useSystemTheme());
   const title = t(comparison ? "Compare files" : "Options");
@@ -49,16 +59,15 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
   }, []);
 
   useEffect(() => {
+    const saveSize = () => {
+      void windowHandle.isMaximized().then((maximized) => {
+        if (!maximized && innerWidth >= 600 && innerHeight >= 380) {
+          saveDialogSize("options", { width: innerWidth, height: innerHeight });
+        }
+      }).catch(() => {});
+    };
     if (!comparison) {
-      const saveSize = () => {
-        void windowHandle.isMaximized().then((maximized) => {
-          if (!maximized && innerWidth >= 600 && innerHeight >= 380) {
-            saveDialogSize("options", { width: innerWidth, height: innerHeight });
-          }
-        }).catch(() => {});
-      };
       window.addEventListener("resize", saveSize);
-      return () => window.removeEventListener("resize", saveSize);
     }
     const sync = (event: StorageEvent) => {
       if (event.key !== preferenceKey) return;
@@ -67,7 +76,10 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
       setPreferences(next);
     };
     window.addEventListener("storage", sync);
-    return () => window.removeEventListener("storage", sync);
+    return () => {
+      if (!comparison) window.removeEventListener("resize", saveSize);
+      window.removeEventListener("storage", sync);
+    };
   }, [comparison]);
 
   const reportDirty = (dirty: boolean) => emitTo("main", "dirlume:comparison-dirty", { label: windowHandle.label, dirty });

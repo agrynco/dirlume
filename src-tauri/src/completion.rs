@@ -16,7 +16,9 @@ use tauri::State;
 
 use crate::{
     desktop::{blocking_for, message, Result},
-    local, terminal,
+    local,
+    remote_transfer::UploadSession as _,
+    terminal,
 };
 
 mod docker;
@@ -230,7 +232,7 @@ pub struct RemoteCompletionRequest {
     line: String,
     caret: usize,
     directory: String,
-    search_path: String,
+    search_path: Option<String>,
     #[serde(default)]
     shell_environment: Option<HashMap<String, Option<String>>>,
 }
@@ -241,32 +243,113 @@ pub async fn complete_ssh_terminal(
     request: RemoteCompletionRequest,
     terminals: State<'_, terminal::Terminals>,
 ) -> Result<CompletionBatch> {
+    let terminal = terminals.remote(id)?;
+    complete_remote(request, false, |script| {
+        let terminal = std::sync::Arc::clone(&terminal);
+        async move { terminal.complete(&script).await }
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn complete_ssh_command(
+    id: u32,
+    segments: Vec<String>,
+    line: String,
+    caret: usize,
+    ssh: State<'_, crate::ssh::SshState>,
+) -> Result<CompletionBatch> {
+    let connection = ssh.connection(id)?;
+    let request = RemoteCompletionRequest {
+        line,
+        caret,
+        directory: crate::ssh::Session::absolute(&segments)?,
+        search_path: None,
+        shell_environment: None,
+    };
+    complete_remote(request, true, |script| {
+        let connection = std::sync::Arc::clone(&connection);
+        async move { connection.complete(&script).await }
+    })
+    .await
+}
+
+const REMOTE_OUTPUT: &[u8] = b"\0DIRLUME-COMPLETION\0";
+
+fn remote_command(request: &RemoteCompletionRequest, script: &str, linux_only: bool) -> String {
+    let mut command = String::new();
+    if linux_only {
+        command.push_str("[ \"$(command uname -s)\" = Linux ] || exit\n");
+    }
+    command.push_str(&format!(
+        "CDPATH= cd -- {} || exit\n",
+        crate::ssh::quote(&request.directory)
+    ));
+    command.push_str("unset ENV BASH_ENV\n");
+    let body = format!("printf '\\000DIRLUME-COMPLETION\\000'\n{script}");
+    if let Some(path) = &request.search_path {
+        command.push_str(&format!("export PATH={}\n{body}", crate::ssh::quote(path)));
+    } else {
+        command.push_str("shell=${SHELL:-/bin/bash}\ncase ${shell##*/} in bash|zsh) ;; *) shell=/bin/bash ;; esac\n");
+        command.push_str(&format!(
+            "exec \"$shell\" -ic {} </dev/null",
+            crate::ssh::quote(&body)
+        ));
+    }
+    command
+}
+
+fn remote_output(output: &[u8]) -> &[u8] {
+    output
+        .windows(REMOTE_OUTPUT.len())
+        .position(|bytes| bytes == REMOTE_OUTPUT)
+        .map_or(&[], |start| &output[start + REMOTE_OUTPUT.len()..])
+}
+
+async fn complete_remote<F>(
+    request: RemoteCompletionRequest,
+    linux_only: bool,
+    run: impl Fn(String) -> F,
+) -> Result<CompletionBatch>
+where
+    F: std::future::Future<Output = Result<Vec<u8>>>,
+{
     if request.line.len() > MAX_DRAFT
         || request.line.contains(['\0', '\r', '\n'])
         || !request.directory.starts_with('/')
         || request.directory.len() > MAX_DRAFT
         || request.directory.contains('\0')
-        || request.search_path.len() > MAX_DRAFT
-        || request.search_path.contains('\0')
+        || request
+            .search_path
+            .as_ref()
+            .is_some_and(|path| path.len() > MAX_DRAFT || path.contains('\0'))
     {
         return Ok(CompletionBatch::default());
     }
     let Some(context) = shell_context(&request.line, request.caret, false) else {
         return Ok(CompletionBatch::default());
     };
-    let terminal = terminals.remote(id)?;
-    if let Some(query) = docker::query(&context, false) {
-        let output = terminal
-            .complete(&docker::remote_script(&request, &query))
-            .await
-            .unwrap_or_default();
-        return Ok(docker::batch(
+    let docker_legacy = docker::query(&context, false);
+    let docker_requires_linux = docker_legacy.is_none();
+    if let Some(query) = docker_legacy.or_else(|| docker::extended_query(&context, false)) {
+        let script = docker::remote_script(request.shell_environment.as_ref(), &query);
+        let output = run(remote_command(
+            &request,
+            &script,
+            linux_only || docker_requires_linux,
+        ))
+        .await
+        .unwrap_or_default();
+        let result = docker::batch(
             &query,
             &context,
             &request.line,
-            &output,
+            remote_output(&output),
             false,
-        ));
+        );
+        if !result.matches.is_empty() {
+            return Ok(result);
+        }
     }
     let shell = include_str!("completion/bash.sh");
     let fallback = include_str!("completion/ssh-paths.sh");
@@ -274,36 +357,28 @@ pub async fn complete_ssh_terminal(
         .words
         .first()
         .is_some_and(|word| matches!(word.as_str(), "cd" | "pushd"));
-    let parts = [
-        format!(
-            "CDPATH= cd -- {} || exit",
-            crate::ssh::quote(&request.directory)
-        ),
-        "unset ENV BASH_ENV".to_owned(),
-        format!("export PATH={}", crate::ssh::quote(&request.search_path)),
-        format!(
-            "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {}",
-            crate::ssh::quote(fallback),
-            context.byte_caret,
-            crate::ssh::quote(&request.line),
-            if directory_only { "directory" } else { "any" },
-            if request.line.contains(['$', '`']) {
-                "''".to_owned()
-            } else {
-                crate::ssh::quote(shell)
-            },
-            context
-                .words
-                .iter()
-                .chain(std::iter::once(&context.prefix))
-                .map(|word| crate::ssh::quote(word))
-                .collect::<Vec<_>>()
-                .join(" "),
-        ),
-    ];
-    let output = terminal.complete(&parts.join("\n")).await?;
+    let script = format!(
+        "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {}",
+        crate::ssh::quote(fallback),
+        context.byte_caret,
+        crate::ssh::quote(&request.line),
+        if directory_only { "directory" } else { "any" },
+        if request.line.contains(['$', '`']) {
+            "''".to_owned()
+        } else {
+            crate::ssh::quote(shell)
+        },
+        context
+            .words
+            .iter()
+            .chain(std::iter::once(&context.prefix))
+            .map(|word| crate::ssh::quote(word))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    let output = run(remote_command(&request, &script, linux_only)).await?;
     let mut seen = BTreeSet::new();
-    let matches = output
+    let matches = remote_output(&output)
         .split(|&byte| byte == 0)
         .filter_map(|value| {
             let (source, value) = value.split_first()?;
@@ -390,7 +465,7 @@ fn paths(cwd: &Path, prefix: &str, directories_only: bool) -> Vec<Suggestion> {
     result
 }
 
-fn executables(prefix: &str) -> Vec<String> {
+fn executables(prefix: &str, search_path: Option<&str>) -> Vec<String> {
     let builtins = if cfg!(windows) {
         &[
             "cd",
@@ -411,7 +486,10 @@ fn executables(prefix: &str) -> Vec<String> {
         .filter(|command| starts_with(command, prefix))
         .map(ToString::to_string)
         .collect();
-    if let Some(path) = std::env::var_os("PATH") {
+    if let Some(path) = search_path
+        .map(Into::into)
+        .or_else(|| std::env::var_os("PATH"))
+    {
         for directory in std::env::split_paths(&path).filter(|directory| directory.is_absolute()) {
             if let Ok(files) = fs::read_dir(directory) {
                 for entry in files.flatten() {
@@ -463,7 +541,9 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
             "cd" | "chdir" | "pushd" | "push-location" | "set-location" | "sl"
         )
     });
-    if let Some(batch) = docker::local(request, &context, cwd) {
+    if let Some(batch) = docker::local(request, &context, cwd)
+        .filter(|batch| !cfg!(target_os = "linux") || !batch.matches.is_empty())
+    {
         return batch;
     }
     if cfg!(windows)
@@ -502,8 +582,14 @@ fn complete(request: &CompletionRequest) -> CompletionBatch {
             }
         }
     }
+    let search_path = request
+        .shell_environment
+        .as_ref()
+        .filter(|_| cfg!(target_os = "linux"))
+        .and_then(|environment| environment.get("PATH"))
+        .map(|value| value.as_deref().unwrap_or(""));
     let mut matches = if context.words.is_empty() && !context.prefix.contains(['/', '\\']) {
-        executables(&context.prefix)
+        executables(&context.prefix, search_path)
             .into_iter()
             .map(|label| Suggestion {
                 text: shell_word(&label),
@@ -587,6 +673,126 @@ fn read_process_with_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn completes_linux_command_line_and_ssh_prompt_in_their_own_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let local = temp.path().join("local project");
+        let remote = temp.path().join("remote project");
+        let bin = temp.path().join("remote bin");
+        let local_bin = temp.path().join("local bin");
+        for directory in [&home, &local, &remote, &bin, &local_bin] {
+            fs::create_dir(directory).unwrap();
+        }
+        let remote_path = format!("{}:/usr/bin:/bin", bin.display());
+        fs::write(
+            home.join(".bashrc"),
+            format!("export PATH={}\n", crate::ssh::quote(&remote_path)),
+        )
+        .unwrap();
+        fs::write(remote.join("remote-file.txt"), []).unwrap();
+        fs::write(local.join("local-file.txt"), []).unwrap();
+        let docker = r#"#!/bin/sh
+case "$*" in
+  "__complete co"|"__complete ") printf 'container\ncompose\n:4\n';;
+  "__complete image ls --for") printf '%s\n' '--format' ':4';;
+  'compose config --services') /bin/cat compose.yaml;;
+  *'container ls --all --no-trunc --format'*) /bin/cat containers.json;;
+esac
+"#;
+        for (dir, name, source) in [
+            (&bin, "remote-only-tool", "#!/bin/sh\n"),
+            (&local_bin, "local-only-tool", "#!/bin/sh\n"),
+            (&bin, "docker", docker),
+            (&local_bin, "docker", docker),
+        ] {
+            let path = dir.join(name);
+            fs::write(&path, source).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        fs::write(remote.join("compose.yaml"), "remote-web\n").unwrap();
+        fs::write(local.join("compose.yaml"), "local-web\n").unwrap();
+        fs::write(
+            remote.join("containers.json"),
+            r#"{"ID":"aabb","Names":"remote-container"}"#,
+        )
+        .unwrap();
+        fs::write(
+            local.join("containers.json"),
+            r#"{"ID":"ccdd","Names":"local-container"}"#,
+        )
+        .unwrap();
+        let environment = HashMap::from([(
+            "PATH".to_owned(),
+            Some(format!("{}:/usr/bin:/bin", local_bin.display())),
+        )]);
+        for (line, expected) in [
+            ("local-only", "local-only-tool"),
+            ("ec", "echo"),
+            ("cat local-", "local-file.txt"),
+            ("docker co", "container"),
+            ("docker image ls --for", "--format"),
+            ("docker compose logs local-", "local-web"),
+            ("docker container inspect cc", "ccdd"),
+        ] {
+            let batch = complete(&CompletionRequest {
+                line: line.into(),
+                caret: line.len(),
+                directory: local.to_string_lossy().into_owned(),
+                refresh_environment: false,
+                shell_environment: Some(environment.clone()),
+            });
+            assert!(
+                batch.matches.iter().any(|item| item.label == expected),
+                "local {line}: missing {expected}"
+            );
+        }
+        for live in [false, true] {
+            for (line, expected) in [
+                ("remote-only", "remote-only-tool"),
+                ("ec", "echo"),
+                ("cat remote-", "remote-file.txt"),
+                ("docker ", "compose"),
+                ("docker co", "container"),
+                ("docker image ls --for", "--format"),
+                ("docker compose logs remote-", "remote-web"),
+                ("docker container inspect aa", "aabb"),
+            ] {
+                let batch = complete_remote(
+                    RemoteCompletionRequest {
+                        line: line.into(),
+                        caret: line.len(),
+                        directory: remote.to_string_lossy().into_owned(),
+                        search_path: live.then(|| remote_path.clone()),
+                        shell_environment: None,
+                    },
+                    !live,
+                    |script| {
+                        let output = Command::new("/bin/sh")
+                            .args(["-c", &script])
+                            .env_clear()
+                            .env("PATH", "/usr/bin:/bin")
+                            .env("SHELL", "/bin/bash")
+                            .env("HOME", &home)
+                            .output()
+                            .unwrap();
+                        assert!(output.status.success(), "remote shell status for {line}");
+                        std::future::ready(Ok(output.stdout))
+                    },
+                )
+                .await
+                .unwrap();
+                assert!(
+                    batch.matches.iter().any(|item| item.label == expected),
+                    "remote {line}: missing {expected}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn matches_only_the_current_token_and_preserves_the_rest_of_the_draft() {
