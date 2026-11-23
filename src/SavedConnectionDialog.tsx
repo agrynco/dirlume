@@ -6,6 +6,7 @@ import { Dialog } from "./Dialog";
 import { FtpProfileDialog } from "./FtpDialog";
 import { HistoryField } from "./HistoryField";
 import { errorText, t } from "./i18n";
+import { kswitcherAddress, rememberKSwitcherAddress } from "./kswitcherAddresses";
 import { Message } from "./Message";
 import type { Provider } from "./preferences";
 import { removeSavedConnection, saveRemoteConnection, saveSmbLocation } from "./savedConnections";
@@ -18,11 +19,11 @@ export const connectionCommands = {
   remote: ["addRemoteProfile", "editRemoteProfile"],
 } as const;
 
-export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeDirectory, onSaved, onClose }: {
+export function SavedConnectionDialog({ source, profile, remoteProvider, kswitcherDirectory, onSaved, onClose }: {
   source: ConnectionSource;
   profile?: SavedConnection;
   remoteProvider: Provider;
-  bridgeDirectory: string;
+  kswitcherDirectory: string;
   onSaved: (kind: SavedConnection["kind"], id: string) => void;
   onClose: () => void;
 }) {
@@ -49,14 +50,14 @@ export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeD
     );
   }
   return <LocationConnectionDialog source={source} profile={profile} remoteProvider={remoteProvider}
-    bridgeDirectory={bridgeDirectory} onSaved={onSaved} onClose={onClose} />;
+    kswitcherDirectory={kswitcherDirectory} onSaved={onSaved} onClose={onClose} />;
 }
 
-function LocationConnectionDialog({ source, profile, remoteProvider, bridgeDirectory, onSaved, onClose }: {
+function LocationConnectionDialog({ source, profile, remoteProvider, kswitcherDirectory, onSaved, onClose }: {
   source: "smb" | "remote";
   profile?: SavedConnection;
   remoteProvider: Provider;
-  bridgeDirectory: string;
+  kswitcherDirectory: string;
   onSaved: (kind: SavedConnection["kind"], id: string) => void;
   onClose: () => void;
 }) {
@@ -66,20 +67,24 @@ function LocationConnectionDialog({ source, profile, remoteProvider, bridgeDirec
   const paired = source === "remote" && provider === "kswitcher";
   const [label, setLabel] = useState(profile?.label ?? "");
   const [value, setValue] = useState(smb?.path ?? (remote?.kind === "kswitcher" ? remote.peer : ""));
+  const [host, setHost] = useState(() => kswitcherAddress(remote?.kind === "kswitcher" ? remote.peer : ""));
   const [peers, setPeers] = useState<KSwitcherPeer[]>([]);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!paired || !bridgeDirectory) return;
+    if (!paired) return;
     let current = true;
-    void api.kswitcherPeers(bridgeDirectory).then((result) => {
+    void api.kswitcherPeers(kswitcherDirectory).then((result) => {
       if (!current) return;
       setPeers(result);
-      setValue((previous) => previous || result[0]?.id || "");
+      if (!profile && result[0]) {
+        setValue(result[0].id);
+        setHost(kswitcherAddress(result[0].id));
+      }
     }).catch((failure: unknown) => { if (current) setError(describeError(failure)); });
     return () => { current = false; };
-  }, [paired, bridgeDirectory]);
+  }, [paired, kswitcherDirectory, profile]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -89,7 +94,11 @@ function LocationConnectionDialog({ source, profile, remoteProvider, bridgeDirec
     setWorking(true);
     try {
       if (source === "smb") onSaved("smb", saveSmbLocation(name, value, smb));
-      else onSaved(provider, await saveRemoteConnection(name, provider, value.trim(), remote));
+      else {
+        const id = await saveRemoteConnection(name, provider, value.trim(), remote);
+        if (paired) rememberKSwitcherAddress(value, host);
+        onSaved(provider, id);
+      }
     } catch (failure) {
       setError(describeError(failure));
     } finally {
@@ -107,12 +116,22 @@ function LocationConnectionDialog({ source, profile, remoteProvider, bridgeDirec
         </label>
         {source === "smb" ? <label className="field">{t("SMB server or share")}
           <HistoryField historyKey="smb-share" required value={value} onValueChange={setValue} />
-        </label> : paired ? <label className="field">{t("Paired machine")}
-          <select value={value} onChange={(event) => setValue(event.target.value)} required>
-            {!peers.some(({ id }) => id === value) && <option value={value}>{value}</option>}
-            {peers.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
-          </select>
-        </label> : <label className="field">{t("Server invitation")}
+        </label> : paired ? <>
+          <label className="field">{t("Paired machine")}
+            <select value={value} onChange={(event) => {
+              const id = event.target.value;
+              setValue(id);
+              setHost(kswitcherAddress(id));
+            }} required>
+              {!peers.some(({ id }) => id === value) && <option value={value}>{value}</option>}
+              {peers.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+          <label className="field">{t("Computer name or IPv4 address")}
+            <input spellCheck={false} value={host} placeholder={peers.find(({ id }) => id === value)?.name}
+              onChange={(event) => setHost(event.target.value)} />
+          </label>
+        </> : <label className="field">{t("Server invitation")}
           <input type="password" autoComplete="off" spellCheck={false} value={value} required={!remote}
             placeholder={t(remote ? "Keep saved invitation" : "Paste the invitation from the remote machine")}
             onChange={(event) => setValue(event.target.value)} />

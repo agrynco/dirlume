@@ -269,7 +269,7 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 To share directly from the desktop app, open **Connect → Share a folder**. Choose a local folder and the IP address of the network interface the other computer can reach. Select **Start sharing**, then **Copy invitation**. On the other computer, activate either file pane and paste the invitation into **Connect**. You can also save the invitation in that pane’s **Remote machine** list. Guests can browse and download over TLS. The host can revoke the invitation and end access with **Stop sharing** or by exiting Dirlume.
 
-**KSwitcher** provides Windows access to drives and files on paired computers. To browse inside a Dirlume pane, use a build of `KSwitcher.Files.exe` that includes Dirlume Bridge. In **Options → Remote connection**, choose **KSwitcher (Windows)** and enter the installation directory. KSwitcher must be running on both computers, and the remote file service must be reachable. With an older installation, the connection dialog can launch KSwitcher Files.
+**KSwitcher** provides Windows access to drives and files on paired computers. Pair the computers in KSwitcher, then choose **KSwitcher (Windows)** under **Options → Remote connection**. Dirlume reads the pairing for your Windows account and connects directly to the remote KSwitcher file service. Choose a paired computer in **Connect**. Dirlume tries its computer name by default. Enter its IPv4 address if the name does not resolve. For a portable installation, set the KSwitcher installation folder in Options if Dirlume cannot locate the pairing data.
 
 ## MCP server
 

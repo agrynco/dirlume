@@ -791,6 +791,7 @@ enum TransferSource {
     Kswitcher {
         directory: String,
         peer: String,
+        host: Option<String>,
         path: String,
         name: String,
     },
@@ -1175,10 +1176,18 @@ async fn transfer_item(
             TransferSource::Kswitcher {
                 directory,
                 peer,
+                host,
                 path,
                 ..
             } => {
-                kswitcher::download(&directory, &peer, &path, target)?;
+                kswitcher::download(
+                    &directory,
+                    &peer,
+                    &path,
+                    host.as_deref(),
+                    target,
+                    &mut |path, bytes, total| progress(path, bytes, Some(total)),
+                )?;
             }
         }
         Ok(TransferOutcome::Completed)
@@ -2390,16 +2399,6 @@ async fn save_text_as(path: String, encoding: Encoding, text: String) -> Result<
 }
 
 #[tauri::command]
-async fn open_kswitcher(directory: String) -> Result<()> {
-    blocking(move || kswitcher::launch(&directory)).await
-}
-
-#[tauri::command]
-async fn has_kswitcher_bridge(directory: String) -> Result<bool> {
-    blocking(move || kswitcher::available(&directory)).await
-}
-
-#[tauri::command]
 async fn kswitcher_peers(directory: String) -> Result<Vec<kswitcher::Peer>> {
     blocking(move || kswitcher::peers(&directory)).await
 }
@@ -2409,8 +2408,9 @@ async fn list_kswitcher(
     directory: String,
     peer: String,
     path: String,
+    host: Option<String>,
 ) -> Result<kswitcher::Listing> {
-    blocking(move || kswitcher::list(&directory, &peer, &path)).await
+    blocking(move || kswitcher::list(&directory, &peer, &path, host.as_deref())).await
 }
 
 pub fn run() {
@@ -2634,8 +2634,6 @@ pub fn run() {
         read_server_bytes,
         save_text,
         save_text_as,
-        open_kswitcher,
-        has_kswitcher_bridge,
         kswitcher_peers,
         list_kswitcher,
         begin_transfer,

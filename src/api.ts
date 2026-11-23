@@ -1,6 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
 import type { ImageTransform, Size } from "./imageCrop";
+import { kswitcherAddress } from "./kswitcherAddresses";
 
 export interface Entry extends Partial<PanelMetadata> {
   name: string;
@@ -545,11 +546,9 @@ export const api = {
   saveImageEdit: (id: string, target: string | null, edit: ImageTransform) =>
     invoke<void>("save_image_edit", { id, target, edit }),
   closeImageEdit: (id: string) => invoke<void>("close_image_edit", { id }),
-  openKSwitcher: (directory: string) => invoke<void>("open_kswitcher", { directory }),
-  hasKSwitcherBridge: (directory: string) => invoke<boolean>("has_kswitcher_bridge", { directory }),
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
-  listKSwitcher: (directory: string, peer: string, path: string) =>
-    invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path }),
+  listKSwitcher: (directory: string, peer: string, path: string, host = kswitcherAddress(peer)) =>
+    invoke<Listing & { parent: string | null }>("list_kswitcher", { directory, peer, path, host }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
   openTerminal: (session: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<boolean>("open_terminal", { request: { id: session.id, directory: session.path, promptToken, rows, cols,
@@ -582,7 +581,12 @@ export const api = {
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; multiple: boolean; moving: boolean;
     policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
-  }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
+  }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", {
+    id, output,
+    request: request.source.kind === "kswitcher"
+      ? { ...request, source: { ...request.source, host: kswitcherAddress(request.source.peer) } }
+      : request,
+  }),
 };
 
 export function placePath(place: Place) {
