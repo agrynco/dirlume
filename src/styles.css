@@ -908,6 +908,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   overflow-wrap: anywhere; background: var(--danger-bg); color: var(--danger);
 }
 .disk-information { overflow: hidden; }
+.workspace:has(.disk-information-left) :is(.space-analyzer-left, .environment-left, .quick-view-left),
+.workspace:has(.disk-information-right) :is(.space-analyzer-right, .environment-right, .quick-view-right) { display: none; }
 .disk-information:focus-visible { outline-offset: -3px; }
 .disk-information .pane-title svg { flex: none; width: 16px; height: 16px; }
 .disk-content { display: grid; align-content: start; gap: 14px; overflow: auto; padding: 14px; }

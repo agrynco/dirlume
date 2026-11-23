@@ -346,7 +346,8 @@ export const defaultBindings = Object.fromEntries<readonly string[]>(commandName
     command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" && command !== "quickView" &&
     !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
-  const alternate = mac && (command === "shrinkLeft" || command === "growLeft") ? commands[command].key : alternateDefaults[command]?.key;
+  const alternate = mac && (command === "shrinkLeft" || command === "growLeft" || command === "diskInformation")
+    ? commands[command].key : alternateDefaults[command]?.key;
   return [command, [key, alternate].filter((value): value is string => Boolean(value))];
 })) as Bindings;
 
