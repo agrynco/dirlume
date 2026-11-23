@@ -421,9 +421,29 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 
 .workspace { position: relative; display: grid; grid-template-columns: minmax(0, var(--left-pane-width, 50fr)) 10px minmax(0, var(--right-pane-width, 50fr)); padding: 8px 8px 6px; min-height: 0; }
 .workspace[hidden] { display: none; }
-#left-pane, .quick-view-left, .space-analyzer-left, .disk-information-left, .git-pane-left, .environment-left { grid-column: 1; grid-row: 1; }
-#right-pane, .quick-view-right, .space-analyzer-right, .disk-information-right, .git-pane-right, .environment-right { grid-column: 3; grid-row: 1; }
+#left-pane, .quick-view-left, .space-analyzer-left, .disk-information-left, .git-pane-left, .environment-left, .recent-left { grid-column: 1; grid-row: 1; }
+#right-pane, .quick-view-right, .space-analyzer-right, .disk-information-right, .git-pane-right, .environment-right, .recent-right { grid-column: 3; grid-row: 1; }
 .pane[inert] { visibility: hidden; }
+.recent-pane { min-width: 0; min-height: 0; overflow: hidden; }
+.recent-pane .pane-title { flex: 1; min-width: 0; }
+.recent-pane .pane-title svg { width: 16px; height: 16px; flex: none; }
+.recent-filter { padding: 4px 6px; }
+.recent-filter input { width: 100%; min-width: 0; }
+.recent-list { min-height: 0; flex: 1; overflow: auto; }
+.recent-list:empty { flex: none; }
+.recent-pane > .pane-empty { flex: 1; }
+.recent-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
+  gap: 1px 6px; padding: 4px 6px; border-bottom: 1px solid var(--line); cursor: default;
+}
+.recent-row > :is(strong, small, .recent-path) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-row svg { width: 15px; height: 15px; color: var(--panel-muted); }
+.recent-row small, .recent-path { color: var(--panel-muted); }
+.recent-path { grid-column: 2 / -1; font-family: var(--panel-font); }
+.recent-row:hover { background: var(--hover); }
+.recent-row[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.recent-row[aria-selected="true"] :is(svg, small, .recent-path) { color: inherit; }
+.recent-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 6px; border-top: 1px solid var(--line); }
 .quick-view { overflow: hidden; }
 .quick-view .pane-heading { min-height: 32px; }
 .quick-view .pane-title > svg { width: 16px; height: 16px; flex: none; }

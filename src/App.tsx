@@ -21,7 +21,7 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
-import { smbLocation, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
+import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { canAnalyze, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
 import { useFilePaneTree, usePaneFolderSizes, usePaneTreeRevision } from "./filePaneTree";
@@ -47,6 +47,9 @@ import { AboutDialog, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { PaneSources, type PaneSource } from "./PaneSources";
+import { RecentLocationsPane } from "./RecentLocationsPane";
+import { persistRecentLocations, readRecentLocations, recentLocation, recentLocationKey, recentLocationLimit, type RecentLocation } from "./recentLocations";
+import { connectionEntries, readRemoteProfiles } from "./savedConnections";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { SearchDialog } from "./SearchDialog";
@@ -101,6 +104,13 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
 }
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
+type SavedConnectionTarget = Exclude<SavedConnection, { kind: "ftp" | "ssh" }> |
+  { kind: "ftp" | "ssh"; id: string; label: string };
+type ConnectionOpenOptions = {
+  approvals?: readonly SshHostVerification[];
+  segments?: string[];
+  fromRecent?: boolean;
+};
 type RenameLocation = Extract<Place, { kind: "local" | "ftp" }>;
 type RowRename = { side: Side; place: RenameLocation; name: string; treeKey?: string };
 type AnalysisPane = {
@@ -132,7 +142,7 @@ type Modal =
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
-  | { kind: "verifyConnection"; side: Side; profile: SavedConnection; verification: SshHostVerification; approvals: readonly SshHostVerification[] }
+  | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; side: Side; transfer: Transfer }
   | { kind: "deletion"; deletion: Deletion }
@@ -244,7 +254,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [swappedPanes, setSwappedPanes] = useState(false);
   const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
   const [environmentRevision, setEnvironmentRevision] = useState(0);
+  const [recentPanes, setRecentPanes] = useState({ left: false, right: false });
+  const [recentLocations, setRecentLocations] = useState(readRecentLocations);
   const active = quickViewSource ?? focusedSide;
+  const recentActive = recentPanes[active];
   const diskActive = diskPanes[active] !== null;
   const diskSide = diskPanes.left ? "left" : diskPanes.right ? "right" : null;
   const analysis = diskActive ? null : analysisPanes[active];
@@ -502,6 +515,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setPanes((previous) => ({ ...previous, [side]: updater(previous[side]) }));
   }, []);
 
+  const rememberRecentLocation = useCallback((place: Place) => {
+    const entry = recentLocation(place);
+    if (!entry) return;
+    const key = recentLocationKey(entry);
+    setRecentLocations((items) => [entry, ...items.filter((item) => recentLocationKey(item) !== key)].slice(0, recentLocationLimit));
+  }, []);
+
+  useEffect(() => {
+    try { persistRecentLocations(recentLocations); }
+    catch (error) { reportFrontendError("recent_locations", error); }
+  }, [recentLocations]);
+
   const cancelScan = useCallback((side: Side) => {
     const previous = scans.current[side];
     if (previous === null) return false;
@@ -538,7 +563,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return cancelledLoading || cancelledMeasurement;
   }
 
-  const load = useCallback(async (side: Side, place: Place, action: ListingAction | "background" = "push", reveal?: string, sudoPassword?: string) => {
+  const load = useCallback(async (side: Side, place: Place, action: ListingAction | "background" | "startup" = "push", reveal?: string, sudoPassword?: string) => {
     const background = action === "background";
     const elevated = sudoPassword !== undefined;
     const dialog = activeModal.current;
@@ -558,10 +583,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("Item no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         if (background && pane.place !== place) return pane;
-        const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
+        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action), sudoListing };
         if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
       });
+      if (action === "push" || typeof action === "number") rememberRecentLocation(openedPlace);
       return true;
     };
     try {
@@ -581,7 +607,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           ...pane, loading: false, loadingPath: undefined, error: text,
           elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined,
           deniedSshListing: elevated ? pane.deniedSshListing : place.kind === "ssh" && isPermissionError(text)
-            ? { place, action: background ? "refresh" : action, reveal } : undefined,
+            ? { place, action: background ? "refresh" : action === "startup" ? "push" : action, reveal } : undefined,
         });
       }
       if (elevated) throw error;
@@ -589,7 +615,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     } finally {
       if (request.current[side] === ticket) delete pendingListings.current[side];
     }
-  }, [beginListing, cancelScan, updatePane]);
+  }, [beginListing, cancelScan, rememberRecentLocation, updatePane]);
 
   useEffect(() => {
     if (sshUploadRefresh === null) return;
@@ -653,10 +679,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           }
           const local = requestedFolder ?? saved?.place;
           let ticket = request.current[side] + 1;
-          if (!local || !await load(side, local, requestedFolder ? "push" : "refresh", elevationTarget?.selected ?? undefined)) {
+          if (!local || !await load(side, local, requestedFolder ? "startup" : "refresh", elevationTarget?.selected ?? undefined)) {
             if (cancelled || (local && request.current[side] !== ticket)) return;
             ticket = request.current[side] + 1;
-            await load(side, localPath(fallback));
+            await load(side, localPath(fallback), "startup");
           }
           if (savedFtp && failure && !cancelled && request.current[side] === ticket) {
             failedFtp.current[side] = savedFtp;
@@ -735,13 +761,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (!leftRemote && !rightRemote) return;
     const timer = window.setInterval(() => {
       for (const side of ["left", "right"] as const) {
-        if (showingGit || (side === "left" ? leftEnvironment || leftAnalyzing : rightEnvironment || rightAnalyzing)) continue;
+        if (showingGit || recentPanes[side] || (side === "left" ? leftEnvironment || leftAnalyzing : rightEnvironment || rightAnalyzing)) continue;
         const { place } = latest.current[side];
         if (place && place.kind !== "local" && place.kind !== "connections") void load(side, place, "background");
       }
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [leftRemote, rightRemote, load, leftAnalyzing, rightAnalyzing, showingGit, leftEnvironment, rightEnvironment]);
+  }, [leftRemote, rightRemote, load, leftAnalyzing, rightAnalyzing, showingGit, leftEnvironment, rightEnvironment, recentPanes]);
 
   useEffect(() => {
     persistPreferences(preferences);
@@ -936,11 +962,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       analysisHandles.current[side]?.focus();
       return;
     }
-    document.getElementById(side + (environmentPanels[side] ? "-environment" : "-files"))?.focus({ preventScroll: true });
+    document.getElementById(side + (environmentPanels[side] ? "-environment" : recentPanes[side] ? "-recent" : "-files"))?.focus({ preventScroll: true });
   }
 
   function paneCovered(side: Side) {
-    return !!gitView || environmentPanels[side] !== null || side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
+    return !!gitView || environmentPanels[side] !== null || recentPanes[side] || side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
   }
 
   function closeSourceMenu(restoreFocus: boolean) {
@@ -965,6 +991,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (environmentPanels[side]) setEnvironmentPanels((panels) => ({ ...panels, [side]: null }));
     if (analysisPanes[side]) setAnalysisPanes((current) => ({ ...current, [side]: null }));
     if (diskPanes[side]) setDiskPanes((current) => ({ ...current, [side]: null }));
+    if (recentPanes[side]) setRecentPanes((current) => ({ ...current, [side]: false }));
     if (side === previewSide) setQuickViewSource(null);
   }
 
@@ -979,13 +1006,21 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   function openPaneSource(side: Side, source: PaneSource) {
     closeSourceMenu(false);
     revealWorkspaceSide(side);
+    if (source === "recent") {
+      showProcesses(side, false);
+      cancelFolderOperation(side);
+      updatePane(side, (pane) => ({ ...pane, error: "" }));
+      setRecentPanes((current) => ({ ...current, [side]: true }));
+      setActive(side);
+      return;
+    }
     if (source === "processes") showProcesses(side, true);
     else if (typeof source === "string") openConnections(side, source);
     else if ("drive" in source) {
       showProcesses(side, false);
       const { host, drive } = source;
       if (host.kind === "dirlume") {
-        void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential, lan: true }, [], [drive]);
+        void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential, lan: true }, { segments: [drive] });
       } else {
         void load(side, { kind: "kswitcher", directory: "", peer: host.id,
           address: host.name, path: drive + "\\", parent: null });
@@ -1088,7 +1123,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if ((!noControl && (!inTitlebar || !hasModifier)) ||
         !shortcut || !commandNames.some((command) => bindingMatches(shortcuts[command], shortcut))) return;
     const selector = activeDocument !== null ? ".text-window:not([hidden])" : panelsHidden ? ".terminal-card:not([hidden])" :
-      gitView ? ".git-pane" : environmentActive ? "#" + active + "-environment" : `#${active}-files`;
+      gitView ? ".git-pane" : environmentActive ? "#" + active + "-environment" : recentActive ? `#${active}-recent` : `#${active}-files`;
     const target = document.querySelector(selector);
     if (target && !target.dispatchEvent(new globalThis.KeyboardEvent("keydown", {
       key: event.key, code: event.code, altKey: event.altKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, metaKey: event.metaKey,
@@ -1238,6 +1273,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (previous.kind === "ssh") dropTerminal("ssh:" + previous.id);
     }
     connected.current[side] = place.kind === "server" || isFileServer(place) ? place : null;
+    rememberRecentLocation(place);
     setActive(side);
     updatePane(side, (pane) => {
       if (place.kind === "smbRoot" && pane.place?.kind === "smbRoot" && pane.place.path === place.path) {
@@ -1330,6 +1366,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       invalidateListing(side);
     }
     setQuickViewSource(null);
+    if (mode) setRecentPanes((current) => ({ ...current, [side]: false }));
     setEnvironmentPanels((panels) => ({ ...panels, [side]: mode }));
     setActive(side);
     if (!mode) focusRevealedSide(side);
@@ -1434,8 +1471,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  async function openSavedConnection(side: Side, profile: SavedConnection, approvals: readonly SshHostVerification[] = [],
-    serverSegments: string[] = []) {
+  async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
+    const { approvals = [], segments, fromRecent } = options;
     const location = panes[side].place;
     const { ticket } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
@@ -1445,22 +1482,23 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         return false;
       }
       routeLocation(side, place, listing);
-      requestAnimationFrame(() => focus(side));
+      if (fromRecent) closeRecent(side, false);
+      else requestAnimationFrame(() => focus(side));
       return true;
     }
     try {
       switch (profile.kind) {
         case "ftp": {
-          const { place, listing } = await connectFtpLocation(profile.id);
+          const { place, listing } = await connectFtpLocation(profile.id, segments);
           complete(place, listing);
           break;
         }
         case "ssh": {
-          const result = await api.connectSsh(profile.id, approvals);
+          const result = await api.connectSsh(profile.id, approvals, segments);
           if (result.kind === "verifyHost") {
             if (request.current[side] !== ticket) break;
             if (activeModal.current) throw new Error(t("Open this connection again to verify its host key."));
-            const verification = { kind: "verifyConnection", side, profile, verification: result.verification, approvals } as const;
+            const verification = { kind: "verifyConnection", side, profile, verification: result.verification, options } as const;
             activeModal.current = verification;
             setModal(verification);
           } else {
@@ -1487,9 +1525,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           break;
         }
         case "server": {
-          const { listing, ...connected } = await api.connectSavedServer(profile.credential, serverSegments);
-          const address = serverSegments.length ? profile.label : connected.address;
-          complete({ kind: "server", ...connected, address, segments: serverSegments, pairedComputer: profile.lan }, listing);
+          const { listing, ...connected } = await api.connectSavedServer(profile.credential, segments ?? []);
+          const address = profile.lan ? profile.label : connected.address;
+          complete({ kind: "server", ...connected, address, segments: segments ?? [], pairedComputer: profile.lan, profileId: profile.id }, listing);
           break;
         }
         case "kswitcher": {
@@ -1506,6 +1544,57 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         delete pendingListings.current[side];
         updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined }));
       }
+    }
+  }
+
+  function closeRecent(side: Side, cancelPending = true) {
+    if (cancelPending) cancelLoading(side);
+    setRecentPanes((current) => ({ ...current, [side]: false }));
+    focusRevealedSide(side);
+  }
+
+  async function openRecent(side: Side, location: RecentLocation) {
+    if (latest.current[side].loading) return;
+    if (location.kind === "smb") {
+      const parts = uncParts(location.path);
+      const path = parts.length ? "\\\\" + parts.join("\\") : location.path;
+      await openSavedConnection(side, { kind: "smb", id: path, label: location.source, path }, { fromRecent: true });
+      return;
+    }
+    if ("path" in location) {
+      const place: FileLocation = location.kind === "kswitcher" ? {
+        kind: "kswitcher", directory: preferences.kswitcher, peer: location.peer, address: location.source,
+        path: location.path, parent: null,
+      } : filesystemPlace(location.path);
+      if (await load(side, place)) closeRecent(side, false);
+      return;
+    }
+    if (location.kind === "server") {
+      const profile = readRemoteProfiles().find((profile) => profile.kind === "server" && profile.id === location.profileId);
+      if (!profile) {
+        updatePane(side, (pane) => ({ ...pane, error: t("This saved connection is missing. Add it in the pane sources or remove this recent location.") }));
+        return;
+      }
+      await openSavedConnection(side, profile, { segments: location.segments, fromRecent: true });
+    } else {
+      await openSavedConnection(side, { kind: location.kind, id: location.profileId, label: location.source },
+        { segments: location.segments, fromRecent: true });
+    }
+  }
+
+  async function editRecentConnection(side: Side, location: RecentLocation) {
+    if (!("profileId" in location)) return;
+    const source = location.kind === "server" ? "remote" : location.kind;
+    const stillOpen = () => document.getElementById(side + "-recent") && !activeModal.current;
+    try {
+      const entries = await connectionEntries(source);
+      const profile = entries.find(({ connection }) => connection?.kind === location.kind && connection.id === location.profileId)?.connection;
+      if (!stillOpen()) return;
+      if (!profile) {
+        updatePane(side, (pane) => ({ ...pane, error: t("This saved connection is missing. Add it in the pane sources or remove this recent location.") }));
+      } else editConnection(side, source, profile);
+    } catch (error) {
+      if (stillOpen()) updatePane(side, (pane) => ({ ...pane, error: describeError(error) }));
     }
   }
 
@@ -1581,6 +1670,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   async function openFolderShortcut(side: Side, entry: FolderShortcut) {
+    if (recentPanes[side]) setRecentPanes((current) => ({ ...current, [side]: false }));
     if (paneCovered(side)) {
       revealWorkspaceSide(side);
       focusRevealedSide(side);
@@ -2142,7 +2232,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       latest.current[side].selected === pane.selected;
     const selected = segments ? await trees[side].reveal(pane, segments, current) : null;
     if (!current()) return;
-    if (selected !== null) updatePane(side, (state) => ({ ...state, selected, revealedHidden: selected }));
+    if (selected !== null) {
+      updatePane(side, (state) => ({ ...state, selected, revealedHidden: selected }));
+      rememberRecentLocation(destination);
+    }
     else if (!await (focusTree ? load(side, destination) : loadTerminalFolder(side, destination))) return;
     if (focusTree) requestAnimationFrame(() => focus(side));
   }
@@ -2384,6 +2477,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setPanes(swapSides);
     setProcessPanels(swapSides);
     setEnvironmentPanels(swapSides);
+    setRecentPanes(swapSides);
     setQuickViewSource((side) => side === null ? null : opposite(side));
     setAnalysisPanes(swapSides);
     setDiskPanes(swapSides);
@@ -2393,7 +2487,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     selectionAnchor.current = swapSides(selectionAnchor.current);
     scans.current = swapSides(scans.current);
     setActive(opposite(focusedSide));
-    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : "-files");
+    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : recentActive ? "-recent" : "-files");
     requestAnimationFrame(() => {
       if (movedFocus?.isConnected) movedFocus.focus({ preventScroll: true });
       else if (!diskActive && analysisHandles.current[next]) analysisHandles.current[next]?.focus();
@@ -2429,7 +2523,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (panesAvailable && !gitView && !showingAnalysis) showEnvironment(active, environmentPanels[active] ? null : "root");
       return;
     }
-    if (environmentActive && !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
+    if ((environmentActive || recentActive) && !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
     if (command === "gitView") {
       if (!canToggleGitView) return;
       if (gitView) closeGitView();
@@ -2737,10 +2831,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }
       return;
     }
-    if (environmentActive) {
-      const fromEnvironmentList = target.id === active + "-environment";
+    if (environmentActive || recentActive) {
+      const fromList = target.id === active + (recentActive ? "-recent" : "-environment");
+      const tabThroughRecent = recentActive && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
       if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft"].includes(command) ||
-          command === "switchPane" && fromEnvironmentList)) {
+          command === "switchPane" && fromList && !tabThroughRecent)) {
         event.preventDefault();
         if (!event.repeat) perform(command);
       }
@@ -2826,10 +2921,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
-  const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !processPanels[active] && !pane.loading;
-  const canToggleQuickView = panesAvailable && !showingEnvironment && !gitView && !showingAnalysis &&
+  const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !recentActive && !processPanels[active] && !pane.loading;
+  const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
-  const canToggleGitView = panesAvailable && !showingEnvironment && (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
+  const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
+    (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
   const previewFile = previewSide && filesAvailable ? currentFile : null;
   const previewName = currentItem?.entry.name ?? current?.name;
   const previewKey = previewFile ? JSON.stringify([
@@ -2932,7 +3028,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
-  const showFileActions = !showingGit && !environmentActive && activeDocument === null;
+  const showFileActions = !showingGit && !environmentActive && !recentActive && activeDocument === null;
   const commandLineVisible = showFileActions && !panelsHidden;
   const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
@@ -3069,6 +3165,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             onFilter={(filter) => updatePane(side, (pane) => ({ ...pane, filter }))} onSort={(column) => sort(side, column, true)}
             sourceMenu={paneSources(side)} fontSize={preferences.viewFontSizes[side]} />
         ))}
+        {(["left", "right"] as const).map((side) => recentPanes[side] &&
+          <RecentLocationsPane key={swappedPanes ? opposite(side) : side} side={side} active={active === side}
+            locations={recentLocations} sourceMenu={paneSources(side)} error={panes[side].error} loading={panes[side].loading}
+            onFocus={() => setActive(side)} onClose={() => closeRecent(side)} onOpen={(location) => void openRecent(side, location)}
+            onRemove={(location) => setRecentLocations((items) => items.filter((item) => recentLocationKey(item) !== recentLocationKey(location)))}
+            onClear={() => setRecentLocations([])} onEdit={(location) => void editRecentConnection(side, location)} />)}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
           return mode && <Suspense key={swappedPanes ? opposite(side) : side} fallback={<section className={"pane environment-pane environment-" + side}>
@@ -3507,7 +3609,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}
         onCancel={() => connectionDialogsClosed(modal.side)} onApprove={() => {
           connectionDialogsClosed(modal.side);
-          void openSavedConnection(modal.side, modal.profile, [...modal.approvals, modal.verification]);
+          void openSavedConnection(modal.side, modal.profile, { ...modal.options,
+            approvals: [...(modal.options.approvals ?? []), modal.verification] });
         }} />}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap} onClose={() => setModal(null)} />}

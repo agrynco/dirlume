@@ -114,7 +114,7 @@ export interface ComputerSharing {
 export type FileLocation =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "smbRoot"; path: string }
-  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean }
+  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; address: string }
   | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; catalogSource?: "ftp" }
