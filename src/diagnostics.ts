@@ -9,6 +9,14 @@ type FrontendReport = { origin: FrontendOrigin; source: FrontendSource | null };
 
 const reported = new WeakSet<object>();
 
+export class KSwitcherUnavailableError extends Error {}
+
+const kswitcherAvailabilityMessages = new Map([
+  ["Start KSwitcher with support for trusted LAN clients.", "Start KSwitcher with support for trusted LAN clients."],
+  ["The paired computer is offline or file browsing is unavailable.",
+    "The paired computer is offline or file browsing is unavailable. Check KSwitcher on the other computer and refresh."],
+]);
+
 function send(operation: string, code: ErrorCode, osCode?: number, detail?: string, frontend?: FrontendReport) {
   if (!isTauri()) return;
   void invoke("report_diagnostic", { operation, code, osCode, detail, frontend }).catch(() => {});
@@ -73,12 +81,21 @@ export async function invokeWithDiagnostics<T>(command: string, args?: InvokeArg
       ((command === "read_text" && "readCause" in failure) || (command === "check_for_update" && "updateCause" in failure)) &&
       "message" in failure && typeof failure.message === "string" ? failure.message : undefined;
     const error = failure instanceof Error ? failure : new Error(reportedMessage ?? String(failure));
+    // The resident service uses one response for an offline peer and unavailable file browsing.
+    const unavailable = command === "list_kswitcher" ? kswitcherAvailabilityMessages.get(error.message) : undefined;
+    if (unavailable) {
+      const availability = new KSwitcherUnavailableError(unavailable);
+      reported.add(availability);
+      throw availability;
+    }
     reported.add(error);
     // Structured native diagnostics and panic reports are written before the rejection reaches JavaScript.
     if (reportedMessage === undefined && error.message !== "An internal operation panicked.") {
       const osCode = /\(os error (\d{1,5})\)$/.exec(error.message)?.[1];
+      const deniedKSwitcher = command === "list_kswitcher" &&
+        error.message === "Authorize this executable in KSwitcher → Computers → Trusted clients.";
       const code = osCode ? "os_error"
-        : /permission denied|access (?:is )?denied/i.test(error.message) ? "permission_denied"
+        : deniedKSwitcher || /permission denied|access (?:is )?denied/i.test(error.message) ? "permission_denied"
         : /not found|no such file/i.test(error.message) ? "not_found"
         : /timed? ?out|deadline exceeded/i.test(error.message) ? "timeout" : "native_error";
       send(command, code, osCode ? Number(osCode) : undefined, detail);
