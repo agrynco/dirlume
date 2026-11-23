@@ -52,7 +52,11 @@ export async function testDesktopShare(host, root, guest = host) {
   await right.getByRole("option", { name: /^shared\.txt/ }).click();
   await right.press("F3");
   await guest.getByText("Shared from the desktop", { exact: true }).waitFor();
-  await guest.keyboard.press("Escape");
+  const viewer = guest.locator(".text-window:not([hidden])");
+  const viewerMenu = viewer.getByRole("menubar", { name: "Document menu" });
+  await viewerMenu.getByRole("menuitem", { name: "File", exact: true }).click();
+  assert.equal(await viewerMenu.getByRole("menuitem", { name: "Open in Editor", exact: true }).getAttribute("aria-disabled"), "true");
+  await button(viewer, "Close document").click();
 
   await button(await connectDialog(host), "Share a folder").click();
   await button(dialog, "Stop sharing").click();
