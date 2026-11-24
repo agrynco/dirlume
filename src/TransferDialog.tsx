@@ -16,7 +16,7 @@ import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEst
 export interface Transfer {
   kind: "copy" | "move";
   source: FilePlace;
-  items: { place: FilePlace; entry: Entry }[];
+  items: { place: FilePlace; entry: Entry; searchPath?: string }[];
   target: string;
   remoteDestination?: FtpPlace | SshPlace;
   archiveDestination?: ArchivePlace;
@@ -61,7 +61,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   side: Side;
   showHidden: boolean;
   onClose: () => void;
-  onFinished: (success: boolean) => void;
+  onFinished: (success: boolean, movedPaths: readonly string[]) => void;
 }) {
   const [destination, setDestination] = useState(transfer.target);
   const [multipleDestinations, setMultipleDestinations] = useState(false);
@@ -207,6 +207,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     let finished = false;
     let initialized = previousSession !== null;
     let skippedItems = skipped;
+    const movedPaths: string[] = [];
     try {
       if (!initialized) {
         await api.beginTransfer(id);
@@ -251,8 +252,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           setBlocked(item);
           return;
         }
-        if (result.kind === "completed") setCompleted((count) => count + 1);
-        else setSkipped(++skippedItems);
+        if (result.kind === "completed") {
+          if (moving && item.searchPath) movedPaths.push(item.searchPath);
+          setCompleted((count) => count + 1);
+        } else setSkipped(++skippedItems);
         estimate.current?.finishItem();
         reportedBytes.current.clear();
         setProcessed(index + 1);
@@ -277,7 +280,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       running.current = null;
       setConflict(null);
       const success = finished && !cancelled.current && skippedItems === 0;
-      onFinished(success);
+      onFinished(success, movedPaths);
       if (success) onClose();
       else setPhase("done");
     }
