@@ -11,6 +11,7 @@ import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
+import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEstimate";
 
 export interface Transfer {
   kind: "copy" | "move";
@@ -34,6 +35,14 @@ function remoteDestinationLabel(place: FtpPlace | SshPlace) {
   const address = alias && endpoint.port && alias !== endpoint.hostname && alias !== endpoint.host
     ? `${alias} (${endpoint.host})` : endpoint.port ? endpoint.host : alias || endpoint.host;
   return `${protocol} · ${address}`;
+}
+
+function estimateLabel(seconds: number | null) {
+  if (seconds === null) return t("Estimating time remaining…");
+  const unit = seconds >= 3_600 ? "hour" : seconds >= 60 ? "minute" : "second";
+  const value = unit === "hour" ? Math.ceil(seconds / 360) / 10 : unit === "minute" ? Math.ceil(seconds / 60) : seconds;
+  const duration = new Intl.NumberFormat(locale(), { style: "unit", unit, unitDisplay: "long" }).format(value);
+  return t("About {0} remaining", duration);
 }
 
 export function itemSource(place: FilePlace, item: Entry): TransferSource {
@@ -77,11 +86,13 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [remember, setRemember] = useState(false);
   const [answering, setAnswering] = useState<TransferConflict | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [estimatedTime, setEstimatedTime] = useState<string>();
   const running = useRef<number | null>(null);
   const session = useRef<number | null>(null);
   const cancelled = useRef(false);
   const failedDecision = useRef(false);
   const reportedBytes = useRef(new Map<string, number>());
+  const estimate = useRef<TransferEstimate | null>(null);
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
   const archiveTarget = transfer.archiveDestination;
@@ -100,10 +111,31 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
     : destination;
   const lockingMove = phase === "done" && windowsClient && blocked?.place.kind === "local" && moving && isLockError(error);
+  const visibleEstimate = phase === "working" && !conflict ? estimatedTime : undefined;
 
   useEffect(() => {
     if (phase === "done") action.current?.focus();
   }, [phase]);
+
+  useEffect(() => {
+    const current = estimate.current;
+    if (phase !== "working" || !current) return;
+    current.setPaused(conflict !== null, performance.now());
+    if (conflict) {
+      setEstimatedTime(undefined);
+      return;
+    }
+    let timer = 0;
+    const update = () => {
+      if (current !== estimate.current || cancelled.current) return;
+      const now = performance.now();
+      const elapsed = current.elapsed(now);
+      if (elapsed >= estimateDelay) setEstimatedTime(estimateLabel(current.remainingSeconds(now)));
+      timer = window.setTimeout(update, elapsed < estimateDelay ? estimateDelay - elapsed : estimateInterval);
+    };
+    update();
+    return () => window.clearTimeout(timer);
+  }, [phase, conflict]);
 
   useEffect(() => () => {
     const id = session.current;
@@ -134,6 +166,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     }
     cancelled.current = true;
     setCanceling(true);
+    setEstimatedTime(undefined);
     setConflict(null);
     void api.cancelTransfer(running.current).catch(() => {});
   }
@@ -146,6 +179,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         setConflict(event.conflict);
         return;
       }
+      estimate.current?.progress(event, performance.now());
       const path = event.path ?? event.file;
       const previous = reportedBytes.current.get(path) ?? 0;
       if (event.bytes > previous) {
@@ -163,6 +197,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     session.current = id;
     running.current = id;
     failedDecision.current = false;
+    const jobs = archiveTarget ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+    estimate.current = new TransferEstimate(archiveTarget ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
+    setEstimatedTime(undefined);
     setPhase("working");
     setError("");
     setBlocked(undefined);
@@ -190,7 +227,6 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         setProcessed(result.length);
         reportedBytes.current.clear();
       }
-      const jobs = archiveTarget ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
       for (let index = processed; index < jobs.length; index++) {
         if (cancelled.current || session.current !== id) break;
         const { destination, item } = jobs[index];
@@ -217,6 +253,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         }
         if (result.kind === "completed") setCompleted((count) => count + 1);
         else setSkipped(++skippedItems);
+        estimate.current?.finishItem();
         reportedBytes.current.clear();
         setProcessed(index + 1);
       }
@@ -227,6 +264,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         setBlocked(attempted);
       }
     } finally {
+      estimate.current = null;
+      setEstimatedTime(undefined);
       if (session.current !== id) {
         await api.finishTransfer(id).catch(() => {});
         return;
@@ -347,7 +386,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                   <span>{t("{0} / {1} items", processed, copies)}{skipped ? ` · ${t("{0} skipped", skipped)}` : ""}</span>
                   <span>{t("{0} transferred", formatSize(bytes))}</span>
                 </div>
-                <progress aria-label={t("Overall transfer progress")} max={copies} value={processed} />
+                <progress aria-label={t("Overall transfer progress")} aria-describedby={visibleEstimate ? "transfer-estimate" : undefined}
+                  max={copies} value={processed} />
+                {visibleEstimate && <div className="transfer-estimate" id="transfer-estimate">{visibleEstimate}</div>}
                 {phase === "done" && <p role="status">{t("{0} completed", completed)}{skipped ? `, ${t("{0} skipped", skipped)}` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
                 {lockingMove && <div className="dialog-actions">

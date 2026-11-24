@@ -1318,6 +1318,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .transfer-meter { display: flex; justify-content: space-between; gap: 12px; }
 .transfer-meter span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .transfer-meter span:last-child { flex: none; color: var(--muted); }
+.transfer-estimate { color: var(--muted); text-align: end; font-variant-numeric: tabular-nums; }
 .transfer-body progress { width: 100%; accent-color: var(--accent-fill); }
 .deletion-body { display: grid; gap: 12px; }
 .deletion-body p { margin: 0; }
