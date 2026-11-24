@@ -14,7 +14,7 @@ elif [[ $kind != directory && -n $provider ]]; then
     while IFS= read -r -d '' item; do
         printf 'N%s\0' "$item"
         found=true
-    done < <(/bin/bash --noprofile --norc -c "$provider" dirlume-completion "$point" "$line" "$@")
+    done < <(DIRLUME_REMOTE_BASH_COMPLETION=1 /bin/bash --noprofile --norc -c "$provider" dirlume-completion "$point" "$line" "$@")
     $found && exit 0
 fi
 

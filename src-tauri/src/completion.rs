@@ -769,10 +769,22 @@ mod tests {
     esac
 }
 complete -F _fixture_tool remote-only-tool
+_fixture_paths() {
+    if [[ $3 == --format ]]; then
+        COMPREPLY=(var)
+        return
+    fi
+    compopt -o filenames
+    mapfile -t COMPREPLY < <(compgen -f -- "$2")
+}
+complete -F _fixture_paths fixture-xz
 "#,
         )
         .unwrap();
         fs::write(remote.join("remote-file.txt"), []).unwrap();
+        fs::create_dir_all(remote.join("space dir/child")).unwrap();
+        fs::create_dir(remote.join("var")).unwrap();
+        fs::write(remote.join("space dir/regular file"), []).unwrap();
         fs::write(local.join("local-file.txt"), []).unwrap();
         let docker = r#"#!/bin/sh
 case "$*" in
@@ -859,6 +871,11 @@ esac
                 ("remote-only-tool report --sum", "--summary"),
                 ("ec", "echo"),
                 ("cat remote-", "remote-file.txt"),
+                ("fixture-xz ", "var/"),
+                ("fixture-xz ", "space dir/"),
+                ("fixture-xz 'space dir/'", "space dir/child/"),
+                ("fixture-xz 'space dir/'", "space dir/regular file"),
+                ("fixture-xz --format ", "var"),
                 ("docker ", "compose"),
                 ("docker co", "container"),
                 ("docker ps ", "--all"),
@@ -874,7 +891,11 @@ esac
                 let batch = complete_remote(
                     RemoteCompletionRequest {
                         line: line.into(),
-                        caret: line.len(),
+                        caret: if line.ends_with("/'") {
+                            line.len() - 1
+                        } else {
+                            line.len()
+                        },
                         directory: remote.to_string_lossy().into_owned(),
                         search_path: live.then(|| remote_path.clone()),
                         shell_environment: None,
@@ -899,6 +920,23 @@ esac
                     batch.matches.iter().any(|item| item.label == expected),
                     "remote {line}: missing {expected}"
                 );
+                if line.starts_with("fixture-xz") {
+                    let item = batch
+                        .matches
+                        .iter()
+                        .find(|item| item.label == expected)
+                        .unwrap();
+                    assert_eq!(item.directory, expected.ends_with('/'));
+                    let quoted = if expected.contains(' ') {
+                        format!("'{expected}'")
+                    } else {
+                        expected.to_owned()
+                    };
+                    assert_eq!(item.text, quoted);
+                    if line.ends_with("--format ") {
+                        assert!(!batch.matches.iter().any(|item| item.directory));
+                    }
+                }
             }
         }
     }
