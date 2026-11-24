@@ -40,8 +40,36 @@ COMPREPLY=()
 if [[ $spec =~ [[:space:]]-F[[:space:]]([[:alnum:]_][[:alnum:]_.:-]*) ]]; then
     function_name=${BASH_REMATCH[1]}
     if declare -F "$function_name" >/dev/null; then
+        dirlume_filenames=false
+        if [[ ${DIRLUME_REMOTE_BASH_COMPLETION:-} == 1 ]]; then
+            [[ $spec == *' -o filenames '* ]] && dirlume_filenames=true
+            # The completion function runs without Readline's active compspec.
+            compopt() {
+                local filenames=$dirlume_filenames
+                local -a args=("$@")
+                while (( $# >= 2 )); do
+                    case $1 in -o|+o) ;; *) break ;; esac
+                    if [[ $2 == filenames ]]; then
+                        if [[ $1 == -o ]]; then filenames=true; else filenames=false; fi
+                    fi
+                    shift 2
+                done
+                if (( $# )); then
+                    builtin compopt "${args[@]}"
+                else
+                    dirlume_filenames=$filenames
+                fi
+            }
+        fi
         "$function_name" "$program" "$current" "$previous" >/dev/null 2>&1
-        if (( ${#COMPREPLY[@]} )); then printf '%s\0' "${COMPREPLY[@]:0:80}"; fi
+        for choice in "${COMPREPLY[@]:0:80}"; do
+            if $dirlume_filenames && [[ -n $choice ]]; then
+                path=$choice
+                if [[ $path == '~/'* ]]; then path=$HOME/${path#\~/}; fi
+                if [[ -d $path ]]; then choice="${choice%/}/"; fi
+            fi
+            printf '%s\0' "$choice"
+        done
     fi
 fi
 

@@ -66,6 +66,17 @@ export async function testSmbNavigation() {
               if (args.request.line.startsWith("remote-fi")) {
                 return { index: 0, length: args.request.line.length, matches: [{ label: "remote-fixture", text: "remote-fixture", directory: false }] };
               }
+              if (args.request.line === "xz ") {
+                return { index: 3, length: 0, matches: [
+                  { label: "var/", text: "var/", directory: true },
+                  { label: "space dir/", text: "'space dir/'", directory: true },
+                ] };
+              }
+              if (args.request.line === "xz var/" || args.request.line === "xz 'space dir/'") {
+                const path = args.request.line.includes("space") ? "space dir/" : "var/";
+                return { index: 3, length: args.request.line.length - 3,
+                  matches: [{ label: path + "child", text: path + "child", directory: false }] };
+              }
               if (args.request.line === "docker compose logs --tail 20 we" && args.request.shellEnvironment?.COMPOSE_FILE === "remote.yaml" &&
                   args.request.shellEnvironment?.DOCKER_CONTEXT === "remote-engine") {
                 return { index: args.request.caret - 2, length: 2, matches: [{ label: "web-remote", text: "web-remote", directory: false }], exclusive: true };
@@ -219,6 +230,18 @@ export async function testSmbNavigation() {
     await sshInput.pressSequentially("private-input");
     await suggestions.waitFor({ state: "hidden" });
     assert.equal(await page.evaluate(() => window.lastSshCompletion.line), "remote-fi");
+    for (const [label, next, useMouse] of [["var/", "xz var/", false], ["space dir/", "xz 'space dir/'", true]]) {
+      await page.evaluate(() => window.sshPrompt("/var/log"));
+      await sshInput.pressSequentially("xz ");
+      const directory = suggestions.getByRole("option", { name: label, exact: true });
+      await directory.waitFor();
+      if (useMouse) await directory.click();
+      else await sshInput.press("Tab");
+      await suggestions.getByRole("option", { name: label + "child", exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => window.lastSshCompletion.line), next);
+      assert.equal(await page.evaluate(() => window.lastSshCompletion.caret), next.length - Number(useMouse));
+      await sshInput.press("Control+c");
+    }
     await page.evaluate(() => window.sshPrompt("/var/log", "COMPOSE_FILE=remote.yaml\0DOCKER_CONTEXT=remote-engine\0COMPOSE_PROFILES\0"));
     await sshInput.pressSequentially("docker compose logs --tail 20 we");
     await suggestions.getByRole("option", { name: "web-remote", exact: true }).waitFor();

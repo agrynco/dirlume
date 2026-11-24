@@ -307,14 +307,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         term.modes.applicationCursorKeysMode, term.modes.bracketedPasteMode);
       if (replacement) {
         editable = replacement.draft;
-        const trailingQuote = windows && option.directory && option.text.startsWith("'") && option.text.endsWith("'");
+        const trailingQuote = option.directory &&
+          (windows && option.text.startsWith("'") && option.text.endsWith("'") || remote && option.text.endsWith("/'"));
         const arrow = term.modes.applicationCursorKeysMode ? "\x1bOD" : "\x1b[D";
         if (trailingQuote) editable = { ...editable, caret: editable.caret - 1 };
         send(replacement.data + (trailingQuote ? arrow : ""), false);
       }
       hideSuggestions();
       term.focus();
-      if (replacement && windows && option.directory) completionTimer = window.setTimeout(() => void completeDraft(), 160);
+      if (replacement && (windows || remote) && option.directory) completionTimer = window.setTimeout(() => void completeDraft(), 160);
     };
     dismissSuggestions.current = hideSuggestions;
     term.textarea?.addEventListener("blur", hideSuggestions);
