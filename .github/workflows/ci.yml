@@ -222,6 +222,9 @@ jobs:
       - name: Verify workspace source and folder bookmark shortcuts
         if: github.event.action != 'closed'
         run: node scripts/workspace-source-shortcuts-smoke.mjs
+      - name: Verify recent folder history and provider reconnection
+        if: github.event.action != 'closed'
+        run: node scripts/recent-locations-smoke.mjs
       - name: Check Rust format
         if: github.event.action != 'closed'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
