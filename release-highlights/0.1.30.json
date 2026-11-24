@@ -1,0 +1,9 @@
+{
+  "version": "0.1.30",
+  "highlights": [
+    "Copy files into ZIP and 7z archives, create folders, and rename entries with bundled 7-Zip.",
+    "Move regular local files to SSH/SFTP and confirm the receiving connection in Copy and Move.",
+    "See an estimated time remaining during long copies and moves when the total size is known.",
+    "See which file type uses an extension before reassigning it in Options."
+  ]
+}
