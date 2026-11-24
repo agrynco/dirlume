@@ -4,6 +4,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "List": ["Список", "Список"],
   "Folder sizes": ["Розміри папок", "Размеры папок"],
   "Measuring folders…": ["Обчислення розмірів папок…", "Вычисление размеров папок…"],
+  "Folder contents may be out of date. {0}": ["Вміст папки може бути застарілим. {0}", "Содержимое папки могло устареть. {0}"],
   "Collapse folder": ["Згорнути папку", "Свернуть папку"],
   "Expand folder": ["Розгорнути папку", "Раскрыть папку"],
   "Wait for the marked folders to finish loading.": ["Дочекайтеся завантаження позначених папок.", "Дождитесь завершения загрузки отмеченных папок."],
