@@ -77,6 +77,7 @@ export async function testSmbNavigation() {
                 const encodedEnvironment = environment ? ":" + encode(environment) : "";
                 args.output.onmessage({ event: "data", data: encode(`\x1b]2;${promptToken}:0:${encode(path)}:::bash:${encode("/fixture/bin:/usr/bin")}${encodedEnvironment}\x07`) });
               };
+              window.sshOutput = (data) => args.output.onmessage({ event: "data", data: btoa(data) });
               return true;
             }
             case "close_terminal":
@@ -101,6 +102,14 @@ export async function testSmbNavigation() {
               return null;
             case "complete_ssh_terminal": {
               window.lastSshCompletion = { id: args.id, ...args.request };
+              if (args.request.line === "hostn") {
+                const result = (label) => ({ index: 0, length: 5, matches: [{ label, text: label, directory: false }] });
+                if (window.deferSshCompletion) {
+                  window.deferSshCompletion = false;
+                  return new Promise((resolve) => { window.finishOldSshCompletion = () => resolve(result("hostname-stale")); });
+                }
+                return result("hostname");
+              }
               if (args.request.line.startsWith("remote-fi")) {
                 return { index: 0, length: args.request.line.length, matches: [{ label: "remote-fixture", text: "remote-fixture", directory: false }] };
               }
@@ -359,6 +368,29 @@ export async function testSmbNavigation() {
     await right.focus();
     await sshTerminal.waitFor();
     assert.equal(await page.evaluate(() => window.sshTerminalStarts), 1);
+    const hostname = suggestions.getByRole("option", { name: "hostname", exact: true });
+    await page.evaluate(() => window.sshOutput("\r\nretained SSH output\r\n"));
+    await sshInput.press("Control+c");
+    await sshInput.pressSequentially("hostn");
+    await hostname.waitFor();
+    const sshCompletionBeforeSwitch = await page.evaluate(() => window.lastSshCompletion);
+    await sshInput.press("Control+c");
+    await page.evaluate(() => { window.deferSshCompletion = true; });
+    await sshInput.pressSequentially("hostn");
+    await page.waitForFunction(() => typeof window.finishOldSshCompletion === "function");
+    for (let i = 0; i < 2; i++) {
+      await left.focus();
+      await sshTerminal.waitFor({ state: "hidden" });
+      await right.focus();
+      await sshTerminal.waitFor();
+      await sshInput.press("Backspace");
+      await sshInput.press("n");
+      await hostname.waitFor({ timeout: 3000 });
+    }
+    await page.evaluate(() => window.finishOldSshCompletion());
+    await page.clock.runFor(200);
+    assert.equal(await hostname.isVisible(), true);
+    assert.equal(await suggestions.getByRole("option", { name: "hostname-stale", exact: true }).count(), 0);
     await left.focus();
     const localInput = local.locator(".xterm-helper-textarea");
     await localInput.pressSequentially("exit");
@@ -367,6 +399,11 @@ export async function testSmbNavigation() {
     await right.focus();
     await sshTerminal.waitFor();
     assert.equal(await page.evaluate(() => window.sshTerminalStarts), 1);
+    await sshInput.press("Control+c");
+    await sshInput.pressSequentially("hostn");
+    await hostname.waitFor({ timeout: 3000 });
+    assert.deepEqual(await page.evaluate(() => window.lastSshCompletion), sshCompletionBeforeSwitch);
+    await sshTerminal.locator(".xterm-rows").getByText("retained SSH output", { exact: true }).waitFor();
     await left.focus();
     await ended.waitFor();
     await page.evaluate(() => { window.localStartup = "reject"; });
