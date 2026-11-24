@@ -20,6 +20,7 @@ import "@xterm/xterm/css/xterm.css";
 // Focus and device reports are forwarded to the PTY without changing input state.
 const terminalReport = /^\x1b(?:\[(?:[IO]|\??[\d;]+[Rcnt])|\][\s\S]*(?:\x07|\x1b\\))$/;
 const macClient = /Macintosh/.test(navigator.userAgent);
+const windowsStartupTimeout = 15_000;
 
 function isWebLink(text: string) {
   if (!/^https?:\/\/[^/\\?#\s]/i.test(text) || /[\p{Cc}\s\\]|%(?![\da-f]{2})/iu.test(text)) return false;
@@ -63,7 +64,7 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
-  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onClose }: {
+  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onRestart, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -85,6 +86,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   onCompletionContext: (context: TerminalCompletionContext | null) => void;
   rowHeight: { current: number };
   focusRequested: { current: number | null };
+  onRestart?: () => void;
   onClose: () => void;
 }) {
   const remoteTerminal = session.kind === "ssh";
@@ -93,6 +95,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
   const [commandsWaiting, setCommandsWaiting] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string; href: string | null } | null>(null);
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
@@ -196,6 +199,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     const output = new Channel<TerminalOutput>();
     let stopped = false;
     let closed = false;
+    let opened = false;
     let atPrompt = false;
     let tracksPrompt = true;
     let draft = false;
@@ -206,6 +210,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let resizing = Promise.resolve();
     const remote = session.kind === "ssh";
     const windows = !remote && windowsClient;
+    let startupTimer = 0;
+    let closing: Promise<void> | undefined;
     let installedPrompt = false;
     let editable: TerminalDraft | null = null;
     let sshSearchPath: string | null = null;
@@ -321,7 +327,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     term.textarea?.addEventListener("blur", hideSuggestions);
 
     function runQueuedCommand() {
-      if (closed || stopped || (tracksPrompt && (!atPrompt || draft))) return false;
+      if (closed || stopped || !opened || (tracksPrompt && (!atPrompt || draft))) return false;
       const entry = applicationQueue.shift();
       if (!entry) return false;
       setCommandsWaiting(applicationQueue.length > 0);
@@ -339,7 +345,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }
       submitted.set(text, { original: command, pending: (prior?.pending ?? 0) + 1 });
       term.scrollToBottom();
-      send(text + "\r", true, (error) => rejectQueuedCommands(error, true));
+      send(text + "\r", true, (error) => endSession(t("This terminal session has closed."), error, true));
       return true;
     }
 
@@ -347,12 +353,22 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       reportError.current(t("Could not submit the command. {0}", errorText(describeError(error))));
     }
 
-    function rejectQueuedCommands(error: unknown, writeFailed = false) {
+    function closeSession() {
+      closing ??= opening.then(() => api.closeTerminal(session.id)).catch(() => {});
+    }
+
+    function endSession(reason: string, error: unknown, writeFailed = false) {
+      if (closed || stopped) return;
       closed = true;
-      if (!writeFailed && !applicationQueue.length) return;
+      clearTimeout(startupTimer);
+      setSessionError(windows ? reason : null);
+      reportCompletion.current(null);
+      editable = null;
+      hideSuggestions();
+      closeSession();
+      if (writeFailed || applicationQueue.length) commandFailed(error);
       applicationQueue.length = 0;
       setCommandsWaiting(false);
-      commandFailed(error);
     }
 
     function shellCommand(command: string) {
@@ -391,7 +407,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       reportCommand(decode(encoded));
     }
     function synchronize() {
-      if (!atPrompt || draft || closed || stopped) return;
+      if (!opened || !atPrompt || draft || closed || stopped) return;
       if (nextDirectory === null) return;
       const next = nextDirectory;
       nextDirectory = null;
@@ -402,6 +418,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
     function prompt(title: string) {
       if (!title.startsWith(promptPrefix)) return false;
+      if (closed || stopped) return true;
       if (remote && title === promptPrefix + "init") {
         if (!installedPrompt) {
           installedPrompt = true;
@@ -435,6 +452,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
             return separator < 0 ? [field, null] : [field.slice(0, separator), field.slice(separator + 1)];
           }));
       } catch { return true; }
+      if (opened) clearTimeout(startupTimer);
       setShellDirectory(currentDirectory ?? "");
       if (sshSearchPath !== previousSearchPath || environmentMarker !== previousEnvironmentMarker) {
         reportCompletion.current({ searchPath: sshSearchPath ?? undefined, environment: shellEnvironment });
@@ -457,28 +475,38 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     const titles = [0, 2].map((code) => term.parser.registerOscHandler(code, prompt));
     moveTo.current = (path) => { nextDirectory = path; synchronize(); };
     output.onmessage = (message) => {
-      if (stopped) return;
+      if (stopped || closed) return;
       if (message.event === "closed") {
-        reportCompletion.current(null);
-        rejectQueuedCommands(new Error(t("This terminal session has closed.")));
-        editable = null;
-        hideSuggestions();
-        term.writeln("\r\nShell exited.");
+        const reason = t("This terminal session has closed.");
+        endSession(reason, new Error(reason));
+        if (!windows) term.writeln("\r\n" + reason);
       } else {
         term.write(Uint8Array.from(atob(message.data), (byte) => byte.charCodeAt(0)));
       }
     };
     const opening = api.openTerminal(session, promptToken, term.rows, term.cols, output);
+    if (windows) {
+      startupTimer = window.setTimeout(() => {
+        const reason = t("PowerShell did not reach its prompt in time.");
+        endSession(reason, new Error(reason));
+      }, windowsStartupTimeout);
+    }
     void opening.then((tracked) => {
+      if (closed || stopped) return;
+      opened = true;
       tracksPrompt = tracked;
-      if (!tracked) while (runQueuedCommand()) { /* Unsupported shells have no prompt marker. */ }
+      if (!tracked || atPrompt) clearTimeout(startupTimer);
+      if (!tracked) {
+        while (runQueuedCommand()) { /* Unsupported shells have no prompt marker. */ }
+      } else if (!runQueuedCommand()) synchronize();
     }, (error: unknown) => {
-      if (!stopped) {
-        rejectQueuedCommands(error);
+      if (!stopped && !closed) {
+        endSession(t("PowerShell could not start."), error);
         term.writeln(describeError(error));
       }
     });
     function send(data: string, observe = true, onFailure?: (error: unknown) => void) {
+      if (closed || stopped) return;
       // Readline can redraw its current prompt after canceling an edit without running the prompt hook.
       const canceledDraft = data === "\x03" && atPrompt && editable !== null;
       if (canceledDraft) {
@@ -501,7 +529,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       queued = queued.then(async () => {
         await opening;
         if (stopped) return;
-        if (closed) throw new Error(t("This terminal session has closed."));
+        if (closed) return;
         await api.writeTerminal(session.id, data);
       }).catch((error: unknown) => { if (!stopped) onFailure?.(error); });
       if (canceledDraft && !runQueuedCommand()) synchronize();
@@ -614,6 +642,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     resize.observe(surface);
     return () => {
       stopped = true;
+      clearTimeout(startupTimer);
       hideLinkTooltip();
       hideSuggestions();
       dismissSuggestions.current = () => {};
@@ -634,7 +663,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       resize.disconnect();
       output.onmessage = () => {};
       term.dispose();
-      void opening.then(() => api.closeTerminal(session.id)).catch(() => {});
+      closeSession();
     };
   }, [session, rowHeight, suggestionId]);
 
@@ -695,12 +724,16 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         {focusHint}
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
-      {watchEnvironment && environmentChanged && <p className="terminal-environment-notice" role="status">
+      {watchEnvironment && environmentChanged && !sessionError && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}
       </p>}
       {commandsWaiting && <p className="terminal-environment-notice" role="status">
         {t("Command queued. It will run when the terminal is ready.")}
       </p>}
+      {sessionError && <div className="terminal-environment-notice terminal-recovery">
+        <span role="status">{sessionError}</span>
+        {onRestart && <Button type="button" onClick={onRestart}>{t("Restart terminal")}</Button>}
+      </div>}
       <div className="terminal-surface" ref={container} />
       {visible && popup && <CommandSuggestions id={suggestionId} {...popup} choose={(option) => chooseSuggestion.current(option)} />}
       {visible && menu && <FileContextMenu label="Terminal actions" x={menu.x} y={menu.y}
