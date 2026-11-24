@@ -83,7 +83,7 @@ interface PaneProps {
   onPath: (path: string) => void;
   onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
-  onOpenConnections: (source: ConnectionSource) => void;
+  onOpenConnections: (source: ConnectionSource, trail: FileLocation) => void;
   onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
   onParent: () => void;
@@ -520,10 +520,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
         <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        {pane.place?.kind === "connections" ? <div className="address" id={side + "-path"} data-help-topic="paneSources" data-path={path}>
-          <div className="address-breadcrumbs connection-address"><Server aria-hidden="true" />{t(path)}</div>
-        </div> : <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} showHidden={showHidden}
-          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onOpenConnections={onOpenConnections} onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />}
+        <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} showHidden={showHidden}
+          onNavigate={onPath} onNavigateAncestor={onPathAncestor} onOpenConnections={onOpenConnections}
+          onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
         {sourceMenu}
       </div>
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)}

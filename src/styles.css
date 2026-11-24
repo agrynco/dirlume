@@ -565,8 +565,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   font: .92em var(--mono);
 }
 .address-breadcrumbs[data-editable="true"] { cursor: text; }
-.connection-address { gap: 6px; padding-inline: 8px; }
-.connection-address svg { width: 14px; height: 14px; color: var(--panel-muted); }
 .address-current, .address-ancestor { cursor: default; }
 .address-crumb-clip { min-width: 0; overflow: hidden; direction: rtl; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
@@ -576,22 +574,20 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-crumb-clip[data-fit] .address-crumbs { max-width: 100%; }
 .address-crumb-clip[data-fit] .address-ancestor { flex: none; }
 .address-crumb-clip[data-fit] .address-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.address-crumbs[data-has-hidden] { padding-inline-start: var(--address-overflow-width); }
-.address-crumb-clip[data-fit] .address-crumbs[data-measuring] { max-width: none; padding-inline-start: 0; }
+.address-crumb-clip[data-fit] .address-crumbs[data-measuring] { max-width: none; }
 .address-crumbs[data-measuring] .address-ancestor[hidden] { display: flex; }
 .address-ancestor button { min-height: 28px; padding: 2px 7px; }
 .address-ancestor > span { padding: 2px 7px; }
 .address-ancestor svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
-.address-source { flex: none; min-width: 0; max-width: 70%; }
+.address-source { flex: none; min-width: 0; max-width: min(70%, max(32px, calc(100% - var(--address-overflow-width) - 32px))); }
 .address-source button { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 .address-current { padding: 3px 8px; }
-.address-forward { display: flex; min-width: 0; max-width: 45%; overflow: hidden; white-space: nowrap; }
-.address-crumb-clip[data-fit] + .address-forward { flex: none; }
-.address-forward .address-ancestor { min-width: 0; }
-.address-forward button { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: .64; }
-.address-forward button:is(:hover, :focus-visible) { opacity: 1; }
+.address-current svg { width: 14px; height: 14px; margin-inline-end: 6px; vertical-align: text-bottom; color: var(--panel-muted); }
+.address-forward { display: flex; flex: none; white-space: nowrap; }
+.address-forward button, .address-return { opacity: .64; }
+.address-forward button:is(:hover, :focus-visible), .address-return:is(:hover, :focus-visible) { opacity: 1; }
 .address-overflow { position: absolute; inset-inline-start: 0; width: var(--address-overflow-width); background: var(--canvas); }
-.address-breadcrumbs[data-connection-source] > .address-overflow { position: static; flex: none; }
+.address-breadcrumbs[data-fit] > .address-overflow { position: static; flex: none; }
 .address-ellipsis { padding: 2px 7px; pointer-events: none; }
 .address-actions {
   position: absolute; z-index: 6; top: 100%; right: 0; display: flex; width: max-content; gap: 2px; padding: 2px;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { clickBreadcrumbAncestor as clickCrumb } from "./pane-address-smoke.mjs";
 
 const platforms = ["Windows NT 10.0; Win64; x64", "X11; Linux x86_64", "Macintosh; Intel Mac OS X 10_15_7"];
 const folders = ["one-long-folder", "two-long-folder", "three-long-folder", "four-long-folder", "leaf-folder"];
@@ -43,6 +44,7 @@ async function fixture(browser, platform, nestedLocal = false) {
     localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ kswitcher: "fixture-bridge" }));
     localStorage.setItem("dirlume.remote-connections", JSON.stringify([
       { id: "server", kind: "server", label: "Saved Dirlume Server", credential: "fixture-invitation" },
+      { id: "paired", kind: "server", label: "Paired fixture", credential: "fixture-pair", lan: true },
       ...(windows ? [{ id: "bridge", kind: "kswitcher", label: "Saved KSwitcher", peer: "fixture-peer" }] : []),
     ]));
     const remote = (result) => {
@@ -64,9 +66,16 @@ async function fixture(browser, platform, nestedLocal = false) {
           segments: args.segments ?? folders, listing: listing(folders.length) });
         if (command === "connect_ssh") return remote({ kind: "connected", id: 5, address: "SFTP fixture", origin: "sftp://fixture",
           segments: folders, listing: listing(folders.length) });
-        if (command === "connect_saved_server") return remote({ id: 6, share: "share", address: "Server fixture", origin: "https://fixture",
-          listing: listing(0) });
-        if (["list_ftp", "list_ssh", "list_server"].includes(command)) return remote(listing(args.segments.length));
+        if (command === "list_saved_computer_drives") return [{ name: "Files", type: 3, total: null, available: null }];
+        if (command === "connect_saved_server") return remote({ id: args.credential === "fixture-pair" ? 8 : 6,
+          share: "share", address: "Server fixture", origin: "https://fixture", listing: listing(0) });
+        if (command === "open_archive") return { id: 7, path: args.path, parent: home, writable: false, canAdd: false, listing: listing(0) };
+        if (command === "list_archive") return listing(args.segments.length);
+        if (["list_ftp", "list_ssh", "list_server"].includes(command)) {
+          const segments = args.segments;
+          const depth = segments[0] === "Files" ? segments.length - 1 : segments.length;
+          return remote(listing(depth));
+        }
         if (command === "list_kswitcher") {
           const parts = args.path.split("\\").filter(Boolean);
           const parent = parts.length === 0 ? null : parts.length === 1 ? "" : parts.length === 2 ? parts[0] + "\\" : parts.slice(0, -1).join("\\");
@@ -77,7 +86,7 @@ async function fixture(browser, platform, nestedLocal = false) {
           if (!args.path.startsWith(smbRoot)) {
             const last = args.path.lastIndexOf(separator);
             const parent = args.path.startsWith(home + separator) ? args.path.slice(0, last) : null;
-            return { path: args.path, parent, entries: [], omitted: 0 };
+            return { path: args.path, parent, entries: args.path === home ? [{ ...folder("fixture.zip"), directory: false }] : [], omitted: 0 };
           }
           return remote({ path: args.path, parent: args.path.slice(0, args.path.lastIndexOf("\\")), entries: [], omitted: 0 });
         }
@@ -109,7 +118,26 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   const parents = crumbs(page, side).locator(".address-parents");
   await button(parents, connectionName).click();
   await waitPath(page, side, root);
+  const address = crumbs(page, side);
+  assert.equal(await address.locator("[aria-current=location]").innerText(), connectionName);
+  await clickCrumb(address, folders.at(-1));
+  await waitPath(page, side, path);
+  await clickCrumb(address, connectionName);
+  await waitPath(page, side, root);
   await source.click();
+  await waitPath(page, side, name);
+  assert.equal(await address.locator("[aria-current=location]").innerText(), name);
+  const hidden = button(address, "Show hidden folders");
+  await hidden.waitFor();
+  await page.setViewportSize({ width: 2600, height: 700 });
+  const fullTrail = address.locator(".address-forward");
+  for (const label of [connectionName, ...folders]) await button(fullTrail, label).waitFor();
+  await hidden.waitFor({ state: "hidden" });
+  await page.setViewportSize({ width: 740, height: 700 });
+  await hidden.waitFor();
+  await clickCrumb(address, folders.at(-1));
+  await waitPath(page, side, path);
+  await button(pane(page, side), "Back").click();
   await waitPath(page, side, name);
   await button(pane(page, side), "Back").click();
   await waitPath(page, side, root);
@@ -120,6 +148,10 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await page.keyboard.press("Tab");
   assert.ok(await source.evaluate((node) => node === document.activeElement));
   await page.keyboard.press(key);
+  await waitPath(page, side, name);
+  await clickCrumb(address, connectionName);
+  await waitPath(page, side, root);
+  await button(pane(page, side), "Back").click();
   await waitPath(page, side, name);
   assert.equal(await page.locator(`#${other}-path`).getAttribute("data-path"), home);
   await button(pane(page, side), "Back").click();
@@ -173,13 +205,49 @@ async function checkLocalResize(page, home, path) {
   await waitPath(page, "left", home);
   assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
   const forward = address.locator(".address-forward");
-  await forward.waitFor();
-  assert.ok((await forward.boundingBox()).width > 0);
+  const hiddenFolders = button(address, "Show hidden folders");
+  await hiddenFolders.click();
+  await button(address.locator(".address-parents"), folders.at(-1)).waitFor();
+  await hiddenFolders.click();
   await dragTo(0.79);
   const first = button(forward, folders[0]);
   await first.click();
   const separator = home.includes("\\") ? "\\" : "/";
   await waitPath(page, "left", home + separator + folders[0]);
+}
+
+async function checkArchive(page, side, home) {
+  const separator = home.includes("\\") ? "\\" : "/";
+  const archive = home + separator + "fixture.zip!/";
+  await row(page, side, "fixture.zip").dblclick();
+  await waitPath(page, side, archive);
+  for (const name of folders) await row(page, side, name).dblclick();
+  await waitPath(page, side, archive + folders.join("/"));
+  const address = crumbs(page, side);
+  await clickCrumb(address, "fixture.zip");
+  await waitPath(page, side, archive);
+  await clickCrumb(address, folders.at(-1));
+  await waitPath(page, side, archive + folders.join("/"));
+  await clickCrumb(address, "fixture");
+  await waitPath(page, side, home);
+  await clickCrumb(address, folders.at(-1));
+  await waitPath(page, side, archive + folders.join("/"));
+}
+
+async function checkLan(page, side) {
+  await button(pane(page, side), `Locations for ${side} pane`).click();
+  const host = page.getByRole("group", { name: "Paired fixture", exact: true });
+  await host.getByRole("button", { name: /^Files/ }).click();
+  await waitPath(page, side, "/Files");
+  for (const name of folders) await row(page, side, name).dblclick();
+  await waitPath(page, side, "/Files" + deep);
+  const address = crumbs(page, side);
+  await clickCrumb(address, "Files");
+  await waitPath(page, side, "/Files");
+  await button(address, "Open Remote machine connection list").click();
+  await waitPath(page, side, "Remote machine");
+  await clickCrumb(address, folders.at(-1));
+  await waitPath(page, side, "/Files" + deep);
 }
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -191,6 +259,7 @@ try {
     const { page, home } = await fixture(browser, platform);
     const side = index === 1 ? "left" : "right";
     const other = side === "left" ? "right" : "left";
+    await checkArchive(page, side, home);
     for (const [source, saved, connectionName] of [["FTP", "Saved FTP", "FTP fixture"],
       ["FTP", "Saved SFTP", "SFTP fixture"], ["SSH", "Saved SFTP", "SFTP fixture"]]) {
       await enterFromCatalog(page, side, source, saved);
@@ -199,6 +268,10 @@ try {
     await enterFromCatalog(page, other, "Remote machine", "Saved Dirlume Server");
     for (const name of folders) await row(page, other, name).dblclick();
     await checkCatalog(page, other, deep, "Remote machine", home, { root: "/", connectionName: "Server fixture" });
+    await checkLan(page, other);
+    await button(pane(page, other), `Locations for ${other} pane`).click();
+    await button(pane(page, other), "Home").click();
+    await waitPath(page, other, home);
     if (index === 0) {
       const breadcrumbs = crumbs(page, side);
       await breadcrumbs.hover();
@@ -232,7 +305,7 @@ try {
     await page.getByRole("dialog", { name: "Add SSH connection", exact: true }).waitFor();
     await page.close();
   }
-  console.log("Verified local breadcrumb resizing and navigation, and remote source and root breadcrumbs on Windows, Ubuntu, and macOS.");
+  console.log("Verified retained local, archive, and remote trails, overflow folders, and catalog Back and Forward navigation.");
 } finally {
   await browser.close();
 }

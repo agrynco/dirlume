@@ -123,7 +123,7 @@ export type FileLocation =
 
 export const connectionSourceNames = { ftp: "FTP", ssh: "SSH", smb: "SMB", remote: "Remote machine" } as const;
 export type ConnectionSource = keyof typeof connectionSourceNames;
-export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null };
+export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null; trail?: FileLocation };
 export type Place = FileLocation | ConnectionLocation;
 export type SavedConnection =
   | ({ kind: "ftp" } & FtpProfile)

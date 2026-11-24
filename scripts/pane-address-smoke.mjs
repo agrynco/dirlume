@@ -25,7 +25,7 @@ export async function clickBreadcrumbAncestor(breadcrumbs, name) {
   if (await visible.isVisible()) {
     await visible.click();
   } else {
-    await breadcrumbs.getByRole("button", { name: "Show parent folders", exact: true }).click();
+    await breadcrumbs.getByRole("button", { name: /^Show (parent|hidden) folders$/ }).click();
     await breadcrumbs.locator(".address-parents").getByRole("button", { name, exact: true }).click();
   }
 }
