@@ -80,23 +80,21 @@ jobs:
       - name: Select build platforms
         if: steps.resolve.outputs.product-version != ''
         id: platforms
-        env:
-          PUBLISH_RELEASE: ${{ steps.resolve.outputs.publish }}
         run: |
-          platforms="$(node scripts/package.mjs platforms "$PUBLISH_RELEASE")"
+          platforms="$(node scripts/package.mjs platforms)"
           printf 'platforms=%s\n' "$platforms" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and test (${{ matrix.platform }})
     if: needs.version.outputs.product-version != ''
     needs: version
-    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[matrix.platform] }}
+    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04"}')[matrix.platform] }}
     timeout-minutes: 45
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
       DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
-      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage","macos-arm64":"app,dmg","macos-x64":"app,dmg"}')[matrix.platform] }}
+      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage"}')[matrix.platform] }}
     strategy:
       fail-fast: false
       matrix:
