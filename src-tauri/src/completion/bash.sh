@@ -66,12 +66,15 @@ if [[ $spec =~ [[:space:]]-F[[:space:]]([[:alnum:]_][[:alnum:]_.:-]*) ]]; then
             if $dirlume_filenames && [[ -n $choice ]]; then
                 path=$choice
                 if [[ $path == '~/'* ]]; then path=$HOME/${path#\~/}; fi
+                if [[ ${DIRLUME_BASH_FLAG_PROBE:-} == 1 && -e $path ]]; then continue; fi
                 if [[ -d $path ]]; then choice="${choice%/}/"; fi
             fi
             printf '%s\0' "$choice"
         done
     fi
 fi
+
+[[ ${DIRLUME_BASH_FLAG_PROBE:-} == 1 ]] && exit 0
 
 if [[ $spec == *' -o plusdirs '* ]] ||
     { (( ${#COMPREPLY[@]} == 0 )) && [[ $spec == *' -o dirnames '* ]]; }; then

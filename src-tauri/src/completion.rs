@@ -99,6 +99,13 @@ struct Context {
 }
 
 impl Context {
+    fn can_probe_flags(&self) -> bool {
+        self.prefix.is_empty()
+            && self.length == 0
+            && !self.words.is_empty()
+            && !self.words[1..].iter().any(|word| word == "--")
+    }
+
     fn explicit_path(&self, windows: bool) -> bool {
         let prefix = &self.prefix;
         if windows {
@@ -428,8 +435,16 @@ where
     } else {
         "none"
     };
+    // Only the interactive SSH terminal augments Bash argument completions.
+    let flag_line = if !linux_only && context.can_probe_flags() {
+        let mut line = request.line.clone();
+        line.insert(context.byte_caret, '-');
+        line
+    } else {
+        String::new()
+    };
     let script = format!(
-        "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {}",
+        "exec /bin/bash --noprofile --norc -c {} dirlume-completion {} {} {} {} {} {}",
         crate::ssh::quote(fallback),
         context.byte_caret,
         crate::ssh::quote(&request.line),
@@ -439,6 +454,7 @@ where
         } else {
             crate::ssh::quote(shell)
         },
+        crate::ssh::quote(&flag_line),
         context
             .words
             .iter()
@@ -449,39 +465,68 @@ where
     );
     let output = run(remote_command(&request, &script, linux_only)).await?;
     let mut seen = BTreeSet::new();
-    let matches = remote_output(&output)
+    let (flags, mut matches): (Vec<_>, Vec<_>) = remote_output(&output)
         .split(|&byte| byte == 0)
         .filter_map(|value| {
             let (source, value) = value.split_first()?;
             let value = std::str::from_utf8(value).ok()?;
             let (label, trailing_space) = match source {
-                b'N' => value
+                b'N' | b'F' => value
                     .strip_suffix(' ')
                     .map_or((value, false), |label| (label, true)),
                 b'P' => (value, false),
                 _ => return None,
             };
-            if label.is_empty() || label.chars().any(char::is_control) || !seen.insert(label) {
+            if label.is_empty()
+                || label.chars().any(char::is_control)
+                || !seen.insert((*source == b'F', label))
+            {
                 return None;
             }
             let mut text = quote_word(label, false);
             if trailing_space {
                 text.push(' ');
             }
-            Some(Suggestion {
-                label: label.to_owned(),
-                text,
-                directory: label.ends_with('/'),
-            })
+            Some((
+                *source,
+                Suggestion {
+                    label: label.to_owned(),
+                    text,
+                    directory: label.ends_with('/'),
+                },
+            ))
         })
-        .take(MAX_MATCHES)
-        .collect();
+        .partition(|(source, _)| *source == b'F');
+    matches.truncate(MAX_MATCHES);
+    let mut matches = matches.into_iter().map(|(_, item)| item).collect();
+    append_flags(&mut matches, flags.into_iter().map(|(_, item)| item));
     Ok(CompletionBatch {
         index: context.index,
         length: context.length,
         matches,
         exclusive: false,
     })
+}
+
+fn append_flags(
+    matches: &mut Vec<Suggestion>,
+    flags: impl IntoIterator<Item = Suggestion>,
+) -> bool {
+    // Keep both kinds of candidates visible even when the positional list fills the popup.
+    let option_limit = (MAX_MATCHES - matches.len()).max(MAX_MATCHES / 2);
+    let options: Vec<_> = flags
+        .into_iter()
+        .filter(|option| {
+            option.label.starts_with('-')
+                && !matches!(option.label.as_str(), "-" | "--")
+                && !matches.iter().any(|item| item.label == option.label)
+        })
+        .take(option_limit)
+        .collect();
+    matches.truncate(MAX_MATCHES - options.len());
+    let found = !options.is_empty();
+    matches.extend(options);
+    found
 }
 
 fn paths(cwd: &Path, prefix: &str, directories_only: bool) -> Vec<Suggestion> {
@@ -774,6 +819,10 @@ _fixture_paths() {
         COMPREPLY=(var)
         return
     fi
+    if [[ $2 == -* ]]; then
+        mapfile -t COMPREPLY < <(compgen -W '-k --keep --threads --keep' -- "$2")
+        return
+    fi
     compopt -o filenames
     mapfile -t COMPREPLY < <(compgen -f -- "$2")
 }
@@ -876,6 +925,8 @@ esac
                 ("fixture-xz 'space dir/'", "space dir/child/"),
                 ("fixture-xz 'space dir/'", "space dir/regular file"),
                 ("fixture-xz --format ", "var"),
+                ("fixture-xz -- ", "var/"),
+                ("fixture-xz --k", "--keep"),
                 ("docker ", "compose"),
                 ("docker co", "container"),
                 ("docker ps ", "--all"),
@@ -887,7 +938,12 @@ esac
                 ("docker container logs ", "remote-container"),
                 ("docker compose logs remote-", "remote-web"),
                 ("docker container inspect aa", "aabb"),
-            ] {
+            ]
+            .into_iter()
+            .chain(live.then_some(("fixture-xz ", "--keep")))
+            .chain(live.then_some(("fixture-xz ", "-k")))
+            .chain(live.then_some(("remote-only-tool report ", "--summary")))
+            {
                 let batch = complete_remote(
                     RemoteCompletionRequest {
                         line: line.into(),
@@ -936,6 +992,20 @@ esac
                     if line.ends_with("--format ") {
                         assert!(!batch.matches.iter().any(|item| item.directory));
                     }
+                    if !live && line == "fixture-xz "
+                        || line.ends_with("--format ")
+                        || line.ends_with("-- ")
+                    {
+                        assert!(!batch.matches.iter().any(|item| item.label.starts_with('-')));
+                    }
+                    assert_eq!(
+                        batch
+                            .matches
+                            .iter()
+                            .filter(|item| item.label == expected)
+                            .count(),
+                        1
+                    );
                 }
             }
         }
