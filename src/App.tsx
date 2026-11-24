@@ -1451,11 +1451,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function openConnections(side: Side, source: ConnectionSource) {
+  function openConnections(side: Side, source: ConnectionSource, trail?: FileLocation) {
     const place = panes[side].place;
     showProcesses(side, false);
     if (place?.kind === "connections" && place.source === source) refresh(side);
-    else void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place });
+    else void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place, trail });
   }
 
   function editConnection(side: Side, source: ConnectionSource, profile?: SavedConnection) {
@@ -3238,7 +3238,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (trees[side].enabled && place.kind === "local") void navigateTree(side, place, true);
               else void load(side, place);
             }}
-            onOpenConnections={(source) => openConnections(side, source)}
+            onOpenConnections={(source, trail) => openConnections(side, source, trail)}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
