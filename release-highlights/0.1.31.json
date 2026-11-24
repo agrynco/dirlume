@@ -1,0 +1,7 @@
+{
+  "version": "0.1.31",
+  "highlights": [
+    "Reopen recently visited folders from either pane's Sources menu.",
+    "See when a KSwitcher folder is temporarily unavailable and have the alert clear when access returns."
+  ]
+}
