@@ -52,7 +52,7 @@ async function fixture(browser, refresh) {
     const remote = { "/destination": [entry("remote.txt")], "/elsewhere": [] };
     const state = window.sshFixture = {
       root, local: [entry("upload.txt"), entry("rollback.txt"), entry("another.txt")], remote,
-      requests: [], hold: false, fail: false, transfer: "complete",
+      requests: [], listings: [], closedTerminals: [], connectAttempts: [], hold: false, fail: false, transfer: "complete",
     };
     const entriesFor = async (path) => window.sftpFixture
       ? (await window.sftpFixture("list", path)).map(entry) : remote[path].slice();
@@ -73,16 +73,28 @@ async function fixture(browser, refresh) {
           { id: "ssh", label: "Remote fixture", host: "fixture", port: 22 },
           { id: "other", label: "Alternate fixture", host: "other.example", port: 2202 },
         ];
+        if (command === "ftp_profiles") return [];
         if (command === "connect_ssh") {
           const other = args.id === "other";
           state.connection = other ? 38 : 37;
+          state.connectAttempts.push(args.id);
           return { kind: "connected", id: state.connection,
             address: other ? "" : "Remote fixture", origin: other ? "sftp://other.example:2202" : "sftp://fixture",
             segments: ["destination"], listing: { entries: await entriesFor("/destination"), omitted: 0, elevated: false } };
         }
         if (command === "list_ssh") {
           const path = "/" + args.segments.join("/");
+          state.listings.push([args.id, path]);
           if (args.reuseSudo) state.requests.push(["ssh", args.id, path]);
+          if (args.id === state.offline) {
+            if (state.deferLoss) {
+              state.deferLoss = false;
+              await new Promise((done) => { state.releaseLoss = done; });
+              state.lossReleased = true;
+            }
+            throw { sshCause: "connection_lost", message: "The SSH server could not be reached." };
+          }
+          if (args.id === 37 && state.pathError) throw new Error(state.pathError);
           if (state.fail) throw new Error("SSH fixture could not list the directory.");
           const listing = { entries: await entriesFor(path), omitted: 0, elevated: false };
           if (state.hold) {
@@ -90,6 +102,14 @@ async function fixture(browser, refresh) {
             await new Promise((resolve) => { state.release = resolve; });
           }
           return listing;
+        }
+        if (command === "open_terminal") {
+          state.terminal = { id: args.request.id, connection: args.request.ssh?.connection, output: args.output };
+          return false;
+        }
+        if (command === "close_terminal") {
+          state.closedTerminals.push(args.id);
+          return null;
         }
         if (command === "complete_ssh_command") {
           state.completion ??= [];
@@ -134,12 +154,107 @@ async function fixture(browser, refresh) {
   return page;
 }
 
-async function connect(page, side, profile = "Remote fixture") {
+async function connect(page, side, profile = "Remote fixture", source = "SSH") {
   const panel = pane(page, side);
   await button(panel, `Locations for ${side} pane`).click();
-  await button(panel, "SSH").click();
+  await button(panel, source).click();
   await list(page, side).getByRole("option", { name: new RegExp("^" + profile) }).dblclick();
   await row(page, side, "remote.txt").waitFor();
+}
+
+const waitPath = (page, side, path) => page.waitForFunction(({ side, path }) =>
+  document.getElementById(side + "-path")?.dataset.path === path &&
+  document.getElementById(side + "-files")?.getAttribute("aria-busy") === "false", { side, path });
+
+async function startSshTerminal(page, side) {
+  const former = await page.evaluate(() => window.sshFixture.terminal?.id ?? 0);
+  await row(page, side, "remote.txt").click();
+  await list(page, side).press("F12");
+  await page.waitForFunction((previous) => window.sshFixture.terminal?.id > previous, former);
+  return page.evaluate(() => window.sshFixture.terminal.id);
+}
+
+async function closeSshTerminal(page, event) {
+  const id = await page.evaluate((event) => {
+    const { terminal } = window.sshFixture;
+    terminal.output.onmessage({ event });
+    return terminal.id;
+  }, event);
+  await page.waitForFunction((id) => window.sshFixture.closedTerminals.includes(id), id);
+}
+
+async function verifyConnectionLoss(browser) {
+  const page = await fixture(browser);
+  try {
+    await connect(page, "left", "Remote fixture", "FTP");
+    await connect(page, "right");
+    await startSshTerminal(page, "right");
+    await page.evaluate(() => { window.sshFixture.listings = []; });
+    await closeSshTerminal(page, "closed");
+    assert.deepEqual(await page.evaluate(() => window.sshFixture.listings), []);
+    await waitPath(page, "right", "/destination");
+    await button(page, "Close terminal").click();
+    await waitPath(page, "left", "/destination");
+
+    await startSshTerminal(page, "right");
+    await closeSshTerminal(page, "disconnected");
+    await page.waitForFunction(() => window.sshFixture.listings.some(([id]) => id === 37));
+    await waitPath(page, "right", "/destination");
+    await button(page, "Close terminal").click();
+
+    await startSshTerminal(page, "right");
+    await page.evaluate(() => { window.sshFixture.offline = 37; });
+    await closeSshTerminal(page, "disconnected");
+    await Promise.all([waitPath(page, "left", "FTP"), waitPath(page, "right", "SSH")]);
+    await page.getByRole("status").filter({ hasText: "SSH connection lost." }).waitFor();
+    await page.evaluate(() => { window.sshFixture.offline = null; });
+    await list(page, "left").press("Enter");
+    await waitPath(page, "left", "/destination");
+    await waitPath(page, "right", "SSH");
+    assert.deepEqual(await page.evaluate(() => window.sshFixture.connectAttempts), ["ssh", "ssh", "ssh"]);
+  } finally { await page.close(); }
+
+  const explicit = await fixture(browser);
+  try {
+    await connect(explicit, "left");
+    await connect(explicit, "right", "Alternate fixture");
+    for (const message of ["SSH permission denied.", "No such file."]) {
+      await explicit.evaluate((error) => { window.sshFixture.pathError = error; }, message);
+      await button(pane(explicit, "left"), "Refresh folder").click();
+      await pane(explicit, "left").getByRole("alert").filter({ hasText: message }).waitFor();
+      await waitPath(explicit, "left", "/destination");
+    }
+    await explicit.evaluate(() => { window.sshFixture.offline = 37; });
+    await button(pane(explicit, "left"), "Refresh folder").click();
+    await waitPath(explicit, "left", "SSH");
+    await waitPath(explicit, "right", "/destination");
+    await explicit.evaluate(() => { window.sshFixture.offline = null; });
+    await list(explicit, "left").press("Enter");
+    await waitPath(explicit, "left", "/destination");
+    const address = await editPaneAddress(explicit, "left");
+    await address.fill("/elsewhere");
+    await explicit.evaluate(() => { window.sshFixture.offline = 37; });
+    await address.press("Enter");
+    await waitPath(explicit, "left", "SSH");
+    await waitPath(explicit, "right", "/destination");
+  } finally { await explicit.close(); }
+
+  const delayed = await fixture(browser);
+  try {
+    await connect(delayed, "right");
+    await startSshTerminal(delayed, "right");
+    await delayed.evaluate(() => Object.assign(window.sshFixture, { offline: 37, deferLoss: true }));
+    await closeSshTerminal(delayed, "disconnected");
+    await delayed.waitForFunction(() => window.sshFixture.releaseLoss);
+    await button(pane(delayed, "right"), "Locations for right pane").click();
+    await button(pane(delayed, "right"), "Home").click();
+    const home = await delayed.evaluate(() => window.sshFixture.root);
+    await waitPath(delayed, "right", home);
+    await delayed.evaluate(() => window.sshFixture.releaseLoss());
+    await delayed.waitForFunction(() => window.sshFixture.lossReleased);
+    await waitPath(delayed, "right", home);
+    assert.equal(await delayed.getByRole("status").filter({ hasText: "SSH connection lost." }).count(), 0);
+  } finally { await delayed.close(); }
 }
 
 async function upload(page, side, name, destination = "/destination") {
@@ -155,6 +270,8 @@ async function upload(page, side, name, destination = "/destination") {
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
+  await verifyConnectionLoss(browser);
+  console.log("Verified SSH connection loss, normal terminal exit, catalog routing, reconnection, listing errors, and stale probes.");
   {
     const page = await fixture(browser);
     await connect(page, "right");

@@ -1337,6 +1337,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Transfer canceled.": ["Передавання скасовано.", "Передача отменена."],
   "Connect to the FTP server first.": ["Спочатку підключіться до сервера FTP.", "Сначала подключитесь к серверу FTP."],
   "This terminal session has closed.": ["Цей сеанс термінала завершено.", "Этот сеанс терминала завершён."],
+  "SSH connection lost. Select a saved connection to reconnect.": ["З’єднання SSH втрачено. Виберіть збережене підключення, щоб під’єднатися знову.", "Соединение SSH потеряно. Выберите сохранённое подключение, чтобы подключиться снова."],
   "A Windows context menu is already open.": ["Контекстне меню Windows уже відкрите.", "Контекстное меню Windows уже открыто."],
   "Windows did not start an administrator instance.": ["Windows не запустила екземпляр із правами адміністратора.", "Windows не запустила экземпляр с правами администратора."],
   "The process no longer matches the selected entry.": ["Процес більше не відповідає вибраному запису.", "Процесс больше не соответствует выбранной записи."],

@@ -178,6 +178,7 @@ impl Terminals {
 pub enum Output {
     Data { data: String },
     Closed,
+    Disconnected,
 }
 
 fn size(rows: u16, cols: u16) -> PtySize {

@@ -129,7 +129,18 @@ pub fn open_shell(
     })?;
     let (mut reader, writer) = channel.split();
     let reader = async_runtime::spawn(async move {
-        while let Some(message) = reader.wait().await {
+        let mut exited = false;
+        let mut eof = false;
+        loop {
+            let message = if eof {
+                tokio::time::timeout(Duration::from_secs(1), reader.wait())
+                    .await
+                    .ok()
+                    .flatten()
+            } else {
+                reader.wait().await
+            };
+            let Some(message) = message else { break };
             match message {
                 ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
                     if output
@@ -138,14 +149,26 @@ pub fn open_shell(
                         })
                         .is_err()
                     {
+                        return;
+                    }
+                }
+                ChannelMsg::ExitStatus { .. } => {
+                    exited = true;
+                    if eof {
                         break;
                     }
                 }
-                ChannelMsg::Eof | ChannelMsg::Close => break,
+                ChannelMsg::Eof if exited => break,
+                ChannelMsg::Eof => eof = true,
+                ChannelMsg::Close => break,
                 _ => {}
             }
         }
-        let _ = output.send(Output::Closed);
+        let _ = output.send(if exited {
+            Output::Closed
+        } else {
+            Output::Disconnected
+        });
     });
     Ok(RemoteTerminal {
         client,

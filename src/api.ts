@@ -304,7 +304,7 @@ export interface EnvironmentSave {
   integration: EnvironmentOutcome | null;
 }
 
-export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
+export type TerminalOutput = { event: "data"; data: string } | { event: "closed" | "disconnected" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
   ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });

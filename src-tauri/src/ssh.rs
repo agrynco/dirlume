@@ -58,6 +58,7 @@ fn wait<T, E: std::fmt::Display>(
 #[derive(Debug, PartialEq)]
 pub(crate) enum SftpFailure {
     PermissionDenied,
+    ConnectionLost(String),
     Other(String),
 }
 pub(crate) type SftpResult<T> = std::result::Result<T, SftpFailure>;
@@ -68,6 +69,22 @@ impl From<openssh_sftp_client::Error> for SftpFailure {
                 openssh_sftp_client::error::SftpErrorKind::PermDenied,
                 _,
             ) => Self::PermissionDenied,
+            openssh_sftp_client::Error::BackgroundTaskFailure(_) => {
+                Self::ConnectionLost(message(error))
+            }
+            openssh_sftp_client::Error::IOError(ref io)
+                if matches!(
+                    io.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::NotConnected
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                Self::ConnectionLost(message(error))
+            }
             other => Self::Other(message(other)),
         }
     }
@@ -91,7 +108,7 @@ impl From<SftpFailure> for String {
     fn from(error: SftpFailure) -> Self {
         match error {
             SftpFailure::PermissionDenied => "SSH permission denied.".to_owned(),
-            SftpFailure::Other(detail) => detail,
+            SftpFailure::ConnectionLost(detail) | SftpFailure::Other(detail) => detail,
         }
     }
 }
@@ -311,16 +328,14 @@ impl Connection {
         read_only: bool,
         ordinary: impl FnOnce() -> SftpResult<T>,
         elevated: impl FnOnce(&mut Session) -> SftpResult<T>,
-    ) -> Result<(T, bool)> {
+    ) -> SftpResult<(T, bool)> {
         let denied = if password.is_none() {
             match ordinary() {
-                Err(SftpFailure::PermissionDenied) if reuse => {
-                    Some(String::from(SftpFailure::PermissionDenied))
-                }
-                result => return result.map(|value| (value, false)).map_err(Into::into),
+                Err(SftpFailure::PermissionDenied) if reuse => true,
+                result => return result.map(|value| (value, false)),
             }
         } else {
-            None
+            false
         };
         self.sudo
             .run(self, password, read_only, |session| {
@@ -328,7 +343,11 @@ impl Connection {
             })?
             .map(|value| (value, true))
             .ok_or_else(|| {
-                denied.unwrap_or_else(|| "Authorize this SSH operation with sudo.".to_owned())
+                if denied {
+                    SftpFailure::PermissionDenied
+                } else {
+                    "Authorize this SSH operation with sudo.".into()
+                }
             })
     }
 
@@ -346,13 +365,18 @@ impl Connection {
             &operation,
         )
         .map(|(value, _)| value)
+        .map_err(Into::into)
     }
 
     fn list(&self, segments: &[String]) -> SftpResult<RemoteListing> {
         let mut session = self.listing.lock().map_err(message)?;
-        if session.is_closed() {
-            *session = self.open()?;
+        if !session.is_closed() {
+            match session.listing(segments) {
+                Err(SftpFailure::ConnectionLost(_)) => {}
+                result => return result,
+            }
         }
+        *session = self.open().map_err(SftpFailure::ConnectionLost)?;
         session.listing(segments)
     }
 }
@@ -680,20 +704,51 @@ pub async fn list_ssh(
     sudo_password: Option<String>,
     reuse_sudo: Option<bool>,
     state: State<'_, SshState>,
-) -> Result<SshListing> {
+) -> std::result::Result<SshListing, SshListingError> {
     let sudo_password = sudo_password.map(Zeroizing::new);
     let connection = state.connection(id)?;
     blocking(move || {
-        let (listing, elevated) = connection.retry_with_sudo(
+        let result = connection.retry_with_sudo(
             sudo_password,
             reuse_sudo.unwrap_or(false),
             true,
             || connection.list(&segments),
             |session| session.listing(&segments),
-        )?;
-        Ok(SshListing { listing, elevated })
+        );
+        Ok(result
+            .map(|(listing, elevated)| SshListing { listing, elevated })
+            .map_err(SshListingError::from))
     })
-    .await
+    .await?
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum SshListingError {
+    Lost {
+        #[serde(rename = "sshCause")]
+        ssh_cause: &'static str,
+        message: String,
+    },
+    Message(String),
+}
+
+impl From<String> for SshListingError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<SftpFailure> for SshListingError {
+    fn from(error: SftpFailure) -> Self {
+        match error {
+            SftpFailure::ConnectionLost(message) => Self::Lost {
+                ssh_cause: "connection_lost",
+                message,
+            },
+            other => Self::Message(other.into()),
+        }
+    }
 }
 
 #[derive(Serialize)]
