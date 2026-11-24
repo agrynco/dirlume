@@ -155,6 +155,9 @@ jobs:
       - name: Verify terminal web links
         if: github.event.action != 'closed'
         run: node scripts/terminal-links-smoke.mjs
+      - name: Verify transfer estimates
+        if: github.event.action != 'closed'
+        run: node scripts/transfer-estimate-smoke.mjs
       - name: Verify current marked row colors and keyboard navigation
         if: github.event.action != 'closed'
         run: node scripts/marked-cursor-smoke.mjs

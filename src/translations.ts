@@ -1264,6 +1264,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Discard the unsaved changes to {0}?": ["Відкинути незбережені зміни у файлі «{0}»?", "Отменить несохранённые изменения в файле «{0}»?"],
   "Transfer stopped": ["Передавання зупинено", "Передача остановлена"],
   "Transfer canceled": ["Передавання скасовано", "Передача отменена"],
+  "Estimating time remaining…": ["Оцінюємо залишок часу…", "Оцениваем оставшееся время…"],
+  "About {0} remaining": ["Залишилося приблизно {0}", "Осталось примерно {0}"],
   "Choose regular local files to move to an SSH/SFTP folder.": ["Виберіть звичайні локальні файли для перенесення до папки SSH/SFTP.", "Выберите обычные локальные файлы для перемещения в папку SSH/SFTP."],
   "Choose a local destination. FTP does not support moving local files.": ["Виберіть локальну папку призначення. FTP не підтримує перенесення локальних файлів.", "Выберите локальную папку назначения. FTP не поддерживает перемещение локальных файлов."],
   "Uploaded to {0}. Could not remove local source {1}. {2}": ["Завантажено до {0}. Не вдалося видалити локальний файл {1}. {2}", "Загружено в {0}. Не удалось удалить локальный файл {1}. {2}"],
