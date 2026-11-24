@@ -71,7 +71,7 @@ interface PaneProps {
   fileView: FilePaneView;
   onFileView: (view: FilePaneView) => void;
   onTreeBranch: (entry: Entry) => void;
-  folderSizes: { active: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
+  folderSizes: { active: boolean; branchActive: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
   onFolderSizes: () => void;
   locations: QuickLocation[];
   rename?: { name: string; rowKey: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
@@ -180,10 +180,16 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const columnsInMode = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
   const modeGroups = panelColumnGroups(columnsInMode);
   const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
-    folderSizes.active && !group.some(({ field }) => field === "size" || field === "bytes")
+    (folderSizes.active || folderSizes.branchActive) && !group.some(({ field }) => field === "size" || field === "bytes")
       ? [...group, { field: "size" as const, width: "0" }] : group);
   const columns = groups.flat();
-  const fitMeasuredFolders = !pane.search && pane.sizes.size > 0;
+  const hasReadyBackgroundSize = useMemo(() => {
+    for (const size of pane.backgroundSizes?.values() ?? []) {
+      if (!size.pending && !size.unavailable) return true;
+    }
+    return false;
+  }, [pane.backgroundSizes]);
+  const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
   const tracks = panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
@@ -230,7 +236,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       for (const [name, result] of measurements) {
         const background = pane.backgroundSizes?.get(name);
         if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
-        const measured = pane.sizes.has(name);
+        const measured = pane.sizes.has(name) || !!background;
         // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
         if (autoSize || (sampleSize && measured)) {
           const sample = sizeLabel(result.bytes, result.incomplete);

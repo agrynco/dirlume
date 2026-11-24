@@ -13,22 +13,36 @@ try {
     return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
   });
   await page.addInitScript(() => {
+    window.isTauri = true;
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+    const width = new URL(location.href).searchParams.get("sizeWidth");
+    if (width) {
+      localStorage.removeItem("dirlume.workspace.v1");
+      localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
+        paneViews: { left: "tree", right: "list" },
+        panelModes: { full: { list: [{ field: "name", width: "0" }, { field: "size", width }],
+          status: [{ field: "rightName", width: "0" }] } },
+      }));
+    }
     const file = (name, size) => ({ name, directory: false, hidden: false, link: false, size, modified: null });
     const dir = (name) => ({ ...file(name, null), directory: true });
     const listings = {
       "/fixture": [dir("A"), dir("B"), dir("Empty"), dir("Limited")],
-      "/fixture/A": [file("report.txt", 12)],
+      "/fixture/A": [file("report.txt", 12), ...(width ? [dir("Nested")] : [])],
+      "/fixture/A/Nested": [dir("Child"), file("readme.txt", 12)],
       "/fixture/B": [file("report.txt", 25)],
       "/target": [],
     };
     let hold = true;
+    let wideRuns = 0;
     window.treeCalls = [];
     window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
       transformCallback: () => 1,
       invoke: async (command, args = {}) => {
         if (command === "locations") return [{ label: "Home", path: "/fixture" }, { label: "Downloads", path: "/target" }];
-        if (command === "watch_directory" && args.path === "/fixture" && args.recursive) {
-          window.treeWatch = () => args.changes.onmessage(null);
+        if (command === "watch_directory" && args.path === "/fixture") {
+          window[args.recursive ? "treeWatch" : "listWatch"] = () => args.changes.onmessage(null);
         }
         if (command === "list_directory") {
           window.treeCalls.push([command, args.path]);
@@ -48,7 +62,16 @@ try {
             size: entry.size, allocated: entry.size === null ? null : 4096, shared: false });
           const close = (closed, error = null) => ({ closed, error, partial: !!error });
           send({ kind: "start", strategy: "walk" });
-          if (args.root === "/fixture") {
+          if (args.root === "/fixture" && width) {
+            wideRuns++;
+            send({ kind: "batch", changes: [node(0, dir("A")), node(0, dir("B")),
+              node(1, file("large.dat", Math.round(17.6 * 1024 ** 3))), node(2, file("large.dat", 170 * 1024 ** 3)),
+              close(1)] });
+            await new Promise((resolve) => { window.finishWideScan = resolve; });
+            window.finishWideScan = null;
+            send({ kind: "batch", changes: [...(wideRuns === 1 ? [] : [node(2, file("new.dat", 1024 ** 3))]),
+              close(2, "Some files could not be read"), close(0)] });
+          } else if (args.root === "/fixture") {
             send({ kind: "batch", changes: [node(0, dir("A")), node(0, dir("B")), node(0, dir("Empty")),
               node(0, dir("Limited")), node(2, listings["/fixture/B"][0]),
               close(2), close(3), close(4, "Permission denied"), close(0)] });
@@ -57,6 +80,9 @@ try {
               await new Promise((resolve) => { window.finishOldScan = resolve; });
             }
             send({ kind: "batch", changes: [node(1, listings["/fixture/A"][0]), close(1)] });
+          } else if (args.root === "/fixture/A/Nested") {
+            send({ kind: "batch", changes: [node(0, dir("Child")), node(0, file("readme.txt", 512)),
+              node(1, file("data.bin", 2048)), close(1), close(0)] });
           } else {
             send({ kind: "batch", changes: [...(listings[args.root] ?? []).map((entry) => node(0, entry)), close(0)] });
           }
@@ -64,6 +90,10 @@ try {
           return null;
         }
         if (command === "cancel_space_scan") window.treeCalls.push([command, args.id]);
+        if (command === "read_text") {
+          window.treeCalls.push([command, args.directory, args.name]);
+          return { text: "Fixture text", encoding: "utf8" };
+        }
         if (command === "transfer_item") {
           window.treeCalls.push([command, args.request.source, args.request.destination]);
           return { kind: "completed" };
@@ -91,16 +121,25 @@ try {
   assert.equal(await button(pane("left"), "Folder sizes").getAttribute("aria-pressed"), "false");
   await button(pane("right"), "Locations for right pane").click();
   await pane("right").getByRole("button", { name: /^Downloads/ }).click();
-  await page.evaluate(() => { window.isTauri = true; });
   await button(pane("left"), "Folder sizes").click();
-  await page.waitForFunction(() => window.treeWatch);
-  await page.evaluate(() => { window.isTauri = false; });
   await page.waitForFunction(() => window.finishOldScan);
   await size("B").getByText("25 B", { exact: true }).waitFor();
   assert.equal(await size("A").innerText(), "…");
   assert.equal(await size("Empty").innerText(), "0 B");
   assert.equal(await size("Limited").innerText(), "—");
+  for (let change = 0; change < 2; change++) {
+    const previousCalls = await page.evaluate(() => {
+      const count = window.treeCalls.filter(([command, path]) => command === "list_directory" && path === "/fixture").length;
+      window.listWatch();
+      return count;
+    });
+    await page.waitForFunction((count) => window.treeCalls.filter(([command, path]) =>
+      command === "list_directory" && path === "/fixture").length > count, previousCalls);
+    assert.equal(await size("B").innerText(), "25 B");
+    assert.equal((await scanCalls()).length, 1);
+  }
   await button(pane("left"), "Tree").click();
+  await page.waitForFunction(() => window.treeWatch);
   assert.equal(await files().getAttribute("role"), "tree");
   assert.equal(await files("right").getAttribute("role"), "listbox");
   assert.equal((await scanCalls()).length, 1);
@@ -174,6 +213,8 @@ try {
   await row("A/added.txt").waitFor({ state: "detached" });
   await row("A").locator(".file-tree-error").waitFor({ state: "detached" });
   await startRefresh(false);
+  assert.equal((await scanCalls()).length, 1);
+  assert.equal(await size("B").innerText(), "4 KiB");
   await row("B/report.txt").click();
   await button(pane("left"), "List").click();
   await row("report.txt").waitFor();
@@ -189,7 +230,46 @@ try {
   await files("right").waitFor();
   assert.equal(await files("right").getAttribute("data-file-view"), "tree");
   assert.equal(await button(pane("left"), "Folder sizes").getAttribute("aria-pressed"), "false");
-  console.log("Verified lazy branches, stable automatic and manual refresh, refresh errors and recovery, marks, size metrics, and navigation.");
+
+  for (const width of ["6", "5%"]) {
+    await page.goto(`http://dirlume.test/?sizeWidth=${encodeURIComponent(width)}`);
+    await row("A").waitFor();
+    await button(row("A"), "Expand folder").click();
+    await button(row("A/Nested"), "Expand folder").click();
+    await row("A/Nested/Child").waitFor();
+    await row("B").click({ modifiers: [markModifier] });
+    await row("A/Nested").click();
+    const siblingSize = await size("B").innerText();
+    await files().press("F3");
+    await size("A/Nested").getByText("2.5 KiB", { exact: true }).waitFor();
+    await size("A/Nested/Child").getByText("2 KiB", { exact: true }).waitFor();
+    assert.deepEqual((await scanCalls()).map(([, path]) => path), ["/fixture/A/Nested"]);
+    assert.equal(await size("B").innerText(), siblingSize);
+    assert.equal(await button(pane("left"), "Folder sizes").getAttribute("aria-pressed"), "false");
+    await row("A/Nested/readme.txt").click();
+    await files().press("F3");
+    await page.waitForFunction(() => window.treeCalls.some(([command, path, name]) =>
+      command === "read_text" && path === "/fixture/A/Nested" && name === "readme.txt"));
+    await page.keyboard.press("Escape");
+
+    const otherSize = pane("right").locator(".file-column.col-size");
+    const savedWidth = () => otherSize.evaluate((element) => element.getBoundingClientRect().width);
+    const otherWidth = await savedWidth();
+    await button(pane("left"), "Folder sizes").click();
+    await size("A").getByText("17.6 GiB", { exact: true }).waitFor();
+    await page.evaluate(() => window.finishWideScan());
+    await size("B").getByText("≥ 170 GiB", { exact: true }).waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll("#left-files .file-size")]
+      .filter((element) => /17\.6 GiB|170 GiB/.test(element.textContent))
+      .every((element) => element.scrollWidth <= element.clientWidth));
+    assert.equal(await savedWidth(), otherWidth, "Folder sizing changed the opposite pane's width.");
+    await button(pane("left"), "Refresh folder").click();
+    await page.waitForFunction(() => window.finishWideScan);
+    assert.equal(await size("B").innerText(), "≥ 170 GiB");
+    await page.evaluate(() => window.finishWideScan());
+    await size("B").getByText("≥ 171 GiB", { exact: true }).waitFor();
+  }
+  console.log("Verified stable Tree refresh, scoped F3, and folder totals that fit saved character and percentage widths.");
 } finally {
   await browser.close();
 }

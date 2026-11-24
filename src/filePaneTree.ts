@@ -1,9 +1,8 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { describeError, watchDirectory, windowsClient, type Entry, type PanelMetadata } from "./api";
 import type { SortMode, SortSettings } from "./fileSort";
 import { childPlace, readPlace, visibleEntries, type PaneBackgroundSize, type PaneState } from "./panes";
-import { scanSpace, unavailable, type Metric, type SpaceNode, type SpaceResult } from "./spaceScan";
 
 type LocalPlace = NonNullable<Entry["tree"]>["parent"];
 type Branch = {
@@ -153,71 +152,4 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
   }, [branches, enabled, root, row]);
 
   return { enabled: enabled && !!root, branches, lookup, reveal, toggle, visible };
-}
-
-type ScanSnapshot = {
-  path: string;
-  revision: number;
-  listing: PaneState["entries"];
-  result: SpaceResult;
-};
-
-export function usePaneFolderSizes(pane: PaneState, enabled: boolean, revision: number) {
-  const path = enabled && !pane.search && pane.place?.kind === "local" ? pane.place.path : undefined;
-  const [snapshot, setSnapshot] = useState<ScanSnapshot | null>(null);
-  const [preferredMetric, setMetric] = useState<Metric>("logical");
-  const listing = pane.entries;
-  const result = snapshot?.path === path && snapshot?.revision === revision && snapshot.listing === listing
-    ? snapshot.result : undefined;
-
-  useEffect(() => {
-    if (!path) {
-      setSnapshot(null);
-      return;
-    }
-    const scan = new AbortController();
-    const timer = window.setTimeout(() => {
-      const place = { kind: "local", path, parent: null } as const;
-      void scanSpace(place, scan.signal, (result) => {
-        if (!scan.signal.aborted) setSnapshot({ path, revision, listing, result });
-      });
-    }, 100);
-    return () => { window.clearTimeout(timer); scan.abort(); };
-  }, [path, revision, listing]);
-
-  const support = !!result?.supportsAllocation;
-  const metric = support ? preferredMetric : "logical";
-  const scanning = !!path && (!result || result.phase === "scanning");
-  const childIndexes = useMemo(() => new WeakMap<SpaceNode, Map<string, SpaceNode>>(), [result]);
-
-  const measures = useCallback((entries: readonly Entry[]) => {
-    if (!path) return undefined;
-    const sizes = new Map<string, PaneBackgroundSize>();
-    for (const entry of entries) {
-      if (entry.name === ".." || entry.link || !entry.directory && metric === "logical") continue;
-      const segments = entry.tree?.segments ?? [entry.name];
-      let node = result?.root;
-      for (const segment of segments) {
-        if (!node) break;
-        let children = childIndexes.get(node);
-        if (!children) {
-          children = new Map(node.children.map((child) => [child.name, child]));
-          childIndexes.set(node, children);
-        }
-        node = children.get(segment);
-      }
-      if (!node || node.directory !== entry.directory) {
-        sizes.set(entry.name, { name: entry.name, bytes: 0, incomplete: true, pending: scanning, unavailable: !scanning });
-      } else {
-        const bytes = node[metric];
-        const pending = scanning && node.pending > 0;
-        const missing = unavailable(node, metric) > 0 || !!node.error;
-        sizes.set(entry.name, { name: entry.name, bytes, pending, incomplete: !!node.pending || node.partial || missing,
-          unavailable: missing && bytes === 0 && !pending });
-      }
-    }
-    return sizes;
-  }, [childIndexes, metric, path, result, scanning]);
-
-  return { active: !!path, scanning, error: result?.error, metric, support, setMetric, measures };
 }
