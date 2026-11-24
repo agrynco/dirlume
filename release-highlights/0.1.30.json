@@ -4,6 +4,8 @@
     "Copy files into ZIP and 7z archives, create folders, and rename entries with bundled 7-Zip.",
     "Move regular local files to SSH/SFTP and confirm the receiving connection in Copy and Move.",
     "See an estimated time remaining during long copies and moves when the total size is known.",
+    "Keep folder sizes readable during refresh and measure the selected Tree branch with F3.",
+    "Move or delete local files directly from Search results and rerun the original search with Refresh.",
     "See which file type uses an extension before reassigning it in Options."
   ]
 }
