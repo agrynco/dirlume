@@ -253,26 +253,11 @@ pub(super) fn extended_query(context: &Context, windows: bool) -> Option<Query> 
 pub(super) fn flag_query(context: &Context) -> Option<Query> {
     let (_, words) = context.words.split_first()?;
     // Cobra can omit flags for an empty token and handles the dash probe in flag-value positions.
-    (context.prefix.is_empty() && context.length == 0 && !words.iter().any(|word| word == "--"))
-        .then(|| completion_query(words, "-"))
+    context.can_probe_flags().then(|| completion_query(words, "-"))
 }
 
 pub(super) fn add_flags(result: &mut CompletionBatch, flags: CompletionBatch) {
-    // Keep both kinds of candidates visible even when the positional list fills the popup.
-    let option_limit = (MAX_MATCHES - result.matches.len()).max(MAX_MATCHES / 2);
-    let options: Vec<_> = flags
-        .matches
-        .into_iter()
-        .filter(|option| {
-            option.label.starts_with('-')
-                && !matches!(option.label.as_str(), "-" | "--")
-                && !result.matches.iter().any(|item| item.label == option.label)
-        })
-        .take(option_limit)
-        .collect();
-    result.matches.truncate(MAX_MATCHES - options.len());
-    result.exclusive |= !options.is_empty();
-    result.matches.extend(options);
+    result.exclusive |= append_flags(&mut result.matches, flags.matches);
 }
 
 #[derive(Deserialize)]

@@ -2,7 +2,8 @@ point=$1
 line=$2
 kind=$3
 provider=$4
-shift 4
+flag_line=$5
+shift 5
 prefix=${!#}
 
 if (( $# == 1 )) && [[ $prefix != */* ]]; then
@@ -15,6 +16,14 @@ elif [[ $kind != directory && -n $provider ]]; then
         printf 'N%s\0' "$item"
         found=true
     done < <(DIRLUME_REMOTE_BASH_COMPLETION=1 /bin/bash --noprofile --norc -c "$provider" dirlume-completion "$point" "$line" "$@")
+    if [[ -n $flag_line && $(command uname -s) == Linux ]]; then
+        words=("${@:1:$#-1}")
+        while IFS= read -r -d '' item; do
+            if [[ $item == -[[:alnum:]]* || $item == --[[:alnum:]]* ]]; then
+                printf 'F%s\0' "$item"
+            fi
+        done < <(DIRLUME_REMOTE_BASH_COMPLETION=1 DIRLUME_BASH_FLAG_PROBE=1 /bin/bash --noprofile --norc -c "$provider" dirlume-completion "$((point+1))" "$flag_line" "${words[@]}" -)
+    fi
     $found && exit 0
 fi
 
