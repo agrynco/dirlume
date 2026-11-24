@@ -46,34 +46,46 @@ const autoWidths: Partial<Record<PanelField, number>> = { size: 9, bytes: 12, da
 export const measuredColumnFields = ["size", "bytes", "date", "time"] as const;
 export type MeasuredColumnField = typeof measuredColumnFields[number];
 
-export function panelColumnTracks(columns: PanelColumn[]) {
+export function panelColumnTracks(columns: PanelColumn[], fitMeasuredFolders = false) {
   const names = columns.filter(({ field }) => isNameField(field)).length;
   const minimumPerName = names ? `min(5ch, ${55 / names}%)` : "0px";
   const nameMinimum = names ? `min(${names * 5}ch, 55%)` : "0px";
   const fixed = columns.flatMap(({ field, width }, i) => {
-    if (width.endsWith("%")) return [];
+    const measuredSize = fitMeasuredFolders && (field === "size" || field === "bytes");
+    const measuredWidth = `var(--file-${field}-width, 0px)`;
+    const percentage = width.endsWith("%");
+    if (percentage && !measuredSize) return [];
     const chars = Number(width) || autoWidths[field];
     if (!chars) return [];
+    if (percentage) return [{ i, chars, expression: measuredWidth }];
     const padded = `calc(${chars}ch + 8px)`;
     const expression = width === "0" && measuredColumnFields.some((candidate) => candidate === field)
-      ? `var(--file-${field}-width, ${padded})` : isNameField(field)
+      ? `var(--file-${field}-width, ${padded})` : measuredSize
+        ? `max(${padded}, ${measuredWidth})` : isNameField(field)
         ? `max(0px, calc(${padded} - ${minimumPerName}))` : padded;
     return [{ i, chars, expression }];
   });
   const totalFixed = fixed.reduce((total, { chars }) => total + chars, 0);
   const used = fixed.map(({ expression }) => expression).join(" + ") || "0px";
   return columns.map(({ field, width }, i) => {
-    if (width.endsWith("%")) {
+    const slot = fixed.find((item) => item.i === i);
+    if (width.endsWith("%") && !slot) {
       const share = Number.parseInt(width, 10) / 100;
       const extra = `max(0px, calc((100% - (${used}) - ${nameMinimum}) * ${share}))`;
       return isNameField(field) ? `calc(${minimumPerName} + ${extra})` : extra;
     }
-    const slot = fixed.find((item) => item.i === i);
     if (slot) {
       const available = `(100% - ${nameMinimum})`;
       const proportional = `calc(${available} * ${slot.chars / totalFixed})`;
       const remaining = `calc(${available} - (${used}) + ${slot.expression})`;
       const extra = `min(${slot.expression}, max(0px, ${proportional}, ${remaining}))`;
+      if (width.endsWith("%")) {
+        // Reserve the measured label, then grant any remaining share of the row.
+        const share = Number.parseInt(width, 10) / 100;
+        const preferred = `calc((${remaining}) * ${share})`;
+        const availableShare = `max(0px, calc((${available} - (${used})) * ${share}))`;
+        return `max(${extra}, min(${preferred}, calc(${extra} + ${availableShare})))`;
+      }
       return isNameField(field) ? `calc(${minimumPerName} + ${extra})` : extra;
     }
     return isNameField(field) ? `minmax(${minimumPerName}, 1fr)` : "minmax(0, 1fr)";

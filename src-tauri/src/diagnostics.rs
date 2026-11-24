@@ -58,6 +58,7 @@ const ACTIONS: &[&str] = &[
     "delete_selection",
     "connect_server",
     "list_server",
+    "list_connected_computer_drives",
     "connect_ftp",
     "list_ftp",
     "search_ftp",

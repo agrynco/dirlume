@@ -27,22 +27,19 @@ const formats = {
 const platformLabels = {
   "windows-x64": "Windows x64",
   "linux-x64": "Ubuntu / Linux x64",
-  "macos-arm64": "macOS Apple Silicon",
-  "macos-x64": "macOS Intel",
 };
 
 const updaterFormats = {
   "windows-x64": { target: "windows-x86_64", bundle: "nsis", suffix: "-setup.exe", extension: "setup.exe" },
   "linux-x64": { target: "linux-x86_64", bundle: "appimage", suffix: ".AppImage", extension: "AppImage" },
-  "macos-arm64": { target: "darwin-aarch64", bundle: "macos", suffix: ".app.tar.gz", extension: "app.tar.gz" },
-  "macos-x64": { target: "darwin-x86_64", bundle: "macos", suffix: ".app.tar.gz", extension: "app.tar.gz" },
 };
 
 function bundleFormats(platform, signed) {
   if (!signed) return formats[platform];
-  const { bundle, suffix, extension } = updaterFormats[platform];
-  const signedBundles = bundle === "macos" ? [[bundle, suffix, extension]] : [];
-  return [...formats[platform], ...signedBundles, [bundle, suffix + ".sig", extension + ".sig"]];
+  const format = updaterFormats[platform];
+  if (!format) throw new Error(`Release publication is disabled for ${platform}.`);
+  const { bundle, suffix, extension } = format;
+  return [...formats[platform], [bundle, suffix + ".sig", extension + ".sig"]];
 }
 
 function artifactNames(platform, label, signed) {
@@ -163,7 +160,7 @@ async function verifyRelease() {
     throw new Error("Release packages must match the resolved build number and tag.");
   }
   const label = artifactVersion(DIRLUME_PRODUCT_VERSION, DIRLUME_BUILD_NUMBER);
-  const expected = Object.keys(formats).flatMap((platform) => artifactNames(platform, label, true))
+  const expected = Object.keys(updaterFormats).flatMap((platform) => artifactNames(platform, label, true))
     .flatMap((name) => [name, `${name}.sha256`]).sort();
   const actual = (await readdir("release")).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("The release artifact set does not match the resolved version.");
@@ -202,6 +199,8 @@ async function verifyRelease() {
 
 if (process.argv[2] === "check") {
   console.log(`Dirlume v${artifactVersion(await version())}`);
+} else if (process.argv[2] === "platforms") {
+  console.log(JSON.stringify(Object.keys(process.argv[3] === "true" ? updaterFormats : formats)));
 } else if (process.argv[2] === "collect") {
   await collect(process.argv[3]);
 } else if (process.argv[2] === "verify-release") {
@@ -209,5 +208,5 @@ if (process.argv[2] === "check") {
 } else if (process.argv[2] === "configure-signing") {
   await configureSigning();
 } else {
-  throw new Error("Use package.mjs check, collect <platform>, configure-signing, or verify-release.");
+  throw new Error("Use package.mjs check, platforms <publish>, collect <platform>, configure-signing, or verify-release.");
 }

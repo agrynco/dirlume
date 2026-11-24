@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "io.github.agrynco.dirlume",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/clean-debug-artifacts.mjs && npm run dev",
     "devUrl": "http://127.0.0.1:1421",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"

@@ -985,7 +985,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       showProcesses(side, false);
       const { host, drive } = source;
       if (host.kind === "dirlume") {
-        void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential }, [], [drive]);
+        void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential, lan: true }, [], [drive]);
       } else {
         void load(side, { kind: "kswitcher", directory: "", peer: host.id,
           address: host.name, path: drive + "\\", parent: null });
@@ -1489,7 +1489,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         case "server": {
           const { listing, ...connected } = await api.connectSavedServer(profile.credential, serverSegments);
           const address = serverSegments.length ? profile.label : connected.address;
-          complete({ kind: "server", ...connected, address, segments: serverSegments }, listing);
+          complete({ kind: "server", ...connected, address, segments: serverSegments, pairedComputer: profile.lan }, listing);
           break;
         }
         case "kswitcher": {

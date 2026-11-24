@@ -42,7 +42,7 @@ In Brief and Medium, **Up** and **Down** follow the sort order from the bottom o
 
 In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
 
-The built-in **Full** mode uses automatic Size and Date widths. These widths follow measured folder sizes and system-formatted dates in the current pane font. For a saved layout with fixed widths, set Size, Size in bytes, or Date to **0** to enable that behavior.
+The built-in **Full** mode uses automatic Size and Date widths. These widths follow the displayed values in the current pane font. When **F3** returns a folder measurement, the Size column widens as needed to show the full result, even with a saved width. Set a column width to **0** to fit its displayed values automatically.
 
 After confirming a local deletion or Move to Trash, you can cancel preparation or follow progress for the current item and the full selection. If an item is locked, retry it, skip it, or skip all remaining locks in that batch. On Windows, **Find locking processes** opens the process inspector. Ending a process requires its own confirmation. Permanent deletion keeps a skipped item and its parent folders while continuing with removable siblings. The final free-space reading comes from the source volume.
 
@@ -215,6 +215,8 @@ npm ci
 npm run tauri -- dev
 ```
 
+Before starting the local desktop dev server, Dirlume measures the debug files in Cargo's target and build directories. If their combined file size exceeds 30 GiB, it runs `cargo clean --profile dev -p dirlume` to remove Dirlume's development artifacts. To apply the same check before a direct Cargo build or test, run `node scripts/clean-debug-artifacts.mjs` from the repository root.
+
 Run the checks and build the desktop app and standalone server.
 
 ```sh
@@ -316,7 +318,7 @@ The [DirLume project board](https://github.com/users/agrynco/projects/12/views/1
 
 The sync workflow uses the `DIRLUME_PROJECT_TOKEN` Actions secret. Use a GitHub classic personal access token with the `project` scope for this user-owned project. Run **Sync Dirlume project status** in GitHub Actions to reconcile the board immediately after setting the secret.
 
-Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers and portable copies, Linux AppImage, and both Mac packages verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command.
+Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers, Windows portable copies, and Linux AppImage verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command. GitHub releases publish downloads and updates for Windows and Linux. macOS remains a source build and CI target.
 
 The update dialog shows the offered version’s highlights and links to its full release notes. After installation, **What’s new** shows the installed version’s highlights offline. Dismiss the dialog once for that product version. It also appears on a clean installation when highlights are available. Use **Help → What’s new** to reopen it. Each Windows Portable folder keeps its own acknowledgment.
 
@@ -332,7 +334,7 @@ When the batch is ready, open one pull request from `prerelease` to `main`. Both
 
 Invoke [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md) in Codex to process the GitHub issue backlog in the current checkout. It works through the issues in order, merges each completed task into `prerelease`, then opens and merges the promotion pull request after its required checks pass.
 
-After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
+After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages for Windows and Linux from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI on all four targets. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
 
 Prepare one to eight short English highlights in `release-highlights/X.Y.Z.json` for the next stable version before opening its promotion pull request. Set `version` to that product version and list the sentences in `highlights`. The same summary goes into the desktop packages, the updater manifest, and the GitHub Release.
 
@@ -340,10 +342,10 @@ To publish manually, open **Actions → CI and releases → Run workflow** and s
 
 For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
 
-The **Downloads** table on the release page links to the installer and ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime.
+The **Downloads** table on the release page links to the installer and ZIP for Windows and Linux. Extract the ZIP and open `Dirlume.exe` on Windows or `Dirlume.AppImage` on Linux. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime.
 
 Windows Portable uses **Install and restart** to update its current folder. Extract it into a folder you can write to. Move the whole folder to carry the portable marker and `dirlume-settings.json` with the app. Copies in separate folders keep separate Options preferences. For earlier ZIPs that lack the portable marker, extract a current ZIP to start using in-place updates.
 
-The release workflow also publishes `latest.json`, version-bound updater signatures, and `.app.tar.gz` update packages for both Mac architectures. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
+The release workflow also publishes `latest.json` and version-bound updater signatures for Windows and Linux. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 
 The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks signature rejection, installation, restored pane settings, and release highlights before and after install. The Ubuntu job also checks the manual Debian upgrade path.

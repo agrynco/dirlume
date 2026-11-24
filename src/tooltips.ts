@@ -131,8 +131,15 @@ export function installTooltips() {
         tooltipTarget(event.relatedTarget) !== trigger) hide();
   }, true);
   document.addEventListener("focusin", (event) => {
-    if (trigger && event.target instanceof Element &&
-        event.target.closest("dialog") !== trigger.closest("dialog")) hide();
+    if (!(event.target instanceof HTMLElement)) return;
+    const anchor = event.target;
+    if (anchor.dataset.tooltipOnFocus) {
+      const bounds = anchor.getBoundingClientRect();
+      show(anchor, bounds.left + bounds.width / 2);
+    } else if (trigger && anchor.closest("dialog") !== trigger.closest("dialog")) hide();
+  });
+  document.addEventListener("focusout", (event) => {
+    if (trigger?.dataset.tooltipOnFocus && event.target === trigger) hide();
   });
   document.addEventListener("pointerdown", hide, true);
   document.addEventListener("scroll", hide, true);

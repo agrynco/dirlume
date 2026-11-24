@@ -10,7 +10,7 @@ try {
     ["Ubuntu", "Mozilla/5.0 (X11; Linux x86_64)"],
     ["macOS", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"],
   ]) {
-    const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, userAgent });
+    const page = await browser.newPage({ viewport: { width: 1400, height: 760 }, userAgent });
     page.setDefaultTimeout(5000);
     await page.route("http://dirlume.test/**", (route) => {
       const path = new URL(route.request().url()).pathname;
@@ -31,12 +31,18 @@ try {
       ]));
       const file = { name: "note.txt", directory: false, link: false, hidden: false, size: 4, modified: null };
       const listing = { entries: [file], omitted: 0 };
+      const gib = 1024 ** 3;
+      const drive = (name, total, available) => ({ name, total: total == null ? null : total * gib, available: available == null ? null : available * gib });
+      const pairedDrives = () => [drive("Files", 200, window.fixtureFree ?? 50), drive("Full disk", 100, 0), drive("Older disk", null, null)];
+      const remoteListing = (segments) => segments.length === 1
+        ? { ...listing, entries: [{ ...file, name: "nested", directory: true }, file] } : listing;
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args = {}) => {
           switch (command) {
             case "locations": return [{ label: "Home", path: home }, { label: "Downloads", path: downloads }];
             case "list_directory": return { path: args.path, parent: null, ...listing };
+            case "disk_space": return { total: 10 * gib, available: 4 * gib };
             case "list_processes": return [];
             case "read_text": return { text: "Test", encoding: "utf8" };
             case "scan_local_space":
@@ -54,10 +60,17 @@ try {
             case "connect_ftp": return { id: 1, address: "fixture", origin: "ftp://fixture", segments: ["nested"], listing };
             case "list_ftp": return listing;
             case "computer_name": return "This test PC";
-            case "list_saved_computer_drives": return [{ name: "Files", total: 1024 ** 3, available: 512 * 1024 ** 2 }];
+            case "list_saved_computer_drives": return pairedDrives();
             case "connect_saved_server":
               window.dirlumeDrive = args.segments;
-              return { id: 8, address: "fixture", origin: "https://fixture", share: "fixture", listing };
+              return { id: 8, address: "fixture", origin: "https://fixture", share: "fixture", listing: remoteListing(args.segments) };
+            case "list_server": return remoteListing(args.segments);
+            case "list_connected_computer_drives":
+              if (window.deferCapacity) {
+                window.deferCapacity = false;
+                return new Promise((resolve) => { window.finishCapacity = () => resolve([drive("Files", 800, 700)]); });
+              }
+              return pairedDrives();
             case "kswitcher_peers": return windows ? [
               { id: "online", name: "KSwitcher PC", online: true },
               { id: "offline", name: "Offline KSwitcher PC", online: false },
@@ -95,10 +108,49 @@ try {
     await page.goto("http://dirlume.test/");
     await waitForPath("left", home);
     assert.equal(await button(page.locator(".topbar"), "Connect").count(), 0);
-    await files("left").press("Alt+F1");
-    const lan = sources("left").getByRole("group", { name: "Dirlume LAN", exact: true });
-    await lan.getByRole("group", { name: "Dirlume test PC", exact: true }).getByRole("button", { name: /^Files/ }).click();
-    await page.waitForFunction(() => window.dirlumeDrive?.[0] === "Files");
+    async function openPairedDrive(drive) {
+      await files("left").press("Alt+F1");
+      const lan = sources("left").getByRole("group", { name: "Dirlume LAN", exact: true });
+      await lan.getByRole("group", { name: "Dirlume test PC", exact: true }).getByRole("button", { name: new RegExp(`^${drive}`) }).click();
+      await page.waitForFunction((name) => window.dirlumeDrive?.[0] === name, drive);
+    }
+    const control = button(pane("left"), "Analyze space");
+    const tooltip = page.getByRole("tooltip");
+    const detail = "50 GiB free of 200 GiB, 150 GiB used";
+    await openPairedDrive("Files");
+    await control.getByText("50 GiB free of 200 GiB", { exact: true }).waitFor();
+    assert.equal(await control.locator(".space-meter > span").evaluate((meter) => meter.style.width), "75%");
+    await button(pane("right"), "Analyze space").getByText("4 GiB free of 10 GiB", { exact: true }).waitFor();
+    await control.hover();
+    await tooltip.getByText(detail, { exact: true }).waitFor();
+    await page.mouse.move(0, 0);
+    await tooltip.waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 650, height: 680 });
+    await control.getByText("50 GiB free of 200 GiB", { exact: true }).waitFor({ state: "hidden" });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const scope = pane("left").locator('summary[aria-label="Analysis scope"]');
+    await scope.focus();
+    await page.keyboard.press("Shift+Tab");
+    assert.equal(await control.evaluate((node) => node === document.activeElement), true);
+    await tooltip.getByText(detail, { exact: true }).waitFor();
+    await page.setViewportSize({ width: 1400, height: 760 });
+    await files("left").getByRole("option", { name: /^nested/ }).dblclick();
+    await files("left").getByRole("option", { name: /^note\.txt/ }).waitFor();
+    await control.getByText("50 GiB free of 200 GiB", { exact: true }).waitFor();
+    await page.evaluate(() => { window.fixtureFree = 40; });
+    const refresh = button(pane("left"), "Refresh folder");
+    await refresh.click();
+    await control.getByText("40 GiB free of 200 GiB", { exact: true }).waitFor();
+    await page.evaluate(() => { window.deferCapacity = true; });
+    await refresh.click();
+    await page.waitForFunction(() => typeof window.finishCapacity === "function");
+    await openPairedDrive("Full disk");
+    await control.getByText("0 B free of 100 GiB", { exact: true }).waitFor();
+    await page.evaluate(() => window.finishCapacity());
+    assert.equal(await control.getAttribute("aria-description"), "0 B free of 100 GiB, 100 GiB used");
+    await openPairedDrive("Older disk");
+    await control.getByText("Analyze space", { exact: true }).waitFor();
+    assert.equal(await control.isEnabled(), true);
     if (windows) {
       await files("right").press("Alt+F2");
       const lan = sources("right").getByRole("group", { name: "Dirlume LAN", exact: true });
@@ -106,7 +158,9 @@ try {
       await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
       await page.waitForFunction(() => window.kswitcherDrive === "C:\\");
       await files("right").getByRole("option", { name: /^note\.txt/ }).waitFor();
+      await button(pane("right"), "Analyze space").getByText("256 MiB free of 1 GiB", { exact: true }).waitFor();
     }
+    await page.setViewportSize({ width: 1100, height: 760 });
     await button(page, "Options").click();
     const options = page.getByRole("dialog", { name: "Options", exact: true });
     await button(options, "Computers").click();

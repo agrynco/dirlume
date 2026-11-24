@@ -506,7 +506,9 @@ try {
     await pane(page, "right").getByRole("option", { name: /^remote.dat/, selected: true }).waitFor();
     assert.equal(await remote.isVisible(), true);
     const calls = await page.evaluate(() => window.spaceCalls);
-    assert.ok(calls.every((call) => call.segments?.[0] === "open" || call.path?.startsWith("D:\\open")));
+    const listings = calls.filter((call) => !(call.command === "list_kswitcher" && call.path === ""));
+    assert.ok(listings.length > 0);
+    assert.ok(listings.every((call) => call.segments?.[0] === "open" || call.path?.startsWith("D:\\open")));
     await button(remote, "Close").click();
     await left.locator("summary[aria-label='Analysis scope']").click();
     await left.getByRole("button", { name: new RegExp("^" + label) }).click();
