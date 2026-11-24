@@ -27,8 +27,17 @@ try {
       transformCallback: () => 1,
       invoke: async (command, args = {}) => {
         if (command === "locations") return [{ label: "Home", path: "/fixture" }, { label: "Downloads", path: "/target" }];
+        if (command === "watch_directory" && args.path === "/fixture" && args.recursive) {
+          window.treeWatch = () => args.changes.onmessage(null);
+        }
         if (command === "list_directory") {
           window.treeCalls.push([command, args.path]);
+          if (window.holdTreeListing === args.path) {
+            window.holdTreeListing = null;
+            const names = await new Promise((resolve) => { window.finishTreeListing = resolve; });
+            if (names === null) throw new Error("Permission denied");
+            listings[args.path] = names.map((name) => file(name, 12));
+          }
           return { path: args.path, parent: args.path.split("/").slice(0, -1).join("/") || "/",
             entries: listings[args.path] ?? [], omitted: 0 };
         }
@@ -82,7 +91,10 @@ try {
   assert.equal(await button(pane("left"), "Folder sizes").getAttribute("aria-pressed"), "false");
   await button(pane("right"), "Locations for right pane").click();
   await pane("right").getByRole("button", { name: /^Downloads/ }).click();
+  await page.evaluate(() => { window.isTauri = true; });
   await button(pane("left"), "Folder sizes").click();
+  await page.waitForFunction(() => window.treeWatch);
+  await page.evaluate(() => { window.isTauri = false; });
   await page.waitForFunction(() => window.finishOldScan);
   await size("B").getByText("25 B", { exact: true }).waitFor();
   assert.equal(await size("A").innerText(), "…");
@@ -130,9 +142,43 @@ try {
   await files().press("Shift+Delete");
   await button(dialog("Delete permanently"), "Cancel").click();
 
+  const finishRefresh = (names) => page.evaluate((names) => {
+    const finish = window.finishTreeListing;
+    window.finishTreeListing = null;
+    finish(names);
+  }, names);
+  async function startRefresh(automatic) {
+    await page.evaluate(() => { window.holdTreeListing = "/fixture/A"; });
+    if (automatic) await page.evaluate(() => window.treeWatch());
+    else await button(pane("left"), "Refresh folder").click();
+    await page.waitForFunction(() => typeof window.finishTreeListing === "function");
+    await row("A/report.txt").waitFor();
+    assert.equal(await row("A").locator(".spin").count(), 0);
+  }
+  await row("A/report.txt").click();
+  if (!(await row("A/report.txt").evaluate((element) => element.classList.contains("marked")))) {
+    await row("A/report.txt").click({ modifiers: [markModifier] });
+  }
+  await startRefresh(true);
+  await finishRefresh(["report.txt", "added.txt"]);
+  await row("A/added.txt").waitFor();
+  assert.equal(await row("A/report.txt").getAttribute("data-current"), "true");
+  assert.ok(await row("A/report.txt").evaluate((element) => element.classList.contains("marked")));
+  await startRefresh(false);
+  await finishRefresh(null);
+  await row("A").locator(".file-tree-error").waitFor();
+  assert.match(await row("A").getAttribute("aria-description"), /Folder contents may be out of date/);
+  await row("A/added.txt").waitFor();
+  await startRefresh(true);
+  await finishRefresh(["report.txt"]);
+  await row("A/added.txt").waitFor({ state: "detached" });
+  await row("A").locator(".file-tree-error").waitFor({ state: "detached" });
+  await startRefresh(false);
   await row("B/report.txt").click();
   await button(pane("left"), "List").click();
   await row("report.txt").waitFor();
+  await finishRefresh(["late.txt"]);
+  assert.equal(await row("late.txt").count(), 0);
   assert.equal(await row("report.txt").getAttribute("data-current"), "true");
   assert.equal(await page.locator("#left-path").getAttribute("data-path"), "/fixture/B");
   await page.evaluate(() => window.finishOldScan());
@@ -143,7 +189,7 @@ try {
   await files("right").waitFor();
   assert.equal(await files("right").getAttribute("data-file-view"), "tree");
   assert.equal(await button(pane("left"), "Folder sizes").getAttribute("aria-pressed"), "false");
-  console.log("Verified per-pane modes, lazy branches, duplicate marked files, size metrics, scan reuse, and selection when returning to List.");
+  console.log("Verified lazy branches, stable automatic and manual refresh, refresh errors and recovery, marks, size metrics, and navigation.");
 } finally {
   await browser.close();
 }

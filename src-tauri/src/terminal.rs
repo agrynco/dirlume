@@ -22,7 +22,7 @@ $global:DirlumePromptCount = 0
 $global:DirlumeLastHistoryId = 0
 $global:DirlumeCommandCount = 0
 $global:DirlumeLatestCommand = ''
-Import-Module PSReadLine -ErrorAction SilentlyContinue
+Microsoft.PowerShell.Core\Import-Module -Name PSReadLine -ErrorAction SilentlyContinue
 $dirlumeReadLine = Get-Item Function:PSConsoleHostReadLine -ErrorAction SilentlyContinue
 $global:DirlumeTracksSubmissions = [bool]$dirlumeReadLine
 function global:Send-DirlumeCommand([string]$line) {
@@ -229,7 +229,14 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
         let mut command = CommandBuilder::new(&shell);
         crate::windows_environment::apply(&mut command, request.refresh_environment)
             .map_err(message)?;
-        command.args(["-NoLogo", "-NoExit", "-Command", POWERSHELL_PROMPT]);
+        // Pass the bootstrap as one argument through the Windows command line.
+        let startup = STANDARD.encode(
+            POWERSHELL_PROMPT
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        command.args(["-NoLogo", "-NoExit", "-EncodedCommand", &startup]);
         command
     };
     #[cfg(not(windows))]

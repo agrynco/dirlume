@@ -2069,14 +2069,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function openTerminal(moveFocus = true, place = terminalPlace) {
+  function openTerminal(moveFocus = true, place = terminalPlace, replaceId?: number) {
     if (!place) {
       setStatus({ text: "Choose a local or SSH folder to open a terminal.", error: true });
       return;
     }
     const key = place.kind === "ssh" ? "ssh:" + place.id : "local";
     const existing = terminals[key];
-    if (existing) {
+    if (replaceId !== undefined && existing?.id !== replaceId) return;
+    if (existing && replaceId === undefined) {
       if (moveFocus) terminalFocus.current = existing.id;
       return existing;
     }
@@ -2085,6 +2086,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? { ...common, kind: "ssh", connection: place.id, address: place.address, segments: place.segments }
       : { ...common, kind: "local" };
     if (moveFocus) terminalFocus.current = session.id;
+    if (existing) clearTerminalState(existing.id);
     setTerminals((current) => ({ ...current, [key]: session }));
     return session;
   }
@@ -2175,8 +2177,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const session = terminals[key];
     if (!session) return;
     setTerminals(({ [key]: _closed, ...remaining }) => remaining);
-    setPendingCommands(({ [session.id]: _closed, ...remaining }) => remaining);
-    setTerminalCompletion(({ [session.id]: _closed, ...remaining }) => remaining);
+    clearTerminalState(session.id);
+  }
+
+  function clearTerminalState(id: number) {
+    setPendingCommands(({ [id]: _closed, ...remaining }) => remaining);
+    setTerminalCompletion(({ [id]: _closed, ...remaining }) => remaining);
   }
 
   function toggleTerminal() {
@@ -3245,6 +3251,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               const { [session.id]: _closed, ...remaining } = current;
               return remaining;
             })}
+            onRestart={session.kind === "local" && terminalPlace?.kind === "local"
+              ? () => openTerminal(true, terminalPlace, session.id) : undefined}
             onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
       </Suspense>

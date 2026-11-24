@@ -6,7 +6,7 @@ import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from "react-dom";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
-  Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
+  Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
@@ -580,6 +580,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
             const marked = markedSet.has(entry.name);
             const appearance = fileAppearance(entry, fileTypes);
+            const branchError = entry.tree?.error && (entry.tree.stale
+              ? t("Folder contents may be out of date. {0}", errorText(entry.tree.error)) : errorText(entry.tree.error));
             return <Fragment key={entry.name}>
               {gap > 0 && <div className="file-row-spacer" aria-hidden="true" style={{ height: gap * viewport.rowHeight }} />}
               <div id={`${side}-file-${index}`} className={`file-row${marked ? " marked" : ""}`}
@@ -588,6 +590,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-level={entry.tree?.segments.length}
                 aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
                 aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
+                aria-description={branchError}
                 data-file-color={appearance.tone}
                 style={appearance.color || appearance.family ? { "--entry-color": appearance.color,
                   "--entry-font": appearance.family && `${CSS.escape(appearance.family)}, var(--panel-font)` } as CSSProperties : undefined}
@@ -608,7 +611,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                     {tree && (entry.tree && entry.directory && !entry.link
                       ? <Button type="button" className="file-tree-expand" tabIndex={-1}
                         aria-label={t(entry.tree.expanded ? "Collapse folder" : "Expand folder")}
-                        data-tooltip={entry.tree.error ? errorText(entry.tree.error) : undefined}
+                        data-tooltip={branchError}
                         onPointerDown={(event) => { if (event.button === 0) event.stopPropagation(); }}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -616,6 +619,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                           list.current?.focus({ preventScroll: true });
                         }} onDoubleClick={(event) => event.stopPropagation()}>
                         {entry.tree.loading ? <LoaderCircle className="spin" aria-hidden="true" /> :
+                          branchError ? <TriangleAlert className="file-tree-error" aria-hidden="true" /> :
                           entry.tree.expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
                       </Button> : <span className="file-tree-spacer" aria-hidden="true" />)}
                     {field === "markedName" && <span className="panel-mode-mark" aria-hidden="true">{marked && <Check />}</span>}

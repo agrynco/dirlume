@@ -757,6 +757,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .file-name .file-tree-expand:hover { background: var(--hover); }
 .file-name .file-tree-expand svg { width: 13px; height: 13px; color: inherit; }
+.file-name .file-tree-expand .file-tree-error { color: var(--danger); }
 .file-name span { overflow: hidden; text-overflow: ellipsis; }
 .file-name:has(.inline-rename) { overflow: visible; }
 .file-name .inline-rename { position: relative; flex: 1; min-width: 0; overflow: visible; }
@@ -1126,6 +1127,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .terminal-location { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .terminal-card header > button { flex: none; }
 .terminal-environment-notice { margin: 0; padding: 4px 10px; background: var(--raised); color: var(--ink); font-size: .84em; }
+.terminal-recovery { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .terminal-shortcut-hint { display: flex; align-items: center; gap: 5px; min-width: 24px; }
 .terminal-card .terminal-shortcut-hint { flex: 0 1 auto; max-width: 65%; font-size: .84em; color: var(--muted); }
 .terminal-shortcut-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
