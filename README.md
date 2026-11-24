@@ -1,6 +1,6 @@
 # Dirlume
 
-Dirlume is a two-pane file manager for Windows, Ubuntu, and macOS. It uses Tauri 2, Rust, React, TypeScript, and Vite. The window layout takes its cues from Revqora. The [migration checklist](docs/migration.md) tracks feature parity with KSwitcher Files.
+Dirlume is a two-pane file manager for Windows and Ubuntu. It uses Tauri 2, Rust, React, TypeScript, and Vite. The window layout takes its cues from Revqora. The [migration checklist](docs/migration.md) tracks feature parity with KSwitcher Files.
 
 Choose English, Ukrainian, or Russian in **Options → General → Language**. Apply changes to switch the interface immediately. Dirlume remembers your choice after restart and uses it for numbers. Dates and times follow the operating system's regional settings. Native system menus and terminal output use their own language settings.
 
@@ -42,7 +42,7 @@ In Brief and Medium, **Up** and **Down** follow the sort order from the bottom o
 
 In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
 
-The built-in **Full** mode uses automatic Size and Date widths. These widths follow the displayed values in the current pane font. When **F3** returns a folder measurement, the Size column widens as needed to show the full result, even with a saved width. Set a column width to **0** to fit its displayed values automatically.
+The built-in **Full** mode uses automatic Size and Date widths. These widths follow the displayed values in the current pane font. The Size column widens as needed to show full folder measurements, even with a saved width. Set a column width to **0** to fit its displayed values automatically.
 
 After confirming a local deletion or Move to Trash, you can cancel preparation or follow progress for the current item and the full selection. If an item is locked, retry it, skip it, or skip all remaining locks in that batch. On Windows, **Find locking processes** opens the process inspector. Ending a process requires its own confirmation. Permanent deletion keeps a skipped item and its parent folders while continuing with removable siblings. The final free-space reading comes from the source volume.
 
@@ -58,13 +58,13 @@ The current marked row in the active pane has its own fill and outline. Adjust o
 
 Enable **Right-click selection** under **Options → Main File Panels** to mark an item with a short right-click. Drag with the right button held to mark the rows you cross, or start on a marked row to unmark them. Hold the button over a row or empty pane space for half a second and release when the spinner appears to open the usual context menu.
 
-Choose **List** or **Tree** independently in either local file pane. Use a folder's disclosure button or Left and Right to traverse the tree. You can mark and operate on items across branches. Switching to List from a nested row opens that item's parent and keeps it selected if available. Turn on **Folder sizes** to scan the current subtree in the background in either view. An ellipsis indicates a pending size, a dash indicates an unavailable size, and ≥ marks a partial total. Choose **Size on disk** when allocation is available. The toggle starts off each time the app opens.
+Choose **List** or **Tree** independently in either local file pane. Use a folder's disclosure button or Left and Right to traverse the tree. You can mark and operate on items across branches. Switching to List from a nested row opens that item's parent and keeps it selected if available. Turn on **Folder sizes** to scan the current subtree in the background in either view. Use **Refresh** to recalculate after changes. Completed values stay visible until their replacements are ready. An ellipsis indicates a pending size, a dash indicates an unavailable size, and ≥ marks a partial total. Choose **Size on disk** when allocation is available. The toggle starts off each time the app opens.
 
 Click the free-space indicator or **Analyze space** to scan the folder shown in that pane. The adjacent arrow offers the containing volume, share, or connection root when available. The tree and treemap show file sizes or allocated storage, with percentages relative to each item's parent. **Show in other pane** opens a folder or selects a file there. **Stop** keeps partial results, **Rescan** repeats the same scope, and **Close** restores the file list. On Windows, full local NTFS volume scans use the Master File Table when accessible. Without volume access, Dirlume reads the sizes and file IDs of local NTFS directory entries in batches and scans folders concurrently. On solid-state storage, it uses up to 16 workers when the processor supports them. Local scans stream results to the pane as they arrive. Configure the **Analyze space** binding in **Options → Keyboard shortcuts**.
 
 In the local **Space Analyzer → Tree**, right-click a file or folder for its actions. Windows opens the Shell menu when available. Use **F5** to copy, **F6** to rename or move, **F8** to follow the location's Trash policy, or **Shift+Delete** to review permanent deletion. The same shortcut settings apply in the file pane and the analyzer. Copy and move suggest the other pane's directory when supported. Results refresh after file operations while keeping expanded branches.
 
-**F3** measures selected local folders in List view with the Space Analyzer scanner. It shows each folder's logical file size as its scan completes. **Esc** cancels pending measurements and keeps completed totals.
+**F3** measures selected local folders in List view with the Space Analyzer scanner. It shows each folder's logical file size as its scan completes. **Esc** cancels pending measurements and keeps completed totals. In Tree view, **F3** measures the selected folder and its descendants without changing the **Folder sizes** toggle.
 
 Open **Space Analyzer** in either pane from the Left or Right menu, the free-space control, or **left Ctrl+5** on the number row. Each pane keeps its own scan and selection. The breadcrumbs show the selected folder or file's parent. Choose a breadcrumb within the scan to reveal its folder, or choose a folder above the root to scan it. In a local or matching SSH terminal, successful directory changes follow the same rules. In Tree, **Tab** switches panes and marked items take precedence for file actions. Choose a file panel mode such as **Full** to browse the current folder and keep the selected file. **Close** or **Esc** restores the previous file view.
 
@@ -146,7 +146,7 @@ Type in the command line to see matching history and completions for the active 
 
 On Windows, **Options → Terminal → Automatically refresh environment variables** is enabled by default. New PowerShell sessions read the current user and system variables, including PATH. If Windows reports a change while a terminal is open, Dirlume shows a notice. Reopen the terminal when you are ready to use the new values.
 
-**Find files** searches local folders and connected sources. Masks are case-insensitive. **Show in panel** displays all collected matches in the searching pane. Relative paths identify files from different folders. You can view, edit, mark, compare, or copy files from there. Use **Go to selected file** to open the containing folder for move, rename, or deletion.
+**Find files** searches local folders and connected sources. Masks are case-insensitive. **Show in panel** displays all collected matches in the searching pane. Relative paths identify files from different folders. You can view, edit, mark, compare, or copy files from there. With local results, you can also move files to a local destination, send them to Trash, or permanently delete them using the file-pane commands and confirmations. Successfully moved or removed files disappear from the results. **Ctrl+R** or **Refresh** reruns a local search in place with its original folder, mask, and visibility settings. Use **Go to selected file** to open the containing folder for renaming.
 
 **Compare files** opens a separate window. Use **Previous** and **Next** to select a change, then **Apply to left** or **Apply to right** to transfer it. Turn on **Edit files** to work directly in both panes. When closing with unsaved edits, choose **Overwrite original** or **Save as** for each changed file.
 
@@ -208,7 +208,7 @@ In the main menu, **Help → Help** opens the offline guide and **Help → About
 
 ## Build
 
-Install Node.js 24, Rust via rustup, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Windows uses MSVC and WebView2, macOS uses Xcode Command Line Tools, and Ubuntu uses WebKitGTK 4.1.
+Install Node.js 24, Rust via rustup, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Windows uses MSVC and WebView2. Ubuntu uses WebKitGTK 4.1.
 
 ```sh
 npm ci
@@ -235,9 +235,11 @@ For Windows memory investigations, [measure WebView2 by PID and process role](do
 
 ## Archives
 
-Install the [7-Zip command-line tools](https://www.7-zip.org/download.html) to create and browse local archives. Dirlume looks for `7zz`, `7z`, or `7za` on the executable search path and in common installation directories. Select local items and press **Shift+F1** to create a ZIP, 7z, TAR, or WIM archive when the installed tool supports the format. The dialog supports compression profiles, AES encryption, split volumes, and a self-extracting option when the Windows SFX module is installed. Profiles store compression options without passwords.
+Packaged Dirlume includes the [7-Zip command-line tools](https://www.7-zip.org/download.html), including their license and source. Archive operations work offline. A development build can use a system copy of `7zz`, `7z`, or `7za`. Run `./scripts/prepare-7zip.ps1` before building a desktop package to prepare the pinned tools. Select local items and press **Shift+F1** to create a ZIP, 7z, TAR, or WIM archive when the tool supports the format. The dialog supports compression profiles, AES encryption, split volumes, and self-extracting archives on Windows. Profiles store compression options without passwords.
 
 Press **Enter** on an archive to open it in a pane. Use **F5** to extract selected members to a local folder with the normal copy conflict prompts, **F3** to view files, or the **Parent folder** button to go up. A writable archive supports editing text files with **F4** and removing selected members with **F8**. Encrypted, split, and other formats without update support open read-only. Dirlume skips unsafe member paths and refuses to extract links.
+
+With a writable, unencrypted ZIP or 7z archive open, select local files or folders in the other pane and press **F5** to copy into the displayed archive folder. The confirmation shows the archive filename and member path. Use **F7** to create an empty folder or **F2** to rename one entry in the archive. Canceling a write before replacement keeps the original archive and source files.
 
 ## Remote sources
 
@@ -254,6 +256,8 @@ If the destination is reachable through bastion servers, add each server under *
 On first connection, verify the displayed SHA-256 host key fingerprint with your server administrator before choosing **Trust and connect**. Dirlume checks that fingerprint before authenticating and blocks the connection if the host key changes. The pin is shared by all SSH profiles for the same host and port. For a planned key rotation, independently verify the new fingerprint, close Dirlume, and remove the matching entry from the `trustedHosts` list in `ssh-profiles.json` in Dirlume's app configuration directory. Reopen Dirlume and verify the displayed fingerprint again.
 
 The SSH pane opens in the server's initial directory. Browse with the file list, breadcrumbs, or an absolute path starting with / in the pane address. Press **F5** to copy files or folders between a local pane and the SSH pane with progress, cancellation, and conflict prompts. Replacing an existing server file requires the SFTP server to support the OpenSSH POSIX rename extension.
+
+Press **F6** on one or more regular local files with a connected SSH/SFTP folder in the other pane to move those files. Copy and Move show the connection beside the editable destination path. Move removes each local source after the server commits that upload. If removal fails, the dialog identifies the uploaded file and the source. Retry checks both files before trying removal again.
 
 Press **F3** to view a remote file or **F4** to edit text. Saving preserves the file encoding and checks whether the file changed on the server. SSH editing uses the same safe replacement extension as copying over an existing file. If SFTP denies directory access, text reading, or saving, use **Open with sudo** or **Save with sudo** to retry. The server must allow the SSH account to run the external OpenSSH SFTP server through sudo. Dirlume uses the password only to open the authorized session. Subsequent protected operations on that connection can reuse the session until it has been idle for five minutes or the connection closes. Browsing and reading open a read-only session, and the first protected save requires write authorization.
 
@@ -318,13 +322,13 @@ The [DirLume project board](https://github.com/users/agrynco/projects/12/views/1
 
 The sync workflow uses the `DIRLUME_PROJECT_TOKEN` Actions secret. Use a GitHub classic personal access token with the `project` scope for this user-owned project. Run **Sync Dirlume project status** in GitHub Actions to reconcile the board immediately after setting the secret.
 
-Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers, Windows portable copies, and Linux AppImage verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command. GitHub releases publish downloads and updates for Windows and Linux. macOS remains a source build and CI target.
+Dirlume checks for stable updates in the background at startup. Use **Commands → Check for updates** to check again. Windows installers, Windows portable copies, and Linux AppImage verify an update signature before installing and restarting. Dirlume asks before discarding changes in open editors. Debian installations show the matching `.deb` and an upgrade command. GitHub releases publish downloads and updates for Windows and Linux.
 
 The update dialog shows the offered version’s highlights and links to its full release notes. After installation, **What’s new** shows the installed version’s highlights offline. Dismiss the dialog once for that product version. It also appears on a clean installation when highlights are available. Use **Help → What’s new** to reopen it. Each Windows Portable folder keeps its own acknowledgment.
 
 Install a recent release with the bundled verification key to enable in-app updates. When a newer release is available, choose **Install and restart** to download and verify the update and let Dirlume install it.
 
-[GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64, Ubuntu x64, macOS Apple Silicon, and macOS Intel. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
+[GitHub Actions](https://github.com/agrynco/dirlume/actions) checks and builds the desktop app and server for Windows x64 and Ubuntu x64. A version job resolves one product version and CI build number for all platforms. Ordinary builds use the higher of the source version and the highest published version. The build number is the workflow run number multiplied by 1,000 plus the run attempt. A full rerun gets a new build number. Retrying failed platform jobs reuses the resolved build identity if the version job already succeeded.
 
 The installer and server filenames include both numbers, for example `Dirlume-0.1.1-build.42001-windows-x64.setup.exe`. In the installed app, open **Options → General → Version** to see `0.1.1+42001`. The server reports the same value with `dirlume-server --version`.
 
@@ -334,13 +338,13 @@ When the batch is ready, open one pull request from `prerelease` to `main`. Both
 
 Invoke [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md) in Codex to process the GitHub issue backlog in the current checkout. It works through the issues in order, merges each completed task into `prerelease`, then opens and merges the promotion pull request after its required checks pass.
 
-After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages for Windows and Linux from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI on all four targets. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
+After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages for Windows and Linux from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI on both targets. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
 
 Prepare one to eight short English highlights in `release-highlights/X.Y.Z.json` for the next stable version before opening its promotion pull request. Set `version` to that product version and list the sentences in `highlights`. The same summary goes into the desktop packages, the updater manifest, and the GitHub Release.
 
 To publish manually, open **Actions → CI and releases → Run workflow** and select `main`. A manual release runs the full build and test suite before publishing.
 
-For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed builds use no Windows or Apple developer signing certificates.
+For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed Windows builds use no Windows developer signing certificate.
 
 The **Downloads** table on the release page links to the installer and ZIP for Windows and Linux. Extract the ZIP and open `Dirlume.exe` on Windows or `Dirlume.AppImage` on Linux. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime.
 
@@ -348,4 +352,4 @@ Windows Portable uses **Install and restart** to update its current folder. Extr
 
 The release workflow also publishes `latest.json` and version-bound updater signatures for Windows and Linux. All desktop builds use the updater public key in `src-tauri/tauri.conf.json`. Store the matching encrypted signing key and its password in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. See the [Tauri updater signing guide](https://v2.tauri.app/plugin/updater/#signing-updates).
 
-The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on all four platforms with an ephemeral key. It checks signature rejection, installation, restored pane settings, and release highlights before and after install. The Ubuntu job also checks the manual Debian upgrade path.
+The **Install signed desktop updates** workflow tests both versions of an isolated fixture app on Windows and Ubuntu with an ephemeral key. It checks signature rejection, installation, restored pane settings, and release highlights before and after install. The Ubuntu job also checks the manual Debian upgrade path.

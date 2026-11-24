@@ -1,0 +1,6 @@
+Dirlume packages the official 7-Zip 26.06 command-line tools as a separate program.
+Copyright Igor Pavlov.
+
+See the included 7-Zip license for the upstream terms and notices.
+The corresponding source is available from the upstream release.
+https://github.com/ip7z/7zip/releases/download/26.06/7z2606-src.tar.xz

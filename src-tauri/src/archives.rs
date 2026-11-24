@@ -10,7 +10,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::{
@@ -24,10 +24,17 @@ use crate::{
     protocol::{BytePage, RemoteListing, BYTE_PAGE_SIZE},
 };
 
+mod updates;
+
 #[derive(Default)]
 pub struct Archives {
     next: AtomicU32,
-    items: Mutex<HashMap<u32, Arc<Mutex<Archive>>>>,
+    items: Mutex<HashMap<u32, ArchiveHandle>>,
+}
+
+struct ArchiveHandle {
+    path: PathBuf,
+    archive: Arc<Mutex<Archive>>,
 }
 
 impl Archives {
@@ -36,7 +43,7 @@ impl Archives {
             .lock()
             .map_err(message)?
             .get(&id)
-            .cloned()
+            .map(|item| Arc::clone(&item.archive))
             .ok_or_else(|| "Open the archive again.".to_owned())
     }
 }
@@ -54,6 +61,7 @@ struct Index {
     members: BTreeMap<Vec<String>, Member>,
     format: String,
     encrypted: bool,
+    split: bool,
     omitted: usize,
 }
 
@@ -74,6 +82,8 @@ pub struct OpenedArchive {
     path: String,
     parent: String,
     writable: bool,
+    #[serde(rename = "canAdd")]
+    can_add: bool,
     listing: RemoteListing,
 }
 
@@ -81,10 +91,13 @@ pub struct OpenedArchive {
 pub async fn open_archive(
     path: String,
     password: Option<String>,
+    app: AppHandle,
     state: State<'_, Archives>,
 ) -> Result<OpenedArchive> {
+    let engine = Engine::for_app(&app)?;
     let opened = blocking(move || {
         Archive::open(
+            engine,
             local::absolute(&path).map_err(message)?.to_owned(),
             password,
         )
@@ -100,13 +113,29 @@ pub async fn open_archive(
         path: local::display_path(&opened.path).map_err(message)?,
         parent: local::display_path(parent).map_err(message)?,
         writable: opened.writable,
+        can_add: opened.can_add(),
         listing: opened.list(&[])?,
     };
-    state
-        .items
-        .lock()
-        .map_err(message)?
-        .insert(id, Arc::new(Mutex::new(opened)));
+    let mut items = state.items.lock().map_err(message)?;
+    let mut existing = None;
+    if opened.password.is_none() {
+        for item in items.values().filter(|item| item.path == opened.path) {
+            let current = item.archive.try_lock().map_err(|_| {
+                "An archive operation is in progress. Open the archive again when it finishes."
+            })?;
+            if current.password.is_none() && current.verify().is_ok() {
+                existing = Some(Arc::clone(&item.archive));
+                break;
+            }
+        }
+    }
+    items.insert(
+        id,
+        ArchiveHandle {
+            path: opened.path.clone(),
+            archive: existing.unwrap_or_else(|| Arc::new(Mutex::new(opened))),
+        },
+    );
     Ok(view)
 }
 
@@ -228,12 +257,12 @@ impl Write for CacheWriter {
 }
 
 impl Archive {
-    fn open(path: PathBuf, password: Option<String>) -> Result<Self> {
+    fn open(engine: Engine, path: PathBuf, password: Option<String>) -> Result<Self> {
         let metadata = fs::symlink_metadata(&path).map_err(message)?;
         if !metadata.is_file() || local::is_link(&metadata) {
             return Err("Choose a regular archive file.".to_owned());
         }
-        let engine = Engine::find()?;
+        let path = path.canonicalize().map_err(message)?;
         let password = password.filter(|value| !value.is_empty());
         let revision = FileRevision::capture(&path, &metadata).map_err(message)?;
         let index = inspect(&engine, &path, password.as_deref())?;
@@ -244,6 +273,7 @@ impl Archive {
         let writable = !metadata.permissions().readonly()
             && index.omitted == 0
             && !index.encrypted
+            && !index.split
             && matches!(index.format.as_str(), "7z" | "zip" | "tar" | "wim")
             && !path
                 .extension()
@@ -396,19 +426,7 @@ impl Archive {
         {
             return Err("Choose entries in the archive.".to_owned());
         }
-        let workspace = tempfile::tempdir_in(
-            self.path
-                .parent()
-                .ok_or("Choose an archive inside a folder.")?,
-        )
-        .map_err(message)?;
-        let staged = workspace.path().join(
-            self.path
-                .file_name()
-                .ok_or("Use a valid archive filename.")?,
-        );
-        fs::copy(&self.path, &staged).map_err(message)?;
-        self.verify()?;
+        let (workspace, staged) = self.stage_update()?;
         let modifies =
             |name: &[String]| selected.iter().any(|selection| name.starts_with(selection));
         let mut command;
@@ -468,13 +486,40 @@ impl Archive {
         } else if new_index.members.keys().any(|name| modifies(name)) {
             return Err("An archive entry could not be deleted.".to_owned());
         }
+        self.commit_update(&staged, new_index, || Ok(()))
+    }
+
+    fn stage_update(&self) -> Result<(tempfile::TempDir, PathBuf)> {
+        let workspace = tempfile::tempdir_in(
+            self.path
+                .parent()
+                .ok_or("Choose an archive inside a folder.")?,
+        )
+        .map_err(message)?;
+        let staged = workspace.path().join(
+            self.path
+                .file_name()
+                .ok_or("Use a valid archive filename.")?,
+        );
+        fs::copy(&self.path, &staged).map_err(message)?;
+        self.verify()?;
+        Ok((workspace, staged))
+    }
+
+    fn commit_update(
+        &mut self,
+        staged: &Path,
+        new_index: Index,
+        before_replace: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         fs::OpenOptions::new()
             .write(true)
-            .open(&staged)
+            .open(staged)
             .and_then(|file| file.sync_all())
             .map_err(message)?;
+        before_replace()?;
         self.verify()?;
-        local::replace_file(&staged, &self.path).map_err(message)?;
+        local::replace_file(staged, &self.path).map_err(message)?;
         self.revision = FileRevision::capture(
             &self.path,
             &fs::symlink_metadata(&self.path).map_err(message)?,
@@ -605,13 +650,19 @@ fn parse_index(output: &str) -> Result<Index> {
     let mut lines = output.lines();
     let mut format = String::new();
     let mut encrypted = false;
+    let mut split = false;
     for line in lines.by_ref() {
         if line == "----------" {
             break;
         }
         if let Some(kind) = line.strip_prefix("Type = ") {
             format = kind.to_ascii_lowercase();
+            split |= format == "split";
         }
+        split |= line
+            .strip_prefix("Volumes = ")
+            .and_then(|count| count.parse::<u32>().ok())
+            .is_some_and(|count| count > 1);
         if line.starts_with("Method = ") && line.to_ascii_lowercase().contains("aes") {
             encrypted = true;
         }
@@ -691,6 +742,7 @@ fn parse_index(output: &str) -> Result<Index> {
         members,
         format,
         encrypted,
+        split,
         omitted,
     })
 }
@@ -726,6 +778,11 @@ mod tests {
             return;
         }
         let engine = Engine::find().unwrap();
+        #[cfg(windows)]
+        if let Some(portable) = Engine::embedded().unwrap() {
+            assert_eq!(portable.formats().unwrap(), engine.formats().unwrap());
+            assert!(portable.sfx_module().is_some());
+        }
         let formats = engine.formats().unwrap();
         let fixture = tempfile::tempdir().unwrap();
         let input = fixture.path().join("input");
@@ -748,7 +805,7 @@ mod tests {
                 .unwrap()
                 .checked(false)
                 .unwrap();
-            let mut archive = Archive::open(path.clone(), None).unwrap();
+            let mut archive = Archive::open(engine.clone(), path.clone(), None).unwrap();
             assert_eq!(archive.list(&[]).unwrap().entries.len(), 2);
             let extract = |archive: &Archive, name: &[String]| {
                 archive
@@ -782,8 +839,114 @@ mod tests {
             assert_eq!(archive.byte_page(&note, 0).unwrap().data, b"updated text");
             assert_eq!(extract(&archive, &note), b"updated text");
             assert_eq!(extract(&archive, &keep), b"keep me");
+            if kind == "tar" {
+                assert!(!archive.can_add());
+            } else {
+                use crate::local_transfer::Policy;
+                let parent = ["docs".to_owned()];
+                archive.create_folder(&parent, "empty", |_| Ok(())).unwrap();
+                let before = fs::read(&path).unwrap();
+                assert!(archive.create_folder(&parent, "empty", |_| Ok(())).is_err());
+                assert!(archive
+                    .create_folder(&parent, "canceled", |percent| {
+                        if percent == 100 {
+                            Err(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                "Transfer canceled.",
+                            ))
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .is_err());
+                assert_eq!(fs::read(&path).unwrap(), before);
+                let incoming = fixture.path().join("incoming");
+                fs::create_dir_all(incoming.join("batch/empty child")).unwrap();
+                fs::write(incoming.join("batch/copy.txt"), b"copied data").unwrap();
+                let change = [
+                    (incoming.join("batch"), "batch".to_owned()),
+                    (input.join("keep.txt"), "note.txt".to_owned()),
+                ];
+                assert_eq!(
+                    archive
+                        .copy_into(
+                            &parent,
+                            &change,
+                            Policy::Ask,
+                            |_, _, _| Ok(()),
+                            |_| Ok(Decision::Skip)
+                        )
+                        .unwrap(),
+                    [true, false],
+                );
+                assert_eq!(extract(&archive, &note), b"updated text");
+                assert_eq!(
+                    extract(
+                        &archive,
+                        &["docs".into(), "batch".into(), "copy.txt".into()]
+                    ),
+                    b"copied data"
+                );
+                assert!(archive.index.members[&["docs".into(), "batch".into(), "empty child".into()][..]].directory);
+                assert_eq!(
+                    fs::read(incoming.join("batch/copy.txt")).unwrap(),
+                    b"copied data"
+                );
+                archive
+                    .rename_entry(&["docs".into(), "batch".into()], "renamed", |_| Ok(()))
+                    .unwrap();
+                assert_eq!(
+                    extract(
+                        &archive,
+                        &["docs".into(), "renamed".into(), "copy.txt".into()]
+                    ),
+                    b"copied data"
+                );
+                assert!(
+                    archive.index.members
+                        [&["docs".into(), "renamed".into(), "empty child".into()][..]]
+                        .directory
+                );
+                let before = fs::read(&path).unwrap();
+                let result = archive.copy_into(
+                    &parent,
+                    &change,
+                    Policy::Overwrite,
+                    |file, bytes, _| {
+                        if file.ends_with("keep.txt") && bytes > 0 {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                "Transfer canceled.",
+                            ));
+                        }
+                        Ok(())
+                    },
+                    |_| panic!("unexpected conflict"),
+                );
+                assert!(result.unwrap_err().contains("Transfer canceled"));
+                assert_eq!(fs::read(&path).unwrap(), before);
+                assert!(archive
+                    .copy_into(
+                        &parent,
+                        &[(path.clone(), "self".into())],
+                        Policy::Ask,
+                        |_, _, _| Ok(()),
+                        |_| panic!("unexpected conflict")
+                    )
+                    .is_err());
+                assert_eq!(fs::read(&path).unwrap(), before);
+                let (_stage, staged) = archive.stage_update().unwrap();
+                let index = inspect(&engine, &staged, None).unwrap();
+                let modified = archive.commit_update(&staged, index, || {
+                    fs::write(&path, b"external edit").map_err(message)
+                });
+                assert!(modified.unwrap_err().contains("changed on disk"));
+                assert_eq!(fs::read(&path).unwrap(), b"external edit");
+                fs::write(&path, before).unwrap();
+                archive = Archive::open(engine.clone(), path.clone(), None).unwrap();
+            }
             archive.write(&[keep.to_vec()], None).unwrap();
-            let reopened = Archive::open(path, None).unwrap();
+            let reopened = Archive::open(engine.clone(), path, None).unwrap();
             assert!(reopened.file(&keep).is_err());
             assert_eq!(extract(&reopened, &note), b"updated text");
         }

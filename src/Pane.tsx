@@ -6,7 +6,7 @@ import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from "react-dom";
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
-  Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, X,
+  Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
@@ -71,7 +71,7 @@ interface PaneProps {
   fileView: FilePaneView;
   onFileView: (view: FilePaneView) => void;
   onTreeBranch: (entry: Entry) => void;
-  folderSizes: { active: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
+  folderSizes: { active: boolean; branchActive: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
   onFolderSizes: () => void;
   locations: QuickLocation[];
   rename?: { name: string; rowKey: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
@@ -180,10 +180,16 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const columnsInMode = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
   const modeGroups = panelColumnGroups(columnsInMode);
   const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
-    folderSizes.active && !group.some(({ field }) => field === "size" || field === "bytes")
+    (folderSizes.active || folderSizes.branchActive) && !group.some(({ field }) => field === "size" || field === "bytes")
       ? [...group, { field: "size" as const, width: "0" }] : group);
   const columns = groups.flat();
-  const fitMeasuredFolders = !pane.search && pane.sizes.size > 0;
+  const hasReadyBackgroundSize = useMemo(() => {
+    for (const size of pane.backgroundSizes?.values() ?? []) {
+      if (!size.pending && !size.unavailable) return true;
+    }
+    return false;
+  }, [pane.backgroundSizes]);
+  const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
   const tracks = panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
@@ -230,7 +236,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       for (const [name, result] of measurements) {
         const background = pane.backgroundSizes?.get(name);
         if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
-        const measured = pane.sizes.has(name);
+        const measured = pane.sizes.has(name) || !!background;
         // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
         if (autoSize || (sampleSize && measured)) {
           const sample = sizeLabel(result.bytes, result.incomplete);
@@ -359,7 +365,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
-  const loadingLabel = t("Opening folder…");
+  const loadingLabel = t(search ? "Searching…" : "Opening folder…");
   const measuringLabel = t("Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
@@ -471,7 +477,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         </nav>}
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
-          <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
+          <h2 data-tooltip={pane.search?.query.mask ?? title}>{title}</h2>
           {!processView && pane.place && pane.place.kind !== "connections" && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
@@ -498,7 +504,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 requestAnimationFrame(() => filterField.current?.focus());
               }
             }}><Search /></Button>}
-          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
+          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t(search ? "Refresh" : "Refresh folder")}
+            disabled={!pane.place || pane.loading || !!pane.search && pane.search.query.root.kind !== "local"} onClick={onRefresh}>
             <RefreshCw />
           </Button>}
         </div>
@@ -580,6 +587,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
             const marked = markedSet.has(entry.name);
             const appearance = fileAppearance(entry, fileTypes);
+            const branchError = entry.tree?.error && (entry.tree.stale
+              ? t("Folder contents may be out of date. {0}", errorText(entry.tree.error)) : errorText(entry.tree.error));
             return <Fragment key={entry.name}>
               {gap > 0 && <div className="file-row-spacer" aria-hidden="true" style={{ height: gap * viewport.rowHeight }} />}
               <div id={`${side}-file-${index}`} className={`file-row${marked ? " marked" : ""}`}
@@ -588,6 +597,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-level={entry.tree?.segments.length}
                 aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
                 aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
+                aria-description={branchError}
                 data-file-color={appearance.tone}
                 style={appearance.color || appearance.family ? { "--entry-color": appearance.color,
                   "--entry-font": appearance.family && `${CSS.escape(appearance.family)}, var(--panel-font)` } as CSSProperties : undefined}
@@ -608,7 +618,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                     {tree && (entry.tree && entry.directory && !entry.link
                       ? <Button type="button" className="file-tree-expand" tabIndex={-1}
                         aria-label={t(entry.tree.expanded ? "Collapse folder" : "Expand folder")}
-                        data-tooltip={entry.tree.error ? errorText(entry.tree.error) : undefined}
+                        data-tooltip={branchError}
                         onPointerDown={(event) => { if (event.button === 0) event.stopPropagation(); }}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -616,6 +626,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                           list.current?.focus({ preventScroll: true });
                         }} onDoubleClick={(event) => event.stopPropagation()}>
                         {entry.tree.loading ? <LoaderCircle className="spin" aria-hidden="true" /> :
+                          branchError ? <TriangleAlert className="file-tree-error" aria-hidden="true" /> :
                           entry.tree.expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
                       </Button> : <span className="file-tree-spacer" aria-hidden="true" />)}
                     {field === "markedName" && <span className="panel-mode-mark" aria-hidden="true">{marked && <Check />}</span>}

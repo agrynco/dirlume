@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, isPermissionError, windowsClient, type FolderLinkType } from "./api";
+import { api, describeError, isPermissionError, placePath, windowsClient, type ArchivePlace, type FolderLinkType } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EditableDropdown } from "./EditableDropdown";
@@ -8,6 +8,7 @@ import { PathField } from "./PathField";
 import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { ElevationButton } from "./ProcessTools";
 import { timestampSeconds, useTimestamps } from "./useTimestamps";
+import { useArchiveChange } from "./useArchiveChange";
 
 const historyKey = "dirlume.folder-name-history.v1";
 type HistoryEntry = { name: string; date: number };
@@ -23,8 +24,9 @@ function folderHistory(): HistoryEntry[] {
   }
 }
 
-export function NewFolderDialog({ directory, showHidden, historyShortcut, onCreated, onClose }: {
+export function NewFolderDialog({ directory, archive, showHidden, historyShortcut, onCreated, onClose }: {
   directory: string;
+  archive?: ArchivePlace;
   showHidden: boolean;
   historyShortcut: readonly string[];
   onCreated: (name: string) => Promise<void>;
@@ -42,6 +44,7 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
   const [error, setError] = useState("");
   const [failedName, setFailedName] = useState("");
   const [history] = useState(folderHistory);
+  const archiveChange = useArchiveChange();
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const dates = new Map<string, HistoryEntry[]>();
@@ -69,7 +72,8 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
     setError("");
     setFailedName("");
     try {
-      const result = await api.createFolders(directory, { name, multiple, linkType, target });
+      if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
+      const result = archive ? { last: name, failure: null } : await api.createFolders(directory, { name, multiple, linkType, target });
       if (result.last) await onCreated(result.last);
       if (result.failure) {
         setError(result.failure.error);
@@ -88,7 +92,12 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
     }
   }
 
-  return <Dialog title={t("New folder")} onClose={() => { if (!waiting) onClose(); }} onKeyDown={(event) => {
+  function close() {
+    if (!waiting) onClose();
+    else if (archive) archiveChange.cancel();
+  }
+
+  return <Dialog title={t("New folder")} onClose={close} onKeyDown={(event) => {
     if (historyOpen && event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -129,6 +138,8 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
             </div>)}
           </div>}
         </div>
+        {archive && <p>{placePath(archive)}</p>}
+        {!archive && <>
         <label className="field">{t("Link type")}
           <select value={linkType} aria-label={t("Link type")} disabled={waiting} onChange={(event) => setLinkType(event.target.value as FolderLinkType)}>
             <option value="none">{t("None")}</option>
@@ -145,11 +156,15 @@ export function NewFolderDialog({ directory, showHidden, historyShortcut, onCrea
           <input type="checkbox" checked={multiple} disabled={waiting} onChange={(event) => setMultiple(event.target.checked)} />
           <span>{t("Process multiple names")}</span>
         </label>
+        </>}
         {error && <p className="dialog-error" role="alert">{failedName ? t("Could not create {0}. {1}", failedName, errorText(error)) : errorText(error)}</p>}
-        {windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
+        {archive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
+        {!archive && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
       </div>
       <div className="dialog-footer">
-        <Button type="button" disabled={waiting} onClick={onClose}>{t("Cancel")}</Button>
+        <Button type="button" disabled={waiting && (!archive || archiveChange.canceling)} onClick={close}>
+          {t(archiveChange.canceling ? "Canceling…" : "Cancel")}
+        </Button>
         <Button type="submit" className="primary" disabled={waiting || !name.trim() || (linkType !== "none" && !target.trim())}>
           {t(waiting ? "Working…" : "Create")}
         </Button>

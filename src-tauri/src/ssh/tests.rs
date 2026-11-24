@@ -162,6 +162,7 @@ fn opens_a_two_hop_sftp_route() {
         fs::read(root.join("client.txt")).unwrap(),
         b"upload through the route"
     );
+    crate::desktop::verify_ssh_moves(&mut session, temp.path(), &root);
     drop(session);
 
     let (client, _) = route(input.clone(), &[], &keys)

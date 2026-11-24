@@ -80,23 +80,21 @@ jobs:
       - name: Select build platforms
         if: steps.resolve.outputs.product-version != ''
         id: platforms
-        env:
-          PUBLISH_RELEASE: ${{ steps.resolve.outputs.publish }}
         run: |
-          platforms="$(node scripts/package.mjs platforms "$PUBLISH_RELEASE")"
+          platforms="$(node scripts/package.mjs platforms)"
           printf 'platforms=%s\n' "$platforms" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and test (${{ matrix.platform }})
     if: needs.version.outputs.product-version != ''
     needs: version
-    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[matrix.platform] }}
+    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04"}')[matrix.platform] }}
     timeout-minutes: 45
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
       DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
-      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage","macos-arm64":"app,dmg","macos-x64":"app,dmg"}')[matrix.platform] }}
+      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage"}')[matrix.platform] }}
     strategy:
       fail-fast: false
       matrix:
@@ -155,6 +153,9 @@ jobs:
       - name: Verify terminal web links
         if: github.event.action != 'closed'
         run: node scripts/terminal-links-smoke.mjs
+      - name: Verify transfer estimates
+        if: github.event.action != 'closed'
+        run: node scripts/transfer-estimate-smoke.mjs
       - name: Verify current marked row colors and keyboard navigation
         if: github.event.action != 'closed'
         run: node scripts/marked-cursor-smoke.mjs
@@ -206,6 +207,9 @@ jobs:
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs
+      - name: Verify local Search results actions and refresh
+        if: github.event.action != 'closed'
+        run: node scripts/search-results-smoke.mjs
       - name: Verify Git View
         if: github.event.action != 'closed'
         run: node scripts/git-view-smoke.mjs
@@ -227,8 +231,7 @@ jobs:
       - name: Lint Rust desktop and server
         if: github.event.action != 'closed'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features server -- -D warnings
-      - name: Prepare the 7-Zip test fixture
-        if: github.event.action != 'closed'
+      - name: Prepare the bundled 7-Zip engine
         shell: pwsh
         run: ./scripts/prepare-7zip.ps1
       - name: Verify filesystem and server

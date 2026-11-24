@@ -17,6 +17,7 @@ try {
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
     const windows = client === "Windows";
+    if (windows) await page.clock.install();
     const home = windows ? "C:\\fixture" : "/fixture";
     const bookmark = home + (windows ? "\\bookmarked" : "/bookmarked");
     const downloads = home + (windows ? "\\downloads" : "/downloads");
@@ -36,7 +37,9 @@ try {
       const pairedDrives = () => [drive("Files", 200, window.fixtureFree ?? 50), drive("Full disk", 100, 0), drive("Older disk", null, null)];
       const remoteListing = (segments) => segments.length === 1
         ? { ...listing, entries: [{ ...file, name: "nested", directory: true }, file] } : listing;
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
       window.__TAURI_INTERNALS__ = {
+        metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
         transformCallback: () => 1,
         invoke: async (command, args = {}) => {
           switch (command) {
@@ -80,7 +83,12 @@ try {
               if (args.path === "") return { ...listing, entries: [], parent: null,
                 drives: [{ name: "C:", type: 3, total: 1024 ** 3, available: 256 * 1024 ** 2 }] };
               window.kswitcherDrive = args.path;
+              window.kswitcherListings = (window.kswitcherListings ?? 0) + 1;
+              if (window.kswitcherFailure) throw window.kswitcherFailure;
               return { ...listing, parent: "" };
+            case "report_diagnostic":
+              if (args.operation === "list_kswitcher") (window.kswitcherDiagnostics ??= []).push(args);
+              return null;
             case "file_icons": return args.items.map(() => null);
             default: return null;
           }
@@ -159,6 +167,52 @@ try {
       await page.waitForFunction(() => window.kswitcherDrive === "C:\\");
       await files("right").getByRole("option", { name: /^note\.txt/ }).waitFor();
       await button(pane("right"), "Analyze space").getByText("256 MiB free of 1 GiB", { exact: true }).waitFor();
+      const rightPane = pane("right");
+      const alert = rightPane.getByRole("alert");
+      const refreshRight = button(rightPane, "Refresh folder");
+      const peerUnavailable = "The paired computer is offline or file browsing is unavailable.";
+      const serviceStopped = "Start KSwitcher with support for trusted LAN clients.";
+      const setFailure = (message) => page.evaluate((message) => {
+        window.isTauri = true;
+        window.kswitcherFailure = message;
+        return window.kswitcherListings;
+      }, message);
+      const diagnostics = () => page.evaluate(() => window.kswitcherDiagnostics ?? []);
+
+      for (const message of [peerUnavailable, serviceStopped]) {
+        const before = await setFailure(message);
+        await page.clock.runFor(16000);
+        const refreshed = await page.evaluate(() => window.kswitcherListings);
+        assert.ok(refreshed >= before + 3, `Expected three background refreshes, received ${refreshed - before}.`);
+        assert.ok((await alert.textContent({ timeout: 1200 }).catch(() => ""))?.startsWith(message),
+          `Expected the background refresh to show: ${message}\n${await page.locator("body").innerText()}`);
+        assert.equal((await diagnostics()).length, 0);
+        await refreshRight.click();
+        await alert.filter({ hasText: message }).waitFor();
+        assert.equal((await diagnostics()).length, 0);
+        await setFailure(null);
+        await page.clock.runFor(5200);
+        await alert.waitFor({ state: "hidden", timeout: 7000 });
+        await files("right").getByRole("option", { name: /^note\.txt/ }).waitFor();
+      }
+
+      for (const [message, code] of [
+        ["Authorize this executable in KSwitcher → Computers → Trusted clients.", "permission_denied"],
+        ["Invalid KSwitcher drive listing.", "native_error"],
+      ]) {
+        await setFailure(message);
+        await refreshRight.click();
+        await alert.filter({ hasText: message }).waitFor();
+        const reports = await diagnostics();
+        assert.equal(reports.at(-1)?.code, code);
+        assert.equal(reports.at(-1)?.detail, undefined);
+        assert.equal(reports.at(-1)?.peer, undefined);
+        assert.equal(reports.at(-1)?.path, undefined);
+      }
+      await setFailure(null);
+      await refreshRight.click();
+      await alert.waitFor({ state: "hidden" });
+      await page.evaluate(() => { window.isTauri = false; });
     }
     await page.setViewportSize({ width: 1100, height: 760 });
     await button(page, "Options").click();

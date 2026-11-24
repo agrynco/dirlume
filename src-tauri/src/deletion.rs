@@ -136,6 +136,7 @@ pub(crate) struct DeleteResult {
     cancelled: bool,
     available_after: Option<u64>,
     failures: Vec<Failure>,
+    removed_paths: Vec<Vec<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -555,14 +556,27 @@ fn run(
         skip_locks: false,
         token: 0,
     };
+    let mut removed_paths = Vec::new();
     for group in groups {
         if job.cancelled() {
             break;
         }
+        let root = group.root.clone();
         if permanent {
             batch.permanent(group);
         } else {
             batch.recycle(group);
+        }
+        let removed = root.strip_prefix(base).ok().filter(|_| {
+            checked_metadata(base, &root).is_err_and(|error| error.kind() == ErrorKind::NotFound)
+        });
+        if let Some(relative) = removed {
+            removed_paths.push(
+                relative
+                    .iter()
+                    .map(|segment| segment.to_string_lossy().into_owned())
+                    .collect(),
+            );
         }
     }
     batch.counts.unprocessed = total.saturating_sub(batch.counts.processed());
@@ -572,6 +586,7 @@ fn run(
         cancelled: job.cancelled(),
         available_after: disk_space::query(base).ok().map(|space| space.available),
         failures: batch.failures,
+        removed_paths,
     }
 }
 
@@ -687,7 +702,36 @@ mod tests {
         assert!(result.cancelled && result.selection.incomplete);
         assert_eq!(result.counts.completed, 0);
         assert_eq!(result.counts.unprocessed, 2);
+        assert!(result.removed_paths.is_empty());
         assert!(roots.iter().all(|item| item.exists()));
+    }
+
+    #[test]
+    fn reports_only_removed_relative_paths_when_a_nested_batch_is_cancelled() {
+        let (_directory, base) = fixture();
+        let first = base.join("one").join("demo.mp4");
+        let second = base.join("two").join("demo.mp4");
+        for item in [&first, &second] {
+            fs::create_dir(item.parent().unwrap()).unwrap();
+            fs::write(item, []).unwrap();
+        }
+        let job = Job::default();
+        let result = run(
+            &base,
+            vec![first.clone(), second.clone()],
+            true,
+            &job,
+            |event| {
+                if matches!(event, Event::Removing { progress, .. } if progress.counts.completed == 1)
+                {
+                    job.cancel();
+                }
+                true
+            },
+        );
+        assert_eq!(result.removed_paths, vec![vec!["one", "demo.mp4"]]);
+        assert_eq!(result.counts.unprocessed, 1);
+        assert!(result.cancelled && !first.exists() && second.exists());
     }
 
     #[test]
