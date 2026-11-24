@@ -8,6 +8,7 @@ export async function testSmbNavigation() {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
     const page = await browser.newPage({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
+    await page.clock.install();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error));
     const root = "\\\\192.0.2.10";
@@ -24,6 +25,11 @@ export async function testSmbNavigation() {
       let sshProfile;
       const sshVerification = { host: "fixture.example", port: 22, fingerprint: "SHA256:fixture" };
       const sshListing = { entries: [{ ...file, name: "ssh-notes.txt" }], omitted: 0 };
+      const localShells = new Map();
+      window.localTerminalStarts = [];
+      window.localTerminalCloses = [];
+      window.localTerminalWrites = [];
+      window.sshTerminalStarts = 0;
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args) => {
@@ -47,8 +53,24 @@ export async function testSmbNavigation() {
               window.lastSshRead = { id: args.id, segments: args.segments };
               return { ...sshListing, elevated: false };
             case "open_terminal": {
-              const { promptToken, ssh } = args.request;
-              if (!ssh) return false;
+              const { promptToken, ssh, id, directory } = args.request;
+              if (!ssh) {
+                window.localTerminalStarts.push({ id, directory });
+                if (window.localStartup === "reject") throw new Error("PowerShell fixture could not open.");
+                const prompt = () => {
+                  const marker = `\x1b]2;${promptToken}:1:${btoa(directory)}:::powershell:\x07`;
+                  args.output.onmessage({ event: "data", data: btoa(marker + `PS ${directory}> `) });
+                };
+                localShells.set(id, { draft: "", output: args.output });
+                if (window.localStartup === "stall") {
+                  return new Promise((resolve) => {
+                    window.finishStalledLocalStartup = () => { prompt(); resolve(true); };
+                  });
+                }
+                window.localPrompt = prompt;
+                return true;
+              }
+              window.sshTerminalStarts++;
               window.terminalWrites = [];
               window.sshPrompt = (path, environment) => {
                 const encode = (value) => btoa(String.fromCharCode(...new TextEncoder().encode(value)));
@@ -57,7 +79,23 @@ export async function testSmbNavigation() {
               };
               return true;
             }
-            case "write_terminal": window.terminalWrites?.push(args.data); return null;
+            case "close_terminal":
+              window.localTerminalCloses.push(args.id);
+              localShells.delete(args.id);
+              return null;
+            case "write_terminal": {
+              const shell = localShells.get(args.id);
+              if (!shell) {
+                window.terminalWrites?.push(args.data);
+                return null;
+              }
+              window.localTerminalWrites.push({ id: args.id, data: args.data });
+              if (args.data === "\r" && shell.draft === "exit") {
+                shell.output.onmessage({ event: "closed" });
+              }
+              shell.draft = args.data.endsWith("\r") ? "" : shell.draft + args.data;
+              return null;
+            }
             case "complete_command":
               window.unexpectedLocalCompletion = true;
               return null;
@@ -264,8 +302,6 @@ export async function testSmbNavigation() {
     assert.equal(await sshTerminal.isVisible(), true);
     await sshTerminal.locator(".xterm-helper-textarea").focus();
     await terminalHint.waitFor();
-    await sshTerminal.getByRole("button", { name: "Close terminal", exact: true }).click();
-    await terminalHint.waitFor({ state: "hidden" });
     await pathIs("left", projects);
 
     const localProjects = "C:\\Projects";
@@ -287,7 +323,70 @@ export async function testSmbNavigation() {
       await verify.getByRole("button", { name: "Trust and connect", exact: true }).click();
       await pathIs("left", "/home");
     }
+    await page.evaluate(() => { window.localStartup = "stall"; });
     await navigateLocal("left", localProjects);
+    const local = page.getByRole("region", { name: "Terminal", exact: true });
+    const queued = local.getByText("Command queued. It will run when the terminal is ready.", { exact: true });
+    const restart = local.getByRole("button", { name: "Restart terminal", exact: true });
+    const ended = local.getByText("This terminal session has closed.", { exact: true });
+    async function submitLocal(command) {
+      await commandLine.fill(command);
+      await commandLine.press("Enter");
+    }
+    await submitLocal("Write-Output fixture-discarded");
+    await queued.waitFor();
+    await page.waitForFunction(() => typeof window.finishStalledLocalStartup === "function");
+    await page.clock.fastForward(16_000);
+    await local.getByText("PowerShell did not reach its prompt in time.", { exact: true }).waitFor();
+    await queued.waitFor({ state: "hidden" });
+    await page.getByRole("alert").filter({ hasText: "Could not submit the command." }).waitFor();
+    const stalled = await page.evaluate(() => window.localTerminalStarts[0].id);
+    const restartDirectory = "C:\\Restart folder";
+    await navigateLocal("left", restartDirectory);
+    await page.evaluate(() => { window.localStartup = "ready"; });
+    await restart.press("Enter");
+    await submitLocal("Write-Output fixture-queued");
+    await queued.waitFor();
+    await page.evaluate(() => window.finishStalledLocalStartup());
+    await page.waitForFunction((id) => window.localTerminalCloses.includes(id), stalled);
+    await page.evaluate(() => window.localPrompt());
+    await queued.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => window.localTerminalWrites.some(({ data }) => data.includes("fixture-queued")));
+    const lifecycle = await page.evaluate(() => ({ starts: window.localTerminalStarts, writes: window.localTerminalWrites }));
+    assert.equal(lifecycle.starts[1].directory, restartDirectory);
+    assert.equal(lifecycle.writes.filter(({ data }) => data.includes("fixture-queued")).length, 1);
+    assert.ok(lifecycle.writes.every(({ id, data }) => id === lifecycle.starts[1].id && !data.includes("fixture-discarded")));
+    await right.focus();
+    await sshTerminal.waitFor();
+    assert.equal(await page.evaluate(() => window.sshTerminalStarts), 1);
+    await left.focus();
+    const localInput = local.locator(".xterm-helper-textarea");
+    await localInput.pressSequentially("exit");
+    await localInput.press("Enter");
+    await ended.waitFor();
+    await right.focus();
+    await sshTerminal.waitFor();
+    assert.equal(await page.evaluate(() => window.sshTerminalStarts), 1);
+    await left.focus();
+    await ended.waitFor();
+    await page.evaluate(() => { window.localStartup = "reject"; });
+    await restart.click();
+    await local.getByText("PowerShell could not start.", { exact: true }).waitFor();
+    await local.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await local.waitFor({ state: "hidden" });
+    await page.evaluate(() => { window.localStartup = "ready"; });
+    await left.press("F12");
+    await local.waitFor();
+    await localInput.waitFor({ state: "attached" });
+    await page.waitForFunction(() => window.localTerminalStarts.length === 4);
+    await page.evaluate(() => window.localPrompt());
+    assert.equal(await restart.isVisible(), false);
+    await right.focus();
+    await sshTerminal.waitFor();
+    await sshTerminal.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await terminalHint.waitFor({ state: "hidden" });
+    await navigateLocal("left", localProjects);
+    console.log("Verified PowerShell startup timeout, late cleanup, restart from the active folder, queued input, exit, and close/reopen while retaining the SSH terminal.");
     await openDriveMenu("right", "Alt+F2");
     assert.equal(await drive("right", "C").locator("kbd").textContent(), "C");
     await page.keyboard.press("c");
