@@ -10,7 +10,7 @@ type Branch = {
   segments: readonly string[];
   expanded: boolean;
   revision: number;
-  entries: readonly Entry[];
+  entries?: readonly Entry[];
   error?: string;
 };
 
@@ -52,20 +52,20 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
   useEffect(() => {
     if (!enabled || !root) return;
     for (const [key, branch] of branches) {
-      if (branch.revision === revision || pending.current.get(key) === branch) continue;
+      if (branch.revision === revision || pending.current.get(key)?.segments === branch.segments) continue;
       pending.current.set(key, branch);
-      const complete = (entries: readonly Entry[], error?: string) => {
+      const complete = (entries?: readonly Entry[], error?: string) => {
         if (pending.current.get(key) !== branch) return;
         pending.current.delete(key);
         setSnapshot((current) => {
           const latest = current.branches.get(key);
-          if (current.scope !== scope || !latest) return current;
-          return { scope, branches: new Map(current.branches).set(key, { ...latest, entries, revision, error }) };
+          if (current.scope !== scope || latest?.segments !== branch.segments) return current;
+          return { scope, branches: new Map(current.branches).set(key, { ...latest, entries: entries ?? latest.entries, revision, error }) };
         });
       };
       void readPlace(childFolder(root, branch.segments), undefined, false).then(({ listing }) => {
         complete(listing.entries);
-      }, (error: unknown) => complete([], describeError(error)));
+      }, (error: unknown) => complete(undefined, describeError(error)));
     }
   }, [branches, enabled, revision, root, scope]);
 
@@ -77,7 +77,7 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
       const previous = branches.get(name);
       branches.set(name, previous ? { ...previous, expanded: !previous.expanded,
         revision: previous.error ? -1 : previous.revision } :
-        { segments: tree.segments, expanded: true, revision: -1, entries: [] });
+        { segments: tree.segments, expanded: true, revision: -1 });
       return { scope, branches };
     });
   }
@@ -88,8 +88,9 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
     const branch = branches.get(name);
     return { ...entry, name, tree: {
       parent: childFolder(root!, parentSegments), segments, expanded: branch?.expanded ?? false,
-      loading: !!branch?.expanded && branch.revision !== revision,
-      error: branch?.revision === revision ? branch.error : undefined,
+      loading: !!branch?.expanded && !branch.entries && branch.revision !== revision,
+      error: branch?.error,
+      stale: !!branch?.entries && !!branch.error,
     } };
   }, [branches, revision, root]);
 
@@ -103,7 +104,7 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
       if (depth === path.length - 1) return row(entry, path.slice(0, depth));
       if (!entry.directory || entry.link) return null;
       const branch = branches.get(path.slice(0, depth + 1).join("/"));
-      if (!branch || branch.revision !== revision || branch.error) return undefined;
+      if (!branch?.entries) return undefined;
       entries = branch.entries;
     }
   }
@@ -121,7 +122,7 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
       const key = segments.join("/");
       const existing = branches.get(key);
       try {
-        entries = existing?.revision === revision && !existing.error ? existing.entries :
+        entries = existing?.entries && existing.revision === revision && !existing.error ? existing.entries :
           (await readPlace(childFolder(root, segments), undefined, false)).listing.entries;
       } catch { return null; }
       opened.set(key, { segments: [...segments], expanded: true, revision, entries });
@@ -142,14 +143,14 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
       const entry = stack.pop()!;
       output.push(entry);
       const branch = entry.tree?.expanded ? branches.get(entry.name) : undefined;
-      if (!branch || branch.revision !== revision || !entry.directory || entry.link) continue;
+      if (!branch?.entries || !entry.directory || entry.link) continue;
       const nested = branch.entries.map((child) => row(child, branch.segments));
       const children = visibleEntries({ ...pane, place: null, entries: nested, backgroundSizes: measures(nested) },
         hidden, settings, canSort, emptyMetadata, emptyDescriptions, false);
       for (let index = children.length - 1; index >= 0; index--) stack.push(children[index]);
     }
     return output;
-  }, [branches, enabled, revision, root, row]);
+  }, [branches, enabled, root, row]);
 
   return { enabled: enabled && !!root, branches, lookup, reveal, toggle, visible };
 }

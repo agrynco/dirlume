@@ -19,6 +19,7 @@ export interface Entry extends Partial<PanelMetadata> {
     expanded: boolean;
     loading: boolean;
     error?: string;
+    stale?: boolean;
   };
 }
 

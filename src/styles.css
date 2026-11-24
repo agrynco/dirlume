@@ -757,6 +757,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .file-name .file-tree-expand:hover { background: var(--hover); }
 .file-name .file-tree-expand svg { width: 13px; height: 13px; color: inherit; }
+.file-name .file-tree-expand .file-tree-error { color: var(--danger); }
 .file-name span { overflow: hidden; text-overflow: ellipsis; }
 .file-name:has(.inline-rename) { overflow: visible; }
 .file-name .inline-rename { position: relative; flex: 1; min-width: 0; overflow: visible; }
