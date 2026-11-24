@@ -253,7 +253,9 @@ pub(super) fn extended_query(context: &Context, windows: bool) -> Option<Query> 
 pub(super) fn flag_query(context: &Context) -> Option<Query> {
     let (_, words) = context.words.split_first()?;
     // Cobra can omit flags for an empty token and handles the dash probe in flag-value positions.
-    context.can_probe_flags().then(|| completion_query(words, "-"))
+    context
+        .can_probe_flags()
+        .then(|| completion_query(words, "-"))
 }
 
 pub(super) fn add_flags(result: &mut CompletionBatch, flags: CompletionBatch) {
