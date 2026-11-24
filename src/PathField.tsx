@@ -28,13 +28,14 @@ function splitPath(value: string, windows: boolean, baseDirectory?: string) {
   return { parent, lookup, fragment: value.slice(end + 1), separator };
 }
 
-export function PathField({ id, label, suggestionLabel, value, onChange, onCommit, onEscape, historyKey = id,
+export function PathField({ id, label, suggestionLabel, describedBy, value, onChange, onCommit, onEscape, historyKey = id,
   server, kswitcher, includeFiles = false, showHidden = false, readOnly = false, required = false,
   initialFocus = false, selectOnFocus = false, suggestOnFocus = false, browse, browsePath = value, baseDirectory, onBrowseStateChange }: {
   id: string;
   historyKey?: string;
   label: string;
   suggestionLabel?: string;
+  describedBy?: string;
   value: string;
   onChange: (path: string) => void;
   onCommit?: (path: string) => void;
@@ -209,7 +210,7 @@ export function PathField({ id, label, suggestionLabel, value, onChange, onCommi
   return <div className="path-field">
     <div className="path-input-row">
       <EditableDropdown ref={field} trigger={trigger}>
-        <input ref={input} id={id} aria-label={label} value={value} readOnly={readOnly} type="text" required={required}
+        <input ref={input} id={id} aria-label={label} aria-describedby={describedBy} value={value} readOnly={readOnly} type="text" required={required}
           role={readOnly ? undefined : "combobox"} aria-autocomplete={readOnly ? undefined : "list"}
           aria-expanded={readOnly ? undefined : expanded} aria-controls={expanded ? popup : undefined}
           aria-activedescendant={expanded && current ? popup + "-" + selection : undefined}

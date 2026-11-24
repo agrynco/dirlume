@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath, type Side } from "./panes";
@@ -17,7 +17,7 @@ export interface Transfer {
   source: FilePlace;
   items: { place: FilePlace; entry: Entry }[];
   target: string;
-  remoteDestination?: FileServer;
+  remoteDestination?: FtpPlace | SshPlace;
   archiveDestination?: ArchivePlace;
   chooseOperation?: boolean;
 }
@@ -26,6 +26,15 @@ type Decision = "overwrite" | "skip";
 let nextSession = 0;
 
 export const nextTransferId = () => ++nextSession;
+
+function remoteDestinationLabel(place: FtpPlace | SshPlace) {
+  const protocol = place.kind === "ssh" ? "SFTP" : "FTP";
+  const endpoint = new URL(place.origin);
+  const alias = place.address.trim();
+  const address = alias && endpoint.port && alias !== endpoint.hostname && alias !== endpoint.host
+    ? `${alias} (${endpoint.host})` : endpoint.port ? endpoint.host : alias || endpoint.host;
+  return `${protocol} · ${address}`;
+}
 
 export function itemSource(place: FilePlace, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
@@ -201,6 +210,11 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         };
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
+        if (result.kind === "source_retained") {
+          setError(t("Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
+          setBlocked(item);
+          return;
+        }
         if (result.kind === "completed") setCompleted((count) => count + 1);
         else setSkipped(++skippedItems);
         reportedBytes.current.clear();
@@ -248,8 +262,12 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
               </label>
+              {transfer.remoteDestination && <span className="muted" id="transfer-connection">
+                {remoteDestinationLabel(transfer.remoteDestination)}
+              </span>}
               {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus value={destination} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
+                describedBy={transfer.remoteDestination ? "transfer-connection" : undefined}
                 required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
             </div>

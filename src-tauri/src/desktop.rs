@@ -658,6 +658,15 @@ struct TransferSession {
     pending: Mutex<Option<PendingConflict>>,
     remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
     local: Mutex<LocalTransferAttempt>,
+    ssh_move: Mutex<Option<SshMoveAttempt>>,
+}
+
+struct SshMoveAttempt {
+    source: PathBuf,
+    original: local_transfer::FileRevision,
+    target: Vec<String>,
+    connection: u32,
+    destination: String,
 }
 
 #[derive(Default)]
@@ -856,6 +865,11 @@ struct TransferRequest {
 enum TransferOutcome {
     Completed,
     Skipped,
+    SourceRetained {
+        destination: String,
+        source: String,
+        error: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -1056,6 +1070,191 @@ fn upload_remote<S: remote_transfer::UploadSession>(
         .map(transfer_outcome)
 }
 
+fn move_to_ssh(
+    remote: &mut ssh::Session,
+    request: &TransferRequest,
+    source: &Path,
+    target_name: &str,
+    session: &TransferSession,
+    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let connection = request
+        .ssh_destination
+        .ok_or("Choose an SSH destination.")?;
+    let mut attempt = session.ssh_move.lock().map_err(message)?;
+    if !request.retry {
+        *attempt = None;
+    }
+    let retry_cleanup = attempt.is_some();
+    if let Some(previous) = &*attempt {
+        if previous.source != source
+            || previous.connection != connection
+            || previous.destination != request.destination
+        {
+            return Err("The transfer no longer matches the completed SSH upload.".to_owned());
+        }
+    } else {
+        let metadata = fs::symlink_metadata(source).map_err(message)?;
+        if !metadata.is_file() || local::is_link(&metadata) {
+            return Err("Choose regular local files to move to an SSH/SFTP folder.".to_owned());
+        }
+        let original = local_transfer::FileRevision::capture(source, &metadata).map_err(message)?;
+        let target = remote_transfer::upload_destination(
+            remote,
+            &request.destination,
+            target_name,
+            request.multiple,
+        )?;
+        if !remote_transfer::upload(remote, source, &target, request.policy, progress, ask)? {
+            return Ok(TransferOutcome::Skipped);
+        }
+        *attempt = Some(SshMoveAttempt {
+            source: source.to_owned(),
+            original,
+            target,
+            connection,
+            destination: request.destination.clone(),
+        });
+    }
+    let completed = attempt.as_ref().expect("successful SSH upload");
+    let result = (|| {
+        if retry_cleanup {
+            session.ensure_running().map_err(message)?;
+            completed.original.verify(source).map_err(message)?;
+            let mut input = fs::File::open(source).map_err(message)?;
+            remote.verify_uploaded_contents(&completed.target, &mut input, || {
+                session.ensure_running().map_err(message)
+            })?;
+            session.ensure_running().map_err(message)?;
+        }
+        // Once the remote upload commits, finish this item before moving on.
+        local_transfer::remove_original(source, &completed.original).map_err(message)
+    })();
+    if let Err(error) = result {
+        return Ok(TransferOutcome::SourceRetained {
+            destination: format!("/{}", completed.target.join("/")),
+            source: local::display_path(source).unwrap_or_else(|_| source.display().to_string()),
+            error,
+        });
+    }
+    *attempt = None;
+    Ok(TransferOutcome::Completed)
+}
+
+#[cfg(test)]
+pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, remote_root: &Path) {
+    use local_transfer::{FileRevision, Policy};
+    type Progress<'a> = dyn FnMut(&Path, u64, Option<u64>) -> io::Result<()> + 'a;
+    let session = TransferSession::default();
+    let mut request = TransferRequest {
+        source: TransferSource::Local {
+            directory: local::display_path(local_root).unwrap(),
+            name: "move-source.txt".to_owned(),
+        },
+        destination: "/".to_owned(),
+        ftp_destination: None,
+        ssh_destination: Some(12),
+        multiple: false,
+        moving: true,
+        policy: Policy::Ask,
+        ask_read_only: false,
+        retry: false,
+        copy_options: Default::default(),
+    };
+    let mut ask = |_| panic!("Unexpected transfer decision.");
+    let source = local_root.join("move-source.txt");
+    let target = remote_root.join("move-source.txt");
+    let run = |remote: &mut ssh::Session,
+               request: &TransferRequest,
+               progress: &mut Progress<'_>,
+               ask: &mut _| {
+        move_to_ssh(
+            remote,
+            request,
+            &source,
+            "move-source.txt",
+            &session,
+            &mut |path, bytes, total| progress(path, bytes, total),
+            ask,
+        )
+    };
+    fs::write(&source, b"local source").unwrap();
+    assert!(matches!(
+        run(remote, &request, &mut |_, _, _| Ok(()), &mut ask),
+        Ok(TransferOutcome::Completed)
+    ));
+    assert!(!source.exists());
+    assert_eq!(fs::read(&target).unwrap(), b"local source");
+
+    fs::write(&source, b"another file").unwrap();
+    request.policy = Policy::Skip;
+    assert!(matches!(
+        run(remote, &request, &mut |_, _, _| Ok(()), &mut ask),
+        Ok(TransferOutcome::Skipped)
+    ));
+    assert_eq!(fs::read(&source).unwrap(), b"another file");
+    assert_eq!(fs::read(&target).unwrap(), b"local source");
+
+    request.policy = Policy::Ask;
+    fs::remove_file(&target).unwrap();
+    assert!(run(
+        remote,
+        &request,
+        &mut |_, bytes, _| {
+            if bytes == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Transfer canceled.",
+                ))
+            }
+        },
+        &mut ask
+    )
+    .is_err());
+    assert!(!target.exists());
+    assert_eq!(fs::read(&source).unwrap(), b"another file");
+
+    request.retry = true;
+    let record_attempt = || {
+        *session.ssh_move.lock().unwrap() = Some(SshMoveAttempt {
+            source: source.clone(),
+            original: FileRevision::capture(&source, &fs::symlink_metadata(&source).unwrap())
+                .unwrap(),
+            target: vec!["move-source.txt".to_owned()],
+            connection: 12,
+            destination: "/".to_owned(),
+        })
+    };
+    record_attempt();
+    fs::write(&target, b"external edit").unwrap();
+    assert!(matches!(
+        run(remote, &request, &mut |_, _, _| Ok(()), &mut ask),
+        Ok(TransferOutcome::SourceRetained { destination, error, .. })
+          if destination == "/move-source.txt" && error.contains("SSH file changed")
+    ));
+    assert_eq!(fs::read(&target).unwrap(), b"external edit");
+    assert_eq!(fs::read(&source).unwrap(), b"another file");
+    fs::write(&target, b"another file").unwrap();
+    assert!(matches!(
+        run(remote, &request, &mut |_, _, _| Ok(()), &mut ask),
+        Ok(TransferOutcome::Completed)
+    ));
+    assert!(!source.exists());
+    assert_eq!(fs::read(&target).unwrap(), b"another file");
+    fs::write(&source, b"another file").unwrap();
+    record_attempt();
+    fs::write(&source, b"new local contents").unwrap();
+    assert!(matches!(
+        run(remote, &request, &mut |_, _, _| Ok(()), &mut ask),
+        Ok(TransferOutcome::SourceRetained { .. })
+    ));
+    assert_eq!(fs::read(&source).unwrap(), b"new local contents");
+    assert_eq!(fs::read(&target).unwrap(), b"another file");
+}
+
 #[tauri::command]
 #[expect(
     clippy::too_many_arguments,
@@ -1128,7 +1327,7 @@ async fn transfer_item(
             } else {
                 "FTP"
             };
-            if request.moving
+            if (request.moving && ftp_destination.is_some())
                 || !matches!(
                     request.policy,
                     local_transfer::Policy::Ask
@@ -1142,6 +1341,17 @@ async fn transfer_item(
                 .as_deref()
                 .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
             if let Some(connection) = ssh_destination {
+                if request.moving {
+                    return move_to_ssh(
+                        &mut connection.open()?,
+                        &request,
+                        source,
+                        name,
+                        &session,
+                        &mut progress,
+                        &mut ask,
+                    );
+                }
                 return upload_remote(
                     connection.open()?,
                     &request,
