@@ -207,6 +207,29 @@ fn opens_a_two_hop_sftp_route() {
         .err()
         .expect("second bastion is unreachable directly");
     assert!(error.contains("SSH jump host 1 (second-bastion.invalid:"));
+    let (client, _) = route(input.clone(), &[], &keys)
+        .expect("open the listing connection")
+        .ok()
+        .expect("the saved host keys are current");
+    let mut saved = input.clone();
+    saved["id"] = json!(Uuid::new_v4());
+    for jump in saved["jumpHosts"].as_array_mut().unwrap() {
+        jump["id"] = json!(Uuid::new_v4());
+    }
+    let connection = Connection {
+        profile: serde_json::from_value(saved).expect("restore the saved profile"),
+        host_keys: keys.clone(),
+        listing: Mutex::new(open_sftp(client).expect("start the listing subsystem")),
+        sudo: sudo::Access::default(),
+    };
+    let missing = connection
+        .list(&["missing".to_owned()])
+        .err()
+        .expect("missing path");
+    assert!(serde_json::to_value(SshListingError::from(missing))
+        .unwrap()
+        .is_string());
+    assert!(connection.list(&[]).is_ok());
     fixture.request(json!({ "rotate": 1 }));
     let error = route(input, &[], &keys)
         .err()
@@ -215,5 +238,19 @@ fn opens_a_two_hop_sftp_route() {
         error.contains("SSH jump host 2 (second-bastion.invalid:")
             && error.contains("different host key")
     );
-    fixture.wait_for_idle();
+    fixture.child.kill().expect("stop the listening fixture");
+    fixture
+        .child
+        .wait()
+        .expect("wait for the SSH server to stop");
+    let failure = connection
+        .list(&[])
+        .err()
+        .expect("the saved route cannot reconnect");
+    let failure = serde_json::to_value(SshListingError::from(failure)).unwrap();
+    assert_eq!(failure["sshCause"], "connection_lost");
+    assert!(failure["message"]
+        .as_str()
+        .unwrap()
+        .contains("SSH jump host 1"));
 }

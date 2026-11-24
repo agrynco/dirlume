@@ -28,7 +28,9 @@ fn wait<T, E: Into<SftpFailure>>(
     tauri::async_runtime::block_on(async {
         tokio::time::timeout(super::TIMEOUT, operation)
             .await
-            .map_err(|_| "The SSH server did not respond in time.")?
+            .map_err(|_| {
+                SftpFailure::ConnectionLost("The SSH server did not respond in time.".to_owned())
+            })?
             .map_err(Into::into)
     })
 }

@@ -64,7 +64,8 @@ function terminalAppearance(): ITerminalOptions {
 }
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
-  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onRestart, onClose }: {
+  history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onDisconnected,
+  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onRestart, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -80,6 +81,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   pasteOnRightClick: boolean;
   onClipboardError: (error: unknown) => void;
   onTerminalError: (message: string) => void;
+  onDisconnected?: () => void;
   onCommandsQueued: (count: number) => void;
   onCommandSubmitted: (command: string) => void;
   onDirectoryChange: (directory: string) => void;
@@ -115,6 +117,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   reportCompletion.current = onCompletionContext;
   const reportError = useRef(onTerminalError);
   reportError.current = onTerminalError;
+  const reportDisconnected = useRef(onDisconnected);
+  reportDisconnected.current = onDisconnected;
   const clipboard = useRef({ copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, visible });
   clipboard.current = { copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, visible };
 
@@ -363,7 +367,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       closing ??= opening.then(() => api.closeTerminal(session.id)).catch(() => {});
     }
 
-    function endSession(reason: string, error: unknown, writeFailed = false) {
+    function endSession(reason: string, error: unknown, writeFailed = false, disconnected = false) {
       if (closed || stopped) return;
       closed = true;
       clearTimeout(startupTimer);
@@ -375,6 +379,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       if (writeFailed || applicationQueue.length) commandFailed(error);
       applicationQueue.length = 0;
       setCommandsWaiting(false);
+      if (remote && (writeFailed || disconnected)) reportDisconnected.current?.();
     }
 
     function shellCommand(command: string) {
@@ -482,9 +487,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     moveTo.current = (path) => { nextDirectory = path; synchronize(); };
     output.onmessage = (message) => {
       if (stopped || closed) return;
-      if (message.event === "closed") {
+      if (message.event !== "data") {
         const reason = t("This terminal session has closed.");
-        endSession(reason, new Error(reason));
+        endSession(reason, new Error(reason), false, message.event === "disconnected");
         if (!windows) term.writeln("\r\n" + reason);
       } else {
         term.write(Uint8Array.from(atob(message.data), (byte) => byte.charCodeAt(0)));
@@ -537,7 +542,11 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         if (stopped) return;
         if (closed) return;
         await api.writeTerminal(session.id, data);
-      }).catch((error: unknown) => { if (!stopped) onFailure?.(error); });
+      }).catch((error: unknown) => {
+        if (stopped || closed) return;
+        if (onFailure) onFailure(error);
+        else if (remote) endSession(t("This terminal session has closed."), error, true);
+      });
       if (canceledDraft && !runQueuedCommand()) synchronize();
     }
     enqueue.current = (entry) => {
