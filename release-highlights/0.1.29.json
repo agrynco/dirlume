@@ -1,0 +1,9 @@
+{
+  "version": "0.1.29",
+  "highlights": [
+    "Keep expanded folder contents visible while the file pane refreshes.",
+    "Browse into suggested directories and discover Bash options alongside paths in the Linux SSH terminal.",
+    "Restart a Windows PowerShell session from the active folder after it exits or fails to start.",
+    "Get fresh SSH suggestions when returning from another pane while keeping the session and its scrollback."
+  ]
+}
