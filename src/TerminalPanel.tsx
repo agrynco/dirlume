@@ -100,7 +100,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
   const chooseSuggestion = useRef<(option: CommandSuggestion) => void>(() => {});
-  const dismissSuggestions = useRef<() => void>(() => {});
+  const suspendSuggestions = useRef<() => void>(() => {});
   const localHistory = useRef(history);
   localHistory.current = history;
   const enqueue = useRef<((command: TerminalCommand) => void) | null>(null);
@@ -221,7 +221,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     const sessionHistory: string[] = [];
     let revision = 0;
     let completionTimer = 0;
-    let requesting = false;
+    let activeRequest: symbol | null = null;
     let pending = false;
     let options: CommandSuggestion[] = [];
     let selected = -1;
@@ -279,7 +279,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
 
     async function completeDraft() {
-      if (requesting) {
+      if (activeRequest) {
         pending = true;
         return;
       }
@@ -287,7 +287,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       const directory = currentDirectory;
       if (!current?.text.trim() || !directory || !clipboard.current.visible || !term.textarea?.matches(":focus")) return;
       const requested = revision;
-      requesting = true;
+      const request = Symbol();
+      activeRequest = request;
       const history = remote ? sessionHistory : localHistory.current;
       const prefix = windows ? current.text.toLowerCase() : current.text;
       const recent = current.caret === current.text.length ? [...new Set(history.filter((line) =>
@@ -296,7 +297,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         ? sshSearchPath === null ? Promise.resolve(null) : api.completeSshTerminal(session.id, current.text, current.caret, directory, sshSearchPath, shellEnvironment)
         : api.completeCommand(current.text, current.caret, directory, session.refreshEnvironment, shellEnvironment);
       const batch = await completion.catch(() => null);
-      requesting = false;
+      if (activeRequest !== request) return;
+      activeRequest = null;
       if (requested === revision && clipboard.current.visible && !closed && !stopped) {
         options = commandSuggestions(current.text, recent, batch);
         renderSuggestions();
@@ -323,7 +325,11 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       term.focus();
       if (replacement && (windows || remote) && option.directory) completionTimer = window.setTimeout(() => void completeDraft(), 160);
     };
-    dismissSuggestions.current = hideSuggestions;
+    suspendSuggestions.current = () => {
+      // A request from the previous visit must not delay edits after switching back.
+      activeRequest = null;
+      hideSuggestions();
+    };
     term.textarea?.addEventListener("blur", hideSuggestions);
 
     function runQueuedCommand() {
@@ -645,7 +651,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       clearTimeout(startupTimer);
       hideLinkTooltip();
       hideSuggestions();
-      dismissSuggestions.current = () => {};
+      suspendSuggestions.current = () => {};
       chooseSuggestion.current = () => {};
       instance.current = null;
       enqueue.current = null;
@@ -668,7 +674,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   }, [session, rowHeight, suggestionId]);
 
   useEffect(() => {
-    if (!visible) { dismissSuggestions.current(); setMenu(null); return; }
+    if (!visible) { suspendSuggestions.current(); setMenu(null); return; }
     if (!instance.current) return;
     instance.current.fit();
     if (focusRequested.current === session.id) {
