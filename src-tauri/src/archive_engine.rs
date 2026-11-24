@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::desktop::{message, Result};
+use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 pub const PASSWORD_ERROR: &str = "The archive needs a correct password.";
 pub const LIST_LIMIT: u64 = 32 * 1024 * 1024;
@@ -17,9 +18,60 @@ pub const LIST_LIMIT: u64 = 32 * 1024 * 1024;
 #[derive(Clone)]
 pub struct Engine {
     executable: PathBuf,
+    #[cfg(windows)]
+    _portable_files: Option<std::sync::Arc<tempfile::TempDir>>,
 }
 
 impl Engine {
+    pub fn for_app(app: &AppHandle) -> Result<Self> {
+        #[cfg(windows)]
+        if crate::portable::root().is_some() {
+            return Self::embedded()?.map_or_else(Self::find, Ok);
+        }
+        let name = if cfg!(windows) { "7z.exe" } else { "7zz" };
+        if let Ok(executable) = app.path().resolve(
+            Path::new("archive-tools").join(name),
+            BaseDirectory::Resource,
+        ) {
+            if executable.is_absolute() && executable.is_file() {
+                return Ok(Self::external(executable));
+            }
+        }
+        Self::find()
+    }
+
+    fn external(executable: PathBuf) -> Self {
+        Self {
+            executable,
+            #[cfg(windows)]
+            _portable_files: None,
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn embedded() -> Result<Option<Self>> {
+        let executable = include_bytes!(concat!(env!("OUT_DIR"), "/7z.exe"));
+        let library = include_bytes!(concat!(env!("OUT_DIR"), "/7z.dll"));
+        let sfx = include_bytes!(concat!(env!("OUT_DIR"), "/7z.sfx"));
+        if executable.is_empty() || library.is_empty() || sfx.is_empty() {
+            return Ok(None);
+        }
+        // Existing Portable versions only accept the app and a few known
+        // resources in an update. Keep the signed engine inside the app.
+        let workspace = tempfile::tempdir().map_err(message)?;
+        for (name, contents) in [
+            ("7z.exe", executable.as_slice()),
+            ("7z.dll", library.as_slice()),
+            ("7z.sfx", sfx.as_slice()),
+        ] {
+            fs::write(workspace.path().join(name), contents).map_err(message)?;
+        }
+        Ok(Some(Self {
+            executable: workspace.path().join("7z.exe"),
+            _portable_files: Some(std::sync::Arc::new(workspace)),
+        }))
+    }
+
     pub fn find() -> Result<Self> {
         let file_names = if cfg!(windows) {
             &["7zz.exe", "7z.exe", "7za.exe"][..]
@@ -52,8 +104,8 @@ impl Engine {
                     .map(|name| dir.join(name))
                     .find(|path| path.is_file())
             })
-            .ok_or("Install the 7-Zip command line tools to use archives.")?;
-        Ok(Self { executable })
+            .ok_or("7-Zip is unavailable. Reinstall Dirlume or install the 7-Zip command line tools for this development build.")?;
+        Ok(Self::external(executable))
     }
 
     pub fn command(&self, action: &str) -> Command {
@@ -78,10 +130,15 @@ impl Engine {
             .filter_map(|line| {
                 let mut words = line.split_whitespace();
                 words.find(|word| word.starts_with('C') && word.contains('.'))?;
-                words.next()
+                let kind = words.next()?;
+                if kind.starts_with('w') && kind.contains('.') {
+                    words.next()
+                } else {
+                    Some(kind)
+                }
             })
-            .filter(|kind| ["7z", "zip", "tar", "wim"].contains(kind))
-            .map(ToOwned::to_owned)
+            .map(str::to_ascii_lowercase)
+            .filter(|kind| ["7z", "zip", "tar", "wim"].contains(&kind.as_str()))
             .collect::<Vec<_>>();
         if formats.is_empty() {
             return Err("7-Zip did not report any supported archive formats.".to_owned());

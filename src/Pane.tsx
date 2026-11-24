@@ -71,7 +71,7 @@ interface PaneProps {
   fileView: FilePaneView;
   onFileView: (view: FilePaneView) => void;
   onTreeBranch: (entry: Entry) => void;
-  folderSizes: { active: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
+  folderSizes: { active: boolean; branchActive: boolean; scanning: boolean; error?: string; metric: Metric; support: boolean; setMetric: (metric: Metric) => void };
   onFolderSizes: () => void;
   locations: QuickLocation[];
   rename?: { name: string; rowKey: string; onSave: (name: string) => Promise<void>; onCancel: () => void };
@@ -180,10 +180,16 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const columnsInMode = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
   const modeGroups = panelColumnGroups(columnsInMode);
   const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
-    folderSizes.active && !group.some(({ field }) => field === "size" || field === "bytes")
+    (folderSizes.active || folderSizes.branchActive) && !group.some(({ field }) => field === "size" || field === "bytes")
       ? [...group, { field: "size" as const, width: "0" }] : group);
   const columns = groups.flat();
-  const fitMeasuredFolders = !pane.search && pane.sizes.size > 0;
+  const hasReadyBackgroundSize = useMemo(() => {
+    for (const size of pane.backgroundSizes?.values() ?? []) {
+      if (!size.pending && !size.unavailable) return true;
+    }
+    return false;
+  }, [pane.backgroundSizes]);
+  const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
   const tracks = panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
@@ -230,7 +236,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       for (const [name, result] of measurements) {
         const background = pane.backgroundSizes?.get(name);
         if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
-        const measured = pane.sizes.has(name);
+        const measured = pane.sizes.has(name) || !!background;
         // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
         if (autoSize || (sampleSize && measured)) {
           const sample = sizeLabel(result.bytes, result.incomplete);
@@ -359,7 +365,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
-  const loadingLabel = t("Opening folder…");
+  const loadingLabel = t(search ? "Searching…" : "Opening folder…");
   const measuringLabel = t("Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
@@ -471,7 +477,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         </nav>}
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
-          <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
+          <h2 data-tooltip={pane.search?.query.mask ?? title}>{title}</h2>
           {!processView && pane.place && pane.place.kind !== "connections" && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
@@ -498,7 +504,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 requestAnimationFrame(() => filterField.current?.focus());
               }
             }}><Search /></Button>}
-          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
+          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t(search ? "Refresh" : "Refresh folder")}
+            disabled={!pane.place || pane.loading || !!pane.search && pane.search.query.root.kind !== "local"} onClick={onRefresh}>
             <RefreshCw />
           </Button>}
         </div>

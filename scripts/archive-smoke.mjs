@@ -7,7 +7,8 @@ export async function testArchives(page, root) {
   const source = join(root, "archive-source");
   const destination = join(root, "archive-output");
   await mkdir(join(source, "folder"), { recursive: true });
-  await mkdir(destination);
+  await mkdir(join(destination, "incoming", "empty"), { recursive: true });
+  await writeFile(join(destination, "incoming", "copied.txt"), "copy into archive");
   await writeFile(join(source, "folder", "note.txt"), "archived text");
   await writeFile(join(source, "folder", "keep.txt"), "unrelated text");
 
@@ -63,6 +64,33 @@ export async function testArchives(page, root) {
   assert.equal(await readFile(join(destination, "folder", "note.txt"), "utf8"), "archived text");
 
   await row("folder").dblclick();
+  const right = page.locator("#right-files");
+  await right.getByRole("option", { name: /^incoming/ }).click();
+  await page.keyboard.press("F5");
+  assert.match(await dialog("Copy").locator("#transfer-destination").inputValue(), /fixture\.zip!\/folder$/);
+  await button(dialog("Copy"), "Copy").click();
+  await dialog("Copying…").waitFor({ state: "hidden" });
+  await row("incoming").waitFor();
+  assert.equal(await readFile(join(destination, "incoming", "copied.txt"), "utf8"), "copy into archive");
+  await row("incoming").click();
+  await page.keyboard.press("F2");
+  const rename = dialog("Rename");
+  await rename.getByLabel("Name", { exact: true }).fill("note.txt");
+  await button(rename, "Rename").click();
+  await rename.getByRole("alert").waitFor();
+  await rename.getByLabel("Name", { exact: true }).fill("renamed");
+  await button(rename, "Rename").click();
+  await rename.waitFor({ state: "hidden" });
+  await row("renamed").dblclick();
+  await row("copied.txt").waitFor();
+  await row("empty").waitFor();
+  await page.keyboard.press("F7");
+  const newFolder = dialog("New folder");
+  await newFolder.getByLabel("Name", { exact: true }).fill("created");
+  await button(newFolder, "Create").click();
+  await newFolder.waitFor({ state: "hidden" });
+  await row("created").waitFor();
+  await parentFolder();
   await row("note.txt").click();
   await page.keyboard.press("F3");
   const document = page.getByRole("region", { name: "note.txt", exact: true });
@@ -135,5 +163,5 @@ export async function testArchives(page, root) {
     await parentFolder();
     await row(depth ? "encrypted.7z" : "folder").waitFor();
   }
-  console.log("Verified ZIP creation, overwrite cancellation, copying, editing, removal, and encrypted 7z browsing with the Windows desktop app.");
+  console.log("Verified ZIP creation, overwrite cancellation, copying into and out of archives, member renaming, empty folders, editing, removal, and encrypted 7z browsing with the Windows desktop app.");
 }

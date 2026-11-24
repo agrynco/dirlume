@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath, type Side } from "./panes";
@@ -11,13 +11,15 @@ import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
+import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEstimate";
 
 export interface Transfer {
   kind: "copy" | "move";
   source: FilePlace;
-  items: { place: FilePlace; entry: Entry }[];
+  items: { place: FilePlace; entry: Entry; searchPath?: string }[];
   target: string;
-  remoteDestination?: FileServer;
+  remoteDestination?: FtpPlace | SshPlace;
+  archiveDestination?: ArchivePlace;
   chooseOperation?: boolean;
 }
 
@@ -25,6 +27,23 @@ type Decision = "overwrite" | "skip";
 let nextSession = 0;
 
 export const nextTransferId = () => ++nextSession;
+
+function remoteDestinationLabel(place: FtpPlace | SshPlace) {
+  const protocol = place.kind === "ssh" ? "SFTP" : "FTP";
+  const endpoint = new URL(place.origin);
+  const alias = place.address.trim();
+  const address = alias && endpoint.port && alias !== endpoint.hostname && alias !== endpoint.host
+    ? `${alias} (${endpoint.host})` : endpoint.port ? endpoint.host : alias || endpoint.host;
+  return `${protocol} · ${address}`;
+}
+
+function estimateLabel(seconds: number | null) {
+  if (seconds === null) return t("Estimating time remaining…");
+  const unit = seconds >= 3_600 ? "hour" : seconds >= 60 ? "minute" : "second";
+  const value = unit === "hour" ? Math.ceil(seconds / 360) / 10 : unit === "minute" ? Math.ceil(seconds / 60) : seconds;
+  const duration = new Intl.NumberFormat(locale(), { style: "unit", unit, unitDisplay: "long" }).format(value);
+  return t("About {0} remaining", duration);
+}
 
 export function itemSource(place: FilePlace, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
@@ -42,7 +61,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   side: Side;
   showHidden: boolean;
   onClose: () => void;
-  onFinished: (success: boolean) => void;
+  onFinished: (success: boolean, movedPaths: readonly string[]) => void;
 }) {
   const [destination, setDestination] = useState(transfer.target);
   const [multipleDestinations, setMultipleDestinations] = useState(false);
@@ -67,14 +86,17 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [remember, setRemember] = useState(false);
   const [answering, setAnswering] = useState<TransferConflict | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [estimatedTime, setEstimatedTime] = useState<string>();
   const running = useRef<number | null>(null);
   const session = useRef<number | null>(null);
   const cancelled = useRef(false);
   const failedDecision = useRef(false);
   const reportedBytes = useRef(new Map<string, number>());
+  const estimate = useRef<TransferEstimate | null>(null);
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
-  const localTarget = !transfer.remoteDestination;
+  const archiveTarget = transfer.archiveDestination;
+  const localTarget = !transfer.remoteDestination && !archiveTarget;
   const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
@@ -89,10 +111,31 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
     : destination;
   const lockingMove = phase === "done" && windowsClient && blocked?.place.kind === "local" && moving && isLockError(error);
+  const visibleEstimate = phase === "working" && !conflict ? estimatedTime : undefined;
 
   useEffect(() => {
     if (phase === "done") action.current?.focus();
   }, [phase]);
+
+  useEffect(() => {
+    const current = estimate.current;
+    if (phase !== "working" || !current) return;
+    current.setPaused(conflict !== null, performance.now());
+    if (conflict) {
+      setEstimatedTime(undefined);
+      return;
+    }
+    let timer = 0;
+    const update = () => {
+      if (current !== estimate.current || cancelled.current) return;
+      const now = performance.now();
+      const elapsed = current.elapsed(now);
+      if (elapsed >= estimateDelay) setEstimatedTime(estimateLabel(current.remainingSeconds(now)));
+      timer = window.setTimeout(update, elapsed < estimateDelay ? estimateDelay - elapsed : estimateInterval);
+    };
+    update();
+    return () => window.clearTimeout(timer);
+  }, [phase, conflict]);
 
   useEffect(() => () => {
     const id = session.current;
@@ -123,8 +166,28 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     }
     cancelled.current = true;
     setCanceling(true);
+    setEstimatedTime(undefined);
     setConflict(null);
     void api.cancelTransfer(running.current).catch(() => {});
+  }
+
+  function transferEvents(id: number) {
+    return new Channel<TransferEvent>((event) => {
+      if (session.current !== id || cancelled.current) return;
+      if (event.kind === "conflict") {
+        setRemember(false);
+        setConflict(event.conflict);
+        return;
+      }
+      estimate.current?.progress(event, performance.now());
+      const path = event.path ?? event.file;
+      const previous = reportedBytes.current.get(path) ?? 0;
+      if (event.bytes > previous) {
+        reportedBytes.current.set(path, event.bytes);
+        setBytes((total) => total + event.bytes - previous);
+      }
+      setProgress(event);
+    });
   }
 
   async function run(retry: boolean) {
@@ -134,6 +197,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     session.current = id;
     running.current = id;
     failedDecision.current = false;
+    const jobs = archiveTarget ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+    estimate.current = new TransferEstimate(archiveTarget ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
+    setEstimatedTime(undefined);
     setPhase("working");
     setError("");
     setBlocked(undefined);
@@ -141,12 +207,27 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     let finished = false;
     let initialized = previousSession !== null;
     let skippedItems = skipped;
+    const movedPaths: string[] = [];
     try {
       if (!initialized) {
         await api.beginTransfer(id);
         initialized = true;
       }
-      const jobs = targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+      if (archiveTarget && !cancelled.current) {
+        const sources = transfer.items.map(({ place, entry }) => {
+          if (place.kind !== "local") throw new Error(t("Choose local files or folders to copy into the archive."));
+          return { directory: place.path, name: entry.name };
+        });
+        const output = transferEvents(id);
+        const result = await api.copyIntoArchive(id, archiveTarget, sources, policy, output)
+          .finally(() => { output.onmessage = () => {}; });
+        const written = result.filter(Boolean).length;
+        skippedItems = result.length - written;
+        setCompleted(written);
+        setSkipped(skippedItems);
+        setProcessed(result.length);
+        reportedBytes.current.clear();
+      }
       for (let index = processed; index < jobs.length; index++) {
         if (cancelled.current || session.current !== id) break;
         const { destination, item } = jobs[index];
@@ -164,24 +245,18 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           multiple: itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
-        const output = new Channel<TransferEvent>((event) => {
-          if (session.current !== id || cancelled.current) return;
-          if (event.kind === "conflict") {
-            setRemember(false);
-            setConflict(event.conflict);
-            return;
-          }
-          const path = event.path ?? event.file;
-          const previous = reportedBytes.current.get(path) ?? 0;
-          if (event.bytes > previous) {
-            reportedBytes.current.set(path, event.bytes);
-            setBytes((total) => total + event.bytes - previous);
-          }
-          setProgress(event);
-        });
+        const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
-        if (result.kind === "completed") setCompleted((count) => count + 1);
-        else setSkipped(++skippedItems);
+        if (result.kind === "source_retained") {
+          setError(t("Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
+          setBlocked(item);
+          return;
+        }
+        if (result.kind === "completed") {
+          if (moving && item.searchPath) movedPaths.push(item.searchPath);
+          setCompleted((count) => count + 1);
+        } else setSkipped(++skippedItems);
+        estimate.current?.finishItem();
         reportedBytes.current.clear();
         setProcessed(index + 1);
       }
@@ -192,6 +267,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         setBlocked(attempted);
       }
     } finally {
+      estimate.current = null;
+      setEstimatedTime(undefined);
       if (session.current !== id) {
         await api.finishTransfer(id).catch(() => {});
         return;
@@ -203,7 +280,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       running.current = null;
       setConflict(null);
       const success = finished && !cancelled.current && skippedItems === 0;
-      onFinished(success);
+      onFinished(success, movedPaths);
       if (success) onClose();
       else setPhase("done");
     }
@@ -227,9 +304,14 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
               </label>
+              {transfer.remoteDestination && <span className="muted" id="transfer-connection">
+                {remoteDestinationLabel(transfer.remoteDestination)}
+              </span>}
+              {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus value={destination} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
+                describedBy={transfer.remoteDestination ? "transfer-connection" : undefined}
                 required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination} includeFiles={singleFile}
-                browse={singleFile ? "save" : "folder"} browsePath={browsePath} />
+                browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
             </div>
             {manyDestinations && <>
               {additional.map((path, index) => <PathField key={index} id={`transfer-destination-${index + 2}`}
@@ -273,7 +355,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <input type="checkbox" checked={followLinks} onChange={(event) => setFollowLinks(event.target.checked)} />
               </label>
             </>}
-            {!moving && <label className="field-checkbox"><span>{t("Process multiple destinations")}</span>
+            {!moving && !archiveTarget && <label className="field-checkbox"><span>{t("Process multiple destinations")}</span>
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
             </label>}
             {localCopy && <>
@@ -307,7 +389,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                   <span>{t("{0} / {1} items", processed, copies)}{skipped ? ` · ${t("{0} skipped", skipped)}` : ""}</span>
                   <span>{t("{0} transferred", formatSize(bytes))}</span>
                 </div>
-                <progress aria-label={t("Overall transfer progress")} max={copies} value={processed} />
+                <progress aria-label={t("Overall transfer progress")} aria-describedby={visibleEstimate ? "transfer-estimate" : undefined}
+                  max={copies} value={processed} />
+                {visibleEstimate && <div className="transfer-estimate" id="transfer-estimate">{visibleEstimate}</div>}
                 {phase === "done" && <p role="status">{t("{0} completed", completed)}{skipped ? `, ${t("{0} skipped", skipped)}` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
                 {lockingMove && <div className="dialog-actions">

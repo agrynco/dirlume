@@ -11,6 +11,10 @@ fn main() {
     if env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         bundle_release_highlights(&version);
         panic_source_manifest().expect("Could not prepare the panic source manifest");
+        if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+            bundle_portable_archive_engine()
+                .expect("Could not bundle the Windows Portable archive engine");
+        }
     }
     if let Ok(number) = std::env::var("DIRLUME_BUILD_NUMBER") {
         assert!(
@@ -26,6 +30,22 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         tauri_build::build();
     }
+}
+
+fn bundle_portable_archive_engine() -> io::Result<()> {
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"));
+    let source = Path::new("archive-tools");
+    println!("cargo:rerun-if-changed={}", source.display());
+    let names = ["7z.exe", "7z.dll", "7z.sfx"];
+    let prepared = names.iter().all(|name| source.join(name).is_file());
+    for name in names {
+        if prepared {
+            fs::copy(source.join(name), output.join(name))?;
+        } else {
+            fs::write(output.join(name), [])?;
+        }
+    }
+    Ok(())
 }
 
 fn panic_source_manifest() -> io::Result<()> {

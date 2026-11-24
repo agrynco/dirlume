@@ -10,7 +10,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, State};
 
 use crate::{
     archive_engine::{self, archive_args, Engine},
@@ -30,9 +30,9 @@ pub struct Capabilities {
 }
 
 #[tauri::command]
-pub async fn archive_capabilities() -> Result<Capabilities> {
-    blocking(|| {
-        let engine = Engine::find()?;
+pub async fn archive_capabilities(app: AppHandle) -> Result<Capabilities> {
+    let engine = Engine::for_app(&app)?;
+    blocking(move || {
         Ok(Capabilities {
             formats: engine.formats()?,
             sfx: engine.sfx_module().is_some(),
@@ -76,8 +76,10 @@ pub async fn create_archive(
     id: u32,
     request: CreateArchive,
     output: Channel<u8>,
+    app: AppHandle,
     jobs: State<'_, ArchiveJobs>,
 ) -> Result<CreatedArchive> {
+    let engine = Engine::for_app(&app)?;
     let stopped = Arc::new(AtomicBool::new(false));
     {
         let mut running = jobs.0.lock().map_err(message)?;
@@ -86,7 +88,7 @@ pub async fn create_archive(
         }
         running.insert(id, Arc::clone(&stopped));
     }
-    let result = blocking(move || create(request, stopped, output)).await;
+    let result = blocking(move || create(engine, request, stopped, output)).await;
     jobs.0.lock().map_err(message)?.remove(&id);
     result
 }
@@ -110,11 +112,11 @@ fn running(stopped: &AtomicBool) -> io::Result<()> {
 }
 
 fn create(
+    engine: Engine,
     request: CreateArchive,
     stopped: Arc<AtomicBool>,
     output: Channel<u8>,
 ) -> Result<CreatedArchive> {
-    let engine = Engine::find()?;
     let directory = local::absolute(&request.directory)
         .map_err(message)?
         .canonicalize()
