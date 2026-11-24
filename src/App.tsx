@@ -69,6 +69,7 @@ import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
 import { canEditImage, imageType } from "./ImageViewport";
 import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
 import { TransferDialog, type Transfer } from "./TransferDialog";
+import { useArchiveChange } from "./useArchiveChange";
 import {
   applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
   readPlace, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor, visibleEntries,
@@ -123,7 +124,7 @@ function sameRenameLocation(current: Place | null, place: RenameLocation) {
 }
 
 type ActionModal = (
-  | { kind: "rename" | "newFile"; path: string; name: string }
+  | { kind: "rename" | "newFile"; path: string; name: string; side?: Side }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[]; relativePaths?: string[][] }
 ) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace };
 
@@ -137,7 +138,7 @@ type Modal =
   | { kind: "transfer"; side: Side; transfer: Transfer }
   | { kind: "deletion"; deletion: Deletion }
   | { kind: "search"; side: Side; place: FileLocation }
-  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" }> }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" }> }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
@@ -1819,6 +1820,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     chooseOperation = false, side = active) {
     if (!items.length) return;
     const remoteDestination = isFileServer(target) ? target : undefined;
+    const archiveDestination = source.kind === "local" && target?.kind === "archive" && kind === "copy" ? target : undefined;
+    if (archiveDestination && (!archiveDestination.canAdd || items.some(({ entry }) => entry.link))) {
+      setStatus({ text: archiveDestination.canAdd ? "Choose local files and folders without symbolic links." :
+        "Choose a writable ZIP or 7z archive.", error: true });
+      return;
+    }
     if (remoteDestination && source.kind !== "local") {
       setStatus({ text: remoteDestination.kind === "ssh" ? "Choose a local source for the SSH upload." :
         "Choose a local source for the FTP upload.", error: true });
@@ -1830,8 +1837,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     setModal({ kind: "transfer", side, transfer: {
       kind, source, items, chooseOperation,
-      target: target?.kind === "local" || isFileServer(target) ? placePath(target) : "",
-      remoteDestination,
+      target: target && (archiveDestination || target.kind === "local" || isFileServer(target)) ? placePath(target) : "",
+      remoteDestination, archiveDestination,
     } });
   }
 
@@ -2647,7 +2654,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }
         break;
       case "mkdir":
-        if (local && !pane.search && !busy && !pane.loading) setModal({ kind: "mkdir", side: active, place: local });
+        if (!pane.search && !busy && !pane.loading) {
+          const place = local ?? (archive?.canAdd ? archive : undefined);
+          if (place) setModal({ kind: "mkdir", side: active, place });
+        }
         break;
       case "createArchive":
         if (local && current && !pane.search && !busy && !pane.loading) {
@@ -2659,6 +2669,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         const place = current?.tree && currentItem?.place.kind === "local" ? currentItem.place : local ?? ftp;
         if (place && current && !pane.search && !busy && !pane.loading) {
           setRowRename({ side: active, place, name: currentItem?.entry.name ?? current.name, treeKey: current.tree ? current.name : undefined });
+        } else if (archive?.canAdd && current && !current.link && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "rename", side: active, path: placePath(archive), name: current.name, archive });
         }
         break;
       }
@@ -2825,9 +2837,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !(imageType(currentFile.name) || writableTextPlace(currentFile.place)) },
     { command: "copy", label: local || fileServer || archive ? "Copy" : "Download", Icon: local || fileServer || archive ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight, disabled: (!local && !ftp) || !!pane.search || !canTransfer || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp) || !!pane.search || !current || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !archive?.canAdd) || !!pane.search || !current || (archive && current.link) || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !local || !!pane.search || busy },
-    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !local || !!pane.search || busy },
+    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !archive?.canAdd) || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2, disabled: (!local && !fileServer && !archive?.writable) || !!pane.search || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
@@ -3520,6 +3532,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap} onClose={() => setModal(null)} />}
       {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
+        archive={modal.place.kind === "archive" ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
           await load(modal.side, modal.place, "refresh", name);
@@ -3570,6 +3583,20 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               permanent: modal.kind === "delete", relativePaths: modal.relativePaths } });
             return;
           } else if (operation) {
+            if (operation.kind === "rename" && modal.archive) {
+              const archive = modal.archive;
+              const before = [...archive.segments, operation.name];
+              const after = [...archive.segments, operation.new_name];
+              for (const side of ["left", "right"] as const) {
+                const place = latest.current[side].place;
+                if (place?.kind !== "archive" || place.path !== archive.path) continue;
+                const childRenamed = before.every((part, index) => part === place.segments[index]);
+                const destination = childRenamed ? { ...place, segments: [...after, ...place.segments.slice(before.length)] } : place;
+                void load(side, destination, "refresh", side === modal.side ? operation.new_name : undefined);
+              }
+              setModal(null);
+              return;
+            }
             if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);
             fileLocationsChanged();
@@ -3638,6 +3665,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
+  const archiveChange = useArchiveChange();
+  const renameInArchive = modal.kind === "rename" && modal.archive;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const title = t(titles[modal.kind]);
   const removing = "names" in modal;
@@ -3653,6 +3682,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         setRecursive(true);
         return;
       }
+      if (renameInArchive) {
+        await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
+      }
       await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
     } catch (error) {
@@ -3662,10 +3694,15 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     }
   }
 
+  function close() {
+    if (!waiting) onClose();
+    else if (renameInArchive) archiveChange.cancel();
+  }
+
   return (
     <>
     <Dialog key={String(recursive)} title={recursive ? t(modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "warning" : undefined}
-      onClose={() => { if (!waiting) onClose(); }}>
+      onClose={close}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
         <div className="dialog-body">
           {removing
@@ -3677,7 +3714,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
                   <Message text={permanent ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
                     <strong>{modal.names.length === 1 ? modal.names[0] : countText(modal.names.length, "item")}</strong>
                   </Message>}</p>
-                {permanent && <p className="permanent-delete-note">{t("This action cannot be undone.")}</p>}
+                {permanent && <p className="permanent-delete-note">{t(modal.archive ?
+                  "These items will be permanently deleted from the archive." : "This action cannot be undone.")}</p>}
               </div>
             </div>
             : <label className="field">{t("Name")}
@@ -3691,14 +3729,16 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             </select>
           </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          {!modal.remote && windowsClient && isPermissionError(error) &&
+          {renameInArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
+          {!modal.remote && !modal.archive && windowsClient && isPermissionError(error) &&
             <ElevationButton directory={modal.path} selected={modal.kind === "rename" ? modal.name : undefined} />}
-          {!modal.remote && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
+          {!modal.remote && !modal.archive && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button></div>}
         </div>
         <footer className="dialog-footer">
-          <Button type="button" data-initial-focus={removing ? true : undefined} onClick={onClose} disabled={waiting}>{t("Cancel")}</Button>
+          <Button type="button" data-initial-focus={removing ? true : undefined} onClick={close}
+            disabled={waiting && (!renameInArchive || archiveChange.canceling)}>{t(archiveChange.canceling ? "Canceling…" : "Cancel")}</Button>
           <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}

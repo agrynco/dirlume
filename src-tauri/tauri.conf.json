@@ -39,6 +39,7 @@
     "category": "Utility",
     "licenseFile": "../LICENSE",
     "resources": {
+      "archive-tools": "archive-tools",
       "../src/assets/fonts/GoMono-LICENSE.txt": "licenses/GoMono-LICENSE.txt",
       "../src/assets/fonts/Nerd-Fonts-LICENSE.txt": "licenses/Nerd-Fonts-LICENSE.txt",
       "../src/assets/fonts/GoMono-NOTICE.txt": "licenses/GoMono-NOTICE.txt",
