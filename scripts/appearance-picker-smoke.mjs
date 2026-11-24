@@ -65,7 +65,7 @@ export async function testAppearancePicker() {
     });
     await page.addInitScript(() => {
       const path = "/fixture";
-      const files = ["first.txt", "some-photo.png", "logo.SVG", "art.svg", "Dockerfile", "backup.tar.gz", ".hidden.svg", "system.svg"]
+      const files = ["first.txt", "notes.md", "some-photo.png", "logo.SVG", "art.svg", "Dockerfile", "backup.tar.gz", ".hidden.svg", "system.svg"]
         .map((name) => ({ name, directory: name === "art.svg", link: false, hidden: name.startsWith(".") || name === "system.svg",
           system: name === "system.svg", size: 7, modified: null }));
       window.__TAURI_INTERNALS__ = {
@@ -366,8 +366,12 @@ export async function testAppearancePicker() {
     await groupName.press("Enter");
     const vectors = await groups.inputValue();
     const confirmMove = page.getByRole("dialog", { name: "Move extension", exact: true });
+    const startMove = options.getByRole("button", { name: "Move extension…", exact: true });
+    const extensionHint = (message) => options.locator(".file-type-settings [role=status]").filter({ hasText: message });
+    await extensionHint("Add an extension to apply this group's color and font.").waitFor();
     await extension.fill(".SVG");
-    await add.click();
+    await extensionHint(".svg is already in the Photos group.").waitFor();
+    await startMove.click();
     await confirmMove.getByText("Move .svg from Photos to Vector images?", { exact: true }).waitFor();
     await confirmMove.getByRole("button", { name: "Cancel", exact: true }).click();
     await groups.selectOption("file-image");
@@ -382,6 +386,29 @@ export async function testAppearancePicker() {
     assert.equal(await sample.textContent(), "sample.svg");
     assert.equal(await sample.evaluate((node) => getComputedStyle(node).color), "rgb(133, 53, 121)");
     if (process.env.DIRLUME_FILE_TYPES_SCREENSHOT) await options.screenshot({ path: process.env.DIRLUME_FILE_TYPES_SCREENSHOT });
+
+    await options.getByRole("button", { name: "New group", exact: true }).click();
+    await groupName.fill("Markdown");
+    await groupName.press("Enter");
+    const markdown = await groups.inputValue();
+    await colorField.fill("#2fc8fb");
+    const previewMarkdown = options.locator(".preview-file-types").getByText("notes.md", { exact: true });
+    const filenameColor = (node) => node.evaluate((element) => getComputedStyle(element).color);
+    const originalMarkdownInk = await filenameColor(previewMarkdown);
+    const markdownInk = "rgb(47, 200, 251)";
+    await extension.fill(".md");
+    await extensionHint(".md is already in the Text and Markdown group.").waitFor();
+    assert.equal(await filenameColor(previewMarkdown), originalMarkdownInk);
+    await startMove.click();
+    await confirmMove.getByRole("button", { name: "Cancel", exact: true }).click();
+    await groups.selectOption("file-text");
+    await remove("md").click();
+    await groups.selectOption(markdown);
+    await extension.fill(".md");
+    await add.click();
+    await remove("md").waitFor();
+    assert.equal(await filenameColor(previewMarkdown), markdownInk);
+
     await selectPage("Main File Panels");
     await options.getByRole("checkbox", { name: "Show hidden files", exact: true }).check();
     await done();
@@ -389,6 +416,7 @@ export async function testAppearancePicker() {
     const filename = (side, name) => file(side, name).locator(".file-name-text");
     const appearance = (node) => node.evaluate((element) => [getComputedStyle(element).color, getComputedStyle(element).fontFamily]);
     for (const side of ["left", "right"]) {
+      assert.equal(await filenameColor(filename(side, "notes.md")), markdownInk);
       assert.equal(await file(side, "logo.SVG").getAttribute("data-file-color"), "custom");
       assert.equal(await file(side, "art.svg").getAttribute("data-file-color"), null);
       assert.equal(await file(side, "Dockerfile").getAttribute("data-file-color"), null);
@@ -406,6 +434,9 @@ export async function testAppearancePicker() {
     await page.reload();
     await open();
     await selectPage("File types");
+    await groups.selectOption(markdown);
+    await remove("md").waitFor();
+    assert.equal(await filenameColor(previewMarkdown), markdownInk);
     await groups.selectOption(vectors);
     assert.equal(await colorField.inputValue(), "#853579");
     await remove("svg").waitFor();

@@ -1,8 +1,8 @@
 import { HistoryField } from "./HistoryField";
 import { t } from "./i18n";
 import { Button } from "./Button";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { ArrowRight, Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
   basePalette, baseThemes, builtInThemes, captureFonts, colorGroups, colorKeysForSurface, colorLabels, defaultFileTypeGroups, effectiveFontSize,
   fileAppearance, fileTypeColor, fileTypeIndex, fontGroups, inheritedFont, normalizeExtension,
@@ -351,8 +351,13 @@ function FileTypeSettings({ groups, palette, installed, paneFont, onChange }: {
   const [move, setMove] = useState<{ extension: string; owner: FileTypeGroup } | null>(null);
   const [picker, setPicker] = useState<{ initial: string; color: string } | null>(null);
   const nameInput = useRef<HTMLInputElement>(null);
+  const extensionHintId = useId();
   const group = groups.find(({ id }) => id === selected) ?? groups[0];
   const label = (group: FileTypeGroup) => t(group.name);
+  const extension = normalizeExtension(extensionDraft);
+  const owner = extension ? groups.find((item) => item.id !== group?.id && item.extensions.includes(extension)) : undefined;
+  const extensionHint = owner ? t("{0} is already in the {1} group.", "." + extension, label(owner)) :
+    group?.extensions.length === 0 ? t("Add an extension to apply this group's color and font.") : "";
   const update = (change: Partial<FileTypeGroup>) => onChange(groups.map((item) => item.id === group.id ? { ...item, ...change } : item));
   const ownColor = group && fileTypeColor(group);
   const color = group?.color ?? (ownColor ? palette[ownColor] : palette["panel-ink"]) ?? "#000000";
@@ -387,15 +392,13 @@ function FileTypeSettings({ groups, palette, installed, paneFont, onChange }: {
   }
 
   function addExtension() {
-    const extension = normalizeExtension(extensionDraft);
     if (!extension) { setError(t("Enter a file extension.")); return; }
     if (group.extensions.includes(extension)) { setError(t("This extension is already in this group.")); return; }
-    const owner = groups.find((item) => item.extensions.includes(extension));
+    setError("");
     if (owner) setMove({ extension, owner });
     else {
       update({ extensions: [...group.extensions, extension] });
       setExtensionDraft("");
-      setError("");
     }
   }
 
@@ -431,11 +434,16 @@ function FileTypeSettings({ groups, palette, installed, paneFont, onChange }: {
       </label>
       <div className="file-type-toolbar">
         <label className="field"><SettingSearchLabel label="File extension" />
-          <input aria-label={t("File extension")} placeholder=".svg" value={extensionDraft} onChange={(event) => setExtensionDraft(event.target.value)}
+          <input aria-label={t("File extension")} aria-describedby={extensionHint ? extensionHintId : undefined}
+            placeholder=".svg" value={extensionDraft} onChange={(event) => { setExtensionDraft(event.target.value); setError(""); }}
             onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addExtension(); } }} />
         </label>
-        <Button type="button" disabled={!extensionDraft.trim()} onClick={addExtension}><Plus aria-hidden="true" />{t("Add extension")}</Button>
+        <Button type="button" disabled={!extensionDraft.trim()} onClick={addExtension}>
+          {owner ? <ArrowRight aria-hidden="true" /> : <Plus aria-hidden="true" />}
+          {t(owner ? "Move extension…" : "Add extension")}
+        </Button>
       </div>
+      {extensionHint && <p id={extensionHintId} className="appearance-hint" role="status">{extensionHint}</p>}
       {group.extensions.length > 0 && <div className="file-type-extensions" aria-label={t("File extensions")}>
         {group.extensions.map((extension) => <Button key={extension} type="button" aria-label={t("Remove extension {0}", "." + extension)}
           onClick={() => update({ extensions: group.extensions.filter((value) => value !== extension) })}>.{extension}<Trash2 aria-hidden="true" /></Button>)}
