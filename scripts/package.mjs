@@ -210,7 +210,7 @@ async function verifyRelease() {
 if (process.argv[2] === "check") {
   console.log(`Dirlume v${artifactVersion(await version())}`);
 } else if (process.argv[2] === "platforms") {
-  console.log(JSON.stringify(Object.keys(process.argv[3] === "true" ? updaterFormats : formats)));
+  console.log(JSON.stringify(Object.keys(updaterFormats)));
 } else if (process.argv[2] === "collect") {
   await collect(process.argv[3]);
 } else if (process.argv[2] === "verify-release") {
@@ -218,5 +218,5 @@ if (process.argv[2] === "check") {
 } else if (process.argv[2] === "configure-signing") {
   await configureSigning();
 } else {
-  throw new Error("Use package.mjs check, platforms <publish>, collect <platform>, configure-signing, or verify-release.");
+  throw new Error("Use package.mjs check, platforms, collect <platform>, configure-signing, or verify-release.");
 }

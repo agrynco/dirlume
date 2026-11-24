@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 
-test("pull request builds cover every platform and releases package Windows and Linux", () => {
+test("CI and release builds target Windows and Linux", () => {
   const runner = resolve("scripts/package.mjs");
-  const platforms = (publish) => JSON.parse(spawnSync(process.execPath, [runner, "platforms", publish], { encoding: "utf8" }).stdout);
-  assert.deepEqual(platforms("false"), ["windows-x64", "linux-x64", "macos-arm64", "macos-x64"]);
-  assert.deepEqual(platforms("true"), ["windows-x64", "linux-x64"]);
+  const result = spawnSync(process.execPath, [runner, "platforms"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), ["windows-x64", "linux-x64"]);
 });
 
 test("release metadata pairs the signed packages with their platform and exact version", async () => {

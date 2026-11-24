@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { openMainMenu } from "./menu-header-smoke.mjs";
 
+const markModifier = process.platform === "darwin" ? "Meta" : "Control";
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 720 },
@@ -103,18 +104,22 @@ try {
   const dialog = (name) => page.getByRole("dialog", { name, exact: true });
   const calls = (command) => page.evaluate((name) => window.searchFixture.calls.filter(([command]) => command === name), command);
   const search = async (side = "left") => {
+    const pane = side === "left" ? left : right;
+    await list(side).locator('[data-tooltip="one"]').click();
+    await pane.and(page.locator(".active")).waitFor();
     await list(side).press("Alt+F7");
     const find = dialog("Find files");
     await find.getByRole("textbox", { name: "File mask" }).fill("*.mp4");
     await button(find, "Search").click();
     await button(find, "Show in panel").click();
+    await pane.getByRole("heading", { name: "Search results", exact: true }).waitFor();
   };
   const one = "one/demo.mp4";
   const two = "two/demo.mp4";
   const keep = "three/keep.mp4";
   const mark = async (name) => {
     if (!await row(name).evaluate((element) => element.classList.contains("marked"))) {
-      await row(name).click({ modifiers: ["Control"] });
+      await row(name).click({ modifiers: [markModifier] });
     }
   };
   const destination = (modal) => modal.getByRole("combobox", { name: "Destination", exact: true });
@@ -180,7 +185,7 @@ try {
   await row("one/new.mp4").click();
   // Mark in the order the cancellation fixture processes them.
   if (await row(two).evaluate((element) => element.classList.contains("marked"))) {
-    await row(two).click({ modifiers: ["Control"] });
+    await row(two).click({ modifiers: [markModifier] });
   }
   await mark("one/new.mp4");
   await mark(two);
