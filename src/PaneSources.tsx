@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { Activity, ChevronDown, Folder, HardDrive, Server } from "lucide-react";
+import { Activity, ChevronDown, Clock3, Folder, HardDrive, Server } from "lucide-react";
 import { api, describeError, windowsClient, type ComputerDrive, type ConnectionSource, type QuickLocation } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
@@ -12,7 +12,7 @@ type LanHost = { kind: "dirlume"; id: string; name: string; credential: string }
   { kind: "kswitcher"; id: string; name: string; online?: boolean };
 type RemoteDrive = { host: LanHost; drive: string };
 type LanComputer = { host: LanHost; drives?: ComputerDrive[]; error?: string };
-export type PaneSource = QuickLocation | RemoteDrive | ConnectionSource | "processes";
+export type PaneSource = QuickLocation | RemoteDrive | ConnectionSource | "processes" | "recent";
 const driveTypes = ["", "", "Removable", "Fixed", "Network", "Optical", "RAM disk"];
 
 export function PaneSources({ side, overlay, open, locations, shortcuts, onToggle, onClose, onPick }: {
@@ -85,7 +85,12 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
     const command = driveSourceCommand(location);
     return { label: t(location.label), bindings: command ? shortcuts[command] : [], Icon: Folder, value: location };
   });
-  function sourceButton({ label, bindings, Icon, value }: (typeof sources)[number] | (typeof folders)[number]) {
+  const recent = { label: t("Recent"), bindings: [], Icon: Clock3, value: "recent" } as const;
+  const downloads = locations.findIndex(({ label }) => label === "Downloads");
+  const firstDrive = folders.findIndex(({ value }) => driveSourceCommand(value));
+  const recentIndex = downloads >= 0 ? downloads + 1 : firstDrive >= 0 ? firstDrive : folders.length;
+  const folderSources = [...folders.slice(0, recentIndex), recent, ...folders.slice(recentIndex)];
+  function sourceButton({ label, bindings, Icon, value }: (typeof sources)[number] | (typeof folderSources)[number]) {
     const path = typeof value === "object" ? value.path : undefined;
     return <Button key={path ?? label} tooltip={path} shortcut={showShortcut(bindings[0])} onClick={() => onPick(value)}>
       <Icon /> <span>{label}</span>{bindings.length > 0 && <kbd aria-hidden="true">{showShortcut(bindings[0])}</kbd>}
@@ -119,7 +124,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
         buttons[next]?.focus();
       }
     }}>
-      {folders.map(sourceButton)}
+      {folderSources.map(sourceButton)}
       <div className="location-source-group" role="group" aria-label={t("Sources")}>{sources.map(sourceButton)}</div>
       {(computers.length > 0 || kswitcherError) && <div className="location-source-group lan-sources" role="group" aria-label={t("Dirlume LAN")}>
         <strong>{t("Dirlume LAN")}</strong>
