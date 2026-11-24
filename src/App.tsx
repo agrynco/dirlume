@@ -24,7 +24,8 @@ import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLo
 import { smbLocation, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { canAnalyze, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
-import { useFilePaneTree, usePaneFolderSizes, usePaneTreeRevision } from "./filePaneTree";
+import { useFilePaneTree, usePaneTreeRevision } from "./filePaneTree";
+import { usePaneFolderSizes } from "./paneFolderSizes";
 import type { EnvironmentMode } from "./EnvironmentPane";
 import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
@@ -351,14 +352,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const rightRoot = !panes.right.search && panes.right.place?.kind === "local" ? panes.right.place : null;
   const leftTreeOn = preferences.paneViews.left === "tree";
   const rightTreeOn = preferences.paneViews.right === "tree";
-  const leftRevision = usePaneTreeRevision(leftRoot?.path, leftTreeOn || folderSizesEnabled.left, fileRevision);
-  const rightRevision = usePaneTreeRevision(rightRoot?.path, rightTreeOn || folderSizesEnabled.right, fileRevision);
+  const leftRevision = usePaneTreeRevision(leftRoot?.path, leftTreeOn, fileRevision);
+  const rightRevision = usePaneTreeRevision(rightRoot?.path, rightTreeOn, fileRevision);
   const leftTree = useFilePaneTree(leftRoot, leftTreeOn, leftRevision);
   const rightTree = useFilePaneTree(rightRoot, rightTreeOn, rightRevision);
   const trees = { left: leftTree, right: rightTree };
   const folderSizes = {
-    left: usePaneFolderSizes(panes.left, folderSizesEnabled.left, leftRevision),
-    right: usePaneFolderSizes(panes.right, folderSizesEnabled.right, rightRevision),
+    left: usePaneFolderSizes(panes.left, folderSizesEnabled.left, leftTreeOn),
+    right: usePaneFolderSizes(panes.right, folderSizesEnabled.right, rightTreeOn),
   };
   const leftRootSizes = useMemo(() => folderSizes.left.measures(panes.left.entries), [folderSizes.left.measures, panes.left.entries]);
   const rightRootSizes = useMemo(() => folderSizes.right.measures(panes.right.entries), [folderSizes.right.measures, panes.right.entries]);
@@ -1713,10 +1714,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     requestAnimationFrame(() => focus(side));
   }
 
-  function refresh(side: Side) {
+  function refresh(side: Side, measureFolders = false) {
     const { place, loading } = latest.current[side];
     if (place && !loading) {
       if (trees[side].enabled) setFileRevision((revision) => revision + 1);
+      if (measureFolders) folderSizes[side].refresh();
       void load(side, place, "refresh");
     }
   }
@@ -2334,7 +2336,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const canMeasure = Boolean(local || ftp) && !pane.search;
   const measureEntries = !canMeasure ? [] : ftp && currentRow?.name === ".."
     ? entries[active].filter((entry) => entry.directory && !entry.link && entry.name !== "..")
-    : markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
+    : !trees[active].enabled && markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
 
   function measure() {
     if ((!local && !ftp) || pane.loading || !measureEntries.length) return;
@@ -2598,7 +2600,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "parent": parent(active); break;
       case "back": history(active, -1); break;
       case "forward": history(active, 1); break;
-      case "refresh": refresh(active); break;
+      case "refresh": refresh(active, true); break;
       case "filter": document.getElementById(`${active}-pane`)?.dispatchEvent(new Event("dirlume-filter")); break;
       case "hidden": setPreferences({ ...preferences, hidden: !preferences.hidden }); break;
       case "settings": openSettings(); break;
@@ -2703,7 +2705,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "view":
       case "edit": {
         if (command === "view" && measureEntries.length) {
-          if (trees[active].enabled) setFolderSizesEnabled((before) => ({ ...before, [active]: true }));
+          if (trees[active].enabled) {
+            const folder = measureEntries[0];
+            folderSizes[active].measureBranch(folder.tree?.segments ?? [folder.name]);
+          }
           else measure();
           break;
         }
@@ -2817,7 +2822,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
     if (command === "refresh" && (onFiles?.id === "left-files" || onFiles?.id === "right-files")) {
-      refresh(onFiles.id === "left-files" ? "left" : "right");
+      refresh(onFiles.id === "left-files" ? "left" : "right", true);
       return;
     }
     if (!event.repeat || (!["hidden", "attributes", "quickView", "gitView", "analyzeSpace", "diskInformation", "copyFullPath", "copyItemNames", "addFolderShortcut", "folderShortcuts", "terminal", "toggleTerminal"].includes(command) &&
@@ -2882,7 +2887,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         run: () => {
           focus(side);
           if (command === "parent") parent(side);
-          else if (command === "refresh") refresh(side);
+          else if (command === "refresh") refresh(side, true);
           else history(side, command === "back" ? -1 : 1);
         },
       };
@@ -3070,7 +3075,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             }}
             onOpenConnections={(source) => openConnections(side, source)}
             onCopyPath={copyPath}
-            onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side)}
+            onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
               updatePane(side, (pane) => ({ ...pane, error: "", elevationPath: undefined, deniedSshListing: undefined }));
               requestAnimationFrame(() => focus(side));
@@ -3486,7 +3491,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (place?.kind === "local") setModal({ kind: "mkdir", side, place });
             }}>{t("New folder")}</Button>}
           </>}
-          <Button role="menuitem" onClick={() => { setFileMenu(null); refresh(side); focus(side); }}>{t("Refresh")}</Button>
+          <Button role="menuitem" onClick={() => { setFileMenu(null); refresh(side, true); focus(side); }}>{t("Refresh")}</Button>
         </FileContextMenu>;
       })()}
       {modal?.kind === "smb" && (
