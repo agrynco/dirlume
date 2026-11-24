@@ -125,7 +125,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
       const matches: { path: string; entry: Entry }[] = [];
       const timer = window.setTimeout(() => cancel.abort(), 20_000);
       try {
-        const omitted = await findFiles(root, mask, context.preferences.hidden, cancel.signal, (batch) => {
+        const omitted = await findFiles({ root, mask, showHidden: context.preferences.hidden }, cancel.signal, (batch) => {
           for (const match of batch.slice(0, limit - matches.length)) matches.push({ path: match.relativePath, entry: match.entry });
           if (matches.length >= limit) cancel.abort();
         });

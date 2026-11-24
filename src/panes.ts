@@ -21,8 +21,10 @@ export interface SearchMatch {
   relativePath: string;
 }
 
+export type SearchQuery = { root: FileLocation; mask: string; showHidden: boolean };
+
 interface SearchResults {
-  mask: string;
+  query: SearchQuery;
   matches: ReadonlyMap<string, SearchMatch>;
   incomplete: boolean;
   previous: Pick<PaneState, "selected" | "marked" | "filter">;
@@ -144,12 +146,28 @@ export function toggleMarkAndMoveCursor(pane: PaneState, entries: readonly Entry
   return { ...pane, selected, marked };
 }
 
-export function showSearchResults(pane: PaneState, mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {
+export function showSearchResults(pane: PaneState, query: SearchQuery, matches: readonly SearchMatch[], incomplete: boolean, selected: string) {
   const previous = pane.search?.previous ?? { selected: pane.selected, marked: pane.marked, filter: pane.filter };
   return {
     ...pane, selected, marked: [], filter: "", error: "",
-    search: { mask, matches: new Map(matches.map((match) => [match.relativePath, match])), incomplete, previous },
+    search: { query, matches: searchMatches(matches), incomplete, previous },
   };
+}
+
+function searchMatches(matches: readonly SearchMatch[]) {
+  return new Map(matches.map((match) => [match.relativePath, match]));
+}
+
+export function updateSearchMatches(pane: PaneState, matches: ReadonlyMap<string, SearchMatch>): PaneState {
+  if (!pane.search) return pane;
+  return { ...pane, selected: pane.selected && matches.has(pane.selected) ? pane.selected : null,
+    marked: pane.marked.filter((key) => matches.has(key)), search: { ...pane.search, matches } };
+}
+
+export function replaceSearchMatches(pane: PaneState, matches: readonly SearchMatch[], incomplete: boolean): PaneState {
+  const updated = updateSearchMatches(pane, searchMatches(matches));
+  return updated.search ? { ...updated, loading: false, loadingPath: undefined,
+    search: { ...updated.search, incomplete } } : updated;
 }
 
 export function closeSearchResults(pane: PaneState): PaneState {

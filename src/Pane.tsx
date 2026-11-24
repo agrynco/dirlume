@@ -365,7 +365,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
 
   const title = processView ? t("Processes") : search ? t("Search results") : pane.place ? folderLabel(pane.place) : t(side === "left" ? "Left pane" : "Right pane");
   const cancelKey = cancelFolderShortcut[0] === "Escape" ? "Esc" : showShortcut(cancelFolderShortcut[0]);
-  const loadingLabel = t("Opening folder…");
+  const loadingLabel = t(search ? "Searching…" : "Opening folder…");
   const measuringLabel = t("Calculating folder sizes…");
   const host = smbHost(pane.place);
   const isRemote = host || (pane.place && pane.place.kind !== "local");
@@ -477,7 +477,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         </nav>}
         <div className="pane-title">
           {processView ? <Activity /> : search ? <Search /> : isRemote ? <Server /> : <Folder />}
-          <h2 data-tooltip={pane.search?.mask ?? title}>{title}</h2>
+          <h2 data-tooltip={pane.search?.query.mask ?? title}>{title}</h2>
           {!processView && pane.place && pane.place.kind !== "connections" && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
             {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
@@ -504,7 +504,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 requestAnimationFrame(() => filterField.current?.focus());
               }
             }}><Search /></Button>}
-          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t("Refresh folder")} disabled={search || !pane.place || pane.loading} onClick={onRefresh}>
+          {!processView && <Button className="icon-button" data-help-topic="paneStatus" aria-label={t(search ? "Refresh" : "Refresh folder")}
+            disabled={!pane.place || pane.loading || !!pane.search && pane.search.query.root.kind !== "local"} onClick={onRefresh}>
             <RefreshCw />
           </Button>}
         </div>

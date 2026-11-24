@@ -330,7 +330,7 @@ export type DeletionEvent =
   | { phase: "preparing"; path: string; selection: DeletionSelection }
   | { phase: "removing"; progress: DeletionProgress; selection: DeletionSelection }
   | { phase: "locked"; token: number; path: string };
-export type DeletionResult = { selection: DeletionSelection; counts: DeletionCounts; cancelled: boolean;
+export type DeletionResult = { selection: DeletionSelection; counts: DeletionCounts; cancelled: boolean; removedPaths: string[][];
   availableAfter: number | null; failures: { path: string; message: string }[] };
 export type DeletionDecision = "retry" | "skip" | "skipRemaining";
 

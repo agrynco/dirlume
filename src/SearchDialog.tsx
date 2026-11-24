@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, placePath, type FileLocation, type FtpSearchEvent } from "./api";
 import { Dialog } from "./Dialog";
-import { childPlace, readPlace, type SearchMatch } from "./panes";
+import { childPlace, readPlace, type SearchMatch, type SearchQuery } from "./panes";
 
 const previewLimit = 1000;
 let nextFtpSearchId = 0;
@@ -41,7 +41,7 @@ async function findFtp(
   }
 }
 
-export async function findFiles(root: FileLocation, mask: string, showHidden: boolean, signal: AbortSignal, append: (matches: SearchMatch[]) => void) {
+export async function findFiles({ root, mask, showHidden }: SearchQuery, signal: AbortSignal, append: (matches: SearchMatch[]) => void) {
   if (root.kind === "ftp") return findFtp(root, mask, showHidden, signal, append);
   const includes = fileMask(mask);
   const pending: { place: FileLocation; prefix: string }[] = [{ place: root, prefix: "" }];
@@ -73,7 +73,7 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
   showHidden: boolean;
   onClose: () => void;
   onReveal: (directory: FileLocation, name: string) => void;
-  onShowResults: (mask: string, matches: readonly SearchMatch[], incomplete: boolean, selected: string) => void;
+  onShowResults: (query: SearchQuery, matches: readonly SearchMatch[], incomplete: boolean, selected: string) => void;
 }) {
   const [mask, setMask] = useState("*");
   const [results, setResults] = useState<SearchMatch[]>([]);
@@ -82,7 +82,7 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const active = useRef<AbortController | null>(null);
-  const snapshot = useRef({ mask: "", matches: [] as SearchMatch[], incomplete: false });
+  const snapshot = useRef({ query: { root, mask, showHidden }, matches: [] as SearchMatch[], incomplete: false });
   const maskField = useRef<HTMLInputElement>(null);
   const current = results.find((result) => result.relativePath === selected) ?? results[0];
 
@@ -108,9 +108,10 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
     setStatus("Searching…");
     setRunning(true);
     const found: SearchMatch[] = [];
-    snapshot.current = { mask, matches: found, incomplete: false };
+    const query = { root, mask, showHidden };
+    snapshot.current = { query, matches: found, incomplete: false };
     try {
-      const skipped = await findFiles(root, mask, showHidden, controller.signal, (matches) => {
+      const skipped = await findFiles(query, controller.signal, (matches) => {
         const count = found.length;
         for (const match of matches) found.push(match);
         if (count < previewLimit) setResults(found.slice(0, previewLimit));
@@ -165,8 +166,8 @@ export function SearchDialog({ root, showHidden, onClose, onReveal, onShowResult
             <div className="dialog-actions dialog-actions-end">
               <Button type="button" onClick={() => reveal(current)}>{t("Go to file")}</Button>
               {!running && <Button type="button" onClick={() => {
-                const { mask, matches, incomplete } = snapshot.current;
-                onShowResults(mask, matches, incomplete, current.relativePath);
+                const { query, matches, incomplete } = snapshot.current;
+                onShowResults(query, matches, incomplete, current.relativePath);
               }}>{t("Show in panel")}</Button>}
             </div>
           </>}

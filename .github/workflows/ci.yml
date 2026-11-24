@@ -209,6 +209,9 @@ jobs:
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs
+      - name: Verify local Search results actions and refresh
+        if: github.event.action != 'closed'
+        run: node scripts/search-results-smoke.mjs
       - name: Verify Git View
         if: github.event.action != 'closed'
         run: node scripts/git-view-smoke.mjs
