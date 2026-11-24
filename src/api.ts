@@ -348,7 +348,8 @@ export type TransferConflict = {
   path: string; directory: boolean; readOnly: boolean; replaceable: boolean; allowRemember: boolean;
   incoming: TransferEntryDetails | null; existing: TransferEntryDetails;
 };
-export type TransferOutcome = { kind: "completed" | "skipped" };
+export type TransferOutcome = { kind: "completed" | "skipped" }
+  | { kind: "source_retained"; destination: string; source: string; error: string };
 export type TransferProgress = { file: string; path?: string; bytes: number; total: number | null };
 export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
 

@@ -516,7 +516,7 @@ impl FileRevision {
     }
 }
 
-fn remove_original(source: &Path, original: &FileRevision) -> io::Result<()> {
+pub(crate) fn remove_original(source: &Path, original: &FileRevision) -> io::Result<()> {
     original.verify(source)?;
     let parent = source
         .parent()

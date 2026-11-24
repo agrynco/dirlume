@@ -69,9 +69,17 @@ async function fixture(browser, refresh) {
           return { path: args.path, parent: null, entries: state.local, omitted: 0 };
         }
         if (command === "file_icons") return args.items.map(() => null);
-        if (command === "ssh_profiles") return [{ id: "ssh", label: "Remote fixture", host: "fixture", port: 22 }];
-        if (command === "connect_ssh") return { kind: "connected", id: 37, address: "Remote fixture", origin: "sftp://fixture",
-          segments: ["destination"], listing: { entries: await entriesFor("/destination"), omitted: 0, elevated: false } };
+        if (command === "ssh_profiles") return [
+          { id: "ssh", label: "Remote fixture", host: "fixture", port: 22 },
+          { id: "other", label: "Alternate fixture", host: "other.example", port: 2202 },
+        ];
+        if (command === "connect_ssh") {
+          const other = args.id === "other";
+          state.connection = other ? 38 : 37;
+          return { kind: "connected", id: state.connection,
+            address: other ? "" : "Remote fixture", origin: other ? "sftp://other.example:2202" : "sftp://fixture",
+            segments: ["destination"], listing: { entries: await entriesFor("/destination"), omitted: 0, elevated: false } };
+        }
         if (command === "list_ssh") {
           const path = "/" + args.segments.join("/");
           if (args.reuseSudo) state.requests.push(["ssh", args.id, path]);
@@ -96,8 +104,10 @@ async function fixture(browser, refresh) {
             matches: names.map((label) => ({ label, text: label, directory: false })) };
         }
         if (command === "transfer_item") {
-          if (args.request.sshDestination !== 37) throw new Error("The upload used the wrong SSH connection.");
-          const { destination, source } = args.request;
+          if (args.request.sshDestination !== state.connection) throw new Error("The upload used the wrong SSH connection.");
+          const { destination, source, moving, retry } = args.request;
+          state.transfers ??= [];
+          state.transfers.push(args.request);
           if (state.transfer === "skip") return { kind: "skipped" };
           if (state.transfer === "cancel") {
             await state.write(destination, "committed-before-cancel.txt");
@@ -108,7 +118,11 @@ async function fixture(browser, refresh) {
             await state.write(destination, "already-committed.txt");
             throw new Error("The remaining upload failed.");
           }
-          await state.write(destination, source.name);
+          if (!moving || !retry) await state.write(destination, source.name);
+          if (moving && state.transfer === "cleanup-failed") {
+            return { kind: "source_retained", destination: "/destination/rollback.txt", source: state.root + "/rollback.txt", error: "Sharing violation." };
+          }
+          if (moving) state.local = state.local.filter(({ name }) => name !== source.name);
           return { kind: "completed" };
         }
         if (command === "cancel_transfer") { state.cancelTransfer(); return null; }
@@ -120,11 +134,11 @@ async function fixture(browser, refresh) {
   return page;
 }
 
-async function connect(page, side) {
+async function connect(page, side, profile = "Remote fixture") {
   const panel = pane(page, side);
   await button(panel, `Locations for ${side} pane`).click();
   await button(panel, "SSH").click();
-  await list(page, side).getByRole("option", { name: /^Remote fixture/ }).dblclick();
+  await list(page, side).getByRole("option", { name: new RegExp("^" + profile) }).dblclick();
   await row(page, side, "remote.txt").waitFor();
 }
 
@@ -253,6 +267,46 @@ try {
     await page.close();
   }
 
+  for (const sshSide of ["left", "right"]) {
+    const localSide = sshSide === "left" ? "right" : "left";
+    const other = sshSide === "left";
+    const page = await fixture(browser);
+    await connect(page, sshSide, other ? "Alternate fixture" : undefined);
+    const identity = other ? "SFTP · other.example:2202" : "SFTP · Remote fixture";
+    await row(page, localSide, "rollback.txt").click();
+    await page.keyboard.press("F5");
+    const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+    await copy.getByText(identity, { exact: true }).waitFor();
+    await button(copy, "Cancel").click();
+    await page.evaluate(() => { window.sshFixture.transfer = "cleanup-failed"; });
+    await list(page, localSide).press("F6");
+    const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+    const field = move.getByLabel("Destination", { exact: true });
+    assert.equal(await field.inputValue(), "/destination");
+    await move.getByText(identity, { exact: true }).waitFor();
+    await button(move, "Move").click();
+    const stopped = page.getByRole("dialog", { name: "Transfer stopped", exact: true });
+    await stopped.getByRole("alert").filter({ hasText: "Uploaded to /destination/rollback.txt" }).waitFor();
+    await row(page, sshSide, "rollback.txt").waitFor();
+    assert.equal(await row(page, localSide, "rollback.txt").count(), 1);
+    await page.evaluate(() => { window.sshFixture.transfer = "complete"; });
+    await button(stopped, "Retry").click();
+    await row(page, localSide, "rollback.txt").waitFor({ state: "detached" });
+    assert.equal(await row(page, sshSide, "rollback.txt").count(), 1);
+    assert.deepEqual(await page.evaluate(() => window.sshFixture.transfers.map(({ moving, retry, sshDestination }) =>
+      [moving, retry, sshDestination])), [[true, false, other ? 38 : 37], [true, true, other ? 38 : 37]]);
+    await row(page, localSide, "upload.txt").click();
+    await page.keyboard.press("F6");
+    await field.fill("/elsewhere");
+    await button(move, "Move").click();
+    await row(page, localSide, "upload.txt").waitFor({ state: "detached" });
+    const edited = await page.evaluate(() => window.sshFixture.transfers.at(-1));
+    assert.equal(edited.sshDestination, other ? 38 : 37);
+    assert.equal(edited.destination, "/elsewhere");
+    assert.equal(await row(page, sshSide, "upload.txt").count(), 0);
+    await page.close();
+  }
+
   for (const refresh of [["Ctrl+Shift+F9"], []]) {
     const page = await fixture(browser, refresh);
     await connect(page, "right");
@@ -267,6 +321,7 @@ try {
     await page.close();
   }
   console.log("Verified SSH uploads during listing and navigation, failures, skips, cancellation, pane refresh, and custom or disabled bindings.");
+  console.log("Verified SFTP connection identity, local-to-remote move, editable paths, and cleanup retry in both pane positions.");
   if (process.env.DIRLUME_SFTP_TEST_PYTHON) console.log("Listings and writes used a live loopback SFTP connection.");
 } finally {
   await browser.close();

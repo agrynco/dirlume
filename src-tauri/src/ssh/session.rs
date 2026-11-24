@@ -126,6 +126,50 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Session {
+    pub(crate) fn verify_uploaded_contents(
+        &mut self,
+        segments: &[String],
+        input: &mut impl Read,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        let changed = "The uploaded SSH file changed. The local source was kept.";
+        let original = self.stat(segments)?.filter(Entry::is_file).ok_or(changed)?;
+        let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
+        let result = (|| {
+            let mut buffer = Default::default();
+            let mut local = vec![0; CHUNK as usize];
+            while let Some(mut data) = wait(file.read(CHUNK, buffer))? {
+                check()?;
+                if data.is_empty() || data.len() > local.len() {
+                    return Err("The SSH server returned an invalid data packet.".to_owned());
+                }
+                let bytes = &mut local[..data.len()];
+                if let Err(error) = input.read_exact(bytes) {
+                    return Err(if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                        changed.to_owned()
+                    } else {
+                        message(error)
+                    });
+                }
+                if bytes != data.as_ref() {
+                    return Err(changed.to_owned());
+                }
+                data.clear();
+                buffer = data;
+            }
+            if input.read(&mut local[..1]).map_err(message)? != 0 {
+                return Err(changed.to_owned());
+            }
+            Ok(())
+        })();
+        let closed = wait(file.close());
+        result.and(closed.map_err(Into::into))?;
+        if self.stat(segments)?.as_ref() != Some(&original) {
+            return Err(changed.to_owned());
+        }
+        Ok(())
+    }
+
     pub(super) fn new(client: AuthenticatedRoute, sftp: Sftp) -> Self {
         Self {
             client: Arc::new(client),

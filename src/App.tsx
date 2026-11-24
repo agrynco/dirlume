@@ -412,7 +412,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
   const permanentDelete = Boolean(fileServer || smbHost(local));
-  const otherFileServer = !other.search && isFileServer(other.place);
   const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
@@ -1826,6 +1825,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         "Choose a writable ZIP or 7z archive.", error: true });
       return;
     }
+    if (kind === "move" && remoteDestination && (remoteDestination.kind !== "ssh" ||
+      items.some(({ place, entry }) => place.kind !== "local" || entry.directory || entry.link))) {
+      setStatus({ text: "Choose regular local files to move to an SSH/SFTP folder.", error: true });
+      return;
+    }
     if (remoteDestination && source.kind !== "local") {
       setStatus({ text: remoteDestination.kind === "ssh" ? "Choose a local source for the SSH upload." :
         "Choose a local source for the FTP upload.", error: true });
@@ -1893,7 +1897,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       setModal({ kind: "rename", path: placePath(source), name: current.name, remote: source });
       return;
     }
-    openTransfer(kind, source, transferItems(active, current), other.search || (kind === "move" && otherFileServer) ? null : other.place);
+    const target = other.search ? null : other.place;
+    if (kind === "move" && target?.kind === "ftp") {
+      setStatus({ text: "Choose a local destination. FTP does not support moving local files." });
+    }
+    openTransfer(kind, source, transferItems(active, current), kind === "move" && target?.kind === "ftp" ? null : target);
   }
 
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
@@ -3396,8 +3404,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden} onClose={() => setModal(null)}
           onFinished={(success) => {
             const destination = modal.transfer.remoteDestination;
-            if (destination?.kind === "ssh") setSshUploadRefresh(destination.id);
-            else fileLocationsChanged();
+            if (destination?.kind === "ssh") {
+              setSshUploadRefresh(destination.id);
+              if (modal.transfer.kind === "move") refresh(modal.side);
+            } else fileLocationsChanged();
             if (success) setStatus({ text: "Transfer complete" });
           }} />
       )}
