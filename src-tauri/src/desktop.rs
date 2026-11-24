@@ -858,6 +858,109 @@ enum TransferOutcome {
     Skipped,
 }
 
+#[derive(Deserialize)]
+struct ArchiveCopySource {
+    directory: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ArchiveChange {
+    Folder { parent: Vec<String>, name: String },
+    Rename { segments: Vec<String>, name: String },
+}
+
+#[tauri::command]
+async fn change_archive(
+    id: u32,
+    archive: u32,
+    change: ArchiveChange,
+    output: Channel<u8>,
+    sessions: State<'_, TransferSessions>,
+    archives: State<'_, crate::archives::Archives>,
+) -> Result<()> {
+    let session = sessions.get(id)?;
+    let archive = archives.get(archive)?;
+    blocking(move || {
+        let progress = |percent| {
+            session.ensure_running()?;
+            let _ = output.send(percent);
+            Ok(())
+        };
+        let mut archive = archive.lock().map_err(message)?;
+        match change {
+            ArchiveChange::Folder { parent, name } => {
+                archive.create_folder(&parent, &name, progress)
+            }
+            ArchiveChange::Rename { segments, name } => {
+                archive.rename_entry(&segments, &name, progress)
+            }
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tauri injects transfer and archive state"
+)]
+async fn copy_into_archive(
+    id: u32,
+    archive: u32,
+    segments: Vec<String>,
+    sources: Vec<ArchiveCopySource>,
+    policy: local_transfer::Policy,
+    output: Channel<TransferEvent>,
+    sessions: State<'_, TransferSessions>,
+    archives: State<'_, crate::archives::Archives>,
+) -> Result<Vec<bool>> {
+    let session = sessions.get(id)?;
+    let archive = archives.get(archive)?;
+    blocking(move || {
+        let sources = sources
+            .into_iter()
+            .map(|source| {
+                Ok((
+                    selected(&source.directory, &source.name).map_err(message)?,
+                    source.name,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let progress = |path: &Path, bytes, total| {
+            session.ensure_running()?;
+            report_transfer_progress(&output, path, bytes, total);
+            Ok(())
+        };
+        let ask = |conflict| session.ask(conflict, &output);
+        archive
+            .lock()
+            .map_err(message)?
+            .copy_into(&segments, &sources, policy, progress, ask)
+    })
+    .await
+}
+
+fn report_transfer_progress(
+    output: &Channel<TransferEvent>,
+    path: &Path,
+    bytes: u64,
+    total: Option<u64>,
+) {
+    let file = path
+        .file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+    let _ = output.send(TransferEvent::Progress {
+        file,
+        path: path.to_string_lossy().into_owned(),
+        bytes,
+        total,
+    });
+}
+
 fn transfer_outcome(completed: bool) -> TransferOutcome {
     if completed {
         TransferOutcome::Completed
@@ -1013,17 +1116,7 @@ async fn transfer_item(
         };
         let mut progress = |path: &Path, bytes, total| {
             session.ensure_running()?;
-            let file = path
-                .file_name()
-                .unwrap_or(path.as_os_str())
-                .to_string_lossy()
-                .into_owned();
-            let _ = output.send(TransferEvent::Progress {
-                file,
-                path: path.to_string_lossy().into_owned(),
-                bytes,
-                total,
-            });
+            report_transfer_progress(&output, path, bytes, total);
             Ok(())
         };
         progress(Path::new(name), 0, None).map_err(message)?;
@@ -2684,6 +2777,8 @@ pub fn run() {
         crate::archives::read_archive_bytes,
         crate::archives::save_archive_text,
         crate::archives::delete_archive_entries,
+        change_archive,
+        copy_into_archive,
         crate::folders::create_folders,
         crate::desktop_share::active_desktop_share,
         connect_server,

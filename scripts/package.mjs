@@ -76,10 +76,14 @@ async function collectPortable(platform, target, serverBinary, output) {
       await writeFile(join(stage, ".dirlume-portable"), "");
       const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
       for (const [source, destination] of Object.entries(config.bundle.resources ?? {})) {
+        if (destination === "archive-tools") continue;
         const path = join(stage, destination);
         await mkdir(dirname(path), { recursive: true });
         await cp(join("src-tauri", source), path, { recursive: true, verbatimSymlinks: true });
       }
+      // Earlier Portable updaters only accept these existing package paths.
+      await copyFile("src-tauri/archive-tools/License.txt", join(stage, "licenses", "7-Zip-LICENSE.txt"));
+      await copyFile("src-tauri/archive-tools/NOTICE.txt", join(stage, "licenses", "7-Zip-NOTICE.txt"));
     } else if (platform === "linux-x64") {
       await copyFile(await findBundle(target, "appimage", ".AppImage"), join(stage, "Dirlume.AppImage"));
     } else {
@@ -101,6 +105,12 @@ async function collectPortable(platform, target, serverBinary, output) {
 
 async function collect(platform) {
   if (!Object.hasOwn(formats, platform)) throw new Error("Unknown artifact platform.");
+  const archiveFiles = platform === "windows-x64" ? ["7z.exe", "7z.dll", "7z.sfx"] : ["7zz"];
+  for (const name of [...archiveFiles, "License.txt", "7z2606-src.tar.xz"]) {
+    if (!(await stat(join("src-tauri", "archive-tools", name))).size) {
+      throw new Error(`Missing or empty bundled 7-Zip resource ${name}.`);
+    }
+  }
   const product = await version();
   const number = process.env.DIRLUME_BUILD_NUMBER;
   const signed = process.env.DIRLUME_SIGNED_RELEASE === "true";

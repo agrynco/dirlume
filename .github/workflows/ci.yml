@@ -224,8 +224,7 @@ jobs:
       - name: Lint Rust desktop and server
         if: github.event.action != 'closed'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features server -- -D warnings
-      - name: Prepare the 7-Zip test fixture
-        if: github.event.action != 'closed'
+      - name: Prepare the bundled 7-Zip engine
         shell: pwsh
         run: ./scripts/prepare-7zip.ps1
       - name: Verify filesystem and server

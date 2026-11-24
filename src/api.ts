@@ -117,7 +117,7 @@ export type FileLocation =
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
-  | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; address: string }
+  | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; canAdd: boolean; address: string }
   | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; catalogSource?: "ftp" }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
@@ -143,6 +143,8 @@ export function isFileServer(place: Place | null | undefined): place is FileServ
   return place?.kind === "ftp" || place?.kind === "ssh";
 }
 export type ArchivePlace = Extract<Place, { kind: "archive" }>;
+export type ArchiveChange = { kind: "folder"; parent: string[]; name: string }
+  | { kind: "rename"; segments: string[]; name: string };
 export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" | "ssh" | "archive" }>;
 
 export type ArchiveSettings = {
@@ -466,13 +468,18 @@ export const api = {
   cancelArchive: (id: number) => invoke<void>("cancel_archive", { id }),
   closeArchive: (id: number) => invoke<void>("close_archive", { id }),
   openArchive: (path: string, password?: string) =>
-    invoke<{ id: number; path: string; parent: string; writable: boolean; listing: Listing }>("open_archive", { path, password: password ?? null }),
+    invoke<{ id: number; path: string; parent: string; writable: boolean; canAdd: boolean; listing: Listing }>("open_archive", { path, password: password ?? null }),
   listArchive: (id: number, segments: string[]) => invoke<Listing>("list_archive", { id, segments }),
   readArchiveText: (id: number, segments: string[]) => invoke<TextDocument>("read_archive_text", { id, segments }),
   readArchiveBytes: (id: number, segments: string[], offset: number) => invoke<BytePage>("read_archive_bytes", { id, segments, offset }),
   saveArchiveText: (id: number, segments: string[], revision: string, text: string, encoding: TextEncoding) =>
     invoke<TextDocument>("save_archive_text", { id, segments, revision, text, encoding }),
   deleteArchiveEntries: (id: number, paths: string[][]) => invoke<void>("delete_archive_entries", { id, paths }),
+  changeArchive: (id: number, archive: number, change: ArchiveChange, output: Channel<number>) =>
+    invoke<void>("change_archive", { id, archive, change, output }),
+  copyIntoArchive: (id: number, archive: ArchivePlace, sources: { directory: string; name: string }[],
+    policy: ConflictPolicy, output: Channel<TransferEvent>) =>
+    invoke<boolean[]>("copy_into_archive", { id, archive: archive.id, segments: archive.segments, sources, policy, output }),
   diskSpace: (path: string) => invoke<DiskSpace>("disk_space", { path }),
   connectSmb: (path: string, credentials: { username: string; password: string } | null, remember: boolean) =>
     invoke<SmbConnection>("connect_smb", { path, credentials, remember }),

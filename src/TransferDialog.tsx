@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FileServer, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath, type Side } from "./panes";
@@ -18,6 +18,7 @@ export interface Transfer {
   items: { place: FilePlace; entry: Entry }[];
   target: string;
   remoteDestination?: FileServer;
+  archiveDestination?: ArchivePlace;
   chooseOperation?: boolean;
 }
 
@@ -74,7 +75,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const reportedBytes = useRef(new Map<string, number>());
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
-  const localTarget = !transfer.remoteDestination;
+  const archiveTarget = transfer.archiveDestination;
+  const localTarget = !transfer.remoteDestination && !archiveTarget;
   const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive";
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
@@ -127,6 +129,24 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     void api.cancelTransfer(running.current).catch(() => {});
   }
 
+  function transferEvents(id: number) {
+    return new Channel<TransferEvent>((event) => {
+      if (session.current !== id || cancelled.current) return;
+      if (event.kind === "conflict") {
+        setRemember(false);
+        setConflict(event.conflict);
+        return;
+      }
+      const path = event.path ?? event.file;
+      const previous = reportedBytes.current.get(path) ?? 0;
+      if (event.bytes > previous) {
+        reportedBytes.current.set(path, event.bytes);
+        setBytes((total) => total + event.bytes - previous);
+      }
+      setProgress(event);
+    });
+  }
+
   async function run(retry: boolean) {
     if (running.current !== null) return;
     const previousSession = session.current;
@@ -146,7 +166,22 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         await api.beginTransfer(id);
         initialized = true;
       }
-      const jobs = targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+      if (archiveTarget && !cancelled.current) {
+        const sources = transfer.items.map(({ place, entry }) => {
+          if (place.kind !== "local") throw new Error(t("Choose local files or folders to copy into the archive."));
+          return { directory: place.path, name: entry.name };
+        });
+        const output = transferEvents(id);
+        const result = await api.copyIntoArchive(id, archiveTarget, sources, policy, output)
+          .finally(() => { output.onmessage = () => {}; });
+        const written = result.filter(Boolean).length;
+        skippedItems = result.length - written;
+        setCompleted(written);
+        setSkipped(skippedItems);
+        setProcessed(result.length);
+        reportedBytes.current.clear();
+      }
+      const jobs = archiveTarget ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
       for (let index = processed; index < jobs.length; index++) {
         if (cancelled.current || session.current !== id) break;
         const { destination, item } = jobs[index];
@@ -164,21 +199,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           multiple: itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
-        const output = new Channel<TransferEvent>((event) => {
-          if (session.current !== id || cancelled.current) return;
-          if (event.kind === "conflict") {
-            setRemember(false);
-            setConflict(event.conflict);
-            return;
-          }
-          const path = event.path ?? event.file;
-          const previous = reportedBytes.current.get(path) ?? 0;
-          if (event.bytes > previous) {
-            reportedBytes.current.set(path, event.bytes);
-            setBytes((total) => total + event.bytes - previous);
-          }
-          setProgress(event);
-        });
+        const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "completed") setCompleted((count) => count + 1);
         else setSkipped(++skippedItems);
@@ -227,9 +248,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
               </label>
+              {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus value={destination} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
                 required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination} includeFiles={singleFile}
-                browse={singleFile ? "save" : "folder"} browsePath={browsePath} />
+                browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
             </div>
             {manyDestinations && <>
               {additional.map((path, index) => <PathField key={index} id={`transfer-destination-${index + 2}`}
@@ -273,7 +295,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <input type="checkbox" checked={followLinks} onChange={(event) => setFollowLinks(event.target.checked)} />
               </label>
             </>}
-            {!moving && <label className="field-checkbox"><span>{t("Process multiple destinations")}</span>
+            {!moving && !archiveTarget && <label className="field-checkbox"><span>{t("Process multiple destinations")}</span>
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
             </label>}
             {localCopy && <>
