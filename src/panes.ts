@@ -49,6 +49,7 @@ export interface PaneState {
   addressRevision?: number;
   omitted: number;
   error: string;
+  kswitcherAvailabilityError?: string;
   elevationPath?: string;
   deniedSshListing?: DeniedSshListing;
   sudoListing?: boolean;
@@ -322,6 +323,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     loading: false,
     loadingPath: undefined,
     error: "",
+    kswitcherAvailabilityError: undefined,
     elevationPath: undefined,
     deniedSshListing: undefined,
     sudoListing: undefined,

@@ -30,7 +30,7 @@ import type { EnvironmentMode } from "./EnvironmentPane";
 import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
 import { ReleaseNotes } from "./ReleaseNotes";
-import { reportFrontendError } from "./diagnostics";
+import { KSwitcherUnavailableError, reportFrontendError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
 import { VerifyHostDialog } from "./SshDialog";
@@ -554,6 +554,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const { ticket, signal } = beginListing(side, background);
     if (!background) updatePane(side, (pane) => ({
       ...pane, loading: true, loadingPath: placePath(place), error: "", elevationPath: undefined,
+      kswitcherAvailabilityError: undefined,
       deniedSshListing: elevated ? pane.deniedSshListing : undefined,
     }));
     const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean) => {
@@ -565,7 +566,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       updatePane(side, (pane) => {
         if (background && pane.place !== place) return pane;
         const listing = { ...applyListing(pane, openedPlace, openedListing, action), sudoListing };
-        if (background) Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
+        if (background && pane.error !== pane.kswitcherAvailabilityError) {
+          Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
+        }
         return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
       });
       return true;
@@ -583,11 +586,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           setModal(credentialsDialog);
         }
         const text = credentialsRequired ? (prompt ? "" : error.message) : describeError(error);
-        updatePane(side, (pane) => background && (pane.place !== place || pane.error) ? pane : {
-          ...pane, loading: false, loadingPath: undefined, error: text,
-          elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined,
-          deniedSshListing: elevated ? pane.deniedSshListing : place.kind === "ssh" && isPermissionError(text)
-            ? { place, action: background ? "refresh" : action, reveal } : undefined,
+        updatePane(side, (pane) => {
+          if (background && (pane.place !== place || pane.error === text ||
+            pane.error && pane.error !== pane.kswitcherAvailabilityError)) return pane;
+          return {
+            ...pane, loading: false, loadingPath: undefined, error: text,
+            kswitcherAvailabilityError: pane.place === place && error instanceof KSwitcherUnavailableError ? text : undefined,
+            elevationPath: windowsClient && place.kind === "local" && isPermissionError(text) ? place.path : undefined,
+            deniedSshListing: elevated ? pane.deniedSshListing : place.kind === "ssh" && isPermissionError(text)
+              ? { place, action: background ? "refresh" : action, reveal } : undefined,
+          };
         });
       }
       if (elevated) throw error;

@@ -808,6 +808,10 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
     "Запустіть KSwitcher із підтримкою довірених клієнтів LAN.",
     "Запустите KSwitcher с поддержкой доверенных клиентов LAN.",
   ],
+  "The paired computer is offline or file browsing is unavailable. Check KSwitcher on the other computer and refresh.": [
+    "Спарений комп’ютер поза мережею або перегляд файлів недоступний. Перевірте KSwitcher на іншому комп’ютері й оновіть панель.",
+    "Сопряжённый компьютер не в сети или просмотр файлов недоступен. Проверьте KSwitcher на другом компьютере и обновите панель.",
+  ],
   "Pairing lets another computer browse and download files from your local drives while Dirlume is running.": [
     "Спарений комп’ютер може переглядати й завантажувати файли з локальних дисків, поки Dirlume працює.",
     "Сопряжённый компьютер может просматривать и скачивать файлы с локальных дисков, пока Dirlume работает.",
