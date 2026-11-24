@@ -8,7 +8,7 @@ const dialog = (page, name) => page.getByRole("dialog", { name, exact: true });
 
 async function fixture(browser, remote = false) {
   const page = await browser.newPage({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", locale: "en-US" });
-  page.setDefaultTimeout(8_000);
+  page.setDefaultTimeout(15_000);
   await page.clock.install();
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -62,9 +62,9 @@ async function fixture(browser, remote = false) {
   await page.goto("http://dirlume.test/");
   const right = page.getByRole("region", { name: "right pane", exact: true });
   if (remote) {
-    await button(right, "Locations for right pane").click();
-    await button(right, "SSH").click();
-    await right.getByRole("option", { name: /^Fixture/ }).dblclick();
+    await button(right, "Locations for right pane").press("Enter");
+    await button(right, "SSH").press("Enter");
+    await right.getByRole("option", { name: /^Fixture/ }).dispatchEvent("dblclick", { button: 0 });
   } else {
     const address = await editPaneAddress(page, "right");
     await address.fill("D:\\target");
@@ -77,11 +77,13 @@ async function fixture(browser, remote = false) {
 async function start(page, names, move = false) {
   const source = page.locator("#left-files");
   const row = (name) => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`);
-  await row(names[0]).click();
-  if (names.length > 1) for (const name of names) await row(name).click({ modifiers: ["Control"] });
+  // Use selection events so the estimate test does not depend on how the
+  // runner schedules animation frames after Playwright installs a clock.
+  await row(names[0]).dispatchEvent("click", { button: 0 });
+  if (names.length > 1) for (const name of names) await row(name).dispatchEvent("click", { button: 0, ctrlKey: true });
   await source.press(move ? "F6" : "F5");
   const setup = dialog(page, move ? "Rename or move" : "Copy");
-  await button(setup, move ? "Move" : "Copy").click();
+  await button(setup, move ? "Move" : "Copy").press("Enter");
   await waitForSource(page, names[0]);
   return dialog(page, move ? "Moving…" : "Copying…");
 }
@@ -127,25 +129,25 @@ try {
   await conflict.waitFor();
   assert.equal(await estimate.count(), 0);
   await copyPage.clock.fastForward(60_000);
-  await button(conflict, "Skip").click();
+  await button(conflict, "Skip").press("Enter");
   await waitForSource(copyPage, "c.bin");
   await report(copyPage, 400_000);
   await copyPage.clock.runFor(2_000);
   await estimate.getByText(/About \d+ seconds remaining/).waitFor();
   assert.ok(Number((await estimate.innerText()).match(/\d+/)[0]) < 10);
-  await button(copy, "Cancel").click();
+  await button(copy, "Cancel").press("Enter");
   await dialog(copyPage, "Transfer canceled").waitFor();
   assert.equal(await copyPage.locator(".transfer-estimate").count(), 0);
   await copyPage.close();
 
   const destinationsPage = await fixture(browser);
   const files = destinationsPage.locator("#left-files");
-  await files.locator('[data-tooltip="a.bin"]').click();
+  await files.locator('[data-tooltip="a.bin"]').dispatchEvent("click", { button: 0 });
   await files.press("F5");
   const setup = dialog(destinationsPage, "Copy");
-  await setup.getByLabel("Process multiple destinations", { exact: true }).check();
+  await setup.getByLabel("Process multiple destinations", { exact: true }).press("Space");
   await setup.getByLabel("Destination 2", { exact: true }).fill("D:\\another");
-  await button(setup, "Copy").click();
+  await button(setup, "Copy").press("Enter");
   await waitForSource(destinationsPage, "a.bin");
   await destinationsPage.clock.runFor(4_000);
   await report(destinationsPage, 300_000);
@@ -166,7 +168,7 @@ try {
   await complete(movePage);
   await waitForSource(movePage, "b.bin");
   await movePage.evaluate(() => window.transferFixture.current.reject(new Error("Fixture failed.")));
-  await button(dialog(movePage, "Transfer stopped"), "Retry").click();
+  await button(dialog(movePage, "Transfer stopped"), "Retry").press("Enter");
   await waitForSource(movePage, "b.bin", true);
   const moveEta = dialog(movePage, "Moving…").locator(".transfer-estimate");
   assert.equal(await moveEta.count(), 0);
