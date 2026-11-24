@@ -6,16 +6,19 @@ import { editPaneAddress } from "./pane-address-smoke.mjs";
 const button = (scope, name) => scope.getByRole("button", { name, exact: true });
 const dialog = (page, name) => page.getByRole("dialog", { name, exact: true });
 
-async function fixture(browser, remote = false) {
-  const page = await browser.newPage({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", locale: "en-US" });
+async function fixture(browser, remote = false, { platform = "Windows NT 10.0; Win64; x64", language, mockClock = true } = {}) {
+  const page = await browser.newPage({ userAgent: `Mozilla/5.0 (${platform})`, locale: "en-US" });
   page.setDefaultTimeout(15_000);
-  await page.clock.install();
+  if (mockClock) await page.clock.install();
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
   });
-  await page.addInitScript(() => {
-    const home = "C:\\source";
+  const windows = platform.startsWith("Windows");
+  const home = windows ? "C:\\source" : "/source";
+  const target = windows ? "D:\\target" : "/target";
+  await page.addInitScript(({ home, language }) => {
+    if (language) localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ language }));
     const entries = ["a.bin", "b.bin", "c.bin"].map((name) =>
       ({ name, directory: false, link: false, hidden: false, size: 600_000, modified: null }));
     entries.push({ ...entries[0], name: "folder", directory: true, size: null });
@@ -58,7 +61,7 @@ async function fixture(browser, remote = false) {
         }
       },
     };
-  });
+  }, { home, language });
   await page.goto("http://dirlume.test/");
   const right = page.getByRole("region", { name: "right pane", exact: true });
   if (remote) {
@@ -67,10 +70,10 @@ async function fixture(browser, remote = false) {
     await right.getByRole("option", { name: /^Fixture/ }).dispatchEvent("dblclick", { button: 0 });
   } else {
     const address = await editPaneAddress(page, "right");
-    await address.fill("D:\\target");
+    await address.fill(target);
     await address.press("Enter");
   }
-  await page.waitForFunction((path) => document.getElementById("right-path")?.dataset.path === path, remote ? "/incoming" : "D:\\target");
+  await page.waitForFunction((path) => document.getElementById("right-path")?.dataset.path === path, remote ? "/incoming" : target);
   return page;
 }
 
@@ -103,8 +106,45 @@ function complete(page) {
   return page.evaluate(() => window.transferFixture.current.resolve({ kind: "completed" }));
 }
 
+async function verifyCopyCheckboxes(browser) {
+  for (const [platform, language, width] of [["Windows NT 10.0; Win64; x64", "en", 720], ["X11; Linux x86_64", "uk", 325]]) {
+    const page = await fixture(browser, false, { platform, language, mockClock: false });
+    try {
+      const files = page.locator("#left-files");
+      await files.locator('[data-tooltip="a.bin"]').click();
+      await files.press("F5");
+      const options = page.locator("dialog[open] .transfer-options");
+      const inputs = options.getByRole("checkbox");
+      await inputs.first().waitFor();
+      await page.setViewportSize({ width, height: 680 });
+      const positions = await inputs.evaluateAll((checkboxes) => checkboxes.map((input) => {
+        const checkbox = input.getBoundingClientRect();
+        const text = input.nextElementSibling;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        return {
+          x: checkbox.x, gap: text.getBoundingClientRect().x - checkbox.right,
+          lines: range.getClientRects().length, checked: input.checked,
+        };
+      }));
+      assert.deepEqual(positions.map(({ checked }) => checked), [true, false, false, false, false]);
+      assert.ok(positions.every(({ x, gap }) => x === positions[0].x && gap === 8));
+      if (language === "uk") assert.ok(positions.some(({ lines }) => lines > 1), "The narrow translated label did not wrap.");
+      for (const [index, { checked }] of positions.entries()) {
+        const input = inputs.nth(index);
+        await input.locator("..").locator("span").click();
+        assert.equal(await input.isChecked(), !checked);
+        await input.press("Space");
+        assert.equal(await input.isChecked(), checked);
+      }
+    } finally { await page.close(); }
+  }
+}
+
 const browser = await chromium.launch({ channel: "chrome" });
 try {
+  await verifyCopyCheckboxes(browser);
+  console.log("Verified aligned Copy checkboxes, translated wrapping, and label and keyboard activation.");
   const copyPage = await fixture(browser);
   const copy = await start(copyPage, ["a.bin", "b.bin", "c.bin"]);
   const estimate = copy.locator(".transfer-estimate");

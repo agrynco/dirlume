@@ -1603,6 +1603,9 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .setting { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .field-checkbox { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .field-checkbox input { flex: none; margin: 0; }
+.transfer-options .field-checkbox { align-items: flex-start; }
+.transfer-options .field-checkbox > input { margin-block-start: .15em; }
+.transfer-options .field-checkbox > span { min-width: 0; overflow-wrap: anywhere; }
 .setting select { min-width: 156px; }
 .settings-layout label.setting,
 .settings-layout label.field:has(> :is(select, .editable-dropdown)),
