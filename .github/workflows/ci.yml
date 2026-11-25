@@ -144,6 +144,9 @@ jobs:
       - name: Verify selective settings import and export
         if: github.event.action != 'closed'
         run: node scripts/settings-archive-smoke.mjs
+      - name: Verify settings profiles
+        if: github.event.action != 'closed'
+        run: node scripts/settings-profiles-smoke.mjs
       - name: Verify the optional status bar
         if: github.event.action != 'closed'
         run: node scripts/status-bar-smoke.mjs

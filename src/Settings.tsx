@@ -21,6 +21,8 @@ import {
 import { viewFontKeys, viewFonts } from "./viewFonts";
 import { featureOptions, isFeaturePage, optionSurfaces, type FeaturePage } from "./featureOptions";
 import { ComputersSettings } from "./ComputersSettings";
+import { ProfileSettings } from "./ProfileSettings";
+import { builtInProfiles } from "./settingsProfiles";
 import type { HelpTopic } from "./helpTopics";
 import { errorText, languages, locale, readLanguage, t } from "./i18n";
 import { localPickDate, pickLabel, readPickHistory, savePickHistory, type AppearancePick, type PickHistoryEntry } from "./appearancePick";
@@ -29,11 +31,12 @@ import { SortGroupsSettings } from "./FileSortMenu";
 import { PanelModeSettings, panelModeSettingsLabels } from "./PanelModeSettings";
 import { defaultPanelModes, isPanelMode, panelModeIds, panelModeName, panelModeNames, validPanelMode, type PanelModeId } from "./panelModes";
 
-type Page = AppearanceSection | FeaturePage | PanelModeId | "sortGroups" | "viewFonts" | "general" | "shortcuts" | "computers";
+type Page = AppearanceSection | FeaturePage | PanelModeId | "sortGroups" | "viewFonts" | "general" | "shortcuts" | "computers" | "profiles";
 type OptionsLocation = { page: Page; query: string; expanded: boolean; scrollTop: number };
 type ShortcutCapture = { command: Command; replacing?: string };
 type ShortcutSchemeDialog = { kind: "new" | "rename"; name: string } | { kind: "delete" };
 const optionsLocationKey = "dirlume.options-location";
+const profileShortcutOption = ":profile";
 const featurePages = Object.keys(featureOptions) as FeaturePage[];
 const surfaceTerms = (surfaces: readonly Surface[]) => surfaces.flatMap((surface) =>
   [fontGroups[surface].label, "Font family", "Font size", ...colorKeysForSurface(surface).map((color) => colorLabels[color])]);
@@ -62,7 +65,7 @@ function readOptionsLocation(): OptionsLocation {
   try {
     const saved = JSON.parse(localStorage.getItem(optionsLocationKey) ?? "null") as Partial<OptionsLocation> | null;
     const page = saved?.page;
-    if (!page || (page !== "general" && page !== "computers" && page !== "shortcuts" && page !== "sortGroups" && !isFeaturePage(page) &&
+    if (!page || (page !== "general" && page !== "computers" && page !== "profiles" && page !== "shortcuts" && page !== "sortGroups" && !isFeaturePage(page) &&
         !isPanelMode(page) && !appearancePages.some(({ id }) => id === page))) return defaults;
     const scrollTop = saved.scrollTop;
     return {
@@ -117,8 +120,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [saveError, setSaveError] = useState("");
   const [schemeNaming, setSchemeNaming] = useState<{ id: string; closeAfter: boolean } | null>(null);
   const [buildVersion, setBuildVersion] = useState("");
-  const { shortcutSchemes, activeShortcutScheme } = preferences;
-  const activeScheme = shortcutSchemes.find(({ id }) => id === activeShortcutScheme);
+  const { shortcutSchemes, activeShortcutScheme, profileBindings } = preferences;
+  const activeScheme = profileBindings ? undefined : shortcutSchemes.find(({ id }) => id === activeShortcutScheme);
   const shortcuts = shortcutBindings(preferences);
   const hasChanges = JSON.stringify(preferences) !== JSON.stringify(saved);
   const searching = Boolean(query.trim());
@@ -128,6 +131,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const showComputers = matches("Computers", "Paired computers", "Forget computer", "This computer",
     "Remote connection", "Dirlume LAN", "Dirlume server",
     "Pairing code", "Pair computer");
+  const showProfiles = matches("Profiles", "Current profile", "Save current setup as profile", "Duplicate profile",
+    ...[...builtInProfiles, ...preferences.settingsProfiles].map(({ name }) => name));
   const featureMatches = featurePages.filter((feature) => {
     const { label, font, views } = featureOptions[feature];
     const terms = feature === "filePanels" ? [
@@ -160,9 +165,10 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const showShortcuts = allShortcuts || visibleCommands.length > 0;
   const feature = isFeaturePage(page) ? featureOptions[page] : undefined;
   const isAppearance = !feature && page !== "sortGroups" && !isPanelMode(page) &&
-    page !== "general" && page !== "computers" && page !== "shortcuts";
+    page !== "general" && page !== "computers" && page !== "profiles" && page !== "shortcuts";
   const title = feature?.label ?? (isAppearance ? appearancePages.find(({ id }) => id === page)?.label :
-    page === "computers" ? "Computers" : page === "general" ? "General" : page === "sortGroups" ? "Sort groups" : "Keyboard shortcuts");
+    page === "computers" ? "Computers" : page === "profiles" ? "Profiles" : page === "general" ? "General" :
+      page === "sortGroups" ? "Sort groups" : "Keyboard shortcuts");
 
   useLayoutEffect(() => {
     if (pageBody.current) pageBody.current.scrollTop = initialLocation.scrollTop;
@@ -332,10 +338,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     let number = 1;
     while (shortcutSchemes.some(({ id }) => id === `shortcut-scheme-${number}`)) number++;
     const scheme = { id: `shortcut-scheme-${number}`, name, bindings };
-    onChange({ ...preferences, activeShortcutScheme: scheme.id, shortcutSchemes: [...shortcutSchemes, scheme] });
+    onChange({ ...preferences, profileBindings: undefined, activeShortcutScheme: scheme.id, shortcutSchemes: [...shortcutSchemes, scheme] });
   }
 
   function updateShortcuts(bindings: Bindings) {
+    if (profileBindings) {
+      onChange({ ...preferences, profileBindings: bindings });
+      return;
+    }
     if (activeScheme) {
       onChange({ ...preferences, shortcutSchemes: shortcutSchemes.map((scheme) =>
         scheme.id === activeScheme.id ? { ...scheme, bindings } : scheme) });
@@ -400,6 +410,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 if (event.key !== "Enter" || !searching) return;
                 event.preventDefault();
                 if (showGeneral) select("general");
+                else if (showProfiles) select("profiles");
                 else if (showComputers) select("computers");
                 else if (featureMatches.length) select(featureMatches[0]);
                 else if (modesMatch.length) select(modesMatch[0]);
@@ -414,6 +425,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           {pickError && <p role="alert" className="dialog-error">{t("Could not start the appearance picker.")}</p>}
           <nav className="settings-tree" aria-label={t("Options sections")}>
             {showGeneral && <Button type="button" data-help-topic="general" aria-pressed={!selection && page === "general"} onClick={() => select("general")}>{t("General")}</Button>}
+            {showProfiles && <Button type="button" data-help-topic="profiles" aria-pressed={!selection && page === "profiles"} onClick={() => select("profiles")}>{t("Profiles")}</Button>}
             {showComputers && <Button type="button" data-help-topic="remote" aria-pressed={!selection && page === "computers"} onClick={() => select("computers")}>{t("Computers")}</Button>}
             {featureMatches.map((id) => <Button key={id} type="button" data-help-topic={optionsHelpTopic(id)} aria-pressed={!selection && page === id} onClick={() => select(id)}>
               {t(featureOptions[id].label)}
@@ -466,7 +478,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                 </section>)}
               </div>
             </>}
-            {!showGeneral && !showComputers && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showSortGroups && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
+            {!showGeneral && !showComputers && !showProfiles && !featureMatches.length && !appearanceMatches.length && !modesMatch.length && !showSortGroups && !showShortcuts && <p role="status">{t("No settings match.")}</p>}
           </nav>
         </aside>
         <div className="settings-main">
@@ -481,11 +493,14 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
           </header>
           {!selection && page === "shortcuts" && <div className="shortcut-scheme-bar">
             <label><SettingSearchLabel label="Shortcut scheme" aliases={["keymap", "bindings"]} />
-              <select ref={schemeSelect} value={activeShortcutScheme ?? ""} onChange={(event) => {
+              <select ref={schemeSelect} value={profileBindings ? profileShortcutOption : activeShortcutScheme ?? ""} onChange={(event) => {
                 setCapture(null);
-                onChange({ ...preferences, activeShortcutScheme: event.target.value || null });
+                if (event.target.value !== profileShortcutOption) {
+                  onChange({ ...preferences, profileBindings: undefined, activeShortcutScheme: event.target.value || null });
+                }
               }}>
                 <option value="">{t("Default")}</option>
+                {profileBindings && <option value={profileShortcutOption}>{t("Current setup shortcuts")}</option>}
                 {shortcutSchemes.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
               </select>
             </label>
@@ -496,7 +511,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
               <DialogIconButton label={t("Delete shortcut scheme")} disabled={!activeScheme}
                 onClick={() => openSchemeDialog({ kind: "delete" })}><Trash2 /></DialogIconButton>
             </div>
-            <Button type="button" disabled={!activeScheme} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
+            <Button type="button" disabled={!activeScheme && !profileBindings} onClick={() => { updateShortcuts(defaultBindings); setCapture(null); }}>
               <RotateCcw aria-hidden="true" /> {t("Restore defaults")}
             </Button>
           </div>}
@@ -509,6 +524,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       {selection ? <AppearanceSettings key={selection.id} section="fonts" selection={selection}
         views={selection.view ? [selection.view] : undefined} preferences={preferences} onChange={onChange} /> : page === "computers" ? (
         <ComputersSettings />
+      ) : page === "profiles" ? (
+        <ProfileSettings preferences={preferences} saved={saved} onChange={onChange} />
       ) : page === "general" ? (
         <div className="dialog-body settings-general">
           <label className="setting"><SettingSearchLabel label="Language" aliases={Object.values(languages)} />
@@ -620,7 +637,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         </>
       )}
           </div>
-          {page !== "computers" && ((!isPanelMode(page) && page !== "sortGroups") || selection) &&
+          {page !== "computers" && page !== "profiles" && ((!isPanelMode(page) && page !== "sortGroups") || selection) &&
             <SettingsPreview page={isPanelMode(page) || page === "sortGroups" ? "general" : page} preferences={preferences} pick={selection ?? undefined} />}
         </div>
       </div>

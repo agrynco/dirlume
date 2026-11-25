@@ -298,6 +298,15 @@ export type ActionButtonWidth = keyof typeof actionButtonWidths;
 export const menuPositions = { left: "Left", center: "Center", right: "Right" } as const;
 export type MenuPosition = keyof typeof menuPositions;
 
+export const builtInProfileNames = { dirlume: "Dirlume", far: "Far Manager", total: "Total Commander" } as const;
+
+export type ProfileValues = Pick<Preferences, "theme" | "layout" | "selectedPanelModes" | "rightClickSelection"> & {
+  colorSchemeId?: string;
+  bindings: Bindings;
+};
+
+export type SettingsProfile = { id: string; name: string; values: ProfileValues };
+
 export interface Preferences {
   language: Language;
   theme: Theme;
@@ -325,6 +334,9 @@ export interface Preferences {
   kswitcher: string;
   activeShortcutScheme: string | null;
   shortcutSchemes: ShortcutScheme[];
+  profileBindings?: Bindings;
+  activeSettingsProfile: string | null;
+  settingsProfiles: SettingsProfile[];
   viewFontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
@@ -353,7 +365,8 @@ export const defaultBindings = Object.fromEntries<readonly string[]>(commandName
 })) as Bindings;
 
 export function shortcutBindings(preferences: Preferences) {
-  return preferences.shortcutSchemes.find(({ id }) => id === preferences.activeShortcutScheme)?.bindings ?? defaultBindings;
+  return preferences.profileBindings ??
+    preferences.shortcutSchemes.find(({ id }) => id === preferences.activeShortcutScheme)?.bindings ?? defaultBindings;
 }
 
 function readBindings(saved: Record<string, unknown> | undefined, version: number): Bindings {
@@ -432,6 +445,40 @@ function readShortcutSchemes(value: unknown, version: number): ShortcutScheme[] 
   return schemes;
 }
 
+function readPanelLayout(value: unknown): PanelLayout {
+  return typeof value === "string" && Object.hasOwn(panelLayouts, value) ? value as PanelLayout : "standard";
+}
+
+function readSelectedPanelModes(value: unknown): Preferences["selectedPanelModes"] {
+  const { left, right } = preferenceValues(value);
+  return { left: isPanelMode(left) ? left : "full", right: isPanelMode(right) ? right : "full" };
+}
+
+function readProfileBindings(value: unknown, version: number) {
+  return value && typeof value === "object" && !Array.isArray(value) ? readBindings(preferenceValues(value), version) : undefined;
+}
+
+function readSettingsProfiles(value: unknown, version: number): SettingsProfile[] {
+  if (!Array.isArray(value)) return [];
+  const profiles: SettingsProfile[] = [];
+  for (const item of value as unknown[]) {
+    const { id, name, values } = preferenceValues(item);
+    const stored = preferenceValues(values);
+    const bindings = readProfileBindings(stored.bindings, version);
+    if (typeof id !== "string" || !id || Object.hasOwn(builtInProfileNames, id) ||
+        profiles.some((profile) => profile.id === id) || typeof name !== "string" || !name.trim() || !bindings) continue;
+    profiles.push({ id, name: name.trim().slice(0, 64), values: {
+      theme: readTheme(stored.theme),
+      colorSchemeId: typeof stored.colorSchemeId === "string" && stored.colorSchemeId ? stored.colorSchemeId : undefined,
+      layout: readPanelLayout(stored.layout),
+      selectedPanelModes: readSelectedPanelModes(stored.selectedPanelModes),
+      rightClickSelection: stored.rightClickSelection === true,
+      bindings,
+    } });
+  }
+  return profiles;
+}
+
 function readMenuAlignment(value: unknown): MenuPosition | undefined {
   return value === "left" || value === "center" || value === "right" ? value : undefined;
 }
@@ -490,14 +537,14 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   viewFontSizes: { group: "appearance", portable: true, read: readViewFontSizes },
   shortcutSchemes: { group: "shortcuts", portable: true, read: (value, _get, version) => readShortcutSchemes(value, version) },
   activeShortcutScheme: { group: "shortcuts", portable: true, read: (value, get) => get("shortcutSchemes").find(({ id }) => id === value)?.id ?? null },
-  layout: { group: "filePanels", portable: true, read: (value) =>
-    typeof value === "string" && Object.hasOwn(panelLayouts, value) ? value as PanelLayout : "standard" },
+  profileBindings: { group: "shortcuts", portable: true, read: (value, _get, version) => readProfileBindings(value, version) },
+  settingsProfiles: { group: "general", portable: false, read: (value, _get, version) => readSettingsProfiles(value, version) },
+  activeSettingsProfile: { group: "general", portable: false, read: (value, get) =>
+    typeof value === "string" && (Object.hasOwn(builtInProfileNames, value) || get("settingsProfiles").some(({ id }) => id === value)) ? value : null },
+  layout: { group: "filePanels", portable: true, read: readPanelLayout },
   sortSettings: { group: "filePanels", portable: true, read: readSortSettings },
   panelModes: { group: "filePanels", portable: true, read: readPanelModes },
-  selectedPanelModes: { group: "filePanels", portable: true, read: (value) => {
-    const { left, right } = preferenceValues(value);
-    return { left: isPanelMode(left) ? left : "full", right: isPanelMode(right) ? right : "full" };
-  } },
+  selectedPanelModes: { group: "filePanels", portable: true, read: readSelectedPanelModes },
   actionButtonWidth: { group: "filePanels", portable: true, read: (value) => value === "full" ? "full" : "compact" },
   hideActionButtonIcons: { group: "filePanels", portable: true, read: (value) => value === true },
   hidden: { group: "filePanels", portable: true, read: (value) => value === true },
