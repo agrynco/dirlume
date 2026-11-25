@@ -92,6 +92,16 @@ async function checkViews(page) {
   await preview(page, "right").getByText(front["01-alpha.txt"], { exact: true }).waitFor();
   assert.equal(await toggle(page).getAttribute("aria-pressed"), "true");
   assert.equal(await list(page, "right").count(), 0);
+  const rightPrevious = control(preview(page, "right"), "Previous File");
+  const rightNext = control(preview(page, "right"), "Next File");
+  assert.equal(await rightPrevious.isDisabled(), true);
+  await page.keyboard.press("Alt+PageUp");
+  assert.equal(await row(page, "left", "01-alpha.txt").getAttribute("data-current"), "true");
+  await rightNext.click();
+  await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).waitFor();
+  assert.equal(await row(page, "left", "02-beta.txt").getAttribute("data-current"), "true");
+  await page.keyboard.press("Alt+PageUp");
+  await preview(page, "right").getByText(front["01-alpha.txt"], { exact: true }).waitFor();
   await page.keyboard.press("ArrowDown");
   await preview(page, "right").getByText(front["02-beta.txt"], { exact: true }).waitFor();
   await list(page, "left").press(swap);
@@ -108,6 +118,8 @@ async function checkViews(page) {
   assert.equal(await toggle(page).getAttribute("aria-pressed"), "false");
   assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
   assert.equal(await row(page, "right", "02-remember.txt").getAttribute("data-current"), "true");
+  await list(page, "left").press("Alt+PageDown");
+  assert.equal(await row(page, "left", "02-beta.txt").getAttribute("data-current"), "true");
 
   await row(page, "right", "01-another.txt").click();
   await toggle(page).click();
@@ -115,6 +127,20 @@ async function checkViews(page) {
   await assertDivider(page, "right");
   await page.keyboard.press("ArrowDown");
   await preview(page, "left").getByText(back["02-remember.txt"], { exact: true }).waitFor();
+  await page.keyboard.press("Alt+PageDown");
+  const leftPreview = preview(page, "left");
+  await leftPreview.getByRole("img", { name: "03-right.png", exact: true }).waitFor();
+  assert.equal(await control(leftPreview, "Next File").isDisabled(), true);
+  await page.keyboard.press("Alt+PageDown");
+  assert.equal(await row(page, "right", "03-right.png").getAttribute("data-current"), "true");
+  await control(leftPreview, "Previous File").click();
+  await leftPreview.getByText(back["02-remember.txt"], { exact: true }).waitFor();
+  const rightSort = page.locator('#right-pane button[data-tooltip="Sort by name"]');
+  await rightSort.click();
+  await control(leftPreview, "Next File").click();
+  await leftPreview.getByText(back["01-another.txt"], { exact: true }).waitFor();
+  assert.equal(await control(leftPreview, "Next File").isDisabled(), true);
+  await rightSort.click();
   await row(page, "right", "01-another.txt").click();
   await preview(page, "left").getByText(back["01-another.txt"], { exact: true }).waitFor();
   await toggle(page).click();
@@ -164,6 +190,8 @@ async function checkViews(page) {
   await row(page, "left", "folder").click();
   await right.getByText("Folders cannot be previewed.", { exact: true }).waitFor();
   assert.equal(await image.count(), 0);
+  await control(right, "Next File").click();
+  await right.getByText(front["01-alpha.txt"], { exact: true }).waitFor();
   await row(page, "left", "06-binary.bin").click();
   const dump = right.getByLabel("Binary contents", { exact: true });
   const firstRow = dump.locator('[data-byte-offset="0"]');
@@ -613,14 +641,27 @@ export async function testBrowserQuickView(userAgent) {
     const mac = await page.evaluate(() => /Macintosh/.test(navigator.userAgent));
     const initial = mac ? "⌃Q" : "Ctrl+Q";
     const replacement = mac ? "⌃⌥Q" : "Ctrl+Alt+Q";
+    const prevKey = mac ? "⌥PageUp" : "Alt+PageUp";
+    const nextKey = mac ? "⌥PageDown" : "Alt+PageDown";
     await control(options, "Keyboard shortcuts").click();
     await control(options, "Change " + initial + " for Quick View").click();
     await options.getByRole("textbox", { name: "New shortcut to replace " + initial + " for Quick View", exact: true }).press("Control+Alt+q");
+    await control(options, "Change " + nextKey + " for Quick View: Next File").click();
+    await options.getByRole("textbox", { name: "New shortcut to replace " + nextKey + " for Quick View: Next File", exact: true }).press("Alt+Shift+n");
+    await control(options, "Remove " + prevKey + " from Quick View: Previous File").click();
     await control(options, "Done").click();
     await row(page, "left", "01-alpha.txt").click();
     await page.keyboard.press("Control+q");
     assert.equal(await toggle(page).getAttribute("aria-pressed"), "false");
     await page.keyboard.press("Control+Alt+q");
+    await right.getByText(front["01-alpha.txt"], { exact: true }).waitFor();
+    await page.keyboard.press("Alt+PageDown");
+    assert.equal(await row(page, "left", "01-alpha.txt").getAttribute("data-current"), "true");
+    await page.keyboard.press("Alt+Shift+n");
+    await right.getByText(front["02-beta.txt"], { exact: true }).waitFor();
+    await page.keyboard.press("Alt+PageUp");
+    assert.equal(await row(page, "left", "02-beta.txt").getAttribute("data-current"), "true");
+    await control(right, "Previous File").click();
     await right.getByText(front["01-alpha.txt"], { exact: true }).waitFor();
     await toggle(page).click();
     await page.getByRole("button", { name: "Options", exact: true }).click();
@@ -632,7 +673,7 @@ export async function testBrowserQuickView(userAgent) {
     assert.equal(await toggle(page).getAttribute("aria-pressed"), "false");
     await toggle(page).click();
     await right.getByText(front["01-alpha.txt"], { exact: true }).waitFor();
-    console.log("Verified both Quick View directions, read-only formats, stale reads, remappable shortcuts, and Image Viewer navigation and zoom.");
+    console.log("Verified Quick View navigation in both panes and sort directions, remappable shortcuts, read-only formats, stale reads, and Image Viewer navigation and zoom.");
   } finally {
     await browser.close();
   }

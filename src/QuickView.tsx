@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { Maximize, RotateCcw, RotateCw, ScanEye, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, ArrowRight, Maximize, RotateCcw, RotateCw, ScanEye, ZoomIn, ZoomOut } from "lucide-react";
 import { describeError, readPlaceBytes, readPlacePreviewImage, readPlacePreviewText, type BytePage, type NamedFile } from "./api";
 import { BinaryPreview, looksBinary } from "./BinaryPreview";
 import { ImageViewport, imageType, useImageViewport } from "./ImageViewport";
@@ -136,7 +136,8 @@ function PreviewFile({ file, source, light, markdownSize, shortcuts, onFocusFile
   return <pre className="text-view" tabIndex={0}>{content.text || t("This file is empty.")}</pre>;
 }
 
-export default function QuickView({ side, file, fileKey, name, message, source, light, markdownSize, shortcuts, onFocusFiles }: {
+export default function QuickView({ side, file, fileKey, name, message, source, light, markdownSize, shortcuts, onFocusFiles,
+  onPrevious, onNext, previousShortcut, nextShortcut }: {
   side: Side;
   file: NamedFile | null;
   fileKey: string;
@@ -147,6 +148,10 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
   markdownSize?: number;
   shortcuts: Bindings;
   onFocusFiles: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  previousShortcut: string;
+  nextShortcut: string;
 }) {
   return <section className={`pane quick-view quick-view-${side}`} aria-label={t("Quick View")} data-pane-side={side} data-help-topic="quickView" tabIndex={-1}>
     <header className="pane-heading">
@@ -155,6 +160,12 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
         <h2>{t("Quick View")}</h2>
       </div>
       {name && <span className="quick-view-name" data-tooltip={name}>{name}</span>}
+      <div className="quick-view-navigation">
+        <Button className="icon-button" aria-label={t("Previous File")} shortcut={previousShortcut}
+          disabled={!onPrevious} onClick={onPrevious}><ArrowLeft /></Button>
+        <Button className="icon-button" aria-label={t("Next File")} shortcut={nextShortcut}
+          disabled={!onNext} onClick={onNext}><ArrowRight /></Button>
+      </div>
     </header>
     {file ? <PreviewFile key={fileKey} file={file} source={source} light={light} markdownSize={markdownSize}
       shortcuts={shortcuts} onFocusFiles={onFocusFiles} /> :

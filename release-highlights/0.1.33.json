@@ -3,11 +3,11 @@
   "highlights": [
     "Go up one folder with the parent row, arrow, or shortcut and return along the dimmed path, with separate breadcrumb menus for hidden parents and the previous path.",
     "View and edit text and images with dark blue headers in Classic blue. Zoom Mermaid diagrams with Markdown text or open a diagram in a resizable dialog to zoom, pan, and fit it.",
-    "Insert the current folder's path into the command line with Ctrl+F on the parent row.",
-    "Open local folders in the system file manager with Shift+Enter.",
+    "On the parent row, use Ctrl+F to insert the current folder's path into the command line. Use Shift+Enter to open a local folder in the system file manager.",
     "Keep item icons and normal text weight when marking files and folders. Reverse right-click dragging without moving the rows, or clear marks in the focused pane with Space.",
     "Apply Dirlume, Far Manager, or Total Commander settings profiles and save your own combinations in Options.",
     "See checkboxes centered against their full labels in Copy and throughout Dirlume.",
-    "Scroll from the first byte to the end of a file in the Hex Viewer."
+    "Scroll from the first byte to the end of a file in the Hex Viewer.",
+    "Bookmark selected passages in Markdown Preview and move between files with Previous File and Next File in Quick View."
   ]
 }

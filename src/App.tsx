@@ -2549,6 +2549,21 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? { place: item.place, name: item.entry.name } : null;
   }
 
+  function adjacentQuickViewFile(direction: -1 | 1) {
+    if (quickViewSource === null || !filesAvailable) return undefined;
+    const rows = entries[quickViewSource];
+    for (let index = paneCursorIndex(pane, rows) + direction; index >= 0 && index < rows.length; index += direction) {
+      if (fileFor(quickViewSource, rows[index])) return rows[index];
+    }
+  }
+
+  function navigateQuickView(entry: Entry | undefined) {
+    if (entry === undefined || quickViewSource === null) return;
+    selectionAnchor.current[quickViewSource] = entry.name;
+    updatePane(quickViewSource, (source) => ({ ...source, selected: entry.name }));
+    focus(quickViewSource);
+  }
+
   function imagesInPane(side: Side, file: NamedFile) {
     const source = panes[side];
     const place = source.place;
@@ -3046,6 +3061,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "quickViewPrevious" || command === "quickViewNext") {
+      if (quickViewSource !== null && !inField && !target.closest("[role=menu]") &&
+          (onFiles?.id === quickViewSource + "-files" || target.closest(".quick-view"))) {
+        event.preventDefault();
+        navigateQuickView(command === "quickViewPrevious" ? previousPreview : nextPreview);
+      }
+      return;
+    }
     if (command === "clearMarks" && (!onFiles || inField || !filesAvailable || catalog || event.repeat)) return;
     if (command === "openInSystem" && (!onFiles || inField || !canOpenInSystem || event.repeat)) return;
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
@@ -3119,6 +3142,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
     (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
   const previewFile = previewSide && filesAvailable ? currentFile : null;
+  const previousPreview = adjacentQuickViewFile(-1);
+  const nextPreview = adjacentQuickViewFile(1);
   const previewName = currentItem?.entry.name ?? current?.name;
   const previewKey = previewFile ? JSON.stringify([
     previewFile.place.kind, "id" in previewFile.place ? previewFile.place.id : null, placePath(previewFile.place),
@@ -3408,7 +3433,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </section>}>
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
             message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} markdownSize={preferences.viewFontSizes.markdown}
-            shortcuts={shortcuts} onFocusFiles={() => focus(active)} />
+            shortcuts={shortcuts} onFocusFiles={() => focus(active)}
+            onPrevious={previousPreview && (() => navigateQuickView(previousPreview))}
+            onNext={nextPreview && (() => navigateQuickView(nextPreview))}
+            previousShortcut={keyLabel("quickViewPrevious")} nextShortcut={keyLabel("quickViewNext")} />
         </Suspense>}
         {sourceMenu && paneCovered(sourceMenu.side) && paneSources(sourceMenu.side, true)}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator" data-help-topic="workspace"
