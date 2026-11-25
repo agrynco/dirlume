@@ -560,6 +560,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address input { padding-block: 3px; font: .92em var(--mono); }
 .address-breadcrumbs {
   --address-overflow-width: 28px;
+  --address-separator-width: 12px;
   position: relative; display: flex; align-items: center; min-height: 30px;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--canvas); color: var(--ink);
   font: .92em var(--mono);
@@ -578,16 +579,17 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .address-crumbs[data-measuring] .address-ancestor[hidden] { display: flex; }
 .address-ancestor button { min-height: 28px; padding: 2px 7px; }
 .address-ancestor > span { padding: 2px 7px; }
-.address-ancestor svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
-.address-source { flex: none; min-width: 0; max-width: min(70%, max(32px, calc(100% - var(--address-overflow-width) - 32px))); }
+.address-ancestor svg { width: var(--address-separator-width); height: 12px; flex: none; color: var(--muted); }
+.address-source { flex: none; min-width: 0; max-width: min(70%, max(32px, calc(100% - 2 * var(--address-overflow-width) - 2 * var(--address-separator-width) - 32px))); }
 .address-source button { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 .address-current { padding: 3px 8px; }
 .address-current svg { width: 14px; height: 14px; margin-inline-end: 6px; vertical-align: text-bottom; color: var(--panel-muted); }
 .address-forward { display: flex; flex: none; white-space: nowrap; }
-.address-forward button, .address-return { opacity: .64; }
-.address-forward button:is(:hover, :focus-visible), .address-return:is(:hover, :focus-visible) { opacity: 1; }
+.address-forward button { opacity: .64; }
+.address-forward button:is(:hover, :focus-visible) { opacity: 1; }
 .address-overflow { position: absolute; inset-inline-start: 0; width: var(--address-overflow-width); background: var(--canvas); }
-.address-breadcrumbs[data-fit] > .address-overflow { position: static; flex: none; }
+.address-overflow-segment { flex: none; }
+.address-overflow-segment .address-overflow { position: static; flex: none; }
 .address-ellipsis { padding: 2px 7px; pointer-events: none; }
 .address-actions {
   position: absolute; z-index: 6; top: 100%; right: 0; display: flex; width: max-content; gap: 2px; padding: 2px;
@@ -595,7 +597,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   opacity: 0; pointer-events: none;
 }
 .address-breadcrumbs:is(:hover, :focus-within) .address-actions { opacity: 1; pointer-events: auto; }
-.address-breadcrumbs:has(.address-parents) .address-actions { opacity: 0; pointer-events: none; }
+.address-breadcrumbs:has(:is(.address-parents, .address-previous)) .address-actions { opacity: 0; pointer-events: none; }
 .path-input-row { display: flex; align-items: center; gap: 4px; }
 .editable-dropdown {
   display: flex; flex: 1; min-width: 0; overflow: hidden;
@@ -653,6 +655,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .location-popup { z-index: 1; position: absolute; inset: calc(100% + 5px) 0 auto auto; }
 .location-popup.address-parents { z-index: 5; inset-inline: 0 auto; }
+.location-popup.address-previous { z-index: 5; }
 .file-column-menu { z-index: 4; position: fixed; max-width: calc(100vw - 12px); }
 :is(.location-popup, .file-column-menu) button { width: 100%; justify-content: flex-start; }
 .process-menu-heading { display: grid; gap: 2px; padding: 5px 8px; max-inline-size: 260px; overflow-wrap: anywhere; }
