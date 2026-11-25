@@ -117,6 +117,7 @@ export function prepareSettingsImport(current: Preferences, archive: SettingsArc
   }
 
   const values: GroupValues = Object.assign({}, ...selection.groups.map((group) => archive.groups[group]));
+  if (Object.hasOwn(values, "activeShortcutScheme") && !Object.hasOwn(values, "profileBindings")) values.profileBindings = undefined;
   if (typeof values.activeScheme === "string") values.activeScheme = importedIds.get(values.activeScheme) ?? values.activeScheme;
   for (const key of ["systemLightScheme", "systemDarkScheme"]) {
     const favorite = values[key];

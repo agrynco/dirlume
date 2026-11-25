@@ -2188,6 +2188,12 @@ button.color-swatch {
 .panel-mode-field .dialog-error { grid-column: 1 / -1; }
 .shortcut-capture { display: grid; gap: 4px; }
 .shortcut-capture label { display: flex; align-items: center; gap: 4px; }
+.profile-status { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--dialog-muted); }
+.profile-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 12px; margin: 0; }
+.profile-summary > div { display: contents; }
+.profile-summary :is(dt, dd) { margin: 0; overflow-wrap: anywhere; }
+.profile-summary dt { color: var(--dialog-muted); }
+.profile-shortcuts { margin: 0; }
 
 .sort-menu { gap: 6px; }
 .sort-menu-list, .sort-menu-modes { display: grid; grid-template-columns: 1fr; gap: 1px; min-width: 0; }
