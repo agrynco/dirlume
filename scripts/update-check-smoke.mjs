@@ -18,6 +18,7 @@ try {
     window.isTauri = true;
     window.triggers = [];
     window.checkedDiagnostics = [];
+    window.openedLinks = [];
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
@@ -27,6 +28,7 @@ try {
         if (command === "list_directory") return { path: args.path, parent: null, entries: [], omitted: 0 };
         if (command === "installed_release") return { showOnStartup: false };
         if (command === "report_diagnostic") window.checkedDiagnostics.push(args);
+        if (command === "open_web_link") window.openedLinks.push(args.href);
         if (command === "check_for_update") {
           window.triggers.push(args.trigger);
           if (window.triggers.length === 3) return null;
@@ -49,12 +51,22 @@ try {
   await checkManually();
   await status.getByRole("alert").filter({ hasText: message }).waitFor();
   await checkManually();
-  await page.getByRole("dialog").getByText("Dirlume is up to date.").waitFor();
+  const dialog = page.getByRole("dialog", { name: "Check for updates", exact: true });
+  await dialog.getByText("Dirlume is up to date.").waitFor();
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
+  assert.ok(await close.evaluate((button) => button === document.activeElement));
+  const donate = dialog.getByRole("button", { name: "Donate via monobank", exact: true });
+  await page.keyboard.press("Shift+Tab");
+  assert.ok(await donate.evaluate((button) => button === document.activeElement));
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => window.openedLinks.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.openedLinks), ["https://send.monobank.ua/jar/6ZninEa3R4"]);
+  assert.ok(await dialog.isVisible());
 
   const checks = await page.evaluate(() => ({ triggers: window.triggers, diagnostics: window.checkedDiagnostics }));
   assert.deepEqual(checks.triggers, ["automatic", "manual", "manual"]);
   assert.ok(!checks.diagnostics.some(({ operation }) => operation === "check_for_update" || operation === "desktop_action"));
-  console.log("Verified quiet startup checks, manual update status, and native diagnostic deduplication.");
+  console.log("Verified quiet startup checks, manual update status, the donation button, and native diagnostic deduplication.");
 } finally {
   await browser.close();
 }
