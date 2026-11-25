@@ -86,7 +86,6 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   const managed = preferences.schemes.find(({ id }) => id === managedId) ?? applied ?? preferences.schemes[0];
   const deleting = preferences.schemes.find(({ id }) => id === deleteId);
   const base = theme;
-  const overrides = applied?.colors;
   const picked = selection && pickedSurface(selection);
   const surfaces: readonly Surface[] = selection ? picked ? [picked] : [] :
     fontGroup === "viewer" || fontGroup === "editor" || fontGroup === "terminal" ? optionSurfaces[fontGroup] :
@@ -96,7 +95,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
   const showingFonts = groups.length > 0 || surfaces.length > 0;
   const colorSections = selection || section === "fonts" ? [] : section === "panels" && fontGroup === "panel" ? ["panels", "files"] as const : [section];
 
-  useLayoutEffect(() => setPalette(basePalette(base, overrides)), [base, overrides]);
+  useLayoutEffect(() => setPalette(basePalette(base, applied)), [base, applied]);
 
   useEffect(() => {
     if (!showingFonts && section !== "files") return;
@@ -121,6 +120,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
     const name = number === 1 ? t("Custom scheme") : t("Custom scheme {0}", number);
     const scheme: Scheme = {
       id: `scheme-${number}`, name, base, colors, fonts: { ...fonts, options: fonts.options ?? {} }, fileTypes,
+      documentHeaderUsesTheme: applied ? applied.documentHeaderUsesTheme : true,
       ...(automaticName ? { suggestedName: name } : {}),
     };
     setManagedId(scheme.id);

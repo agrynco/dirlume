@@ -155,7 +155,7 @@ export function ImageEditor({ ref, directory, name, active, shortcuts, revision,
   const cancelDialog = () => { if (!saving) finishDialog(false); };
 
   return <>
-    <section ref={section} hidden={!active} className="text-window image-document image-editor" data-font-zoom="none" aria-label={name} tabIndex={-1}
+    <section ref={section} hidden={!active} className="text-window image-document image-editor" data-editing="true" data-font-zoom="none" aria-label={name} tabIndex={-1}
       data-help-topic="editor" onKeyDownCapture={(event) => {
         const target = event.target as HTMLElement;
         if (event.nativeEvent.isComposing || target.closest("input, select, dialog[open]") ||

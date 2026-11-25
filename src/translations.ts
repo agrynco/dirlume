@@ -1042,6 +1042,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Options window": ["Вікно параметрів", "Окно параметров"],
   "Dialog background": ["Тло діалогів", "Фон диалогов"],
   "Dialog headers and footers": ["Заголовки та нижні рядки діалогів", "Заголовки и нижние строки диалогов"],
+  "Document header": ["Заголовок документа", "Заголовок документа"],
   "Dialog fields": ["Поля діалогів", "Поля диалогов"],
   "Dialog text": ["Текст діалогів", "Текст диалогов"],
   "Secondary dialog text": ["Другорядний текст діалогів", "Второстепенный текст диалогов"],
