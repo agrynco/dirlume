@@ -1,51 +1,11 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { ChevronRight, Copy, Pencil, Server } from "lucide-react";
-import { connectionSourceNames, folderLabel, isFileServer, placePath, smbHost, windowsClient, type ConnectionSource, type FileLocation, type Place } from "./api";
+import { connectionSourceNames, folderLabel, isFileServer, placePath, windowsClient, type ConnectionSource, type FileLocation, type Place } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
-import { parentPlace, type Side } from "./panes";
+import { breadcrumbPlaces, connectionSource, parentPath, parentPlace, placeKey, previousPath, type Side } from "./panes";
 import { PathField } from "./PathField";
-
-function parentPath(path: string, windows: boolean) {
-  const trimmed = path.replace(windows ? /[\\/]+$/ : /\/+$/, "");
-  if (windows && /^(?:[a-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)$/i.test(trimmed)) return null;
-  const end = Math.max(trimmed.lastIndexOf("/"), windows ? trimmed.lastIndexOf("\\") : -1);
-  if (end < 0) return null;
-  const root = end === 0 || (windows && end === 2 && /^[a-z]:/i.test(trimmed));
-  return trimmed.slice(0, root ? end + 1 : end);
-}
-
-function placeKey(place: FileLocation) {
-  const source = place.kind === "local" || place.kind === "smbRoot" ? [] :
-    place.kind === "kswitcher" ? [place.directory, place.peer] : [place.id];
-  const path = placePath(place);
-  const windowsPath = windowsClient && (place.kind === "local" || place.kind === "smbRoot" || place.kind === "kswitcher");
-  return JSON.stringify([place.kind, ...source, windowsPath ? path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase() : path]);
-}
-
-function connectionSource(place: FileLocation | null): ConnectionSource | undefined {
-  switch (place?.kind) {
-    case "ftp": return "ftp";
-    case "ssh": return place.catalogSource ?? "ssh";
-    case "server":
-    case "kswitcher": return "remote";
-    case "local":
-    case "smbRoot": return smbHost(place) ? "smb" : undefined;
-  }
-}
-
-function breadcrumbPlaces(place: FileLocation | null, limit = 4) {
-  const places: FileLocation[] = [];
-  while (place && places.length < limit) {
-    places.push(place);
-    let parent = parentPlace(place);
-    if (parent?.kind === "local") parent = { ...parent, parent: parentPath(parent.path, windowsClient) };
-    if (parent?.kind === "kswitcher" && parent.path) parent = { ...parent, parent: parentPath(parent.path, true) ?? "" };
-    place = parent;
-  }
-  return places.reverse();
-}
 
 function useBreadcrumbClip(editing = false, fitAncestors = false, location = "") {
   const clip = useRef<HTMLDivElement>(null);
@@ -148,7 +108,7 @@ export function CompactAddressBreadcrumbs({ place, path, goTo }: {
 }) {
   // A volume or share can be scanned without loading a directory listing first.
   const target = place.kind === "local" && place.parent === null ? { ...place, parent: parentPath(place.path, windowsClient) } : place;
-  const ancestors = breadcrumbPlaces(target).slice(0, -1);
+  const ancestors = breadcrumbPlaces(target, 4).slice(0, -1);
   const { clip, track, clipped } = useBreadcrumbClip();
   const shortened = clipped || (ancestors.length === 3 && Boolean(parentPlace(ancestors[0])));
   const [overflow, setOverflow] = useState(false);
@@ -168,19 +128,20 @@ export function CompactAddressBreadcrumbs({ place, path, goTo }: {
       aria-label={t("Show parent folders")} aria-expanded={overflow} onClick={() => setOverflow(!overflow)}>…</Button> :
       <span className="address-overflow address-ellipsis" aria-hidden="true">…</span>)}
     {shortened && overflow && goTo && <div className="location-popup address-parents">
-      {breadcrumbPlaces(target, Infinity).slice(0, -1).map((ancestor) => <Button type="button" key={placeKey(ancestor)}
+      {breadcrumbPlaces(target).slice(0, -1).map((ancestor) => <Button type="button" key={placeKey(ancestor)}
         tooltip={placePath(ancestor)} onClick={() => { setOverflow(false); goTo(ancestor); }}>{folderLabel(ancestor)}</Button>)}
     </div>}
   </div>;
 }
 
-export function AddressField({ side, place: shown, showHidden, onNavigate, onNavigateAncestor, onOpenConnections, onCopy, focusFiles }: {
+export function AddressField({ side, place: shown, trail, showHidden, onNavigate, onNavigateAncestor, onOpenConnections, onCopy, focusFiles }: {
   side: Side;
   place: Place | null;
+  trail?: FileLocation;
   showHidden: boolean;
   onNavigate: (path: string) => void;
   onNavigateAncestor: (place: FileLocation) => void;
-  onOpenConnections: (source: ConnectionSource, trail: FileLocation) => void;
+  onOpenConnections: (source: ConnectionSource) => void;
   onCopy: (path: string) => void;
   focusFiles: () => void;
 }) {
@@ -201,12 +162,8 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
   const previousButton = useRef<HTMLButtonElement>(null);
   const [hoverX, setHoverX] = useState<number>();
   const [draft, setDraft] = useState(path);
-  const [branch, setBranch] = useState<FileLocation[]>([]);
-  const branchIndex = branch.findIndex((folder) => placeKey(folder) === location);
-  const catalogBranch = catalog?.trail ? breadcrumbPlaces(catalog.trail, Infinity) : [];
-  const forward = catalog ? catalogBranch : branchIndex < 0 ? [] : branch.slice(branchIndex + 1);
-  const crumbs = breadcrumbPlaces(place, Infinity);
-  const ancestors = crumbs.slice(0, -1);
+  const forward = previousPath(shown, trail);
+  const ancestors = breadcrumbPlaces(place).slice(0, -1);
   const { clip, track, clipped, hidden, hiddenForward } = useBreadcrumbClip(editing, true,
     JSON.stringify([addressKey, forward.map(placeKey)]));
   const parents = ancestors.slice(0, hidden);
@@ -240,10 +197,6 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
   }, [addressKey, path]);
 
   useEffect(() => {
-    if (!catalog && branch.length && branchIndex < 0) setBranch([]);
-  }, [branch, branchIndex, catalog]);
-
-  useEffect(() => {
     if (overflow && !hiddenFolders.length) setOverflow(null);
   }, [overflow, hiddenFolders.length]);
 
@@ -251,9 +204,7 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
     if (editing) root.current?.querySelector("input")?.focus({ preventScroll: true });
   }, [editing]);
 
-  function goTo(folder: FileLocation, goingUp = false) {
-    if (catalogBranch.length) setBranch(catalogBranch);
-    else if (goingUp && place && !forward.length) setBranch(crumbs);
+  function goTo(folder: FileLocation) {
     setOverflow(null);
     onNavigateAncestor(folder);
     focusFiles();
@@ -271,7 +222,7 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
       {leading && <ChevronRight aria-hidden="true" />}
       {open && <div className={`location-popup address-${kind}`}>
         {folders.map((folder) => <Button type="button" key={placeKey(folder)} tooltip={placePath(folder)}
-          onClick={() => goTo(folder, leading)}>{folderLabel(folder)}</Button>)}
+          onClick={() => goTo(folder)}>{folderLabel(folder)}</Button>)}
       </div>}
     </div>;
   }
@@ -314,13 +265,13 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
         {source && place && <div className="address-ancestor address-source">
           <Button type="button" aria-label={t("Open {0} connection list", sourceName)} onClick={() => {
             setOverflow(null);
-            onOpenConnections(source, forward.at(-1) ?? place);
+            onOpenConnections(source);
             focusFiles();
           }}>{sourceName}</Button>
           <ChevronRight aria-hidden="true" />
         </div>}
         {overflowMenu("parents", parents)}
-        <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} goTo={(ancestor) => goTo(ancestor, true)}
+        <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} goTo={goTo}
           fitAncestors hidden={hidden} descendants={forward} hiddenForward={hiddenForward} goForward={goTo}
           catalog={!!catalog} current={catalog ? t(folderLabel(catalog)) : place ? folderLabel(place) : t("Enter a path")} />
         {overflowMenu("previous", nextFolders)}
