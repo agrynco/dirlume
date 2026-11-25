@@ -16,7 +16,8 @@ import type { TaskMarker } from "./MarkdownPreview";
 import { useMarkdownSearch } from "./MarkdownSearch";
 import { MainMenu, type MenuAction, type MenuGroup } from "./MainMenu";
 import type { SourceActions, SourceStatus } from "./CodeSurface";
-import { bookmarkKey, bookmarkPath, type BookmarkJump, type BookmarkResult, type FileBookmark } from "./fileBookmarks";
+import { bookmarkKey, bookmarkPath, lineFingerprint, type BookmarkJump, type BookmarkResult, type FileBookmark } from "./fileBookmarks";
+import { captureMarkdownAnchor, locateMarkdownAnchor, markdownSelection } from "./markdownBookmarks";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { viewFontStyle, type ViewFontSizes } from "./viewFonts";
@@ -35,7 +36,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
 
 export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors, diagnosticLog,
   onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
-  fileBookmarks, bookmarkJump, onBookmarkLine, onFileBookmarks }: {
+  fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -58,12 +59,12 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   onClose: () => void;
   fileBookmarks: readonly FileBookmark[];
   bookmarkJump?: BookmarkJump;
-  onBookmarkLine: (path: string, line: number, text: string) => void;
+  onBookmark: (bookmark: FileBookmark) => void;
   onFileBookmarks: (path: string) => void;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
-  const [preview, setPreview] = useState(!editing && !bookmarkJump && isMarkdownFile(file.name));
+  const [preview, setPreview] = useState(!editing && (!bookmarkJump || "anchor" in bookmarkJump) && isMarkdownFile(file.name));
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
   const [diagnosticSource, setDiagnosticSource] = useState(false);
@@ -74,6 +75,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const syntaxOpener = useRef<HTMLElement | null>(null);
   const [sourceStatus, setSourceStatus] = useState<SourceStatus>({ line: 1, column: 1, canUndo: false, canRedo: false });
   const [bookmarkResult, setBookmarkResult] = useState<BookmarkResult>();
+  const [missingAnchor, setMissingAnchor] = useState<number>();
+  const [hasBookmarkSelection, setHasBookmarkSelection] = useState(false);
+  const menuSelection = useRef<Range | null>(null);
   const [hexSize, setHexSize] = useState<number>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -107,8 +111,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const diagnosticVisible = Boolean(document && diagnosticLog && !diagnosticSource && !hex);
   const sourceVisible = Boolean(document && !preview && !hex && !diagnosticVisible);
   const localBookmarkPath = !editing && !diagnosticLog && !hex ? bookmarkPath(file) : null;
-  const bookmarkLines = useMemo(() => localBookmarkPath ? new Set(fileBookmarks.filter((item) =>
-    bookmarkKey(item.path) === bookmarkKey(localBookmarkPath)).map(({ line }) => line)) : undefined, [fileBookmarks, localBookmarkPath]);
+  const bookmarkLines = useMemo(() => localBookmarkPath ? new Set(fileBookmarks.flatMap((item) =>
+    "line" in item && bookmarkKey(item.path) === bookmarkKey(localBookmarkPath) ? [item.line] : [])) : undefined, [fileBookmarks, localBookmarkPath]);
   const search = useMarkdownSearch(markdownContent, markdownScroll, searchOpen ? searchQuery.trim() : "",
     active && markdownViewer, markdownSource, htmlFormatting);
   const byteSize = useMemo(() => {
@@ -135,9 +139,40 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
 
   useEffect(() => {
     if (!bookmarkJump) return;
-    setPreview(false);
+    setPreview("anchor" in bookmarkJump);
     setHex(false);
   }, [bookmarkJump]);
+
+  useEffect(() => {
+    if (!active || !markdownViewer || !localBookmarkPath || !markdownContent) {
+      menuSelection.current = null;
+      setHasBookmarkSelection(false);
+      return;
+    }
+    const update = () => setHasBookmarkSelection(Boolean(markdownSelection(markdownContent) ||
+      (window.getSelection()?.isCollapsed && menuSelection.current)));
+    window.document.addEventListener("selectionchange", update);
+    update();
+    return () => window.document.removeEventListener("selectionchange", update);
+  }, [active, markdownViewer, localBookmarkPath, markdownContent]);
+
+  useLayoutEffect(() => {
+    const viewport = markdownScroll.current;
+    if (!active || !markdownViewer || !markdownContent || !viewport || !bookmarkJump || !("anchor" in bookmarkJump)) return;
+    const range = locateMarkdownAnchor(markdownContent, bookmarkJump.anchor);
+    setMissingAnchor(range ? undefined : bookmarkJump.request);
+    if (!range) return;
+    const bounds = range.getClientRects()[0];
+    if (bounds) viewport.scrollTop += bounds.top - viewport.getBoundingClientRect().top - viewport.clientHeight / 3;
+    if (typeof Highlight === "function" && CSS.highlights) {
+      CSS.highlights.set("markdown-bookmark", new Highlight(range));
+      return () => { CSS.highlights.delete("markdown-bookmark"); };
+    }
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return () => { if (selection?.rangeCount && selection.getRangeAt(0) === range) selection.removeRange(range); };
+  }, [active, markdownViewer, markdownContent, markdownSource, htmlFormatting, bookmarkJump]);
 
   useLayoutEffect(() => {
     if (active && markdownViewer && searchOpen) searchField.current?.focus();
@@ -323,8 +358,17 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const hexAction = action("Hex", "viewAsHex", () => setHex(!hex));
   const bookmarkAction = action("Bookmark line", "bookmarkLine", () => {
     const line = sourceActions.current?.bookmarkLine();
-    if (line && localBookmarkPath) onBookmarkLine(localBookmarkPath, line.line, line.text);
+    if (line && localBookmarkPath) onBookmark({ path: localBookmarkPath, line: line.line, fingerprint: lineFingerprint(line.text) });
   });
+  const bookmarkSelection = action("Bookmark selection", "bookmarkLine", () => {
+    if (!markdownContent || !localBookmarkPath) return;
+    const range = markdownSelection(markdownContent) ?? (window.getSelection()?.isCollapsed ? menuSelection.current : null);
+    menuSelection.current = null;
+    if (!range) return;
+    const anchor = captureMarkdownAnchor(markdownContent, range);
+    if (anchor) onBookmark({ path: localBookmarkPath, anchor });
+    setHasBookmarkSelection(Boolean(markdownSelection(markdownContent)));
+  }, !hasBookmarkSelection);
   const bookmarksAction = action("File bookmarks", "fileBookmarks", () => {
     if (localBookmarkPath) onFileBookmarks(localBookmarkPath);
   });
@@ -342,7 +386,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const navigationActions = [...(markdownViewer ? [back, forward, searchAction] : sourceVisible ? [
     action("Go to start", "documentStart", () => sourceActions.current?.goToStart()),
     action("Go to end", "documentEnd", () => sourceActions.current?.goToEnd()),
-  ] : []), ...(localBookmarkPath && document ? [...(sourceVisible ? [bookmarkAction] : []), bookmarksAction] : [])];
+  ] : []), ...(localBookmarkPath && document ? [
+    ...(markdownViewer ? [bookmarkSelection] : sourceVisible ? [bookmarkAction] : []), bookmarksAction,
+  ] : [])];
   const menuGroups: MenuGroup[] = [
     { label: "File", items: fileActions },
     { label: editing ? "Edit" : "Selection", items: selectionActions },
@@ -375,7 +421,11 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       hidden={!active} className="text-window" data-text-surface={fontView} data-font-zoom={fontView}
       data-help-topic={editing ? "editor" : "viewer"} data-editing={editing}
       data-limited-width={typeof contentWidth === "number" || undefined}
-      aria-label={file.name} tabIndex={-1} onKeyDownCapture={(event) => {
+      aria-label={file.name} tabIndex={-1} onPointerDownCapture={(event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!markdownViewer || target?.closest("[role=menu]")) return;
+      menuSelection.current = target?.closest(".document-menu") ? markdownSelection(markdownContent)?.cloneRange() ?? null : null;
+    }} onKeyDownCapture={(event) => {
       if (confirm) return;
       const shortcut = eventShortcut(event);
       if (!shortcut) return;
@@ -470,6 +520,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         <p role="status" className="bookmark-position-status">{bookmarkResult.changed ?
           t("Line {0} has changed since it was bookmarked.", bookmarkResult.requested) :
           t("Bookmark line {0} is past the end of the file. Showing line {1}.", bookmarkResult.requested, bookmarkResult.shown)}</p>}
+      {markdownViewer && missingAnchor !== undefined && missingAnchor === bookmarkJump?.request &&
+        <p role="status" className="bookmark-position-status">{t("Could not locate the bookmarked passage.")}</p>}
       {hex ? <HexViewer file={file} revision={hexRevision} onSize={setHexSize} /> :
         !document && !readError && <div className="dialog-body">{t("Loading…")}</div>}
       {document && <>
@@ -486,8 +538,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
-              bookmarkLines={bookmarkLines} bookmarkJump={bookmarkJump} onBookmarkResult={setBookmarkResult}
-              onBookmarkLine={localBookmarkPath ? (line, lineText) => onBookmarkLine(localBookmarkPath, line, lineText) : undefined}
+              bookmarkLines={bookmarkLines} bookmarkJump={bookmarkJump && "line" in bookmarkJump ? bookmarkJump : undefined} onBookmarkResult={setBookmarkResult}
+              onBookmarkLine={localBookmarkPath ? (line, lineText) =>
+                onBookmark({ path: localBookmarkPath, line, fingerprint: lineFingerprint(lineText) }) : undefined}
               ref={sourceActions} onSourceStatus={setSourceStatus} syntaxOverride={syntax} onSyntaxInfo={setSyntaxInfo} />
           </Suspense>
         </div>
