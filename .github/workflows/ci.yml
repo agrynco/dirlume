@@ -171,6 +171,9 @@ jobs:
       - name: Verify Quick View in both panes
         if: github.event.action != 'closed'
         run: node scripts/quick-view-smoke.mjs
+      - name: Verify continuous scrolling in Hex Viewer
+        if: github.event.action != 'closed'
+        run: node scripts/hex-scroll-smoke.mjs
       - name: Verify Mermaid diagram zoom and separate viewer
         if: github.event.action != 'closed'
         run: node scripts/mermaid-zoom-smoke.mjs
