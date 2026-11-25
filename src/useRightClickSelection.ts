@@ -36,6 +36,8 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
 }) {
   const gesture = useRef<Gesture<Item> | null>(null);
   const [spinner, setSpinner] = useState<Point | null>(null);
+  const [gestureEntries, setGestureEntries] = useState<readonly Item[] | null>(null);
+  const visibleEntries = gestureEntries ?? entries;
 
   const clear = useCallback(() => {
     const current = gesture.current;
@@ -45,6 +47,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
       if (list.current?.hasPointerCapture(current.id)) list.current.releasePointerCapture(current.id);
     }
     setSpinner(null);
+    setGestureEntries(null);
   }, [list]);
 
   useEffect(() => {
@@ -67,7 +70,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
     let departed = false;
     for (let index = 1; index <= steps; index++) {
       const fraction = index / steps;
-      const row = hit(list.current, entries, { x: previous.x + dx * fraction, y: previous.y + dy * fraction });
+      const row = hit(list.current, visibleEntries, { x: previous.x + dx * fraction, y: previous.y + dy * fraction });
       if (row === undefined || row?.name !== current.start?.name) departed = true;
       if (row && row.name !== "..") crossed.add(row.name);
     }
@@ -96,10 +99,12 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
     const listElement = list.current;
     if (!listElement) return;
     const position = point(event);
-    const start = hit(listElement, entries, position);
+    const start = hit(listElement, visibleEntries, position);
     if (start === undefined) return;
     event.preventDefault();
     clear();
+    // Marked-first sorting would otherwise move rows while the pointer crosses them.
+    setGestureEntries(visibleEntries);
     listElement.focus({ preventScroll: true });
     listElement.setPointerCapture(event.pointerId);
     const current: Gesture<Item> = {
@@ -126,7 +131,7 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
     move(current, position);
     clear();
     if (current.mode !== "hold") return;
-    const row = hit(list.current, entries, position);
+    const row = hit(list.current, visibleEntries, position);
     if (row === undefined) return;
     if (performance.now() - current.started >= holdDelay) {
       onContext(position.x, position.y, row && row.name !== ".." ? row : undefined);
@@ -140,5 +145,6 @@ export function useRightClickSelection<Item extends Row>({ list, entries, marked
       !(event.target instanceof Element && event.target.closest(".inline-rename"));
   }
 
-  return { spinner, suppressContextMenu, events: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: clear, onLostPointerCapture: clear } };
+  return { spinner, entries: visibleEntries, selecting: gestureEntries !== null, suppressContextMenu,
+    events: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: clear, onLostPointerCapture: clear } };
 }

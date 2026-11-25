@@ -18,7 +18,7 @@ try {
       invoke: async (command, args) => {
         if (command === "locations") return [{ label: "Home", path: "/fixture" }];
         if (command === "list_directory") return { path: args.path, parent: "/",
-          entries: names.map((name) => ({ name, directory: name === "04-folder", hidden: false, link: false,
+          entries: [...names, "06-outside.txt"].map((name) => ({ name, directory: name === "04-folder", hidden: false, link: false,
             size: 0, modified: null })), omitted: 0 };
         if (command === "file_icons" || command === "installed_fonts") return [];
         return null;
@@ -110,6 +110,31 @@ try {
   await row(first).click();
   await files().press("Insert");
   assert.deepEqual(await marked(), [first]);
+  for (const side of ["left", "right"]) {
+    await files(side).press("Space");
+    await files(side).press("Shift+F12");
+    const ordered = await files(side).locator(".file-row:not([data-tooltip='..'])").evaluateAll(
+      (rows) => rows.map((item) => item.dataset.tooltip));
+    const points = await Promise.all(ordered.map(async (name) => {
+      const rect = await row(name, side).boundingBox();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    }));
+    for (const [far, opposite] of [[4, 0], [0, 4]]) {
+      for (const expected of [names, []]) {
+        await page.mouse.move(points[2].x, points[2].y);
+        await press();
+        await page.mouse.move(points[far].x, points[far].y);
+        const stillOrdered = await files(side).locator(".file-row:not([data-tooltip='..'])").evaluateAll(
+          (rows) => rows.map((item) => item.dataset.tooltip));
+        assert.deepEqual(stillOrdered, ordered, "Marking must keep row positions stable while the button is held.");
+        await page.mouse.move(points[opposite].x, points[opposite].y);
+        assert.deepEqual(await marked(side), expected);
+        assert.equal(await menu.count(), 0);
+        await release();
+        assert.deepEqual(await marked(side), expected);
+      }
+    }
+  }
   console.log("Verified opt-in right-click selection, skipped rows, drag direction, hold feedback, and menus.");
 } finally {
   await browser.close();
