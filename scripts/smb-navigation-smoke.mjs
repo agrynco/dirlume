@@ -218,8 +218,9 @@ export async function testSmbNavigation() {
     }
     const right = fileList("right");
     await openSsh("right");
-    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), [".."]);
-    await right.getByRole("option", { name: /^\.\./ }).dblclick();
+    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), []);
+    assert.equal(await pane("right").getByRole("button", { name: "Parent folder", exact: true }).isDisabled(), true);
+    await pane("right").getByRole("button", { name: "Back", exact: true }).click();
     await pathIs("right", root);
     await openSsh("right");
     await right.press("Shift+F4");

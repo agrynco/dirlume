@@ -1695,7 +1695,8 @@ try {
       await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "Remote machine");
     }
     await openRemoteConnections();
-    assert.deepEqual(await remote.locator(".file-name-text").allTextContents(), [".."]);
+    assert.deepEqual(await remote.locator(".file-name-text").allTextContents(), []);
+    assert.equal(await leftPane.getByRole("button", { name: "Parent folder", exact: true }).isDisabled(), true);
     await remote.press("Shift+F4");
     const add = page.getByRole("dialog", { name: "Add remote machine", exact: true });
     await add.getByLabel("Connection name").fill("Local test server");
@@ -1761,7 +1762,8 @@ try {
     await page.getByRole("dialog", { name: "Remove connection", exact: true })
       .getByRole("button", { name: "Remove connection", exact: true }).click();
     await renamedServer.waitFor({ state: "detached" });
-    await remote.getByRole("option", { name: /^\.\./ }).dblclick();
+    assert.equal(await leftPane.getByRole("button", { name: "Parent folder", exact: true }).isDisabled(), true);
+    await back.click();
     await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
   });
   await left.getByRole("option", { name: /^guide.md/ }).click({ modifiers: ["Control"] });
