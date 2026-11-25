@@ -1,0 +1,6 @@
+{
+  "version": "0.1.33",
+  "highlights": [
+    "Open hidden parent folders before the current location and hidden folders from the previous path after it."
+  ]
+}
