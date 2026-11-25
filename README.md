@@ -50,7 +50,7 @@ Open **Sort by** with **Ctrl+F12** or **Sort modes** in the **Left** or **Right*
 
 Use **Show selected first** to sort marked items ahead of unmarked items. **Show directories first** keeps folders together. **Options → Sort groups** lets you order filename masks before or after unmatched items. Enable **Use sort groups** for Name, Name only, and Extension. The pane remembers its sort and priorities when you switch folders, change its panel mode, or restart.
 
-Press **Enter** on a local folder row to open it with the cursor on **..**. Press **Enter** again to return to the parent folder. Click a breadcrumb to open an ancestor folder. The address shows the current location and all breadcrumbs that fit. Dimmed segments return to a folder on the previous branch. Use the ellipsis to open hidden parents or descendants. Hover over the address to edit or copy it, or press **Ctrl+L** to type a path. When a folder opens slowly or sizes are being calculated, **Esc** cancels the pending operation. Moving to another folder also cancels its size calculation.
+Press **Enter** on a local folder row to open it with the cursor on **..**. Press **Enter** again to return to the parent folder. The **Parent folder** arrow and configured shortcut open the same immediate parent. At a root, the arrow is disabled and the **..** row is hidden. Click a breadcrumb to open any ancestor folder. **Shift+Enter** opens a focused local folder in the system file manager. On **..**, it opens the current folder. For a file, **Shift+Enter** behaves like **Enter**. The address shows the current location and all breadcrumbs that fit. Dimmed segments return to a folder on the previous branch. Use the leading ellipsis to open hidden parent folders and the trailing ellipsis to open hidden folders on the previous branch. Hover over the address to edit or copy it, or press **Ctrl+L** to type a path. When a folder opens slowly or sizes are being calculated, **Esc** cancels the pending operation. Moving to another folder also cancels its size calculation.
 
 Choose **Standard**, **Twin panels**, or **Classic commander** in **Options → Main File Panels → Panel layout**. Every layout works with every color scheme. Twin panels keeps file icons and adds drive buttons with icons, a line with the drive's free space above each list, column separators, and a flat key bar with icons. Classic commander uses dense rows without icons, a bar of drives and places above each pane, details of the current item below the list, and a function-key strip. Marked items use the **Marked items** color from **Appearance → Panels** for their check marks. The active and inactive selection colors set the row backgrounds. The pane footer shows the free space on the volume of a local folder.
 
@@ -124,7 +124,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Ctrl+Shift+C (⌘⇧C on macOS) in a file list | Copy the current file or folder's full path as text. Also available under Commands → Copy full path. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
-| Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
+| Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. Ctrl+F on **..** inserts the current folder path in a local or SSH pane. |
 | Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. The terminal receives keystrokes while its input has focus. |
 | Shift+F11 | Compare the selected files, or choose **Commands → Compare files**. Use F7 and F8 to navigate between differences. |
 
@@ -245,7 +245,7 @@ With a writable, unencrypted ZIP or 7z archive open, select local files or folde
 
 Choose **FTP**, **SSH**, **SMB** (Windows), or **Remote machine** from either pane's sources menu to open its saved connections. Use **Shift+F4** to add a connection, **F4** to edit the selected connection, and **Enter** to connect. Open **..** to return to the previous location in that pane. Configure the connection shortcuts in **Options → Keyboard shortcuts**.
 
-While browsing a remote folder, click the source name at the beginning of the address breadcrumbs to open its saved connections in the same pane. SFTP returns to **FTP** when opened from that list and to **SSH** when opened from **SSH** or directly. The source stays accessible when long paths collapse into the ellipsis. From the saved connections list, use the dimmed path to return directly to the previous connection or one of its folders. **Back** returns to the remote folder, and **Forward** opens the list again.
+While browsing a remote folder, click the source name at the beginning of the address breadcrumbs or choose the current source in the pane’s sources menu to open saved connections in the same pane. SFTP returns to **FTP** when opened from that list and to **SSH** when opened from **SSH** or directly. The source stays accessible before the leading ellipsis. From the saved connections list, use the dimmed path to return directly to the previous connection or one of its folders. The saved connections list is a root. **Back** returns to the remote folder, and **Forward** opens the list again.
 
 **SSH.** Open the left or right pane's sources with **Alt+F1** or **Alt+F2**, then choose **SSH** or press **5**. Use **Shift+F4** to add a named connection, **F4** to edit it, or select a saved connection and press **Enter**. SSH uses SFTP, with port 22 by default. Authenticate with a password or a private key file, optionally protected by a passphrase. Dirlume keeps passwords and passphrases in the system credential store and reads the private key from its existing location.
 
@@ -297,6 +297,8 @@ For a confirmed action, Dirlume presents the exact paths or process IDs in its w
 On Windows, add an **SMB** connection using a server name, IP address, or UNC share path such as `\\server\documents`. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
 
 ## Desktop diagnostics
+
+Choose **Help → Open error log** to inspect the journal or **Help → Clear error log** to remove its entries after confirmation. Dirlume continues recording new errors after the log is cleared.
 
 Use **Help → Open error log** to see the latest entries first, with local timestamps down to the millisecond. Expand an entry to inspect its fields and recent actions. A warning icon marks panics, and partial lines can be opened individually. Select **Source** to copy the original JSONL in file order. Opening a JSONL file from a file pane uses the regular text viewer.
 

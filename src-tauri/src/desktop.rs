@@ -415,6 +415,7 @@ enum Operation {
     Open {
         name: String,
     },
+    OpenDirectory,
     Rename {
         name: String,
         new_name: String,
@@ -440,6 +441,13 @@ async fn operate(directory: String, operation: Operation) -> Result<()> {
     blocking(move || {
         match operation {
             Operation::Open { name } => open::that(selected(&directory, &name).map_err(message)?),
+            Operation::OpenDirectory => {
+                let path = local::absolute(&directory).map_err(message)?;
+                if !fs::metadata(path).map_err(message)?.is_dir() {
+                    return Err("The selected path is not a directory.".to_owned());
+                }
+                open::that(path)
+            }
             Operation::Rename { name, new_name } => local::move_item(
                 &selected(&directory, &name).map_err(message)?,
                 selected(&directory, &new_name).map_err(message)?,
@@ -2111,7 +2119,11 @@ async fn read_text(
                 return Ok(Err(error));
             }
         };
-        let result = read_regular_file(&path).and_then(decode_local_text);
+        let result = match read_regular_file(&path).and_then(decode_local_text) {
+            // A new log entry would trigger another read in the live Viewer.
+            Err(error) if diagnostics::is_log_file(&path) => return Ok(Err(error)),
+            result => result,
+        };
         Ok(finish_local_text_read(result, surface, || {
             local::read_byte_page(read_regular_file(&path)?, 0)
                 .map_err(|error| TextReadFailure::io(ReadStage::Read, error))
@@ -2907,6 +2919,7 @@ pub fn run() {
     let dispatch: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
         diagnostics::report_diagnostic,
         diagnostics::error_log,
+        diagnostics::clear_error_log,
         build_version,
         read_settings_archive,
         write_settings_archive,

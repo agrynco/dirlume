@@ -220,6 +220,7 @@ export async function testPanelModes({ page, startDesktop, exitDesktop, root }) 
   assert.equal(await row("UPPERCASE.TXT").locator(".file-size").innerText(), "12,345");
   await list("left").press("Insert");
   await row("UPPERCASE.TXT").locator(".panel-mode-mark svg").waitFor();
+  await row("UPPERCASE.TXT").locator(".file-name > :is(svg.lucide-file, img.native-file-icon)").first().waitFor();
   const tool = await openOptionsWindow(page);
   const options = tool.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("searchbox", { name: "Search settings" }).fill("alternative full");

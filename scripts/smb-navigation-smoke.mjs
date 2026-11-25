@@ -218,8 +218,9 @@ export async function testSmbNavigation() {
     }
     const right = fileList("right");
     await openSsh("right");
-    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), [".."]);
-    await right.getByRole("option", { name: /^\.\./ }).dblclick();
+    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), []);
+    assert.equal(await pane("right").getByRole("button", { name: "Parent folder", exact: true }).isDisabled(), true);
+    await pane("right").getByRole("button", { name: "Back", exact: true }).click();
     await pathIs("right", root);
     await openSsh("right");
     await right.press("Shift+F4");
@@ -353,7 +354,9 @@ export async function testSmbNavigation() {
     const restartDirectory = "C:\\Restart folder";
     await navigateLocal("left", restartDirectory);
     await page.evaluate(() => { window.localStartup = "ready"; });
-    await restart.press("Enter");
+    await restart.click();
+    await page.waitForFunction((directory) => window.localTerminalStarts.at(-1)?.directory === directory &&
+      typeof window.localPrompt === "function", restartDirectory);
     await submitLocal("Write-Output fixture-queued");
     await queued.waitFor();
     await page.evaluate(() => window.finishStalledLocalStartup());

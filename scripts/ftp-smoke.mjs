@@ -122,7 +122,8 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await button(rightPane, "FTP").waitFor();
     await page.keyboard.press("2");
     await page.waitForFunction(() => document.getElementById("right-path")?.dataset.path === "FTP");
-    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), [".."]);
+    assert.deepEqual(await right.locator(".file-name-text").allTextContents(), []);
+    assert.equal(await button(rightPane, "Parent folder").isDisabled(), true);
     await right.press("Shift+F4");
     const add = page.getByRole("dialog", { name: "Add FTP connection" });
     await add.getByLabel("Connection name").fill("Local FTP fixture");

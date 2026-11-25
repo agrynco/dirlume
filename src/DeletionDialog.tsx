@@ -59,8 +59,8 @@ function LockDecision({ locked, suspended, onCancel, onInspect, onDecide, waitin
       </div>
       <p>{t("Deletion is paused while another process is using this item.")}</p>
       {windowsClient && <div><Button type="button" className="deletion-inspect" onClick={onInspect}>{t("Find locking processes")}</Button></div>}
-      <label className="deletion-remember"><input type="checkbox" checked={remember}
-        onChange={(event) => setRemember(event.currentTarget.checked)} />{t("Apply to all remaining locked items")}</label>
+      <label className="field-checkbox deletion-remember"><input type="checkbox" checked={remember}
+        onChange={(event) => setRemember(event.currentTarget.checked)} /><span>{t("Apply to all remaining locked items")}</span></label>
     </div>
     <footer className="dialog-footer">
       <Button type="button" data-initial-focus onClick={onCancel}>{t("Cancel")}</Button>

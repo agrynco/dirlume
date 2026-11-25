@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { testDocumentHeaders } from "./appearance-picker-smoke.mjs";
 
 const legacy = {
   id: "legacy", base: "light", name: "Legacy light",
@@ -334,6 +335,8 @@ try {
   assert.equal((await preferences()).retainedFonts, undefined);
   assert.notDeepEqual(await typography(root), originalFonts);
   console.log("Verified seven text surfaces, live local and SSH terminal themes, inherited colors, font fallback, independent zoom, system schemes, and restart.");
+  await testDocumentHeaders(browser);
+  console.log("Verified Classic blue document headers, controls, legacy scheme overrides, and appearance picking.");
 } finally {
   await browser.close();
 }

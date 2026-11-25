@@ -247,7 +247,13 @@ try {
       }
       if (view === "Space Analyzer") {
         await button(pane(side), "Analyze space").click();
-        return button(page.locator(`.space-analyzer-${side}`), "Treemap");
+        const analyzer = page.locator(`.space-analyzer-${side}`);
+        const tree = analyzer.getByRole("treegrid", { name: "Space usage", exact: true });
+        await tree.waitFor();
+        // The Windows fixture uses an installed clock for the connection-expiry tests.
+        if (windows) await page.clock.runFor(32);
+        await page.waitForFunction((node) => document.activeElement === node, await tree.elementHandle());
+        return button(analyzer, "Treemap");
       }
       if (view === "Quick View") {
         await files(opposite(side)).getByRole("option", { name: /^note\.txt/ }).click();
@@ -282,7 +288,11 @@ try {
           });
           await page.keyboard.press("Escape");
           await sources(target).waitFor({ state: "hidden" });
-          await page.waitForFunction((node) => node === document.activeElement, await origin.elementHandle());
+          if (windows) await page.clock.runFor(32);
+          await page.waitForFunction((node) => node === document.activeElement, await origin.elementHandle()).catch(async (error) => {
+            const focused = await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+            throw new Error(`${client} ${side} ${view} after closing ${target} sources left focus on ${focused}`, { cause: error });
+          });
         }
         await pressBookmark(0);
         await page.getByText("No folder shortcuts in group 0.", { exact: true }).waitFor();

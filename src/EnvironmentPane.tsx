@@ -142,8 +142,8 @@ function ValueDialog({ scope, info, kind, name, close, changed }: {
           setExpected(review); setReview(null); setConfirmReplacement(true); setError("");
         }}>{t("Use current definition for review")}</Button>
       </div>}
-      {pathReplacement && editable && <label className="environment-check"><input type="checkbox" checked={replacePath}
-        onChange={(event) => setReplacePath(event.target.checked)} />{t("Replace the entire destination PATH definition.")}</label>}
+      {pathReplacement && editable && <label className="field-checkbox environment-check"><input type="checkbox" checked={replacePath}
+        onChange={(event) => setReplacePath(event.target.checked)} /><span>{t("Replace the entire destination PATH definition.")}</span></label>}
       {error && <p className="dialog-error" role="alert">{error}</p>}
       {!loaded && !error && <p role="status">{t("Loading environment variable…")}</p>}
     </form>
@@ -239,18 +239,18 @@ function CopyDialog({ scope, to, names, close, changed }: {
             <option value="pending">{t("Choose an action")}</option>
             <option value="replace">{t("Replace")}</option><option value="skip">{t("Skip")}</option>
           </select>}
-          {!result && !row.destination && <label className="environment-check">
+          {!result && !row.destination && <label className="field-checkbox environment-check">
             <input type="checkbox" checked={row.choice === "copy"} disabled={busy}
-              onChange={(event) => update(row.source.name, { choice: event.target.checked ? "copy" : "skip" })} />{t("Copy")}
+              onChange={(event) => update(row.source.name, { choice: event.target.checked ? "copy" : "skip" })} /><span>{t("Copy")}</span>
           </label>}
           {result && <span role="status">{t(outcome === "saved" ? "Copied" : outcome ? outcomes[outcome] : "Skipped")}</span>}
           <details><summary>{t("Inspect values")}</summary>
             <label>{t("Source value")}<textarea readOnly value={row.source.value} /></label>
             {row.destination && <label>{t("Destination value")}<textarea readOnly value={row.destination.value} /></label>}
           </details>
-          {!result && row.choice === "replace" && pathName(row.source.name) && <label className="environment-check">
+          {!result && row.choice === "replace" && pathName(row.source.name) && <label className="field-checkbox environment-check">
             <input type="checkbox" checked={row.replacePath} disabled={busy} onChange={(event) =>
-              update(row.source.name, { replacePath: event.target.checked })} />{t("Replace the entire destination PATH definition.")}
+              update(row.source.name, { replacePath: event.target.checked })} /><span>{t("Replace the entire destination PATH definition.")}</span>
           </label>}
         </li>;
       })}

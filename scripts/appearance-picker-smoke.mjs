@@ -54,6 +54,151 @@ export async function testNativeAppearancePicker(main) {
   console.log("Verified native appearance picker window handoff, Escape, dialog picking, and return focus.");
 }
 
+export async function testDocumentHeaders(browser, platform) {
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 735 }, userAgent: platform ? `Mozilla/5.0 (${platform})` : undefined,
+  });
+  try {
+    page.setDefaultTimeout(8000);
+    await page.route("http://dirlume.test/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
+    });
+    await page.addInitScript(() => {
+      const path = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
+      const entries = ["doc.md", "photo.png"].map((name) =>
+        ({ name, directory: false, hidden: false, link: false, size: 20, modified: null }));
+      const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR2kAAAAASUVORK5CYII="), (char) => char.charCodeAt(0));
+      localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
+        theme: "classic-blue",
+        schemes: [
+          { id: "legacy", name: "Legacy blue", base: "classic-blue", colors: {}, fonts: {} },
+          { id: "override", name: "Legacy override", base: "classic-blue", colors: { "dialog-header": "#345678" }, fonts: {} },
+        ],
+      }));
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: async (command) => {
+          if (command === "locations") return [{ label: "Home", path }];
+          if (command === "list_directory") return { path, parent: null, entries, omitted: 0 };
+          if (command === "file_icons") return [];
+          if (command === "read_text") return { text: "# Header contrast", encoding: "utf8" };
+          if (command === "read_bytes") return { length: 1, data: [35] };
+          if (command === "read_preview_image" || command === "read_image_edit") return bytes.buffer;
+          if (command === "open_image_edit") return { id: "photo", width: 1, height: 1, canReplace: true };
+          return null;
+        },
+      };
+    });
+    await page.goto("http://dirlume.test/");
+    const button = (scope, name) => scope.getByRole("button", { name, exact: true });
+    const left = page.getByRole("listbox", { name: "left files", exact: true });
+    const active = page.locator(".text-window:not([hidden])");
+    const header = active.locator(".document-heading");
+    const options = optionsDialog(page);
+    const openOptions = () => button(page, "Options").click();
+    const background = (element) => element.evaluate((node) => getComputedStyle(node).backgroundColor);
+    const classic = "rgb(20, 32, 57)";
+    const open = async (name, key) => {
+      await left.locator(`[data-tooltip="${name}"]`).click();
+      await left.press(key);
+      await header.waitFor();
+    };
+    const close = () => button(header, "Close document").click();
+    const contrast = async (element, surface = header) => {
+      const ink = await element.evaluate((node) => getComputedStyle(node).color);
+      const luminance = (color) => color.match(/\d+/g).slice(0, 3).map((value) => {
+        const channel = Number(value) / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+      const values = [luminance(ink), luminance(await background(surface))];
+      assert.ok((Math.max(...values) + 0.05) / (Math.min(...values) + 0.05) >= 4.5);
+    };
+    await open("doc.md", "F3");
+    await active.getByRole("heading", { name: "Header contrast", exact: true }).waitFor();
+    assert.equal(await background(header), classic);
+    assert.equal(await background(active.locator(".text-toolbar").first()), classic);
+    await contrast(header.locator("h2"));
+    await contrast(header.locator(".document-encoding"));
+    const fileMenu = header.getByRole("menuitem", { name: "File", exact: true });
+    await contrast(fileMenu);
+    await fileMenu.hover();
+    assert.notEqual(await background(fileMenu), "rgba(0, 0, 0, 0)");
+    await contrast(fileMenu, fileMenu);
+    await fileMenu.press("Enter");
+    assert.equal(await fileMenu.getAttribute("aria-expanded"), "true");
+    await contrast(fileMenu, fileMenu);
+    await page.waitForFunction(() => document.activeElement?.matches(".document-menu [role=menu] button:focus-visible") &&
+      getComputedStyle(document.activeElement).outlineStyle !== "none");
+    await page.keyboard.press("Escape");
+    assert.equal(await fileMenu.getAttribute("aria-expanded"), "false");
+    await button(active, "Source").click();
+    await active.locator(".code-surface").waitFor();
+    assert.equal(await background(header), classic);
+    await button(active, "Hex").click();
+    await active.getByLabel("Hexadecimal contents").waitFor();
+    assert.equal(await background(header), classic);
+    await close();
+
+    await open("doc.md", "F4");
+    const editor = active.locator(".cm-content");
+    await editor.press("End");
+    await editor.press("X");
+    const modified = header.getByText("Modified", { exact: true });
+    await modified.waitFor();
+    assert.equal(await background(header), classic);
+    await contrast(modified);
+    await close();
+    await button(page.getByRole("dialog", { name: "Unsaved changes" }), "Discard changes").click();
+
+    for (const key of ["F3", "F4"]) {
+      await open("photo.png", key);
+      await header.getByText("1 × 1 px", { exact: true }).waitFor();
+      assert.equal(await background(header), classic);
+      await contrast(header.locator("h2"));
+      await close();
+    }
+    await button(page, "Find files").click();
+    const search = page.getByRole("dialog", { name: "Find files", exact: true });
+    assert.equal(await background(search.locator(".dialog-heading")), "rgb(191, 191, 191)");
+    await page.keyboard.press("Escape");
+
+    const scheme = options.getByRole("combobox", { name: "Color scheme", exact: true });
+    for (const [id, expected] of [
+      ["light", "rgb(245, 248, 249)"],
+      ["dark", "rgb(29, 40, 54)"],
+      ["custom:legacy", "rgb(191, 191, 191)"],
+      ["custom:override", "rgb(52, 86, 120)"],
+      ["classic-blue", classic],
+    ]) {
+      await openOptions();
+      await button(options, "Appearance").click();
+      await scheme.selectOption(id);
+      await button(options, "Done").click();
+      await open("doc.md", "F3");
+      assert.equal(await background(header), expected);
+      await close();
+    }
+
+    await open("photo.png", "F4");
+    await openOptions();
+    await pickerButton(page).click();
+    await overlay(page).waitFor();
+    await header.locator("h2").click();
+    await heading(page, "Editor").waitFor();
+    const documentHeader = hex(page, "Document header");
+    assert.equal(await documentHeader.inputValue(), "#142039");
+    await documentHeader.fill("#203354");
+    assert.equal(await background(options.locator(".preview-picked-element")), "rgb(32, 51, 84)");
+    await button(options, "Done").click();
+    const name = page.getByRole("dialog", { name: "Name color scheme", exact: true }).getByLabel("Scheme name");
+    await name.press("Enter");
+    assert.equal(await background(header), "rgb(32, 51, 84)");
+  } finally {
+    await page.close();
+  }
+}
+
 export async function testAppearancePicker() {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
@@ -443,6 +588,9 @@ export async function testAppearancePicker() {
     await options.getByRole("button", { name: "Reset file type font", exact: true }).click();
     await done();
     assert.equal((await appearance(filename("left", "logo.SVG")))[1], (await appearance(filename("left", "art.svg")))[1]);
+    await testDocumentHeaders(browser, "Windows NT 10.0; Win64; x64");
+    await testDocumentHeaders(browser, "X11; Linux x86_64");
+    console.log("Verified Classic blue document headers, controls, legacy scheme overrides, and appearance picking on both desktop platforms.");
     console.log("Verified appearance targets, grouped controls, draft preview, cancellation, and private date-grouped history.");
   } finally {
     await browser.close();

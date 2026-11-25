@@ -476,7 +476,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {preview && !hex && (
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
           <MarkdownPreview file={file} source={markdownSource} active={active} position={position} light={light} colors={colors}
-            scroll={markdownScroll} onContent={setMarkdownContent}
+            scroll={markdownScroll} onContent={setMarkdownContent} fontSize={fontSizes.markdown} shortcuts={shortcuts}
             writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
             onOpenDocument={(target, newTab, next) => onOpenDocument(target, newTab, next, markdownScroll.current?.scrollTop ?? 0)} onError={setError} />
           </Suspense>
@@ -833,20 +833,20 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
               <option value="side-by-side">{t("Side-by-side")}</option>
             </select>
           </label>
-          <label><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
+          <label className="field-checkbox"><input type="checkbox" checked={editing} disabled={!documents} onChange={(event) => {
             setInitialEditor(leftFile);
             setEditing(event.target.checked);
-          }} /> {t("Edit files")}</label>
-          {split && <label><input type="checkbox" checked={connectors} onChange={(event) => {
+          }} /><span>{t("Edit files")}</span></label>
+          {split && <label className="field-checkbox"><input type="checkbox" checked={connectors} onChange={(event) => {
             setConnectors(event.target.checked);
             saveCompareOption(compareConnectorsKey, String(event.target.checked));
-          }} /> {t("Show change connectors")}</label>}
-          <label><input type="checkbox" checked={whitespace} onChange={(event) => {
+          }} /><span>{t("Show change connectors")}</span></label>}
+          <label className="field-checkbox"><input type="checkbox" checked={whitespace} onChange={(event) => {
             setWhitespace(event.target.checked); setCurrent(0);
-          }} /> {t("Show whitespace changes")}</label>
-          <label><input type="checkbox" checked={collapse} onChange={(event) => {
+          }} /><span>{t("Show whitespace changes")}</span></label>
+          <label className="field-checkbox"><input type="checkbox" checked={collapse} onChange={(event) => {
             setCollapse(event.target.checked); setExpanded([]); saveCompareOption(compareCollapseKey, String(event.target.checked));
-          }} /> {t("Collapse unchanged sections")}</label>
+          }} /><span>{t("Collapse unchanged sections")}</span></label>
         </DialogDisclosure>
       </div>
       {failure && <p className="dialog-error" role="alert">{errorText(failure)}</p>}

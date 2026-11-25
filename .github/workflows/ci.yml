@@ -144,6 +144,9 @@ jobs:
       - name: Verify selective settings import and export
         if: github.event.action != 'closed'
         run: node scripts/settings-archive-smoke.mjs
+      - name: Verify settings profiles
+        if: github.event.action != 'closed'
+        run: node scripts/settings-profiles-smoke.mjs
       - name: Verify the optional status bar
         if: github.event.action != 'closed'
         run: node scripts/status-bar-smoke.mjs
@@ -168,6 +171,12 @@ jobs:
       - name: Verify Quick View in both panes
         if: github.event.action != 'closed'
         run: node scripts/quick-view-smoke.mjs
+      - name: Verify continuous scrolling in Hex Viewer
+        if: github.event.action != 'closed'
+        run: node scripts/hex-scroll-smoke.mjs
+      - name: Verify Mermaid diagram zoom and separate viewer
+        if: github.event.action != 'closed'
+        run: node scripts/mermaid-zoom-smoke.mjs
       - name: Verify main menu visibility and shortcuts
         if: github.event.action != 'closed'
         run: node scripts/menu-header-smoke.mjs

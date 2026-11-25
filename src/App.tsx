@@ -44,7 +44,7 @@ import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type Fo
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
-import { AboutDialog, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { AboutDialog, DonationButton, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { PaneSources, type PaneSource } from "./PaneSources";
@@ -75,7 +75,8 @@ import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./
 import { TransferDialog, type Transfer } from "./TransferDialog";
 import { useArchiveChange } from "./useArchiveChange";
 import {
-  applyListing, childPlace, closeSearchResults, emptyPane, filesystemPlace, formatSize, hasParentRow, localPath, opposite, paneCursorIndex, paneItem, parentPlace,
+  applyListing, breadcrumbTrail, childPlace, closeSearchResults, connectionSource, filesystemPlace, formatSize, localPath, opposite,
+  paneCursorIndex, paneItem, parentPath, parentPlace, previousPath,
   readPlace, replaceSearchMatches, selectableRange, showSearchResults, SmbCredentialsRequired, toggleMarkAndMoveCursor,
   updateSearchMatches, visibleEntries, type DeniedSshListing, type FilePaneView, type ListingAction, type PaneState, type SearchMatch,
   type SearchQuery, type Side, type SortColumn,
@@ -166,6 +167,7 @@ type Modal =
   | { kind: "sortMenu"; side: Side }
   | { kind: "sortCriteria"; side: Side; mode: SortMode }
   | { kind: "about" | "commandHistory" | "mcp" }
+  | { kind: "clearErrorLog"; clearing?: boolean; error?: string }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
   | { kind: "whatsNew" }
@@ -425,7 +427,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const state = panes[side];
     if (!trees[side].enabled || !state.selected) return null;
     const item = paneItem(state, trees[side].lookup(state, state.selected) ?? undefined);
-    return item?.place.kind === "local" ? (item.entry.directory ? childPlace(item.place, item.entry.name) : item.place) : null;
+    if (item?.place.kind !== "local") return null;
+    const folder = item.entry.directory ? childPlace(item.place, item.entry.name) : item.place;
+    return folder.kind === "local" ? { ...folder, parent: parentPath(folder.path, windowsClient) } : null;
   }
   const terminalLocation = analysis?.location.place ?? treeFolder(active) ?? pane.place;
   const terminalPlace = terminalLocation?.kind === "local" || terminalLocation?.kind === "ssh" ? terminalLocation : null;
@@ -627,7 +631,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, [dropTerminal, updatePane]);
 
   const load = useCallback(async function loadPlace(side: Side, place: Place, action: ListingAction | "background" | "startup" = "push",
-    reveal?: string, sudoPassword?: string): Promise<boolean> {
+    reveal?: string, sudoPassword?: string, addressFrom?: FileLocation): Promise<boolean> {
     const background = action === "background";
     const elevated = sudoPassword !== undefined;
     const dialog = activeModal.current;
@@ -644,11 +648,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const revealed = reveal !== undefined ? openedListing.entries.find((entry) => entry.name === reveal) : undefined;
-      const found = reveal === ".." ? hasParentRow(openedPlace) : !!revealed;
+      const found = reveal === ".." ? parentPlace(openedPlace) !== null : !!revealed;
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("Item no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         if (background && pane.place !== place) return pane;
-        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action), sudoListing };
+        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action, addressFrom), sudoListing };
         if (background && pane.error !== pane.kswitcherAvailabilityError) {
           Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         }
@@ -1307,6 +1311,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
+  async function clearErrorLog() {
+    if (modal?.kind !== "clearErrorLog" || modal.clearing) return;
+    setModal({ kind: "clearErrorLog", clearing: true });
+    try {
+      await api.clearErrorLog();
+      setModal(null);
+      setStatus({ text: "Error log cleared." });
+    } catch (error) {
+      setModal({ kind: "clearErrorLog", error: describeError(error) });
+    }
+  }
+
   function documentKeys(event: KeyboardEvent) {
     if (modal || helpTopic || event.defaultPrevented || event.nativeEvent.isComposing) return;
     if ((event.target as HTMLElement).closest("dialog[open]")) return;
@@ -1477,7 +1493,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function open(side: Side, entry: Entry, selectParent = false) {
-    if (entry.name === "..") { parent(side); return; }
+    if (entry.name === "..") { parentAction(side)?.(); return; }
     const pane = panes[side];
     if (pane.loading) return;
     if (pane.place?.kind === "connections" && entry.connection) {
@@ -1513,11 +1529,15 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function openConnections(side: Side, source: ConnectionSource, trail?: FileLocation) {
-    const place = panes[side].place;
+  function openConnections(side: Side, source: ConnectionSource) {
+    const { place, addressTrail } = panes[side];
     showProcesses(side, false);
     if (place?.kind === "connections" && place.source === source) refresh(side);
-    else void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place, trail });
+    else {
+      const trail = place && place.kind !== "connections" && connectionSource(place) === source
+        ? previousPath(place, addressTrail).at(-1) ?? place : undefined;
+      void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place, trail });
+    }
   }
 
   function editConnection(side: Side, source: ConnectionSource, profile?: SavedConnection) {
@@ -1693,31 +1713,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function parent(side: Side) {
-    if (processPanels[side]) {
-      showProcesses(side, false);
-      return;
-    }
-    if (panes[side].search) {
-      closeResults(side);
-      return;
-    }
+  function parentAction(side: Side) {
+    if (processPanels[side]) return () => showProcesses(side, false);
+    if (panes[side].search) return () => closeResults(side);
     const place = panes[side].place;
-    const target = place && parentPlace(place);
-    if (place?.kind === "connections") {
-      if (target) {
-        const position = panes[side].history.lastIndexOf(target, panes[side].position - 1);
-        void load(side, target, position >= 0 ? position : "push");
-      } else {
-        cancelLoading(side);
-        updatePane(side, () => emptyPane);
-      }
-      return;
-    }
-    if (place && target) {
+    const target = parentPlace(place);
+    if (!place || !target) return undefined;
+    return () => {
       const reveal = target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
-      void load(side, target, "push", reveal);
-    }
+      void load(side, target, "push", reveal, undefined, treeFolder(side) ?? undefined);
+      focus(side);
+    };
   }
 
   function currentFolderShortcut(side: Side) {
@@ -2377,6 +2383,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   async function navigateTree(side: Side, destination: FileLocation, focusTree: boolean) {
     const pane = latest.current[side];
     const root = pane.place;
+    const addressFrom = treeFolder(side);
     const segments = root?.kind === "local" && destination.kind === "local" ? spaceRelativePath(root, destination) : null;
     const ticket = ++treeNavigation.current[side];
     const current = () => treeNavigation.current[side] === ticket && latest.current[side].place === root &&
@@ -2384,10 +2391,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const selected = segments ? await trees[side].reveal(pane, segments, current) : null;
     if (!current()) return;
     if (selected !== null) {
-      updatePane(side, (state) => ({ ...state, selected, revealedHidden: selected }));
+      updatePane(side, (state) => ({ ...state, selected, revealedHidden: selected,
+        addressTrail: breadcrumbTrail(addressFrom ?? root, destination, state.addressTrail) }));
       rememberRecentLocation(destination);
     }
-    else if (!await (focusTree ? load(side, destination) : loadTerminalFolder(side, destination))) return;
+    else if (!await (focusTree ? load(side, destination, "push", undefined, undefined, addressFrom ?? undefined) :
+      loadTerminalFolder(side, destination))) return;
     if (focusTree) requestAnimationFrame(() => focus(side));
   }
 
@@ -2823,10 +2832,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         break;
       }
       case "open": if (currentRow) open(active, currentRow, true); break;
+      case "openInSystem":
+        if (!canOpenInSystem || !currentRow) break;
+        if (systemFolderPath !== null) {
+          void api.operate(systemFolderPath, { kind: "open_directory" }).catch((error: unknown) =>
+            setStatus({ text: describeError(error), error: true }));
+        } else open(active, currentRow, true);
+        break;
       case "attributes":
         if (currentItem && !pane.loading && !busy) setModal({ kind: "attributes", item: currentItem });
         break;
-      case "parent": parent(active); break;
+      case "parent": parentAction(active)?.(); break;
       case "back": history(active, -1); break;
       case "forward": history(active, 1); break;
       case "refresh": refresh(active, true); break;
@@ -2851,8 +2867,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "commandName":
         if (command === "commandPath" && currentRow?.name === ".." &&
             (pane.place?.kind === "local" || pane.place?.kind === "ssh")) {
-          const target = parentPlace(pane.place);
-          if (target) insertCommand(placePath(target), pane.place.kind === "local" && windowsClient);
+          insertCommand(placePath(pane.place), pane.place.kind === "local" && windowsClient);
         } else if (currentItem && (currentItem.place.kind === "local" || currentItem.place.kind === "ssh")) {
           insertCommand(command === "commandPath"
             ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name,
@@ -2882,6 +2897,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }
         break;
       }
+      case "clearMarks":
+        if (pane.marked.length) {
+          selectionAnchor.current[active] = currentRow?.name ?? null;
+          updatePane(active, (state) => ({ ...state, marked: [], selected: currentRow?.name ?? state.selected }));
+        }
+        break;
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
       case "copyClipboard": if (current) void copyClipboard(active, current); break;
@@ -3025,6 +3046,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "clearMarks" && (!onFiles || inField || !filesAvailable || catalog || event.repeat)) return;
+    if (command === "openInSystem" && (!onFiles || inField || !canOpenInSystem || event.repeat)) return;
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
     if (command && (commandPanelMode(command) || (folderGroupCommand(command)?.add === false)) &&
         (inField || target.closest("[role=menu]") || (commandPanelMode(command) && !canSelectPanelMode(active)))) return;
@@ -3087,6 +3110,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !recentActive && !processPanels[active] && !pane.loading;
+  const systemFolder = currentRow?.name === ".." ? pane.place :
+    currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
+  const systemFolderPath = systemFolder?.kind === "local" && !smbHost(systemFolder) ? systemFolder.path : null;
+  const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && !currentItem.entry.directory);
   const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
   const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
@@ -3110,13 +3137,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function paneMenu(side: Side): MenuGroup {
     const target = panes[side];
+    const parent = parentAction(side);
     const available = panesAvailable && !paneCovered(side) && !target.loading;
     function inPane(command: "back" | "forward" | "parent" | "refresh", disabled: boolean) {
       return {
         ...menuCommand(command, !available || disabled),
         run: () => {
           focus(side);
-          if (command === "parent") parent(side);
+          if (command === "parent") parent?.();
           else if (command === "refresh") refresh(side, true);
           else history(side, command === "back" ? -1 : 1);
         },
@@ -3145,8 +3173,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
         inPane("back", !processPanels[side] && !target.search && target.position <= 0),
         inPane("forward", !processPanels[side] && target.position >= target.history.length - 1),
-        inPane("parent", !processPanels[side] && !target.search && target.place?.kind !== "connections" &&
-          (!target.place || !parentPlace(target.place))),
+        inPane("parent", !parent),
         inPane("refresh", !!processPanels[side] || !target.place),
       ],
     };
@@ -3159,6 +3186,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     paneMenu("left"),
     { label: "Files", items: [
       ...fileActions.map(({ command, label, disabled }) => menuCommand(command, (!analysis && !filesAvailable) || disabled, label)),
+      menuCommand("openInSystem", !canOpenInSystem),
       menuCommand("createArchive", !filesAvailable || !local || !current || !!pane.search, "Create archive"),
       menuCommand("attributes", !filesAvailable || !currentItem || busy),
       ...(windowsClient ? [menuCommand("lockingProcesses", !!previewSide || !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
@@ -3190,7 +3218,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { label: "Help", items: [menuCommand("help"),
       ...(installedRelease ? [{ label: "What's new", run: () => setModal({ kind: "whatsNew" }) }] : []),
       { label: "About", run: () => setModal({ kind: "about" }) },
-      { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
+      { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() },
+      { label: "Clear error log", run: () => setModal({ kind: "clearErrorLog" }) }] },
   ];
 
   const showFileActions = !showingGit && !environmentActive && !recentActive && activeDocument === null;
@@ -3303,9 +3332,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (trees[side].enabled && place.kind === "local") void navigateTree(side, place, true);
               else void load(side, place);
             }}
-            onOpenConnections={(source, trail) => openConnections(side, source, trail)}
+            onOpenConnections={(source) => openConnections(side, source)}
             onCopyPath={copyPath}
-            onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side, true)}
+            onHistory={(offset) => history(side, offset)} onParent={parentAction(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
               updatePane(side, (pane) => ({ ...pane, error: "", elevationPath: undefined, deniedSshListing: undefined }));
               requestAnimationFrame(() => focus(side));
@@ -3378,7 +3407,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <p className="pane-empty" role="status">{t("Loading preview…")}</p>
         </section>}>
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
-            message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} onFocusFiles={() => focus(active)} />
+            message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} markdownSize={preferences.viewFontSizes.markdown}
+            shortcuts={shortcuts} onFocusFiles={() => focus(active)} />
         </Suspense>}
         {sourceMenu && paneCovered(sourceMenu.side) && paneSources(sourceMenu.side, true)}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator" data-help-topic="workspace"
@@ -3587,6 +3617,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         setLocalAppearancePick(null);
         localAppearancePick(pick);
       }} />}
+      {modal?.kind === "clearErrorLog" && (
+        <Dialog title={t("Clear error log")} tone="warning" onClose={() => { if (!modal.clearing) setModal(null); }}>
+          <div className="dialog-body">
+            <p>{t("Permanently clear all entries in the error log?")}</p>
+            {modal.error && <p role="alert" className="dialog-error">{errorText(modal.error)}</p>}
+          </div>
+          <footer className="dialog-footer">
+            <Button type="button" data-initial-focus disabled={modal.clearing} onClick={() => setModal(null)}>{t("Cancel")}</Button>
+            <Button type="button" className="alert-confirm" disabled={modal.clearing} onClick={() => void clearErrorLog()}>
+              {t("Clear error log")}</Button>
+          </footer>
+        </Dialog>
+      )}
       {modal?.kind === "exit" && (
         <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setModal(modal.update ? { kind: "update", update: modal.update } : null)}>
           <div className="dialog-body"><p>{t(modal.update ? "Some editors have unsaved changes. Discard them and install the update?" :
@@ -3627,10 +3670,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </Dialog>
       )}
       {modal?.kind === "upToDate" && (
-        <Dialog title={t("Check for updates")} onClose={() => setModal(null)}
-          footer={<Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Close")}</Button>}>
-          <div className="dialog-body"><p>{t("Dirlume is up to date.")}</p></div>
-        </Dialog>
+        <UpToDateDialog onClose={() => setModal(null)} />
       )}
       {modal?.kind === "installUpdate" && (
         <Dialog title={t("Installing update")}>
@@ -3892,6 +3932,25 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     </div>
     </ElevationContext>
   );
+}
+
+function UpToDateDialog({ onClose }: { onClose: () => void }) {
+  const [linkError, setLinkError] = useState("");
+
+  function openDonationLink() {
+    setLinkError("");
+    void api.openWebLink(donationUrl).catch((error: unknown) => setLinkError(describeError(error)));
+  }
+
+  return <Dialog title={t("Check for updates")} onClose={onClose} footer={<>
+    <DonationButton onClick={openDonationLink} />
+    <Button type="button" data-initial-focus onClick={onClose}>{t("Close")}</Button>
+  </>}>
+    <div className="dialog-body">
+      <p>{t("Dirlume is up to date.")}</p>
+      {linkError && <p role="alert" className="dialog-error">{errorText(linkError)}</p>}
+    </div>
+  </Dialog>;
 }
 
 function CommandHistory({ commands, onChoose, onClose }: {

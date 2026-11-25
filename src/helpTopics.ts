@@ -46,6 +46,7 @@ export const helpTopics = {
   remote: { title: "Remote connection", keys: ["leftLocations", "rightLocations", "ftpSources", "addFtpProfile", "editFtpProfile", "sshSources", "addSshProfile", "editSshProfile", "remoteSources"] },
   processes: { title: "Processes", keys: ["leftLocations", "rightLocations"] },
   general: { title: "General", keys: ["settings"] },
+  profiles: { title: "Profiles", keys: [] },
   appearance: { title: "Appearance", keys: [] },
   window: { title: colorGroups.window.label, keys: [] },
   panels: { title: colorGroups.panels.label, keys: [] },
@@ -63,12 +64,12 @@ export const helpGroups: readonly { title?: string; topics: readonly HelpTopic[]
   { topics: ["workspace", "files", "operations", "archives", "search", "quickView", "viewer", "fileBookmarks", "editor", "terminal", "terminalShortcuts", "compare", "remote", "processes", "gitView", "environment"] },
   { title: "File pane controls", topics: ["paneNavigation", "paneAddress", "paneSources", "paneFilter", "paneViews", "paneColumns", "paneSelection", "paneStatus", "actionDialogs"] },
   { title: "Space Analyzer controls", topics: ["diskInformation", "spaceAnalyzer", "spaceScope", "spacePath", "spaceTree", "spaceTreemap", "spaceSunburst", "spaceMetric", "spaceActions"] },
-  { title: "Options", topics: ["general", "appearance", "window", "panels", "fileTypes", "dialogs", "textTools", "fonts", "viewFonts", "shortcuts"] },
+  { title: "Options", topics: ["general", "profiles", "appearance", "window", "panels", "fileTypes", "dialogs", "textTools", "fonts", "viewFonts", "shortcuts"] },
 ];
 
 export const overviewTopics: Partial<Record<HelpTopic, readonly HelpTopic[]>> = {
   files: ["paneNavigation", "paneAddress", "paneSources", "paneFilter", "paneViews", "paneColumns", "paneSelection", "paneStatus", "spaceAnalyzer"],
   operations: ["paneSelection", "actionDialogs"],
-  general: ["appearance", "shortcuts"],
+  general: ["profiles", "appearance", "shortcuts"],
   terminal: ["terminalShortcuts", "environment"],
 };

@@ -402,6 +402,8 @@ try {
   await clickBreadcrumbAncestor(leftBreadcrumbs, "breadcrumb-branch");
   await page.waitForFunction(() => document.querySelector("#left-path [aria-current=location]")?.textContent === "breadcrumb-branch");
   await clickBreadcrumbAncestor(leftBreadcrumbs, "breadcrumb-leaf");
+  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path &&
+    document.getElementById("left-files")?.getAttribute("aria-busy") === "false", branchLeaf);
   await forwardCrumbs.waitFor({ state: "hidden" });
   assert.equal(await currentCrumb.innerText(), "breadcrumb-leaf");
   await clickBreadcrumbAncestor(leftBreadcrumbs, "from");
@@ -1695,7 +1697,8 @@ try {
       await page.waitForFunction(() => document.getElementById("left-path")?.dataset.path === "Remote machine");
     }
     await openRemoteConnections();
-    assert.deepEqual(await remote.locator(".file-name-text").allTextContents(), [".."]);
+    assert.deepEqual(await remote.locator(".file-name-text").allTextContents(), []);
+    assert.equal(await leftPane.getByRole("button", { name: "Parent folder", exact: true }).isDisabled(), true);
     await remote.press("Shift+F4");
     const add = page.getByRole("dialog", { name: "Add remote machine", exact: true });
     await add.getByLabel("Connection name").fill("Local test server");
@@ -1761,7 +1764,8 @@ try {
     await page.getByRole("dialog", { name: "Remove connection", exact: true })
       .getByRole("button", { name: "Remove connection", exact: true }).click();
     await renamedServer.waitFor({ state: "detached" });
-    await remote.getByRole("option", { name: /^\.\./ }).dblclick();
+    assert.equal(await leftPane.getByRole("button", { name: "Parent folder", exact: true }).isDisabled(), true);
+    await back.click();
     await leftPane.getByRole("heading", { name: "from", exact: true }).waitFor({ state: "attached" });
   });
   await left.getByRole("option", { name: /^guide.md/ }).click({ modifiers: ["Control"] });
@@ -2124,7 +2128,7 @@ try {
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowDown");
   const helpItems = menu("Help").getByRole("menuitem");
-  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log"]);
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log", "Clear error log"]);
   const errorLogAction = helpItems.filter({ hasText: "Open error log" });
   assert.equal(await errorLogAction.evaluate((item) => item.previousElementSibling?.getAttribute("role")), "separator");
   await page.keyboard.press("Enter");
@@ -2158,17 +2162,35 @@ try {
   await appendDiagnosticFixture(diagnosticsFile);
   await openMainMenu(page, "Help");
   await page.keyboard.press("End");
+  await page.keyboard.press("ArrowUp");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
   await page.keyboard.press("Enter");
   await errorLogViewer.waitFor();
   await checkDiagnosticLog(errorLogViewer, diagnosticsFile);
   await page.keyboard.press("Escape");
   await errorLogViewer.waitFor({ state: "hidden" });
+  const oversizedLog = Buffer.alloc(8 * 1024 * 1024 + 1, " ");
+  await writeFile(diagnosticsFile, oversizedLog);
   await openMainMenu(page, "Help");
   await errorLogAction.click();
   await errorLogViewer.waitFor();
+  await errorLogViewer.getByText("Text files can be at most 8 MiB.", { exact: true }).waitFor();
+  await setTimeout(400);
+  assert.equal((await readFile(diagnosticsFile)).length, oversizedLog.length);
   await page.keyboard.press("Escape");
   await errorLogViewer.waitFor({ state: "hidden" });
+  const clearLogAction = helpItems.getByText("Clear error log", { exact: true });
+  const clearLogDialog = page.getByRole("dialog", { name: "Clear error log", exact: true });
+  await openMainMenu(page, "Help");
+  await clearLogAction.click();
+  await clearLogDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal((await readFile(diagnosticsFile)).length, oversizedLog.length);
+  await openMainMenu(page, "Help");
+  await clearLogAction.click();
+  await clearLogDialog.getByRole("button", { name: "Clear error log", exact: true }).click();
+  await clearLogDialog.waitFor({ state: "hidden" });
+  assert.equal((await readFile(diagnosticsFile)).length, 0);
+  await appendDiagnosticFixture(diagnosticsFile);
   await openMainMenu(page, "Files");
   const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });
   assert.match(await attributesAction.getAttribute("data-tooltip"), /Ctrl\+A/);

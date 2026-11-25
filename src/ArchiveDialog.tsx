@@ -156,8 +156,8 @@ export function ArchiveDialog({ directory, names, showHidden, onClose, onCreated
   }
 
   const fieldCheck = (label: string, checked: boolean, toggle: (value: boolean) => void, disabled = false) =>
-    <label className="transfer-checkbox"><input type="checkbox" checked={checked} disabled={disabled}
-      onChange={(event) => toggle(event.target.checked)} /> {t(label)}</label>;
+    <label className="field-checkbox"><input type="checkbox" checked={checked} disabled={disabled}
+      onChange={(event) => toggle(event.target.checked)} /><span>{t(label)}</span></label>;
 
   return <>
     <Dialog title={t("Create archive")} wide onClose={close}>
@@ -271,8 +271,8 @@ export function ArchivePasswordDialog({ onOpen, onClose }: { onOpen: (password: 
           <input type={visible ? "text" : "password"} data-initial-focus required autoComplete="off" disabled={busy}
             value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
-        <label className="transfer-checkbox"><input type="checkbox" checked={visible}
-          onChange={(event) => setVisible(event.target.checked)} /> {t("Show password")}</label>
+        <label className="field-checkbox"><input type="checkbox" checked={visible}
+          onChange={(event) => setVisible(event.target.checked)} /><span>{t("Show password")}</span></label>
         {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
       </div>
       <footer className="dialog-footer">

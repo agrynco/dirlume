@@ -38,7 +38,8 @@ try {
           schemes: [{ id: "legacy", name: "Legacy panels", base: "light", colors: { "panel-selection": "#e1f1ef" }, fonts: {} }] }));
       }
       const home = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
-      const entries = names.map((name) => ({ name, directory: false, hidden: false, link: false, size: 0, modified: null }));
+      const entries = [...names, "sample-folder"].map((name) =>
+        ({ name, directory: name === "sample-folder", hidden: false, link: false, size: 0, modified: null }));
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args) => {
@@ -55,6 +56,26 @@ try {
     const current = (side) => page.locator(`#${side}-files .file-row.marked[data-current=true]`);
     const activeCursor = () => page.locator(".pane.active .file-row.marked[data-current=true]");
     const schemes = page.locator(".topbar-scheme");
+    const itemIcon = (item) => item.locator(".file-name > :is(svg.lucide-file, svg.folder-icon)");
+    const cellWeights = (item) => item.locator(".file-name, .file-size, .file-date, .file-time")
+      .evaluateAll((cells) => cells.map((cell) => getComputedStyle(cell).fontWeight));
+    for (const side of ["left", "right"]) {
+      const scope = page.locator(`#${side}-files`);
+      for (const item of [row(0, side), scope.locator('[data-tooltip="sample-folder"]')]) {
+        await item.click();
+        const icon = itemIcon(item);
+        await icon.waitFor();
+        const initial = await icon.boundingBox();
+        const weights = await cellWeights(item);
+        for (const isMarked of [true, false]) {
+          await item.click();
+          await scope.press("Insert");
+          assert.equal(await item.evaluate((element) => element.classList.contains("marked")), isMarked);
+          assert.deepEqual(await icon.boundingBox(), initial, `${layout}, ${side}, ${await item.getAttribute("data-tooltip")}`);
+          assert.deepEqual(await cellWeights(item), weights);
+        }
+      }
+    }
     for (const index of names.keys()) await row(index).click({ modifiers: [markModifier] });
     await row(0, "right").click({ modifiers: [markModifier] });
 
@@ -127,9 +148,68 @@ try {
       await done();
       assert.deepEqual(await style(row(0)), inherited);
     }
+    const right = page.locator("#right-files");
+    await row(1, "right").click({ modifiers: [markModifier] });
+    assert.equal(await right.locator(".marked").count(), 2);
+    await row(2).click();
+    const command = page.getByRole("combobox", { name: "Command line", exact: true });
+    await command.fill("echo");
+    await command.press("Space");
+    assert.equal(await command.inputValue(), "echo ");
+    assert.equal(await left.locator(".marked").count(), 3);
+    await command.fill("");
+    await left.press("Space");
+    assert.equal(await left.locator(".marked").count(), 0);
+    assert.equal(await right.locator(".marked").count(), 2);
+    assert.equal(await row(2).getAttribute("data-current"), "true");
+    await left.press("Space");
+    assert.equal(await row(2).getAttribute("data-current"), "true");
+
+    if (layout === "standard") {
+      const options = page.getByRole("dialog", { name: "Options", exact: true });
+      async function shortcuts() {
+        await page.getByRole("button", { name: "Options", exact: true }).click();
+        await options.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+      }
+      const done = () => options.getByRole("button", { name: "Done", exact: true }).click();
+      await shortcuts();
+      await options.getByRole("button", { name: "Change Space for Clear marks", exact: true }).click();
+      await options.getByRole("textbox", { name: "New shortcut to replace Space for Clear marks", exact: true }).press("Escape");
+      const conflict = page.getByRole("dialog", { name: "Shortcut conflict", exact: true });
+      await conflict.getByRole("button", { name: "Reassign shortcut", exact: true }).click();
+      await done();
+      await right.press("Escape");
+      assert.equal(await right.locator(".marked").count(), 0);
+      assert.equal(await row(1, "right").getAttribute("data-current"), "true");
+      await shortcuts();
+      await options.getByRole("button", { name: "Remove Escape from Clear marks", exact: true }).click();
+      await done();
+      await row(2, "right").click({ modifiers: [markModifier] });
+      await right.press("Escape");
+      assert.equal(await right.locator(".marked").count(), 1);
+
+      await page.evaluate(() => {
+        const key = "dirlume.preferences.v1";
+        const preferences = JSON.parse(localStorage.getItem(key));
+        preferences.activeShortcutScheme = "legacy-space";
+        preferences.shortcutSchemes.push({ id: "legacy-space", name: "Legacy Space", bindings: { mark: ["Space"] } });
+        localStorage.setItem(key, JSON.stringify(preferences));
+      });
+      await page.reload();
+      await shortcuts();
+      await options.getByRole("button", { name: "Change Space for Mark or unmark item", exact: true }).waitFor();
+      await options.getByRole("button", { name: "Add shortcut for Clear marks", exact: true }).click();
+      await options.getByRole("textbox", { name: "New shortcut for Clear marks", exact: true }).press("Space");
+      await conflict.getByRole("button", { name: "Reassign shortcut", exact: true }).click();
+      await done();
+      await row(2, "right").click();
+      await right.press("Space");
+      assert.equal(await right.locator(".marked").count(), 0);
+    }
     await page.close();
   }
   console.log("Verified current marked row contrast in every theme and layout, keyboard movement, preview, and independent saved colors.");
+  console.log("Verified file and folder icon positions, active-pane mark clearing, text input, Escape conflicts, and disabling Clear marks.");
 } finally {
   await browser.close();
 }

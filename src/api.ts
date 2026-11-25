@@ -414,6 +414,7 @@ export const api = {
   readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
+  clearErrorLog: () => invoke<void>("clear_error_log"),
   checkForUpdate: (trigger: "automatic" | "manual") => invoke<AppUpdate | null>("check_for_update", { trigger }),
   installedRelease: () => invoke<InstalledRelease>("installed_release"),
   acknowledgeRelease: () => invoke<void>("acknowledge_release"),
@@ -488,7 +489,7 @@ export const api = {
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
     invoke<FileAttributes>("update_file_attributes", { directory, name, changes }),
-  operate: (directory: string, operation: Operation) =>
+  operate: (directory: string, operation: Operation | { kind: "open_directory" }) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
   connectSavedServer: (credential: string, segments?: string[]) =>
     invoke<Connection & { share: string }>("connect_saved_server", { credential, segments }),

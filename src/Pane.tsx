@@ -9,7 +9,7 @@ import {
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
-import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, parentPlace, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
+import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
@@ -83,10 +83,10 @@ interface PaneProps {
   onPath: (path: string) => void;
   onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
-  onOpenConnections: (source: ConnectionSource, trail: FileLocation) => void;
+  onOpenConnections: (source: ConnectionSource) => void;
   onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
-  onParent: () => void;
+  onParent?: () => void;
   onRefresh: () => void;
   onDismissError: () => void;
   onRetryWithSudo: () => void;
@@ -519,8 +519,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       <div className="navigation" data-help-topic="paneNavigation">
         <Button className="icon-button" aria-label={t("Back")} disabled={!processView && !search && pane.position <= 0} onClick={() => onHistory(-1)}><ArrowLeft /></Button>
         <Button className="icon-button" aria-label={t("Forward")} disabled={pane.position + 1 >= pane.history.length} onClick={() => onHistory(1)}><ArrowRight /></Button>
-        <Button className="icon-button" aria-label={t("Parent folder")} disabled={!processView && !search && !catalog && (!pane.place || !parentPlace(pane.place))} onClick={onParent}><ArrowUp /></Button>
-        <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} showHidden={showHidden}
+        <Button className="icon-button" aria-label={t("Parent folder")} disabled={!onParent} onClick={onParent}><ArrowUp /></Button>
+        <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} trail={pane.addressTrail} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onOpenConnections={onOpenConnections}
           onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
         {sourceMenu}
@@ -612,7 +612,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 onDragStart={(event) => event.preventDefault()}
                 onDoubleClick={() => onOpen(entry)}>
                 {group.map(({ field }, slot) => isNameField(field) ?
-                  <span key={slot} className="file-name" data-marked-name={field === "markedName" || undefined}>
+                  <span key={slot} className="file-name">
                     {tree && <span className="file-tree-indent" style={{ width: Math.min(12, (entry.tree?.segments.length ?? 1) - 1) * 12 }} aria-hidden="true" />}
                     {tree && (entry.tree && entry.directory && !entry.link
                       ? <Button type="button" className="file-tree-expand" tabIndex={-1}
