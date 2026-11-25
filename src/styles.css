@@ -1860,7 +1860,11 @@ button.color-swatch {
 .hex-toolbar form { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .hex-toolbar { flex-wrap: wrap; }
 .hex-toolbar .history-field { width: 150px; }
-.hex-view { white-space: pre; overflow-wrap: normal; }
+.hex-view { white-space: pre; overflow-wrap: normal; padding-block: 0; overflow-anchor: none; }
+.hex-track { position: relative; min-width: max-content; overflow: clip; }
+.hex-measure { visibility: hidden; }
+.hex-lines { position: absolute; inset-inline-start: 0; }
+.hex-read-error { position: absolute; margin: 0; padding: 4px 8px; color: var(--danger); background: var(--danger-bg); white-space: normal; }
 .code-surface { padding: 0; overflow: hidden; }
 .code-surface .cm-editor { height: 100%; }
 .code-surface .cm-scroller { font: inherit; }
