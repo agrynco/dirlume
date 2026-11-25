@@ -33,6 +33,26 @@ pub async fn error_log() -> crate::desktop::Result<Option<String>> {
     .await
 }
 
+#[tauri::command]
+pub async fn clear_error_log() -> crate::desktop::Result<()> {
+    crate::desktop::blocking(|| {
+        let log = LOG
+            .get()
+            .ok_or("The diagnostics directory is unavailable.")?;
+        log.clear().map_err(crate::desktop::message)
+    })
+    .await
+}
+
+pub(crate) fn is_log_file(path: &Path) -> bool {
+    LOG.get().is_some_and(|log| {
+        path == log.path
+            || fs::canonicalize(path).is_ok_and(|path| {
+                fs::canonicalize(&log.path).is_ok_and(|log_path| path == log_path)
+            })
+    })
+}
+
 const HISTORY_SIZE: usize = 32;
 const ACTIONS: &[&str] = &[
     "list_directory",
@@ -381,6 +401,7 @@ fn panic_source(file: &str, line: u32) -> Option<PanicSource> {
 
 struct Diagnostics {
     path: PathBuf,
+    file: Mutex<()>,
     actions: Mutex<VecDeque<Action>>,
 }
 
@@ -388,8 +409,42 @@ impl Diagnostics {
     fn new(path: PathBuf) -> Self {
         Self {
             path,
+            file: Mutex::new(()),
             actions: Mutex::new(VecDeque::with_capacity(HISTORY_SIZE)),
         }
+    }
+
+    fn clear(&self) -> std::io::Result<()> {
+        let _file = self
+            .file
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&self.path)
+        {
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn append(&self, entry: &Entry<'_>) -> std::io::Result<()> {
+        let mut line = serde_json::to_vec(entry)?;
+        line.push(b'\n');
+        let _file = self
+            .file
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?
+            .write_all(&line)
     }
 
     fn remember(&self, operation: &'static str) {
@@ -420,7 +475,7 @@ impl Diagnostics {
             recent_actions: actions,
             detail,
         };
-        let _ = append(&self.path, &entry);
+        let _ = self.append(&entry);
     }
 
     fn write_panic(&self, timestamp_ms: u64, details: &PanicDetails, actions: &VecDeque<Action>) {
@@ -432,7 +487,7 @@ impl Diagnostics {
             recent_actions: actions,
             detail: Some(EntryDetail::Panic(details)),
         };
-        let _ = append(&self.path, &entry);
+        let _ = self.append(&entry);
     }
 
     fn capture_panic(&self, info: &PanicHookInfo<'_>) {
@@ -508,19 +563,6 @@ fn timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
-}
-
-fn append(path: &Path, entry: &Entry<'_>) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut line = serde_json::to_vec(entry)?;
-    line.push(b'\n');
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?
-        .write_all(&line)
 }
 
 fn operation_name(operation: &str) -> Option<&'static str> {
