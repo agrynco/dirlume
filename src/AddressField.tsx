@@ -68,20 +68,29 @@ function useBreadcrumbClip(editing = false, fitAncestors = false, location = "")
       }
       const available = address.clientWidth - (source?.getBoundingClientRect().width ?? 0);
       content.setAttribute("data-measuring", "");
-      const width = (element: Element) => element.getBoundingClientRect().width;
+      const width = (element: Element) => {
+        const style = getComputedStyle(element);
+        return element.getBoundingClientRect().width + parseFloat(style.marginInlineStart) + parseFloat(style.marginInlineEnd);
+      };
       const parents = Array.from(content.querySelectorAll(":scope > .address-ancestor"), width);
       const descendants = Array.from(content.querySelectorAll(":scope > .address-forward > .address-ancestor"), width);
       const current = content.querySelector(".address-current");
       let remaining = [...parents, ...descendants].reduce((sum, size) => sum + size, current ? width(current) : 0);
       content.removeAttribute("data-measuring");
-      const overflowWidth = Number.parseFloat(getComputedStyle(address).getPropertyValue("--address-overflow-width"));
+      const style = getComputedStyle(address);
+      const overflowWidth = parseFloat(style.getPropertyValue("--address-overflow-width")) +
+        parseFloat(style.getPropertyValue("--address-separator-width"));
       const clipped = remaining > available + 1;
       let hidden = 0;
       let hiddenForward = 0;
-      if (clipped) {
-        while (hidden < parents.length && remaining + overflowWidth > available) remaining -= parents[hidden++];
-        while (hiddenForward < descendants.length && remaining + overflowWidth > available)
+      while (remaining > available + 1 && (hidden < parents.length || hiddenForward < descendants.length)) {
+        if (parents.length - hidden >= descendants.length - hiddenForward) {
+          if (!hidden) remaining += overflowWidth;
+          remaining -= parents[hidden++];
+        } else {
+          if (!hiddenForward) remaining += overflowWidth;
           remaining -= descendants[descendants.length - 1 - hiddenForward++];
+        }
       }
       setHidden(hidden);
       setHiddenForward(hiddenForward);
@@ -187,7 +196,9 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
   const root = useRef<HTMLDivElement>(null);
   const browsing = useRef(false);
   const [editing, setEditing] = useState(false);
-  const [overflow, setOverflow] = useState(false);
+  const [overflow, setOverflow] = useState<"parents" | "previous" | null>(null);
+  const parentButton = useRef<HTMLButtonElement>(null);
+  const previousButton = useRef<HTMLButtonElement>(null);
   const [hoverX, setHoverX] = useState<number>();
   const [draft, setDraft] = useState(path);
   const [branch, setBranch] = useState<FileLocation[]>([]);
@@ -200,7 +211,7 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
     JSON.stringify([addressKey, forward.map(placeKey)]));
   const parents = ancestors.slice(0, hidden);
   const nextFolders = forward.slice(forward.length - hiddenForward);
-  const hasOverflow = parents.length > 0 || nextFolders.length > 0;
+  const hiddenFolders = overflow === "parents" ? parents : nextFolders;
   const label = t(side === "left" ? "left path" : "right path");
 
   function startEditing() {
@@ -209,7 +220,7 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
     if (current) { current.focus(); current.select(); }
     else {
       setDraft(path);
-      setOverflow(false);
+      setOverflow(null);
       setEditing(true);
     }
   }
@@ -225,7 +236,7 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
   useEffect(() => {
     setDraft(path);
     setEditing(false);
-    setOverflow(false);
+    setOverflow(null);
   }, [addressKey, path]);
 
   useEffect(() => {
@@ -233,8 +244,8 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
   }, [branch, branchIndex, catalog]);
 
   useEffect(() => {
-    if (!hasOverflow) setOverflow(false);
-  }, [hasOverflow]);
+    if (overflow && !hiddenFolders.length) setOverflow(null);
+  }, [overflow, hiddenFolders.length]);
 
   useLayoutEffect(() => {
     if (editing) root.current?.querySelector("input")?.focus({ preventScroll: true });
@@ -243,18 +254,31 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
   function goTo(folder: FileLocation, goingUp = false) {
     if (catalogBranch.length) setBranch(catalogBranch);
     else if (goingUp && place && !forward.length) setBranch(crumbs);
-    setOverflow(false);
+    setOverflow(null);
     onNavigateAncestor(folder);
     focusFiles();
   }
 
-  const overflowButton = hasOverflow && <Button type="button" className="icon-button address-overflow"
-    aria-label={t(nextFolders.length ? "Show hidden folders" : "Show parent folders")} aria-expanded={overflow}
-    onClick={() => setOverflow(!overflow)}>…</Button>;
+  function overflowMenu(kind: "parents" | "previous", folders: FileLocation[]) {
+    if (!folders.length) return null;
+    const leading = kind === "parents";
+    const open = overflow === kind;
+    return <div className="address-ancestor address-overflow-segment">
+      {!leading && <ChevronRight aria-hidden="true" />}
+      <Button ref={leading ? parentButton : previousButton} type="button" className="icon-button address-overflow"
+        aria-label={t(leading ? "Show parent folders" : "Show previous path")} aria-expanded={open}
+        onClick={() => setOverflow(open ? null : kind)}>…</Button>
+      {leading && <ChevronRight aria-hidden="true" />}
+      {open && <div className={`location-popup address-${kind}`}>
+        {folders.map((folder) => <Button type="button" key={placeKey(folder)} tooltip={placePath(folder)}
+          onClick={() => goTo(folder, leading)}>{folderLabel(folder)}</Button>)}
+      </div>}
+    </div>;
+  }
 
   return <div className="address" ref={root} id={side + "-path"} data-path={path} data-help-topic={catalog ? "paneSources" : "paneAddress"} onBlur={(event) => {
     if (helpIsOpen() || event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-    setOverflow(false);
+    setOverflow(null);
     if (editing && !browsing.current) {
       setEditing(false);
       setDraft(path);
@@ -284,27 +308,22 @@ export function AddressField({ side, place: shown, showHidden, onNavigate, onNav
         if (event.key !== "Escape" || !overflow) return;
         event.stopPropagation();
         event.preventDefault();
-        setOverflow(false);
-        focusFiles();
+        setOverflow(null);
+        (overflow === "parents" ? parentButton : previousButton).current?.focus();
       }}>
         {source && place && <div className="address-ancestor address-source">
           <Button type="button" aria-label={t("Open {0} connection list", sourceName)} onClick={() => {
-            setOverflow(false);
+            setOverflow(null);
             onOpenConnections(source, forward.at(-1) ?? place);
             focusFiles();
           }}>{sourceName}</Button>
           <ChevronRight aria-hidden="true" />
         </div>}
-        {overflowButton}
+        {overflowMenu("parents", parents)}
         <BreadcrumbTrack clip={clip} track={track} ancestors={ancestors} goTo={(ancestor) => goTo(ancestor, true)}
           fitAncestors hidden={hidden} descendants={forward} hiddenForward={hiddenForward} goForward={goTo}
           catalog={!!catalog} current={catalog ? t(folderLabel(catalog)) : place ? folderLabel(place) : t("Enter a path")} />
-        {hasOverflow && overflow && <div className="location-popup address-parents">
-          {parents.map((ancestor) => <Button type="button" key={placeKey(ancestor)}
-            tooltip={placePath(ancestor)} onClick={() => goTo(ancestor, true)}>{folderLabel(ancestor)}</Button>)}
-          {nextFolders.map((folder) => <Button type="button" key={placeKey(folder)} className="address-return"
-            tooltip={placePath(folder)} onClick={() => goTo(folder)}>{folderLabel(folder)}</Button>)}
-        </div>}
+        {overflowMenu("previous", nextFolders)}
         {!catalog && (editable || path) && <div className="address-actions" style={hoverX === undefined ? undefined : { left: hoverX }}>
           {editable && <Button type="button" className="icon-button" data-tooltip-placement="above" aria-label={t("Edit {0}", label)} onClick={() => startEditing()}>
             <Pencil aria-hidden="true" />

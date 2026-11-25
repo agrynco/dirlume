@@ -25,8 +25,11 @@ export async function clickBreadcrumbAncestor(breadcrumbs, name) {
   if (await visible.isVisible()) {
     await visible.click();
   } else {
-    await breadcrumbs.getByRole("button", { name: /^Show (parent|hidden) folders$/ }).click();
-    await breadcrumbs.locator(".address-parents").getByRole("button", { name, exact: true }).click();
+    const previous = await breadcrumbs.locator(".address-forward button").evaluateAll(
+      (buttons, name) => buttons.some((button) => button.textContent === name), name,
+    );
+    await breadcrumbs.getByRole("button", { name: previous ? "Show previous path" : "Show parent folders", exact: true }).click();
+    await breadcrumbs.locator(previous ? ".address-previous" : ".address-parents").getByRole("button", { name, exact: true }).click();
   }
 }
 

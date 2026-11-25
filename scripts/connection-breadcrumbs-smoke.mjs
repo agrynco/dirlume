@@ -105,6 +105,32 @@ async function enterFromCatalog(page, side, name, saved) {
   await row(page, side, saved).dblclick();
 }
 
+async function checkOverflowMenu(address, kind) {
+  const parents = kind === "parents";
+  const name = parents ? "Show parent folders" : "Show previous path";
+  const trigger = button(address, name);
+  await trigger.waitFor();
+  const current = address.locator("[aria-current=location]");
+  const bounds = await trigger.boundingBox();
+  const currentBounds = await current.boundingBox();
+  assert.ok(parents ? bounds.x + bounds.width <= currentBounds.x + 1 :
+    currentBounds.x + currentBounds.width <= bounds.x + 1);
+  assert.equal(await trigger.getAttribute("data-tooltip"), name);
+  const scope = parents ? ".address-crumbs >" : ".address-forward >";
+  const hidden = await address.locator(`${scope} .address-ancestor[hidden] button`).allTextContents();
+  assert.ok(hidden.length > 0);
+  await trigger.press("Enter");
+  const popup = address.locator(`.address-${kind}`);
+  await popup.waitFor();
+  assert.deepEqual(await popup.getByRole("button").allTextContents(), hidden);
+  assert.equal(await trigger.getAttribute("aria-expanded"), "true");
+  await trigger.press("Tab");
+  assert.ok(await popup.getByRole("button").first().evaluate((node) => node === document.activeElement));
+  await address.page().keyboard.press("Escape");
+  await popup.waitFor({ state: "hidden" });
+  assert.ok(await trigger.evaluate((node) => node === document.activeElement));
+}
+
 async function checkCatalog(page, side, path, name, home, { key = "Enter", root, connectionName } = {}) {
   const other = side === "left" ? "right" : "left";
   await waitPath(page, side, path);
@@ -127,8 +153,10 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await source.click();
   await waitPath(page, side, name);
   assert.equal(await address.locator("[aria-current=location]").innerText(), name);
-  const hidden = button(address, "Show hidden folders");
+  const hidden = button(address, "Show previous path");
   await hidden.waitFor();
+  assert.equal(await button(address, "Show parent folders").count(), 0);
+  await checkOverflowMenu(address, "previous");
   await page.setViewportSize({ width: 2600, height: 700 });
   const fullTrail = address.locator(".address-forward");
   for (const label of [connectionName, ...folders]) await button(fullTrail, label).waitFor();
@@ -195,6 +223,15 @@ async function checkLocalResize(page, home, path) {
     await overflow.waitFor();
     await page.setViewportSize({ width: 1500, height: 700 });
     await overflow.waitFor({ state: "hidden" });
+    await dragTo(side === "left" ? 0.21 : 0.79);
+    await overflow.waitFor();
+    const separator = home.includes("\\") ? "\\" : "/";
+    await clickCrumb(address, folders[1]);
+    await waitPath(page, side, [home, ...folders.slice(0, 2)].join(separator));
+    await checkOverflowMenu(address, "parents");
+    await checkOverflowMenu(address, "previous");
+    await clickCrumb(address, folders.at(-1));
+    await waitPath(page, side, path);
   }
   await dragTo(0.21);
   const address = crumbs(page, "left");
@@ -205,9 +242,9 @@ async function checkLocalResize(page, home, path) {
   await waitPath(page, "left", home);
   assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
   const forward = address.locator(".address-forward");
-  const hiddenFolders = button(address, "Show hidden folders");
+  const hiddenFolders = button(address, "Show previous path");
   await hiddenFolders.click();
-  await button(address.locator(".address-parents"), folders.at(-1)).waitFor();
+  await button(address.locator(".address-previous"), folders.at(-1)).waitFor();
   await hiddenFolders.click();
   await dragTo(0.79);
   const first = button(forward, folders[0]);
@@ -265,6 +302,8 @@ try {
       await enterFromCatalog(page, side, source, saved);
       await checkCatalog(page, side, deep, source, home, { key: "Space", root: "/", connectionName });
     }
+    await enterFromCatalog(page, other, "SSH", "Saved SFTP");
+    await checkCatalog(page, other, deep, "SSH", home, { root: "/", connectionName: "SFTP fixture" });
     await enterFromCatalog(page, other, "Remote machine", "Saved Dirlume Server");
     for (const name of folders) await row(page, other, name).dblclick();
     await checkCatalog(page, other, deep, "Remote machine", home, { root: "/", connectionName: "Server fixture" });

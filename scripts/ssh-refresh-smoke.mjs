@@ -206,6 +206,11 @@ async function verifyConnectionLoss(browser) {
     await page.evaluate(() => { window.sshFixture.offline = 37; });
     await closeSshTerminal(page, "disconnected");
     await Promise.all([waitPath(page, "left", "FTP"), waitPath(page, "right", "SSH")]);
+    for (const [side, source] of [["left", "FTP"], ["right", "SSH"]]) {
+      const address = page.locator(`#${side}-path nav`);
+      assert.equal(await address.locator("[aria-current=location]").innerText(), source);
+      assert.equal(await address.locator(".address-forward, .address-overflow").count(), 0);
+    }
     await page.getByRole("status").filter({ hasText: "SSH connection lost." }).waitFor();
     await page.evaluate(() => { window.sshFixture.offline = null; });
     await list(page, "left").press("Enter");
