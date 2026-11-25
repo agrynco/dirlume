@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { toString } from "mdast-util-to-string";
 import type { Parent, PhrasingContent, Root } from "mdast";
+import type { Root as HtmlRoot } from "hast";
 import { visit } from "unist-util-visit";
 import { api, describeError, type NamedFile } from "./api";
 import { isMarkdownFile, type MarkdownPosition, type OpenMarkdownLink } from "./markdown";
@@ -99,6 +100,26 @@ function remarkTaskMarkers() {
   };
 }
 
+function rehypeTaskRows() {
+  return (tree: HtmlRoot) => visit(tree, "element", (item) => {
+    if (item.tagName !== "li" || !Array.isArray(item.properties.className) ||
+        !item.properties.className.includes("task-list-item")) return;
+    const head = item.children.find((child) => child.type !== "text");
+    const content = head?.type === "element" && head.tagName === "p" ? head.children : item.children;
+    const marker = content.findIndex((child) => child.type === "element" &&
+      child.tagName === "input" && child.properties.type === "checkbox");
+    if (marker === -1) return;
+    const rest = content.slice(marker + 1);
+    const nextBlock = rest.findIndex((child) => child.type === "element" &&
+      /^(blockquote|div|h[1-6]|hr|ol|p|pre|table|ul)$/.test(child.tagName));
+    const label = nextBlock === -1 ? rest : rest.slice(0, nextBlock);
+    content.splice(marker, label.length + 1, {
+      type: "element", tagName: "span", properties: { className: ["field-checkbox"] },
+      children: [content[marker], { type: "element", tagName: "span", properties: {}, children: label }],
+    });
+  });
+}
+
 function taskFromProperties(properties: Record<string, unknown> | undefined): Task | null {
   const start = properties?.dataTaskStart;
   const end = properties?.dataTaskEnd;
@@ -158,7 +179,7 @@ function MarkdownContent({ source, prefix, htmlFormatting = false }: {
   htmlFormatting?: boolean;
 }) {
   return <Markdown remarkPlugins={htmlFormatting ? [remarkGfm, remarkTaskMarkers, remarkTableNoWrap] : [remarkGfm, remarkTaskMarkers]}
-    rehypePlugins={[[rehypeSlug, { prefix }]]} skipHtml components={components}>{source}</Markdown>;
+    rehypePlugins={[rehypeTaskRows, [rehypeSlug, { prefix }]]} skipHtml components={components}>{source}</Markdown>;
 }
 
 export function ReadOnlyMarkdown({ source, light }: { source: string; light: boolean }) {

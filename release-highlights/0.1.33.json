@@ -7,6 +7,7 @@
     "Insert the current folder's path into the command line with Ctrl+F on the parent row.",
     "Open local folders in the system file manager with Shift+Enter.",
     "Keep item icons visible when marking files and folders, and clear marks in the focused pane with Space.",
-    "Apply Dirlume, Far Manager, or Total Commander settings profiles and save your own combinations in Options."
+    "Apply Dirlume, Far Manager, or Total Commander settings profiles and save your own combinations in Options.",
+    "See checkboxes centered against their full labels in Copy and throughout Dirlume."
   ]
 }
