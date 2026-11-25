@@ -44,7 +44,7 @@ import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type Fo
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
-import { AboutDialog, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
+import { AboutDialog, DonationButton, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { PaneSources, type PaneSource } from "./PaneSources";
@@ -3642,10 +3642,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </Dialog>
       )}
       {modal?.kind === "upToDate" && (
-        <Dialog title={t("Check for updates")} onClose={() => setModal(null)}
-          footer={<Button type="button" data-initial-focus onClick={() => setModal(null)}>{t("Close")}</Button>}>
-          <div className="dialog-body"><p>{t("Dirlume is up to date.")}</p></div>
-        </Dialog>
+        <UpToDateDialog onClose={() => setModal(null)} />
       )}
       {modal?.kind === "installUpdate" && (
         <Dialog title={t("Installing update")}>
@@ -3907,6 +3904,25 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     </div>
     </ElevationContext>
   );
+}
+
+function UpToDateDialog({ onClose }: { onClose: () => void }) {
+  const [linkError, setLinkError] = useState("");
+
+  function openDonationLink() {
+    setLinkError("");
+    void api.openWebLink(donationUrl).catch((error: unknown) => setLinkError(describeError(error)));
+  }
+
+  return <Dialog title={t("Check for updates")} onClose={onClose} footer={<>
+    <DonationButton onClick={openDonationLink} />
+    <Button type="button" data-initial-focus onClick={onClose}>{t("Close")}</Button>
+  </>}>
+    <div className="dialog-body">
+      <p>{t("Dirlume is up to date.")}</p>
+      {linkError && <p role="alert" className="dialog-error">{errorText(linkError)}</p>}
+    </div>
+  </Dialog>;
 }
 
 function CommandHistory({ commands, onChoose, onClose }: {

@@ -241,6 +241,12 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
   );
 }
 
+export function DonationButton({ onClick }: { onClick: () => void }) {
+  return <Button type="button" className="donation-button dialog-donation" onClick={onClick}>
+    <Coffee aria-hidden="true" /><span>{t("Donate via monobank")}</span>
+  </Button>;
+}
+
 export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onOpenGuide: () => void }) {
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
@@ -260,9 +266,7 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
   }
 
   return <Dialog title={t("About")} onClose={onClose} footer={<>
-    <Button type="button" className="donation-button about-donation" onClick={() => openLink(donationUrl)}>
-      <Coffee aria-hidden="true" /><span>{t("Donate via monobank")}</span>
-    </Button>
+    <DonationButton onClick={() => openLink(donationUrl)} />
     <Button data-initial-focus type="button" onClick={onClose}><X aria-hidden="true" />{t("Close")}</Button>
   </>}>
     <div className="dialog-body about-body">
