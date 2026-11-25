@@ -450,6 +450,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .quick-view .pane-heading { min-height: 32px; }
 .quick-view .pane-title > svg { width: 16px; height: 16px; flex: none; }
 .quick-view-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--panel-muted); }
+.quick-view-navigation { display: flex; flex: none; gap: 4px; margin-inline-start: auto; }
 .quick-view .pane-empty { margin: 0; overflow-wrap: anywhere; }
 .quick-view :is(.text-view, .markdown) { margin: 0; border: 0; border-radius: 0; }
 .quick-view-html { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--text-bg); }
