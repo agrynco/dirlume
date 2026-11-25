@@ -5,6 +5,7 @@
     "Go up one folder with the parent row, arrow, or shortcut and return along the dimmed path.",
     "View and edit text and images with dark blue headers in Classic blue.",
     "Insert the current folder's path into the command line with Ctrl+F on the parent row.",
-    "Open local folders in the system file manager with Shift+Enter."
+    "Open local folders in the system file manager with Shift+Enter.",
+    "Keep item icons visible when marking files and folders, and clear marks in the focused pane with Space."
   ]
 }

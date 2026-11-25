@@ -612,7 +612,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 onDragStart={(event) => event.preventDefault()}
                 onDoubleClick={() => onOpen(entry)}>
                 {group.map(({ field }, slot) => isNameField(field) ?
-                  <span key={slot} className="file-name" data-marked-name={field === "markedName" || undefined}>
+                  <span key={slot} className="file-name">
                     {tree && <span className="file-tree-indent" style={{ width: Math.min(12, (entry.tree?.segments.length ?? 1) - 1) * 12 }} aria-hidden="true" />}
                     {tree && (entry.tree && entry.directory && !entry.link
                       ? <Button type="button" className="file-tree-expand" tabIndex={-1}

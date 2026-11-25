@@ -752,19 +752,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 [data-theme="classic-blue"] .file-row[data-file-color] .file-name { color: var(--entry-color); }
 .pane .file-row.marked .file-name { font-weight: 650; }
 .pane .file-row.marked:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name { color: var(--panel-marked); }
-.file-row.marked .file-name > :is(svg, img):first-child { display: none; }
-.file-row.marked .file-name::before {
-  content: "✓" / "";
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 15px;
-  height: 15px;
-  border-radius: 3px;
-  background: var(--panel-marked);
-  color: var(--panel-bg);
-  font: 700 11px/1 var(--ui-font);
-}
 [data-theme="classic-blue"] .pane.active .file-row[data-current="true"] :is(.file-name, .file-size, .file-date, .file-time) {
   color: var(--panel-selected-ink);
 }
@@ -2092,7 +2079,6 @@ button.color-swatch {
 .pane[data-layout="twin"] .file-row[data-current="true"] { background: transparent; border: 1px dotted var(--panel-muted); box-shadow: none; }
 .pane[data-layout="twin"].active .file-row[data-current="true"] { color: var(--panel-ink); border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--panel-bg)); box-shadow: none; }
 .pane[data-layout="twin"] .file-row.marked { background: color-mix(in srgb, var(--panel-marked) 8%, transparent); box-shadow: none; }
-.pane[data-layout="twin"] .file-row.marked .file-name::before { content: none; }
 .pane[data-layout="twin"] .file-row.marked :is(.file-size, .file-date) { color: var(--panel-marked); }
 .pane[data-layout="twin"].active .file-row.marked[data-current="true"] { box-shadow: none; }
 .pane[data-layout="twin"] .pane-footer { min-height: 24px; border-radius: 0 0 2px 2px; }
@@ -2143,8 +2129,7 @@ button.color-swatch {
 .pane[data-layout="classic"] .file-row { min-height: max(20px, calc(1.3em + 1px)); border: 0; border-radius: 3px; }
 .pane[data-layout="classic"] .virtual-file-list .file-row,
 .pane[data-layout="classic"] .file-row-probe { height: max(20px, calc(1.3em + 1px)); }
-.pane[data-layout="classic"] .file-name { padding-left: 2px; }
-.pane[data-layout="classic"] .file-name > :is(svg, img) { display: none; }
+.pane[data-layout="classic"] .file-name { gap: 4px; padding-left: 2px; }
 .pane[data-layout="classic"] :is(.file-size, .file-date) { align-self: stretch; display: flex; align-items: center; border-inline-start: 1px solid var(--line); }
 .pane[data-layout="classic"] .file-size { justify-content: flex-end; }
 .pane[data-layout="classic"] .file-date { padding-left: 6px; }
@@ -2156,7 +2141,6 @@ button.color-swatch {
 .pane[data-layout="classic"].active .file-row.marked[data-current="true"] :is(.file-name, .file-size, .file-date) { color: var(--panel-marked); }
 .pane[data-layout="classic"] .file-row.marked:is([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name { color: var(--entry-color); }
 .pane[data-layout="classic"].active .file-row.marked[data-current="true"] { background: color-mix(in srgb, var(--accent-fill) 35%, var(--panel-bg)); }
-.pane[data-layout="classic"] .file-row.marked .file-name::before { content: none; }
 .pane[data-layout="classic"] .pane-footer { min-height: 22px; border-top: 0; border-radius: 0 0 3px 3px; font-family: var(--panel-font); }
 @container (max-width: 760px) {
   .pane[data-layout="classic"] .pane-free-full { display: none; }
@@ -2195,7 +2179,6 @@ button.color-swatch {
 .file-name-end > span { flex: none; }
 .file-name .panel-mode-mark { display: grid; place-items: center; width: 1em; flex: none; color: var(--panel-marked); }
 .file-name .panel-mode-mark svg, .pane[data-layout="classic"] .file-name .panel-mode-mark svg { width: 1em; height: 1em; color: inherit; }
-.file-row.marked .file-name[data-marked-name]::before { content: none; }
 .panel-mode-settings { gap: 10px; }
 .panel-width-guide { margin: 0; color: var(--dialog-muted, var(--muted)); }
 .panel-mode-fields { min-width: 0; margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); }

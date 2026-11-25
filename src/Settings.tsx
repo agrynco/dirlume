@@ -366,7 +366,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     event.preventDefault();
     event.stopPropagation();
     const { command } = current;
-    if (event.key === "Escape") return finishCapture(command);
+    if (event.key === "Escape" && command !== "clearMarks") return finishCapture(command);
     if (event.repeat || event.nativeEvent.isComposing) return;
     const shortcut = command === "menuAlternate" && event.key === "Alt" && !event.ctrlKey && !event.metaKey && !event.shiftKey ? "Alt" : captureShortcut(event.nativeEvent, distinguishControl);
     if (!shortcut) return;
@@ -611,6 +611,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                     }} />
                     <label><input type="checkbox" checked={distinguishControl}
                       onChange={(event) => setDistinguishControl(event.target.checked)} /> {t("Distinguish left and right Ctrl")}</label>
+                    {command === "clearMarks" && <Button type="button" onClick={() => finishCapture(command)}>{t("Cancel")}</Button>}
                   </div>}
                 </div>}
               </div>;

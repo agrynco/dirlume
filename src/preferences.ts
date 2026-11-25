@@ -71,6 +71,7 @@ export const commands = {
   pageUp: { label: "Previous page", key: "PageUp" },
   pageDown: { label: "Next page", key: "PageDown" },
   mark: { label: "Mark or unmark item", key: "Insert" },
+  clearMarks: { label: "Clear marks", key: "Space" },
   open: { label: "Open", key: "Enter" },
   openInSystem: { label: "Open in system", key: "Shift+Enter" },
   parent: { label: "Parent folder", key: "" },
