@@ -134,6 +134,17 @@ impl Context {
     fn allows_path_fallback(&self, windows: bool) -> bool {
         self.explicit_path(windows)
             || self.directory_argument(windows)
+            || (windows
+                && !self.prefix.starts_with('-')
+                && self
+                    .words
+                    .split_first()
+                    .is_some_and(|(command, arguments)| {
+                        command.eq_ignore_ascii_case("Get-ChildItem")
+                            && arguments
+                                .iter()
+                                .all(|argument| argument.eq_ignore_ascii_case("-Force"))
+                    }))
             || (!windows
                 && !self.prefix.starts_with('-')
                 && self.words.first().is_some_and(|command| {
@@ -1046,6 +1057,11 @@ esac
             ("unknown-tool ./assets", false, true),
             ("cd work", true, true),
             ("cd work", false, true),
+            ("Get-ChildItem completion-", true, true),
+            ("get-childitem -force completion-", true, true),
+            ("Get-ChildItem -Filter completion-", true, false),
+            ("Get-ChildItem -Fr", true, false),
+            ("Get-ChildItem first second", true, false),
             ("cat notes", false, true),
             ("cat --", false, false),
         ] {
