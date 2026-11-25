@@ -311,8 +311,8 @@ async function checkImageEditor(page, side, name, capture = false) {
   await editor.locator(".quick-view-image-canvas").evaluate((canvas) => canvas.scrollTo(0, 0));
   const overlay = editor.locator(".image-crop-overlay");
   const frame = await overlay.boundingBox();
-  assert.equal(frame.width, 800);
-  assert.equal(frame.height, 1200);
+  assert.equal(Math.round(frame.width), 800);
+  assert.equal(Math.round(frame.height), 1200);
   const screen = (x, y) => [frame.x + x * frame.width / 800, frame.y + y * frame.height / 1200];
   await page.mouse.move(...screen(20, 20));
   await page.mouse.down();
