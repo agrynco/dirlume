@@ -52,6 +52,7 @@ export const colorGroups = {
       canvas: "Window background",
       surface: "Toolbar and status bar",
       raised: "Raised surfaces",
+      "document-header": "Document header",
       ink: "Window text",
       muted: "Secondary window text",
       line: "Borders",
@@ -299,6 +300,7 @@ export interface Scheme {
   name: string;
   base: BaseTheme;
   colors: Palette;
+  documentHeaderUsesTheme?: true;
   fonts: Fonts;
   fileTypes?: FileTypeGroup[];
 }
@@ -432,6 +434,7 @@ export function readSchemes(value: unknown): Scheme[] {
       };
     }
     result.push({ id: scheme.id, name: scheme.name.slice(0, maxSchemeNameLength), base: scheme.base, colors: palette, fonts,
+      documentHeaderUsesTheme: scheme.documentHeaderUsesTheme === true ? true : undefined,
       fileTypes: readFileTypeGroups(scheme.fileTypes) });
   }
   return result;
@@ -442,7 +445,7 @@ export function applyAppearance(theme: BaseTheme, scheme: Scheme | null, root = 
   root.dataset.theme = base;
   if (modernThemes.has(base)) root.dataset.look = "modern";
   else delete root.dataset.look;
-  applyColors(root, scheme?.colors);
+  applyColors(root, scheme);
   const windowBackground = scheme?.colors.canvas;
   if (windowBackground) root.style.setProperty("--backdrop", windowBackground);
   else root.style.removeProperty("--backdrop");
@@ -484,9 +487,12 @@ export function captureFonts(theme: BaseTheme, scheme: Scheme | null): RetainedF
   }
 }
 
-function applyColors(root: HTMLElement, palette?: Palette) {
+function applyColors(root: HTMLElement, scheme?: Scheme | null) {
+  const palette = scheme?.colors;
+  // Existing custom schemes used the dialog header for documents.
+  const legacyDocumentHeader = scheme && !scheme.documentHeaderUsesTheme ? "var(--dialog-header)" : undefined;
   for (const color of colors) {
-    const value = palette?.[color] ?? surfaceColorFields[color as SurfaceColor]?.[1];
+    const value = palette?.[color] ?? (color === "document-header" ? legacyDocumentHeader : surfaceColorFields[color as SurfaceColor]?.[1]);
     if (value) root.style.setProperty(`--${color}`, value);
     else root.style.removeProperty(`--${color}`);
   }
@@ -505,12 +511,12 @@ function contrastingText(hex: string) {
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue > 0.179 ? "#000000" : "#ffffff";
 }
 
-export function basePalette(base: BaseTheme, overrides?: Palette): Palette {
+export function basePalette(base: BaseTheme, scheme?: Scheme | null): Palette {
   // Resolve the built-in values from the stylesheet, including any token aliases.
   const sample = document.createElement("div");
   sample.hidden = true;
   sample.dataset.theme = base;
-  applyColors(sample, overrides);
+  applyColors(sample, scheme);
   document.body.append(sample);
   const style = getComputedStyle(sample);
   const result: Palette = {};

@@ -137,7 +137,8 @@ export function resolvePick(element: Element): Target | null {
   if (text) {
     const editing = text.getAttribute("data-editing") === "true";
     return match(".mermaid-preview, .mermaid-diagram", { target: "diagram", colors: [...Object.keys(mermaidColors) as Color[], "markdown-bg"], font: "markdown", view: "markdown" }) ??
-      match(".document-heading, .document-shortcuts, .syntax-toolbar", { target: editing ? "editor" : "viewer", colors: ["dialog-header", "ink", "muted", "line"], font: "ui" }) ??
+      match(".document-heading", { target: editing ? "editor" : "viewer", colors: ["document-header", "ink", "muted", "line", "accent"], font: "ui" }) ??
+      match(".document-shortcuts", { target: editing ? "editor" : "viewer", colors: ["dialog-header", "ink", "muted", "line"], font: "ui" }) ??
       match(".hex-view", surfacePick("hex", "hex")) ??
       match(".markdown", surfacePick("markdown", "markdown")) ??
       { element: element.closest(".text-view, .code-surface") ?? text, pick: editing ? surfacePick("editor", "editor") : surfacePick("viewer", "viewer") };

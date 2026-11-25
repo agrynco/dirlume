@@ -70,6 +70,7 @@
   --panel-current-marked-outline: #81dcca;
   --dialog-bg: var(--surface);
   --dialog-header: var(--raised);
+  --document-header: var(--dialog-header);
   --dialog-input: var(--canvas);
   --dialog-ink: var(--ink);
   --dialog-muted: var(--muted);
@@ -196,6 +197,7 @@
   --dialog-field-ink: #ffffff;
   --canvas: #15181e;
   --surface: #142039;
+  --document-header: var(--surface);
   --raised: #1b2a44;
   --hover: #253956;
   --line: #425b7a;
@@ -1095,7 +1097,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .text-window[hidden], .source-surface[hidden] { display: none; }
 .text-window:focus { outline: none; }
 .document-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px 8px; padding: 6px 12px;
-  background: var(--dialog-header); border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
+  background: var(--document-header); border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
 .document-heading h2 { grid-column: 1 / -1; min-width: 0; margin: 0; font-size: 1.05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .document-menu, .document-status { display: flex; flex-wrap: wrap; gap: 4px 7px; align-items: center; }
 .document-menu .main-menu { order: 0; }

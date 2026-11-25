@@ -82,7 +82,7 @@ function SurfacePreview({ surface, preferences }: { surface: Surface; preference
 
 function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences: Preferences }) {
   const background = ["panel-current-marked-bg", "danger-action", "accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
-    "dialog-header", "dialog-bg", "mermaid-node-bg", "panel-header", "panel-bg", "raised", "surface", "canvas"]
+    "document-header", "dialog-header", "dialog-bg", "mermaid-node-bg", "panel-header", "panel-bg", "raised", "surface", "canvas"]
     .find((color) => pick.colors.some((item) => item === color));
   const foreground = ["panel-marked", "on-danger-action", "on-accent", "panel-selected-ink", ...pick.colors.filter((color) => color.startsWith("file-")),
     "mermaid-node-ink", "dialog-ink", "text-ink", "panel-ink", "muted", "ink"]
