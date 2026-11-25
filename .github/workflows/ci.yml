@@ -25,7 +25,7 @@ jobs:
       github.event.action != 'closed' ||
       (github.event.pull_request.merged && github.head_ref == 'prerelease' &&
       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.private && vars.DIRLUME_SELF_HOSTED == 'true' && 'dirlume-linux-x64' || 'ubuntu-22.04' }}
     outputs:
       product-version: ${{ steps.resolve.outputs.product-version }}
       build-number: ${{ steps.resolve.outputs.build-number }}
@@ -47,7 +47,7 @@ jobs:
             echo 'The release must build the merged pull request commit.' >&2
             exit 1
           fi
-          refs=$(git ls-remote --tags origin 'v*')
+          refs=$(git -c 'credential.helper=' -c 'credential.helper=!gh auth git-credential' ls-remote --tags origin 'v*')
           tags=$(awk -v sha="$GITHUB_SHA" '$1 == sha { sub(/^refs\/tags\//, "", $2); sub(/\^\{\}$/, "", $2); print $2 }' <<< "$refs")
           published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
@@ -74,7 +74,7 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'closed' }}
+          PUBLISH_RELEASE: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || github.event.action == 'closed' }}
           CHECK_NEXT_RELEASE_HIGHLIGHTS: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'prerelease' }}
         run: node scripts/build-version.mjs resolve
       - name: Select build platforms
@@ -88,7 +88,7 @@ jobs:
     name: Build and test (${{ matrix.platform }})
     if: needs.version.outputs.product-version != ''
     needs: version
-    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04"}')[matrix.platform] }}
+    runs-on: ${{ github.event.repository.private && vars.DIRLUME_SELF_HOSTED == 'true' && format('dirlume-{0}', matrix.platform) || fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04"}')[matrix.platform] }}
     timeout-minutes: 45
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
@@ -106,15 +106,17 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-          cache: npm
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
       - name: Install Linux desktop prerequisites
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get -o Acquire::Retries=3 install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 patchelf zip
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.cargo/registry
@@ -261,6 +263,7 @@ jobs:
           name: frontend-maps-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}
           path: src-tauri/target/frontend-sourcemaps/*.js.map
           if-no-files-found: error
+          retention-days: ${{ github.event.repository.private && 1 || '' }}
           overwrite: true
       - name: Build headless server
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --no-default-features --features server --bin dirlume-server
@@ -268,7 +271,7 @@ jobs:
         if: github.event.action != 'closed'
         run: node scripts/server-smoke.mjs
       - name: Prepare Windows WebView2 runtime
-        if: runner.os == 'Windows' && github.event.action != 'closed'
+        if: runner.os == 'Windows' && runner.environment == 'github-hosted' && github.event.action != 'closed'
         shell: pwsh
         run: ./scripts/ensure-webview.ps1
       - name: Build Windows UI automation fixture
@@ -297,13 +300,14 @@ jobs:
           name: dirlume-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}
           path: release/*
           if-no-files-found: error
+          retention-days: ${{ github.event.repository.private && 1 || '' }}
           overwrite: true
 
   release:
     name: Publish GitHub release
     if: needs.version.outputs.publish == 'true'
     needs: [version, build]
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.private && vars.DIRLUME_SELF_HOSTED == 'true' && 'dirlume-linux-x64' || 'ubuntu-22.04' }}
     permissions:
       contents: write
     env:

@@ -1,0 +1,15 @@
+name: dirlume-ci
+
+services:
+  runner:
+    build: ./linux
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    shm_size: 1gb
+    volumes:
+      - runner-state:/runner
+
+volumes:
+  runner-state:
