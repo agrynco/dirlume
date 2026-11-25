@@ -299,7 +299,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       onClose={cancel}>
       {phase === "setup" ? (
         <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
-          <div className="dialog-body transfer-body">
+          <div className="dialog-body transfer-body transfer-options">
             <div className="field">
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
@@ -344,31 +344,35 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               </select>
             </label>
             {replaceable && localTarget && <label className="field-checkbox">
-              <span>{t("Also ask about read-only files")}</span>
               <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} />
+              <span>{t("Also ask about read-only files")}</span>
             </label>}
             {localCopy && <>
-              <label className="field-checkbox"><span>{t("Preserve all timestamps")}</span>
+              <label className="field-checkbox">
                 <input type="checkbox" checked={preserveTimestamps} onChange={(event) => setPreserveTimestamps(event.target.checked)} />
+                <span>{t("Preserve all timestamps")}</span>
               </label>
-              <label className="field-checkbox"><span>{t("Copy contents of symbolic links")}</span>
+              <label className="field-checkbox">
                 <input type="checkbox" checked={followLinks} onChange={(event) => setFollowLinks(event.target.checked)} />
+                <span>{t("Copy contents of symbolic links")}</span>
               </label>
             </>}
-            {!moving && !archiveTarget && <label className="field-checkbox"><span>{t("Process multiple destinations")}</span>
+            {!moving && !archiveTarget && <label className="field-checkbox">
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
+              <span>{t("Process multiple destinations")}</span>
             </label>}
             {localCopy && <>
-              <label className="field-checkbox"><span>{t("Use filter")}</span>
+              <label className="field-checkbox">
                 <input type="checkbox" checked={useFilter} onChange={(event) => setUseFilter(event.target.checked)} />
+                <span>{t("Use filter")}</span>
               </label>
               {useFilter && <label className="field">{t("File mask")}
                 <HistoryField historyKey="copy-mask" type="text" value={mask} onValueChange={setMask} required placeholder="*.txt" />
               </label>}
             </>}
             {transfer.chooseOperation && <label className="field-checkbox">
-              <span>{t("Move instead of copying")}</span>
               <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} />
+              <span>{t("Move instead of copying")}</span>
             </label>}
           </div>
           <footer className="dialog-footer">

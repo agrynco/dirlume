@@ -123,7 +123,7 @@ export type FileLocation =
 
 export const connectionSourceNames = { ftp: "FTP", ssh: "SSH", smb: "SMB", remote: "Remote machine" } as const;
 export type ConnectionSource = keyof typeof connectionSourceNames;
-export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null };
+export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null; trail?: FileLocation };
 export type Place = FileLocation | ConnectionLocation;
 export type SavedConnection =
   | ({ kind: "ftp" } & FtpProfile)
@@ -304,7 +304,7 @@ export interface EnvironmentSave {
   integration: EnvironmentOutcome | null;
 }
 
-export type TerminalOutput = { event: "data"; data: string } | { event: "closed" };
+export type TerminalOutput = { event: "data"; data: string } | { event: "closed" | "disconnected" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
   ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });

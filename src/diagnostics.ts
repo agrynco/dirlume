@@ -10,6 +10,7 @@ type FrontendReport = { origin: FrontendOrigin; source: FrontendSource | null };
 const reported = new WeakSet<object>();
 
 export class KSwitcherUnavailableError extends Error {}
+export class SshConnectionLostError extends Error {}
 
 const kswitcherAvailabilityMessages = new Map([
   ["Start KSwitcher with support for trusted LAN clients.", "Start KSwitcher with support for trusted LAN clients."],
@@ -80,7 +81,11 @@ export async function invokeWithDiagnostics<T>(command: string, args?: InvokeArg
     const reportedMessage = typeof failure === "object" && failure !== null &&
       ((command === "read_text" && "readCause" in failure) || (command === "check_for_update" && "updateCause" in failure)) &&
       "message" in failure && typeof failure.message === "string" ? failure.message : undefined;
-    const error = failure instanceof Error ? failure : new Error(reportedMessage ?? String(failure));
+    const connectionLost = command === "list_ssh" && typeof failure === "object" && failure !== null &&
+      "sshCause" in failure && failure.sshCause === "connection_lost" && "message" in failure && typeof failure.message === "string"
+      ? failure.message : undefined;
+    const error = connectionLost !== undefined ? new SshConnectionLostError(connectionLost) :
+      failure instanceof Error ? failure : new Error(reportedMessage ?? String(failure));
     // The resident service uses one response for an offline peer and unavailable file browsing.
     const unavailable = command === "list_kswitcher" ? kswitcherAvailabilityMessages.get(error.message) : undefined;
     if (unavailable) {

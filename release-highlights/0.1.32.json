@@ -1,0 +1,8 @@
+{
+  "version": "0.1.32",
+  "highlights": [
+    "Return to the previous folder using dimmed breadcrumbs in local, archive, and remote panes, including saved connection lists.",
+    "Return to saved SSH or FTP connections when SFTP access is lost and cannot recover.",
+    "See Copy checkboxes aligned on the left, with each label directly beside its checkbox."
+  ]
+}

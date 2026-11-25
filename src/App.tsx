@@ -30,7 +30,7 @@ import type { EnvironmentMode } from "./EnvironmentPane";
 import { textEncodingLabels, type AppUpdate, type InstalledRelease, type TerminalCommand, type TerminalSession, type TextEncoding, type UpdateProgress } from "./api";
 import { Dialog, readDialogSize } from "./Dialog";
 import { ReleaseNotes } from "./ReleaseNotes";
-import { KSwitcherUnavailableError, reportFrontendError } from "./diagnostics";
+import { KSwitcherUnavailableError, reportFrontendError, SshConnectionLostError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
 import { VerifyHostDialog } from "./SshDialog";
@@ -107,6 +107,7 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
 }
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
+type SshPaneTarget = { side: Side; place: SshPlace; revision: number };
 type SavedConnectionTarget = Exclude<SavedConnection, { kind: "ftp" | "ssh" }> |
   { kind: "ftp" | "ssh"; id: string; label: string };
 type ConnectionOpenOptions = {
@@ -328,6 +329,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const [status, setStatus] = useState<WorkspaceStatus>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
+  const foregroundRevision = useRef({ left: 0, right: 0 });
   const pendingListings = useRef<Partial<Record<Side, { controller: AbortController; background: boolean }>>>({});
   const terminalListings = useRef<Partial<Record<Side, number>>>({});
   const nextSession = useRef(0);
@@ -336,6 +338,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const drag = useRef<{ side: Side; source: Transfer["source"]; items: Transfer["items"]; pointer: number; x: number; y: number; moving: boolean } | null>(null);
   const [dropTarget, setDropTarget] = useState<Side | null>(null);
   const latest = useRef(panes);
+  const terminalSessions = useRef(terminals);
+  terminalSessions.current = terminals;
   const mainMenu = useRef<MainMenuHandle>(null);
   latest.current = panes;
   const connected = useRef<Record<Side, NetworkPlace | null>>({ left: null, right: null });
@@ -542,7 +546,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return true;
   }, [updatePane]);
 
-  const invalidateListing = useCallback((side: Side) => {
+  const invalidateListing = useCallback((side: Side, foreground = true) => {
+    if (foreground) ++foregroundRevision.current[side];
     ++request.current[side];
     pendingListings.current[side]?.controller.abort();
     delete pendingListings.current[side];
@@ -550,7 +555,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, []);
 
   const beginListing = useCallback((side: Side, background = false) => {
-    const ticket = invalidateListing(side);
+    const ticket = invalidateListing(side, !background);
     const controller = new AbortController();
     pendingListings.current[side] = { controller, background };
     return { ticket, signal: controller.signal };
@@ -569,7 +574,60 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return cancelledLoading || cancelledMeasurement;
   }
 
-  const load = useCallback(async (side: Side, place: Place, action: ListingAction | "background" | "startup" = "push", reveal?: string, sudoPassword?: string) => {
+  const clearTerminalState = useCallback((id: number) => {
+    setPendingCommands(({ [id]: _closed, ...remaining }) => remaining);
+    setTerminalCompletion(({ [id]: _closed, ...remaining }) => remaining);
+  }, []);
+
+  const dropTerminal = useCallback((key: string) => {
+    const session = terminalSessions.current[key];
+    if (!session) return;
+    setTerminals((current) => {
+      const { [key]: closed, ...remaining } = current;
+      return closed?.id === session.id ? remaining : current;
+    });
+    clearTerminalState(session.id);
+  }, [clearTerminalState]);
+
+  const sshPaneTargets = useCallback((connection: number, failingSide?: Side): SshPaneTarget[] =>
+    (["left", "right"] as const).flatMap((side) => {
+      const { place } = latest.current[side];
+      if (place?.kind !== "ssh" || place.id !== connection ||
+          side !== failingSide && pendingListings.current[side]?.background === false) return [];
+      return [{ side, place, revision: foregroundRevision.current[side] }];
+    }), []);
+
+  const returnFromLostSsh = useCallback((targets: readonly SshPaneTarget[],
+    openCatalog: (side: Side, place: Place) => Promise<boolean>, failingSide?: Side) => {
+    const current = targets.filter(({ side, place, revision }) =>
+      latest.current[side].place === place && foregroundRevision.current[side] === revision &&
+      (side === failingSide || pendingListings.current[side]?.background !== false));
+    if (!current.length) return false;
+    const focusedTerminal = document.activeElement?.closest(".terminal-card:not([hidden])");
+    dropTerminal("ssh:" + current[0].place.id);
+    setStatus({ text: "SSH connection lost. Select a saved connection to reconnect." });
+    for (const { side, place } of current) {
+      const catalog = { kind: "connections", source: place.catalogSource ?? "ssh", from: null } as const;
+      const restoreFocus = focusedTerminal && document.getElementById(side + "-pane")?.classList.contains("active");
+      void openCatalog(side, catalog).then((opened) => {
+        if (!opened) return;
+        updatePane(side, (pane) => {
+          if (pane.place !== catalog) return pane;
+          const profile = pane.entries.find(({ connection }) => connection?.kind === "ssh" && connection.id === place.profileId);
+          return profile ? { ...pane, selected: profile.name } : pane;
+        });
+        if (restoreFocus) requestAnimationFrame(() => {
+          if (latest.current[side].place === catalog && document.activeElement === document.body) {
+            document.getElementById(side + "-files")?.focus({ preventScroll: true });
+          }
+        });
+      });
+    }
+    return true;
+  }, [dropTerminal, updatePane]);
+
+  const load = useCallback(async function loadPlace(side: Side, place: Place, action: ListingAction | "background" | "startup" = "push",
+    reveal?: string, sudoPassword?: string): Promise<boolean> {
     const background = action === "background";
     const elevated = sudoPassword !== undefined;
     const dialog = activeModal.current;
@@ -604,6 +662,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return result ? complete(result.place, result.listing, result.elevated) : false;
     } catch (error) {
       if (ticket === request.current[side]) {
+        const openPlace = latest.current[side].place;
+        if (!background && action !== "startup" && place.kind === "ssh" && error instanceof SshConnectionLostError &&
+          openPlace?.kind === "ssh" && openPlace.id === place.id &&
+          returnFromLostSsh(sshPaneTargets(place.id, side), loadPlace, side)) return false;
         const credentialsRequired = error instanceof SmbCredentialsRequired;
         const prompt = credentialsRequired && !background && !activeModal.current && (action !== "refresh" || place.kind === "smbRoot");
         if (prompt) {
@@ -629,7 +691,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     } finally {
       if (request.current[side] === ticket) delete pendingListings.current[side];
     }
-  }, [beginListing, cancelScan, rememberRecentLocation, updatePane]);
+  }, [beginListing, cancelScan, rememberRecentLocation, returnFromLostSsh, sshPaneTargets, updatePane]);
 
   useEffect(() => {
     if (sshUploadRefresh === null) return;
@@ -1451,11 +1513,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
   }
 
-  function openConnections(side: Side, source: ConnectionSource) {
+  function openConnections(side: Side, source: ConnectionSource, trail?: FileLocation) {
     const place = panes[side].place;
     showProcesses(side, false);
     if (place?.kind === "connections" && place.source === source) refresh(side);
-    else void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place });
+    else void load(side, { kind: "connections", source, from: place?.kind === "connections" ? place.from : place, trail });
   }
 
   function editConnection(side: Side, source: ConnectionSource, profile?: SavedConnection) {
@@ -2353,16 +2415,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     });
   }
 
-  function dropTerminal(key: string) {
-    const session = terminals[key];
-    if (!session) return;
-    setTerminals(({ [key]: _closed, ...remaining }) => remaining);
-    clearTerminalState(session.id);
-  }
-
-  function clearTerminalState(id: number) {
-    setPendingCommands(({ [id]: _closed, ...remaining }) => remaining);
-    setTerminalCompletion(({ [id]: _closed, ...remaining }) => remaining);
+  async function checkSshTerminal(session: Extract<TerminalSession, { kind: "ssh" }>) {
+    const key = "ssh:" + session.connection;
+    if (terminalSessions.current[key]?.id !== session.id) return;
+    const targets = sshPaneTargets(session.connection);
+    const target = targets[0];
+    if (!target) return;
+    try {
+      await api.listSsh(session.connection, target.place.segments);
+    } catch (error) {
+      if (error instanceof SshConnectionLostError && terminalSessions.current[key]?.id === session.id) {
+        returnFromLostSsh(targets, load);
+      }
+    }
   }
 
   function toggleTerminal() {
@@ -3238,7 +3303,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               if (trees[side].enabled && place.kind === "local") void navigateTree(side, place, true);
               else void load(side, place);
             }}
-            onOpenConnections={(source) => openConnections(side, source)}
+            onOpenConnections={(source, trail) => openConnections(side, source, trail)}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={() => parent(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
@@ -3437,6 +3502,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             copyShortcut={shortcuts.copyTerminalText} pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
             onTerminalError={(message) => setStatus({ text: message, error: true })}
+            onDisconnected={session.kind === "ssh" ? () => { void checkSshTerminal(session); } : undefined}
             pendingCommands={pendingCommands[session.id] ?? noCommands}
             onCommandsQueued={(count) => setPendingCommands((commands) => ({ ...commands,
               [session.id]: (commands[session.id] ?? []).slice(count),
