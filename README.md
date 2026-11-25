@@ -124,7 +124,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Ctrl+Shift+C (⌘⇧C on macOS) in a file list | Copy the current file or folder's full path as text. Also available under Commands → Copy full path. |
 | Ctrl+O / Ctrl+Left / Ctrl+Right | Hide or show the panes, or move the divider. Drag the divider to resize with the mouse. |
 | Ctrl+↑ / Ctrl+↓ | Expand the terminal or give height back to the file panes. The last step restores the command line. |
-| Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. |
+| Ctrl+F / Ctrl+Enter | Insert the selected path or name in the command line. Ctrl+F on **..** inserts the current folder path in a local or SSH pane. |
 | Ctrl+E / Alt+F8 | Recall earlier commands or open the shared command history. The terminal receives keystrokes while its input has focus. |
 | Shift+F11 | Compare the selected files, or choose **Commands → Compare files**. Use F7 and F8 to navigate between differences. |
 
