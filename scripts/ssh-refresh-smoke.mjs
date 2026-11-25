@@ -210,6 +210,8 @@ async function verifyConnectionLoss(browser) {
       const address = page.locator(`#${side}-path nav`);
       assert.equal(await address.locator("[aria-current=location]").innerText(), source);
       assert.equal(await address.locator(".address-forward, .address-overflow").count(), 0);
+      assert.equal(await button(pane(page, side), "Parent folder").isDisabled(), true);
+      assert.equal(await list(page, side).locator('[data-tooltip=".."]').count(), 0);
     }
     await page.getByRole("status").filter({ hasText: "SSH connection lost." }).waitFor();
     await page.evaluate(() => { window.sshFixture.offline = null; });

@@ -41,7 +41,10 @@ async function fixture(browser, platform, nestedLocal = false) {
       }));
     }
     localStorage.setItem("dirlume.smb-locations", JSON.stringify([smbRoot]));
-    localStorage.setItem("dirlume.preferences.v1", JSON.stringify({ kswitcher: "fixture-bridge" }));
+    localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
+      kswitcher: "fixture-bridge", bindingDefaults: 10, activeShortcutScheme: "fixture",
+      shortcutSchemes: [{ id: "fixture", name: "Fixture", bindings: { parent: ["Alt+ArrowUp"] } }],
+    }));
     localStorage.setItem("dirlume.remote-connections", JSON.stringify([
       { id: "server", kind: "server", label: "Saved Dirlume Server", credential: "fixture-invitation" },
       { id: "paired", kind: "server", label: "Paired fixture", credential: "fixture-pair", lan: true },
@@ -131,9 +134,35 @@ async function checkOverflowMenu(address, kind) {
   assert.ok(await trigger.evaluate((node) => node === document.activeElement));
 }
 
+async function checkParentNavigation(page, side, path, parentPath) {
+  const address = crumbs(page, side);
+  const parent = button(pane(page, side), "Parent folder");
+  const other = side === "left" ? "right" : "left";
+  const otherPath = await page.locator(`#${other}-path`).getAttribute("data-path");
+  for (const goUp of [async () => {
+    await row(page, side, "..").click();
+    await list(page, side).press("Enter");
+  }, () => parent.click(), () => list(page, side).press("Alt+ArrowUp")]) {
+    await goUp();
+    await waitPath(page, side, parentPath);
+    await clickCrumb(address, folders.at(-1));
+    await waitPath(page, side, path);
+    assert.equal(await page.locator(`#${other}-path`).getAttribute("data-path"), otherPath);
+  }
+}
+
+async function checkSourceRoot(page, side, path) {
+  assert.equal(await row(page, side, "..").count(), 0);
+  assert.equal(await button(pane(page, side), "Parent folder").isDisabled(), true);
+  await list(page, side).press("Alt+ArrowUp");
+  await waitPath(page, side, path);
+}
+
 async function checkCatalog(page, side, path, name, home, { key = "Enter", root, connectionName } = {}) {
   const other = side === "left" ? "right" : "left";
   await waitPath(page, side, path);
+  const separator = path.includes("\\") ? "\\" : "/";
+  await checkParentNavigation(page, side, path, path.slice(0, path.lastIndexOf(separator)));
   const source = button(crumbs(page, side), `Open ${name} connection list`);
   const overflow = button(crumbs(page, side), "Show parent folders");
   await overflow.waitFor();
@@ -146,12 +175,14 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await waitPath(page, side, root);
   const address = crumbs(page, side);
   assert.equal(await address.locator("[aria-current=location]").innerText(), connectionName);
+  await checkSourceRoot(page, side, root);
   await clickCrumb(address, folders.at(-1));
   await waitPath(page, side, path);
   await clickCrumb(address, connectionName);
   await waitPath(page, side, root);
   await source.click();
   await waitPath(page, side, name);
+  await checkSourceRoot(page, side, name);
   assert.equal(await address.locator("[aria-current=location]").innerText(), name);
   const hidden = button(address, "Show previous path");
   await hidden.waitFor();
@@ -186,6 +217,20 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await waitPath(page, side, path);
   await button(pane(page, side), "Forward").click();
   await waitPath(page, side, name);
+  await button(pane(page, side), "Back").click();
+  await waitPath(page, side, path);
+  await button(pane(page, side), `Locations for ${side} pane`).click();
+  await button(pane(page, side), name).click();
+  await waitPath(page, side, name);
+  await checkSourceRoot(page, side, name);
+  await clickCrumb(address, folders.at(-1));
+  await waitPath(page, side, path);
+  const unrelated = name === "FTP" ? "SSH" : "FTP";
+  await button(pane(page, side), `Locations for ${side} pane`).click();
+  await button(pane(page, side), unrelated).click();
+  await waitPath(page, side, unrelated);
+  await checkSourceRoot(page, side, unrelated);
+  assert.equal(await address.locator(".address-forward, .address-overflow").count(), 0);
   const homeButton = button(pane(page, side), `Locations for ${side} pane`);
   await homeButton.click();
   await button(pane(page, side), "Home").click();
@@ -210,6 +255,8 @@ async function checkLocalResize(page, home, path) {
     const address = crumbs(page, side);
     const overflow = button(address, "Show parent folders");
     await overflow.waitFor({ state: "hidden" });
+    const separator = home.includes("\\") ? "\\" : "/";
+    await checkParentNavigation(page, side, path, [home, ...folders.slice(0, -1)].join(separator));
     await button(address, root).waitFor();
     for (const name of ["fixture", ...folders.slice(0, -1)]) await button(address, name).waitFor();
     await button(crumbs(page, other), "Show parent folders").waitFor();
@@ -225,7 +272,6 @@ async function checkLocalResize(page, home, path) {
     await overflow.waitFor({ state: "hidden" });
     await dragTo(side === "left" ? 0.21 : 0.79);
     await overflow.waitFor();
-    const separator = home.includes("\\") ? "\\" : "/";
     await clickCrumb(address, folders[1]);
     await waitPath(page, side, [home, ...folders.slice(0, 2)].join(separator));
     await checkOverflowMenu(address, "parents");
@@ -240,6 +286,7 @@ async function checkLocalResize(page, home, path) {
   await button(parents, root).waitFor();
   await button(parents, "fixture").click();
   await waitPath(page, "left", home);
+  await checkSourceRoot(page, "left", home);
   assert.equal(await page.locator("#right-path").getAttribute("data-path"), path);
   const forward = address.locator(".address-forward");
   const hiddenFolders = button(address, "Show previous path");
@@ -278,6 +325,7 @@ async function checkLan(page, side) {
   await waitPath(page, side, "/Files");
   for (const name of folders) await row(page, side, name).dblclick();
   await waitPath(page, side, "/Files" + deep);
+  await checkParentNavigation(page, side, "/Files" + deep, "/Files/" + folders.slice(0, -1).join("/"));
   const address = crumbs(page, side);
   await clickCrumb(address, "Files");
   await waitPath(page, side, "/Files");
@@ -340,6 +388,7 @@ try {
     await page.evaluate(() => { window.connectionFixture.emptySsh = true; });
     await button(crumbs(page, other), "Open SSH connection list").click();
     await waitPath(page, other, "SSH");
+    await checkSourceRoot(page, other, "SSH");
     await list(page, other).press("Shift+F4");
     await page.getByRole("dialog", { name: "Add SSH connection", exact: true }).waitFor();
     await page.close();

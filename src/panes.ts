@@ -1,4 +1,4 @@
-import { api, isFileServer, placePath, smbLocation, uncParts, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { api, isFileServer, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
 import { connectionEntries } from "./savedConnections";
 
@@ -47,6 +47,7 @@ export interface PaneState {
   loading: boolean;
   loadingPath?: string;
   addressRevision?: number;
+  addressTrail?: FileLocation;
   omitted: number;
   error: string;
   kswitcherAvailabilityError?: string;
@@ -63,12 +64,6 @@ export const emptyPane: PaneState = {
 };
 
 
-
-export function hasParentRow(place: Place | null) {
-  if (place?.kind === "connections") return true;
-  // The KSwitcher drive list is a source chooser, outside the drive itself.
-  return place !== null && !(place.kind === "kswitcher" && place.parent === "") && parentPlace(place) !== null;
-}
 
 export function folderMeasurement(pane: PaneState, entry: Entry) {
   if (!entry.directory || entry.link || pane.search) return undefined;
@@ -111,7 +106,7 @@ export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortS
       }
     },
   );
-  if (!pane.search && hasParentRow(pane.place)) {
+  if (!pane.search && parentPlace(pane.place)) {
     visible.unshift({ name: "..", directory: true, link: false, hidden: false, size: null, modified: null });
   }
   return visible;
@@ -209,8 +204,8 @@ export function childPlace(place: FileLocation, name: string): FileLocation {
   return localPath(place.path + (place.path.endsWith(separator) ? "" : separator) + name);
 }
 
-export function parentPlace(place: Place): FileLocation | null {
-  if (place.kind === "connections") return place.from;
+export function parentPlace(place: Place | null): FileLocation | null {
+  if (!place || place.kind === "connections") return null;
   if (place.kind === "archive") return place.segments.length
     ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || isFileServer(place)) {
@@ -221,6 +216,64 @@ export function parentPlace(place: Place): FileLocation | null {
   const [host, share, folder] = uncParts(place.path);
   if (host && share && !folder) return { kind: "smbRoot", path: "\\\\" + host };
   return place.parent ? filesystemPlace(place.parent) : null;
+}
+
+export function parentPath(path: string, windows: boolean) {
+  const trimmed = path.replace(windows ? /[\\/]+$/ : /\/+$/, "");
+  if (windows && /^(?:[a-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)$/i.test(trimmed)) return null;
+  const end = Math.max(trimmed.lastIndexOf("/"), windows ? trimmed.lastIndexOf("\\") : -1);
+  if (end < 0) return null;
+  const root = end === 0 || (windows && end === 2 && /^[a-z]:/i.test(trimmed));
+  return trimmed.slice(0, root ? end + 1 : end);
+}
+
+export function placeKey(place: FileLocation) {
+  const source = place.kind === "local" || place.kind === "smbRoot" ? [] :
+    place.kind === "kswitcher" ? [place.directory, place.peer] : [place.id];
+  const path = placePath(place);
+  const windowsPath = windowsClient && (place.kind === "local" || place.kind === "smbRoot" || place.kind === "kswitcher");
+  return JSON.stringify([place.kind, ...source, windowsPath ? path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase() : path]);
+}
+
+export function connectionSource(place: FileLocation | null): ConnectionSource | undefined {
+  switch (place?.kind) {
+    case "ftp": return "ftp";
+    case "ssh": return place.catalogSource ?? "ssh";
+    case "server":
+    case "kswitcher": return "remote";
+    case "local":
+    case "smbRoot": return smbHost(place) ? "smb" : undefined;
+  }
+}
+
+export function breadcrumbPlaces(place: FileLocation | null, limit = Infinity) {
+  const places: FileLocation[] = [];
+  while (place && places.length < limit) {
+    places.push(place);
+    let parent = parentPlace(place);
+    if (parent?.kind === "local") parent = { ...parent, parent: parentPath(parent.path, windowsClient) };
+    if (parent?.kind === "kswitcher" && parent.path) parent = { ...parent, parent: parentPath(parent.path, true) ?? "" };
+    place = parent;
+  }
+  return places.reverse();
+}
+
+export function previousPath(place: Place | null, leaf?: FileLocation): FileLocation[] {
+  if (place?.kind === "connections") return breadcrumbPlaces(place.trail ?? null);
+  if (!place || !leaf) return [];
+  const trail = breadcrumbPlaces(leaf);
+  const current = placeKey(place);
+  const index = trail.findIndex((folder) => placeKey(folder) === current);
+  return index < 0 ? [] : trail.slice(index + 1);
+}
+
+export function breadcrumbTrail(from: Place | null, to: Place, leaf?: FileLocation): FileLocation | undefined {
+  if (to.kind === "connections") return to.trail;
+  const current = placeKey(to);
+  const trailLeaf = from?.kind === "connections" ? from.trail : leaf;
+  if (trailLeaf && breadcrumbPlaces(trailLeaf).some((place) => placeKey(place) === current)) return trailLeaf;
+  if (!from || from.kind === "connections" || placeKey(from) === current) return undefined;
+  return breadcrumbPlaces(from).slice(0, -1).some((place) => placeKey(place) === current) ? from : undefined;
 }
 
 export class SmbCredentialsRequired extends Error {
@@ -279,7 +332,8 @@ function pushHistory(pane: PaneState, place: Place) {
   return history.filter((item) => item.kind !== "archive" || archives.has(item.id));
 }
 
-export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number): PaneState {
+export function applyListing(pane: PaneState, place: Place, listing: Listing, action: "push" | "refresh" | "background" | number,
+  addressFrom = pane.place): PaneState {
   if ((action === "refresh" || action === "background") && pane.search) {
     const updated = applyListing(closeSearchResults(pane), place, listing, action);
     return { ...updated, selected: pane.selected, marked: pane.marked, filter: pane.filter,
@@ -308,10 +362,11 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   return {
     ...pane,
     place,
+    addressTrail: action === "refresh" || action === "background" ? pane.addressTrail : breadcrumbTrail(addressFrom, place, pane.addressTrail),
     entries: listing.entries,
     omitted: listing.omitted,
     selected: samePlace && pane.selected &&
-      (pane.selected === ".." ? hasParentRow(place) : retained(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
+      (pane.selected === ".." ? parentPlace(place) !== null : retained(pane.selected)) ? pane.selected : departed && current.has(departed) ? departed : null,
     revealedHidden: samePlace && pane.revealedHidden && current.has(pane.revealedHidden) ? pane.revealedHidden : undefined,
     marked: samePlace ? pane.marked.filter(retained) : [],
     sizes: new Map([...pane.sizes].filter(([name]) => unchangedFolders.has(name))),
