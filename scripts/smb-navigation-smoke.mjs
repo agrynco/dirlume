@@ -354,7 +354,9 @@ export async function testSmbNavigation() {
     const restartDirectory = "C:\\Restart folder";
     await navigateLocal("left", restartDirectory);
     await page.evaluate(() => { window.localStartup = "ready"; });
-    await restart.press("Enter");
+    await restart.click();
+    await page.waitForFunction((directory) => window.localTerminalStarts.at(-1)?.directory === directory &&
+      typeof window.localPrompt === "function", restartDirectory);
     await submitLocal("Write-Output fixture-queued");
     await queued.waitFor();
     await page.evaluate(() => window.finishStalledLocalStartup());
