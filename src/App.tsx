@@ -2819,6 +2819,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         break;
       }
       case "open": if (currentRow) open(active, currentRow, true); break;
+      case "openInSystem":
+        if (!canOpenInSystem || !currentRow) break;
+        if (systemFolderPath !== null) {
+          void api.operate(systemFolderPath, { kind: "open_directory" }).catch((error: unknown) =>
+            setStatus({ text: describeError(error), error: true }));
+        } else open(active, currentRow, true);
+        break;
       case "attributes":
         if (currentItem && !pane.loading && !busy) setModal({ kind: "attributes", item: currentItem });
         break;
@@ -3020,6 +3027,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "openInSystem" && (!onFiles || inField || !canOpenInSystem || event.repeat)) return;
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
     if (command && (commandPanelMode(command) || (folderGroupCommand(command)?.add === false)) &&
         (inField || target.closest("[role=menu]") || (commandPanelMode(command) && !canSelectPanelMode(active)))) return;
@@ -3082,6 +3090,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const).filter(({ command }) => !ftp || command !== "rename");
   const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !recentActive && !processPanels[active] && !pane.loading;
+  const systemFolder = currentRow?.name === ".." ? pane.place :
+    currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
+  const systemFolderPath = systemFolder?.kind === "local" && !smbHost(systemFolder) ? systemFolder.path : null;
+  const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && !currentItem.entry.directory);
   const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
   const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
@@ -3154,6 +3166,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     paneMenu("left"),
     { label: "Files", items: [
       ...fileActions.map(({ command, label, disabled }) => menuCommand(command, (!analysis && !filesAvailable) || disabled, label)),
+      menuCommand("openInSystem", !canOpenInSystem),
       menuCommand("createArchive", !filesAvailable || !local || !current || !!pane.search, "Create archive"),
       menuCommand("attributes", !filesAvailable || !currentItem || busy),
       ...(windowsClient ? [menuCommand("lockingProcesses", !!previewSide || !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),

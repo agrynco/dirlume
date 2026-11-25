@@ -72,6 +72,7 @@ export const commands = {
   pageDown: { label: "Next page", key: "PageDown" },
   mark: { label: "Mark or unmark item", key: "Insert" },
   open: { label: "Open", key: "Enter" },
+  openInSystem: { label: "Open in system", key: "Shift+Enter" },
   parent: { label: "Parent folder", key: "" },
   back: { label: "Back", key: "Alt+ArrowLeft" },
   forward: { label: "Forward", key: "Alt+ArrowRight" },

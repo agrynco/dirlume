@@ -415,6 +415,7 @@ enum Operation {
     Open {
         name: String,
     },
+    OpenDirectory,
     Rename {
         name: String,
         new_name: String,
@@ -440,6 +441,13 @@ async fn operate(directory: String, operation: Operation) -> Result<()> {
     blocking(move || {
         match operation {
             Operation::Open { name } => open::that(selected(&directory, &name).map_err(message)?),
+            Operation::OpenDirectory => {
+                let path = local::absolute(&directory).map_err(message)?;
+                if !fs::metadata(path).map_err(message)?.is_dir() {
+                    return Err("The selected path is not a directory.".to_owned());
+                }
+                open::that(path)
+            }
             Operation::Rename { name, new_name } => local::move_item(
                 &selected(&directory, &name).map_err(message)?,
                 selected(&directory, &new_name).map_err(message)?,

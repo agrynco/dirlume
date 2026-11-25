@@ -488,7 +488,7 @@ export const api = {
     invoke<FileAttributes>("file_attributes", { directory, name }),
   updateFileAttributes: (directory: string, name: string, changes: AttributeChange[]) =>
     invoke<FileAttributes>("update_file_attributes", { directory, name, changes }),
-  operate: (directory: string, operation: Operation) =>
+  operate: (directory: string, operation: Operation | { kind: "open_directory" }) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
   connectSavedServer: (credential: string, segments?: string[]) =>
     invoke<Connection & { share: string }>("connect_saved_server", { credential, segments }),
