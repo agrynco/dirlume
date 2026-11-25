@@ -402,6 +402,8 @@ try {
   await clickBreadcrumbAncestor(leftBreadcrumbs, "breadcrumb-branch");
   await page.waitForFunction(() => document.querySelector("#left-path [aria-current=location]")?.textContent === "breadcrumb-branch");
   await clickBreadcrumbAncestor(leftBreadcrumbs, "breadcrumb-leaf");
+  await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path &&
+    document.getElementById("left-files")?.getAttribute("aria-busy") === "false", branchLeaf);
   await forwardCrumbs.waitFor({ state: "hidden" });
   assert.equal(await currentCrumb.innerText(), "breadcrumb-leaf");
   await clickBreadcrumbAncestor(leftBreadcrumbs, "from");
