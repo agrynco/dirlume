@@ -645,6 +645,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Hexadecimal contents": ["Шістнадцятковий вміст", "Шестнадцатеричное содержимое"],
   "Rendering diagram…": ["Відображення діаграми…", "Отображение диаграммы…"],
   "Mermaid diagram": ["Діаграма Mermaid", "Диаграмма Mermaid"],
+  "Open diagram": ["Відкрити діаграму", "Открыть диаграмму"],
   "Remote": ["Віддалений", "Удалённый"],
   "Close processes": ["Закрити список процесів", "Закрыть список процессов"],
   "Go to selected file": ["Перейти до вибраного файла", "Перейти к выбранному файлу"],

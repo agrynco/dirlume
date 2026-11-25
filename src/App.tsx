@@ -3393,7 +3393,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <p className="pane-empty" role="status">{t("Loading preview…")}</p>
         </section>}>
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
-            message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} onFocusFiles={() => focus(active)} />
+            message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} markdownSize={preferences.viewFontSizes.markdown}
+            shortcuts={shortcuts} onFocusFiles={() => focus(active)} />
         </Suspense>}
         {sourceMenu && paneCovered(sourceMenu.side) && paneSources(sourceMenu.side, true)}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator" data-help-topic="workspace"

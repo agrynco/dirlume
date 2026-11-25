@@ -1,13 +1,13 @@
 {
   "version": "0.1.33",
   "highlights": [
-    "Open hidden parent folders before the current location and hidden folders from the previous path after it.",
-    "Go up one folder with the parent row, arrow, or shortcut and return along the dimmed path.",
+    "Go up one folder with the parent row, arrow, or shortcut and return along the dimmed path, with separate breadcrumb menus for hidden parents and the previous path.",
     "View and edit text and images with dark blue headers in Classic blue.",
     "Insert the current folder's path into the command line with Ctrl+F on the parent row.",
     "Open local folders in the system file manager with Shift+Enter.",
     "Keep item icons visible when marking files and folders, and clear marks in the focused pane with Space.",
     "Apply Dirlume, Far Manager, or Total Commander settings profiles and save your own combinations in Options.",
-    "See checkboxes centered against their full labels in Copy and throughout Dirlume."
+    "See checkboxes centered against their full labels in Copy and throughout Dirlume.",
+    "Zoom Mermaid diagrams with Markdown text or open a diagram in a separate viewer to zoom, pan, and fit it."
   ]
 }

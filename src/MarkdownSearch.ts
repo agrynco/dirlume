@@ -25,7 +25,7 @@ function findMatches(content: HTMLElement, query: string) {
     }
   }
   for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-    if (!node.length) continue;
+    if (!node.length || node.parentElement?.closest("[data-markdown-control]")) continue;
     const parent = node.parentElement?.closest(blocks) ?? content;
     if (parent !== block) {
       scanBlock();

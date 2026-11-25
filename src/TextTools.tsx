@@ -476,7 +476,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {preview && !hex && (
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
           <MarkdownPreview file={file} source={markdownSource} active={active} position={position} light={light} colors={colors}
-            scroll={markdownScroll} onContent={setMarkdownContent}
+            scroll={markdownScroll} onContent={setMarkdownContent} fontSize={fontSizes.markdown} shortcuts={shortcuts}
             writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
             onOpenDocument={(target, newTab, next) => onOpenDocument(target, newTab, next, markdownScroll.current?.scrollTop ?? 0)} onError={setError} />
           </Suspense>

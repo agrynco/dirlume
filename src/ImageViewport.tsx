@@ -107,8 +107,8 @@ export function useImageViewport(wheel: readonly string[] = []) {
   };
 }
 
-export function ImageViewport({ name, url, view, hidden = false, children }: {
-  name: string; url?: string; view: ReturnType<typeof useImageViewport>; hidden?: boolean; children?: ReactNode;
+export function ImageViewport({ name, url, view, naturalSize, hidden = false, children }: {
+  name: string; url?: string; view: ReturnType<typeof useImageViewport>; naturalSize?: Size; hidden?: boolean; children?: ReactNode;
 }) {
   return <div className="quick-view-image-canvas" ref={view.canvas} tabIndex={0} hidden={hidden}
     data-pannable={view.panning || undefined}
@@ -133,7 +133,7 @@ export function ImageViewport({ name, url, view, hidden = false, children }: {
         {url && <img alt={name} src={url} draggable={false} style={{
           width: (view.natural?.width ?? 0) * view.scale, height: (view.natural?.height ?? 0) * view.scale,
           transform: `translate(-50%, -50%) rotate(${view.turns * 90}deg)`,
-        }} onLoad={({ currentTarget }) => view.setNatural({ width: currentTarget.naturalWidth, height: currentTarget.naturalHeight })}
+        }} onLoad={({ currentTarget }) => view.setNatural(naturalSize ?? { width: currentTarget.naturalWidth, height: currentTarget.naturalHeight })}
         onError={() => view.setFailed(true)} />}
         {children}
       </div>
