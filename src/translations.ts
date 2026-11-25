@@ -1197,6 +1197,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "First item": ["Перший елемент", "Первый элемент"],
   "Last item": ["Останній елемент", "Последний элемент"],
   "Mark or unmark item": ["Позначити або зняти позначку", "Отметить или снять отметку"],
+  "Clear marks": ["Очистити позначки", "Снять все отметки"],
   "Open": ["Відкрити", "Открыть"],
   "Open in system": ["Відкрити в системі", "Открыть в системе"],
   "The selected path is not a directory.": ["Вибраний шлях не є папкою.", "Выбранный путь не является папкой."],

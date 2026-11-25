@@ -2884,6 +2884,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }
         break;
       }
+      case "clearMarks":
+        if (pane.marked.length) {
+          selectionAnchor.current[active] = currentRow?.name ?? null;
+          updatePane(active, (state) => ({ ...state, marked: [], selected: currentRow?.name ?? state.selected }));
+        }
+        break;
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
       case "copyClipboard": if (current) void copyClipboard(active, current); break;
@@ -3027,6 +3033,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "clearMarks" && (!onFiles || inField || !filesAvailable || catalog || event.repeat)) return;
     if (command === "openInSystem" && (!onFiles || inField || !canOpenInSystem || event.repeat)) return;
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
     if (command && (commandPanelMode(command) || (folderGroupCommand(command)?.add === false)) &&
