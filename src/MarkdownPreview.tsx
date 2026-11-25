@@ -1,5 +1,5 @@
 import { t } from "./i18n";
-import { createContext, isValidElement, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { createContext, isValidElement, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
@@ -11,6 +11,8 @@ import { api, describeError, type NamedFile } from "./api";
 import { isMarkdownFile, type MarkdownPosition, type OpenMarkdownLink } from "./markdown";
 import { MermaidDiagram } from "./MermaidDiagram";
 import type { Palette } from "./appearance";
+import type { Bindings } from "./preferences";
+import { viewFontStyle } from "./viewFonts";
 
 export type TaskMarker = { start: number; end: number };
 type Task = TaskMarker & { label: string };
@@ -20,11 +22,22 @@ const PreviewContext = createContext<{
   saving: boolean;
   light: boolean;
   colors?: Palette;
+  diagramScale: number;
+  shortcuts: Bindings;
   onToggleTask?: (marker: TaskMarker, checked: boolean) => void;
   followLink?: (href: string, newTab: boolean) => void;
 } | null>(null);
 const documentOrigin = "https://markdown.dirlume.invalid";
 const scheme = /^[a-z][a-z\d+.-]*:/i;
+
+function useDiagramScale(fontSize: number | undefined, light: boolean, colors?: Palette) {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--markdown-size"));
+    setScale(fontSize !== undefined && base > 0 ? fontSize / base : 1);
+  }, [fontSize, light, colors]);
+  return scale;
+}
 
 interface TableNoWrap extends Parent {
   type: "tableNoWrap";
@@ -156,9 +169,10 @@ function PreviewLink({ href, children, ...props }: ComponentProps<"a">) {
 
 function PreviewCode({ children }: ComponentProps<"pre">) {
   const preview = useContext(PreviewContext);
-  if (isValidElement<{ className?: string; children?: ReactNode }>(children) &&
+  if (preview && isValidElement<{ className?: string; children?: ReactNode }>(children) &&
       children.props.className === "language-mermaid" && typeof children.props.children === "string") {
-    return <MermaidDiagram source={children.props.children} light={preview?.light ?? false} colors={preview?.colors} />;
+    return <MermaidDiagram source={children.props.children} light={preview.light} colors={preview.colors}
+      scale={preview.diagramScale} shortcuts={preview.shortcuts} />;
   }
   return <pre>{children}</pre>;
 }
@@ -182,10 +196,13 @@ function MarkdownContent({ source, prefix, htmlFormatting = false }: {
     rehypePlugins={[rehypeTaskRows, [rehypeSlug, { prefix }]]} skipHtml components={components}>{source}</Markdown>;
 }
 
-export function ReadOnlyMarkdown({ source, light }: { source: string; light: boolean }) {
-  return <div className="markdown" tabIndex={0}>
+export function ReadOnlyMarkdown({ source, light, fontSize, shortcuts }: {
+  source: string; light: boolean; fontSize?: number; shortcuts: Bindings;
+}) {
+  const diagramScale = useDiagramScale(fontSize, light);
+  return <div className="markdown" tabIndex={0} data-font-zoom="markdown" style={viewFontStyle(fontSize)}>
     <div className="markdown-content">
-      <PreviewContext.Provider value={{ writable: false, saving: false, light }}>
+      <PreviewContext.Provider value={{ writable: false, saving: false, light, diagramScale, shortcuts }}>
         <MarkdownContent source={source} prefix="dirlume-quick-view-" />
       </PreviewContext.Provider>
     </div>
@@ -209,7 +226,7 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
 }
 
 export function MarkdownPreview({ file, source, active, position, scroll, onContent, light, colors, writable, saving, htmlFormatting,
-  onToggleTask, onOpenDocument, onError }: {
+  fontSize, shortcuts, onToggleTask, onOpenDocument, onError }: {
   file: NamedFile;
   source: string;
   active: boolean;
@@ -218,6 +235,8 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
   onContent: (element: HTMLDivElement | null) => void;
   light: boolean;
   colors?: Palette;
+  fontSize?: number;
+  shortcuts: Bindings;
   writable: boolean;
   saving: boolean;
   htmlFormatting: boolean;
@@ -227,6 +246,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
 }) {
   const handledPosition = useRef<MarkdownPosition | undefined>(undefined);
   const prefix = "dirlume-markdown-" + useId() + "-";
+  const diagramScale = useDiagramScale(fontSize, light, colors);
 
   function scrollToFragment(fragment: string) {
     if (!fragment) {
@@ -275,7 +295,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
   return (
     <div ref={scroll} className="markdown" tabIndex={0}>
       <div className="markdown-content" ref={onContent}>
-        <PreviewContext.Provider value={{ writable, saving, light, colors, onToggleTask, followLink }}>
+        <PreviewContext.Provider value={{ writable, saving, light, colors, diagramScale, shortcuts, onToggleTask, followLink }}>
           <MarkdownContent source={source} prefix={prefix} htmlFormatting={htmlFormatting} />
         </PreviewContext.Provider>
       </div>

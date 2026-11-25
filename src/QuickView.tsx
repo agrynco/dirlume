@@ -8,6 +8,7 @@ import { errorText, t } from "./i18n";
 import { isMarkdownFile } from "./markdown";
 import { ReadOnlyMarkdown } from "./MarkdownPreview";
 import type { Side } from "./panes";
+import type { Bindings } from "./preferences";
 
 type PreviewContent = { kind: "image"; url: string } | { kind: "text"; text: string } |
   { kind: "binary"; page: BytePage } | { kind: "error"; message: string };
@@ -72,10 +73,12 @@ function ImagePreview({ name, url }: { name: string; url: string }) {
   </>;
 }
 
-function PreviewFile({ file, source, light, onFocusFiles }: {
+function PreviewFile({ file, source, light, markdownSize, shortcuts, onFocusFiles }: {
   file: NamedFile;
   source: boolean;
   light: boolean;
+  markdownSize?: number;
+  shortcuts: Bindings;
   onFocusFiles: () => void;
 }) {
   const [target] = useState(file);
@@ -126,13 +129,14 @@ function PreviewFile({ file, source, light, onFocusFiles }: {
   if (content.kind === "error") return <p className="pane-empty" role="status">{content.message}</p>;
   if (content.kind === "image") return <ImagePreview name={target.name} url={content.url} />;
   if (content.kind === "binary") return <BinaryPreview file={target} initial={content.page} />;
-  if (!source && isMarkdownFile(target.name)) return <ReadOnlyMarkdown source={content.text} light={light} />;
+  if (!source && isMarkdownFile(target.name)) return <ReadOnlyMarkdown source={content.text} light={light}
+    fontSize={markdownSize} shortcuts={shortcuts} />;
   if (!source && /\.html?$/i.test(target.name)) return <HtmlPreview name={target.name}
     text={content.text} light={light} onFocusFiles={onFocusFiles} />;
   return <pre className="text-view" tabIndex={0}>{content.text || t("This file is empty.")}</pre>;
 }
 
-export default function QuickView({ side, file, fileKey, name, message, source, light, onFocusFiles }: {
+export default function QuickView({ side, file, fileKey, name, message, source, light, markdownSize, shortcuts, onFocusFiles }: {
   side: Side;
   file: NamedFile | null;
   fileKey: string;
@@ -140,6 +144,8 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
   message: string;
   source: boolean;
   light: boolean;
+  markdownSize?: number;
+  shortcuts: Bindings;
   onFocusFiles: () => void;
 }) {
   return <section className={`pane quick-view quick-view-${side}`} aria-label={t("Quick View")} data-pane-side={side} data-help-topic="quickView" tabIndex={-1}>
@@ -150,7 +156,8 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
       </div>
       {name && <span className="quick-view-name" data-tooltip={name}>{name}</span>}
     </header>
-    {file ? <PreviewFile key={fileKey} file={file} source={source} light={light} onFocusFiles={onFocusFiles} /> :
+    {file ? <PreviewFile key={fileKey} file={file} source={source} light={light} markdownSize={markdownSize}
+      shortcuts={shortcuts} onFocusFiles={onFocusFiles} /> :
       <p className="pane-empty" role="status">{message}</p>}
   </section>;
 }

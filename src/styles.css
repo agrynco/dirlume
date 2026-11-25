@@ -1881,14 +1881,21 @@ button.color-swatch {
 .syntax-type { color: var(--document-syntax-type, var(--syntax-type)); }
 .syntax-property { color: var(--document-syntax-property, var(--syntax-property)); }
 .syntax-invalid { color: var(--danger); }
+.mermaid-figure { margin: 16px 0; }
+.mermaid-figure > figcaption { margin-block-end: 6px; }
+.mermaid-scroll { overflow-x: auto; }
+.mermaid-scroll:focus-visible { outline-offset: -2px; }
 .mermaid-diagram {
   display: block;
   max-width: min(100%, 960px);
   max-height: min(70vh, 640px);
   object-fit: contain;
   height: auto;
-  margin: 16px auto;
+  margin-inline: auto;
 }
+.dialog:has(> .diagram-toolbar) { width: min(960px, calc(100vw - 36px)); height: min(700px, calc(100vh - 42px)); max-height: calc(100vh - 42px); }
+.diagram-toolbar { flex-wrap: wrap; }
+.diagram-toolbar + .quick-view-image-canvas { background: var(--markdown-bg); }
 .diagram-error { white-space: pre-wrap; padding: 10px; background: var(--danger-bg); color: var(--danger); }
 .footer-message { margin-right: auto; color: var(--muted); }
 .markdown {
@@ -1900,6 +1907,7 @@ button.color-swatch {
   background: var(--markdown-bg); color: var(--markdown-ink);
   font-family: var(--markdown-font); font-size: var(--view-font-size, var(--markdown-size));
 }
+.quick-view .markdown { font-size: var(--view-font-size, var(--markdown-size)); }
 .text-window[data-editing="false"][data-limited-width] .markdown {
   --reading-bg: var(--markdown-bg);
   --reading-outside: var(--markdown-bg);

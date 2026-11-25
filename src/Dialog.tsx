@@ -36,7 +36,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   dismissOnOutside?: boolean;
   tone?: "warning";
   font?: "options";
-  fontZoom?: "compare";
+  fontZoom?: "compare" | "none";
   helpTopic?: HelpTopic;
   contextHelp?: boolean;
 }) {
