@@ -414,6 +414,7 @@ export const api = {
   readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
   savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
   errorLog: () => invoke<string | null>("error_log"),
+  clearErrorLog: () => invoke<void>("clear_error_log"),
   checkForUpdate: (trigger: "automatic" | "manual") => invoke<AppUpdate | null>("check_for_update", { trigger }),
   installedRelease: () => invoke<InstalledRelease>("installed_release"),
   acknowledgeRelease: () => invoke<void>("acknowledge_release"),
