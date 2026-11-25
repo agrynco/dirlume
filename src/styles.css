@@ -1923,6 +1923,7 @@ button.color-swatch {
 .markdown-search [role="status"] { color: var(--muted); padding-inline: 4px; }
 ::highlight(markdown-match) { background: color-mix(in srgb, var(--markdown-search) 30%, var(--markdown-bg)); color: var(--markdown-ink); }
 ::highlight(markdown-current) { background: var(--markdown-search); color: var(--markdown-search-ink); }
+::highlight(markdown-bookmark) { background: var(--markdown-search); color: var(--markdown-search-ink); }
 .markdown-match-overlay { position: absolute; inset: 0; pointer-events: none; }
 .markdown-match-overlay span { position: absolute; background: color-mix(in srgb, var(--markdown-search) 24%, transparent); }
 .markdown-match-overlay .current { box-shadow: inset 0 -2px var(--markdown-search); }

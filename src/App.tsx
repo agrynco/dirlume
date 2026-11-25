@@ -39,7 +39,7 @@ import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { FileBookmarksDialog } from "./FileBookmarksDialog";
-import { bookmarkFile, bookmarkKey, lineFingerprint, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
+import { bookmarkFile, fileBookmarkKey, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
@@ -1241,26 +1241,26 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function updateFileBookmark(bookmark: FileBookmark, change: (current: FileBookmark) => FileBookmark | null) {
-    const key = bookmarkKey(bookmark.path, bookmark.line);
+    const key = fileBookmarkKey(bookmark);
     setFileBookmarks((items) => items.flatMap((item) => {
-      if (bookmarkKey(item.path, item.line) !== key) return [item];
+      if (fileBookmarkKey(item) !== key) return [item];
       const next = change(item);
       return next ? [next] : [];
     }));
   }
 
-  function addFileBookmark(path: string, line: number, text: string) {
-    const key = bookmarkKey(path, line);
-    setFileBookmarks((items) => items.some((item) => bookmarkKey(item.path, item.line) === key) ? items :
-      [...items, { path, line, fingerprint: lineFingerprint(text) }]);
+  function addFileBookmark(bookmark: FileBookmark) {
+    const key = fileBookmarkKey(bookmark);
+    setFileBookmarks((items) => items.some((item) => fileBookmarkKey(item) === key) ? items : [...items, bookmark]);
   }
 
   function openFileBookmark(bookmark: FileBookmark) {
     const file = bookmarkFile(bookmark.path);
     if (!file) return;
     setModal(null);
-    openDocument(file, false, undefined, undefined, undefined,
-      { line: bookmark.line, fingerprint: bookmark.fingerprint, request: ++bookmarkRequest.current });
+    const request = ++bookmarkRequest.current;
+    openDocument(file, false, undefined, undefined, undefined, "anchor" in bookmark
+      ? { anchor: bookmark.anchor, request } : { line: bookmark.line, fingerprint: bookmark.fingerprint, request });
   }
 
   function followMarkdownLink(id: number, from: NamedFile, file: NamedFile, position: MarkdownPosition, scrollTop: number) {
@@ -3487,7 +3487,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TextWindow key={documentKey}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             diagnosticLog={diagnosticLog}
-            fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmarkLine={addFileBookmark}
+            fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmark={addFileBookmark}
             onFileBookmarks={(path) => setModal({ kind: "fileBookmarks", path })}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}

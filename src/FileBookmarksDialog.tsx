@@ -2,8 +2,23 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Bookmark, Pencil, Trash2 } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
-import { bookmarkFile, bookmarkKey, maxBookmarkNameLength, type FileBookmark } from "./fileBookmarks";
+import { bookmarkFile, bookmarkKey, fileBookmarkKey, maxBookmarkNameLength, type FileBookmark } from "./fileBookmarks";
 import { t } from "./i18n";
+
+function bookmarkTitle(bookmark: FileBookmark) {
+  if (bookmark.name) return bookmark.name;
+  if ("line" in bookmark) return bookmarkFile(bookmark.path)?.name;
+  const quote = bookmark.anchor.quote;
+  return quote.length > maxBookmarkNameLength ? quote.slice(0, maxBookmarkNameLength) + "…" : quote;
+}
+
+function compareBookmarks(a: FileBookmark, b: FileBookmark) {
+  const path = a.path.localeCompare(b.path);
+  if (path) return path;
+  if ("line" in a && "line" in b) return a.line - b.line;
+  if ("anchor" in a && "anchor" in b) return a.anchor.offset - b.anchor.offset;
+  return "line" in a ? -1 : 1;
+}
 
 export function FileBookmarksDialog({ bookmarks, path, addKey, onOpen, onRename, onRemove, onClose }: {
   bookmarks: readonly FileBookmark[];
@@ -19,7 +34,7 @@ export function FileBookmarksDialog({ bookmarks, path, addKey, onOpen, onRename,
   const [cursor, setCursor] = useState(0);
   const [rename, setRename] = useState<{ bookmark: FileBookmark; value: string } | null>(null);
   const items = bookmarks.filter((item) => !path || bookmarkKey(item.path) === bookmarkKey(path))
-    .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
+    .sort(compareBookmarks);
   const selected = Math.min(cursor, items.length - 1);
   const current = items[selected];
   useLayoutEffect(() => {
@@ -54,12 +69,12 @@ export function FileBookmarksDialog({ bookmarks, path, addKey, onOpen, onRename,
             else return;
             event.preventDefault();
           }}>
-          {items.map((item, index) => <div key={bookmarkKey(item.path, item.line)} id={`${id}-${index}`} role="option" aria-selected={index === selected}
+          {items.map((item, index) => <div key={fileBookmarkKey(item)} id={`${id}-${index}`} role="option" aria-selected={index === selected}
             className="file-bookmark-row" onClick={() => { setCursor(index); list.current?.focus({ preventScroll: true }); }}
             onDoubleClick={() => onOpen(item)}>
             <Bookmark aria-hidden="true" />
-            <span><strong>{item.name || bookmarkFile(item.path)?.name}</strong><small>{item.path}</small></span>
-            <span>{t("Line {0}", item.line)}</span>
+            <span><strong>{bookmarkTitle(item)}</strong><small>{item.path}</small></span>
+            <span>{"line" in item ? t("Line {0}", item.line) : t("Preview")}</span>
           </div>)}
         </div> : <p role="status">{addKey ? t("Click beside a line number in the text Viewer or press {0} to bookmark a line.", addKey) :
           t("Click beside a line number in the text Viewer to bookmark a line.")}</p>}
