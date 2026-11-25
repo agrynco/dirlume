@@ -120,15 +120,18 @@ async function verifyCopyCheckboxes(browser) {
       const positions = await inputs.evaluateAll((checkboxes) => checkboxes.map((input) => {
         const checkbox = input.getBoundingClientRect();
         const text = input.nextElementSibling;
+        const label = text.getBoundingClientRect();
         const range = document.createRange();
         range.selectNodeContents(text);
         return {
-          x: checkbox.x, gap: text.getBoundingClientRect().x - checkbox.right,
+          x: checkbox.x, gap: label.x - checkbox.right,
+          centerOffset: checkbox.y + checkbox.height / 2 - label.y - label.height / 2,
           lines: range.getClientRects().length, checked: input.checked,
         };
       }));
       assert.deepEqual(positions.map(({ checked }) => checked), [true, false, false, false, false]);
       assert.ok(positions.every(({ x, gap }) => x === positions[0].x && gap === 8));
+      assert.ok(positions.every(({ centerOffset }) => Math.abs(centerOffset) <= 0.5), "Each checkbox must align with its full label.");
       if (language === "uk") assert.ok(positions.some(({ lines }) => lines > 1), "The narrow translated label did not wrap.");
       for (const [index, { checked }] of positions.entries()) {
         const input = inputs.nth(index);

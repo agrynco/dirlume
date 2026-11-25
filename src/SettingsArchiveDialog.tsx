@@ -71,7 +71,7 @@ export function SettingsArchiveDialog({ action, preferences, onImport, onClose }
           {groups.map((group, index) => <label className="field-checkbox" key={group}>
             <input type="checkbox" data-initial-focus={index === 0 || undefined} disabled={saving} checked={selection.groups.includes(group)}
               onChange={() => setSelection((current) => ({ ...current, groups: toggle(current.groups, group) }))} />
-            {t(preferenceGroups[group])}
+            <span>{t(preferenceGroups[group])}</span>
           </label>)}
         </fieldset>}
         {schemes.length > 0 && <fieldset className="settings-archive-items">
@@ -79,7 +79,7 @@ export function SettingsArchiveDialog({ action, preferences, onImport, onClose }
           {schemes.map(({ id, name }, index) => <label className="field-checkbox" key={id}>
             <input type="checkbox" data-initial-focus={!groups.length && index === 0 || undefined} disabled={saving} checked={selection.schemes.includes(id)}
               onChange={() => setSelection((current) => ({ ...current, schemes: toggle(current.schemes, id) }))} />
-            {name}
+            <span>{name}</span>
           </label>)}
         </fieldset>}
         {error && <p className="dialog-error" role="alert">{error}</p>}

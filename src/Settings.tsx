@@ -626,8 +626,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
                       if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
                       captureKey(event, capture);
                     }} />
-                    <label><input type="checkbox" checked={distinguishControl}
-                      onChange={(event) => setDistinguishControl(event.target.checked)} /> {t("Distinguish left and right Ctrl")}</label>
+                    <label className="field-checkbox"><input type="checkbox" checked={distinguishControl}
+                      onChange={(event) => setDistinguishControl(event.target.checked)} /><span>{t("Distinguish left and right Ctrl")}</span></label>
                     {command === "clearMarks" && <Button type="button" onClick={() => finishCapture(command)}>{t("Cancel")}</Button>}
                   </div>}
                 </div>}
