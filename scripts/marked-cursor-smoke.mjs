@@ -57,6 +57,8 @@ try {
     const activeCursor = () => page.locator(".pane.active .file-row.marked[data-current=true]");
     const schemes = page.locator(".topbar-scheme");
     const itemIcon = (item) => item.locator(".file-name > :is(svg.lucide-file, svg.folder-icon)");
+    const cellWeights = (item) => item.locator(".file-name, .file-size, .file-date, .file-time")
+      .evaluateAll((cells) => cells.map((cell) => getComputedStyle(cell).fontWeight));
     for (const side of ["left", "right"]) {
       const scope = page.locator(`#${side}-files`);
       for (const item of [row(0, side), scope.locator('[data-tooltip="sample-folder"]')]) {
@@ -64,11 +66,13 @@ try {
         const icon = itemIcon(item);
         await icon.waitFor();
         const initial = await icon.boundingBox();
+        const weights = await cellWeights(item);
         for (const isMarked of [true, false]) {
           await item.click();
           await scope.press("Insert");
           assert.equal(await item.evaluate((element) => element.classList.contains("marked")), isMarked);
           assert.deepEqual(await icon.boundingBox(), initial, `${layout}, ${side}, ${await item.getAttribute("data-tooltip")}`);
+          assert.deepEqual(await cellWeights(item), weights);
         }
       }
     }

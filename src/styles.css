@@ -705,7 +705,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   text-transform: uppercase;
 }
 .file-column-probe-value { font-size: .88em; padding-inline: 6px; font-variant-numeric: tabular-nums; }
-.pane[data-layout="classic"] .file-column-probe-value { font-weight: 700; }
 .file-columns, .file-list { scrollbar-width: thin; scrollbar-gutter: stable; }
 .file-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 5px; }
 .file-list[data-paged] { overflow-y: hidden; }
@@ -732,7 +731,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-row[data-current="true"] { border-color: var(--line); }
 .pane.active .file-row:is([data-current="true"], .marked) { color: var(--panel-selected-ink); background: var(--panel-selection); }
 .pane.active .file-row[data-current="true"], .file-row.marked { box-shadow: inset 2px 0 var(--accent); }
-.file-row.marked .file-name { color: var(--accent); font-weight: 650; }
+.file-row.marked .file-name { color: var(--accent); }
 .file-row[data-file-color="file-source"] { --entry-color: var(--file-source); }
 .file-row[data-file-color="file-text"] { --entry-color: var(--file-text); }
 .file-row[data-file-color="file-document"] { --entry-color: var(--file-document); }
@@ -750,7 +749,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .file-row[data-file-color]:not(.marked):not([data-current="true"]) .file-name { color: var(--entry-color); }
 [data-theme="classic-blue"] .file-row[data-file-color] .file-name { color: var(--entry-color); }
-.pane .file-row.marked .file-name { font-weight: 650; }
 .pane .file-row.marked:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name { color: var(--panel-marked); }
 [data-theme="classic-blue"] .pane.active .file-row[data-current="true"] :is(.file-name, .file-size, .file-date, .file-time) {
   color: var(--panel-selected-ink);
@@ -2142,7 +2140,7 @@ button.color-swatch {
 .pane[data-layout="classic"].active .file-row[data-current="true"] { background: var(--accent-fill); outline: 0; }
 .pane[data-layout="classic"].active .file-row[data-current="true"] :is(.file-name, .file-size, .file-date) { color: var(--on-accent); }
 .pane[data-layout="classic"] .file-row.marked { background: transparent; box-shadow: none; }
-.pane[data-layout="classic"] .file-row.marked :is(.file-name, .file-size, .file-date) { color: var(--panel-marked); font-weight: 700; }
+.pane[data-layout="classic"] .file-row.marked :is(.file-name, .file-size, .file-date) { color: var(--panel-marked); }
 .pane[data-layout="classic"].active .file-row.marked[data-current="true"] :is(.file-name, .file-size, .file-date) { color: var(--panel-marked); }
 .pane[data-layout="classic"] .file-row.marked:is([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name { color: var(--entry-color); }
 .pane[data-layout="classic"].active .file-row.marked[data-current="true"] { background: color-mix(in srgb, var(--accent-fill) 35%, var(--panel-bg)); }
