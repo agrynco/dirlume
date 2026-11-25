@@ -3,6 +3,7 @@
   "highlights": [
     "Open hidden parent folders before the current location and hidden folders from the previous path after it.",
     "Go up one folder with the parent row, arrow, or shortcut and return along the dimmed path.",
-    "View and edit text and images with dark blue headers in Classic blue."
+    "View and edit text and images with dark blue headers in Classic blue.",
+    "Insert the current folder's path into the command line with Ctrl+F on the parent row."
   ]
 }

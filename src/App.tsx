@@ -2847,8 +2847,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       case "commandName":
         if (command === "commandPath" && currentRow?.name === ".." &&
             (pane.place?.kind === "local" || pane.place?.kind === "ssh")) {
-          const target = parentPlace(pane.place);
-          if (target) insertCommand(placePath(target), pane.place.kind === "local" && windowsClient);
+          insertCommand(placePath(pane.place), pane.place.kind === "local" && windowsClient);
         } else if (currentItem && (currentItem.place.kind === "local" || currentItem.place.kind === "ssh")) {
           insertCommand(command === "commandPath"
             ? placePath(childPlace(currentItem.place, currentItem.entry.name)) : currentItem.entry.name,
