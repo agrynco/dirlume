@@ -483,6 +483,31 @@ async fn operate(directory: String, operation: Operation) -> Result<()> {
     .await
 }
 
+#[cfg(test)]
+mod file_open_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_open_hands_unicode_path_to_the_default_application() {
+        if std::env::var("DIRLUME_VERIFY_FILE_OPEN").as_deref() != Ok("1") {
+            return;
+        }
+        let fixture = tempfile::tempdir().unwrap();
+        let directory = fixture.path().join("Open request fixture");
+        fs::create_dir(&directory).unwrap();
+        let name = "Звіт дня.txt";
+        fs::write(directory.join(name), "Dirlume file open fixture\n").unwrap();
+        operate(
+            directory.to_str().unwrap().to_owned(),
+            Operation::Open {
+                name: name.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
 struct Connection {
     client: Client,
     invitation: Invitation,

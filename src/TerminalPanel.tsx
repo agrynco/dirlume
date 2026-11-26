@@ -65,7 +65,7 @@ function terminalAppearance(): ITerminalOptions {
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
   history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onDisconnected,
-  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onRestart, onClose }: {
+  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onFileOpens, onRestart, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -88,6 +88,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   onCompletionContext: (context: TerminalCompletionContext | null) => void;
   rowHeight: { current: number };
   focusRequested: { current: number | null };
+  onFileOpens: () => void;
   onRestart?: () => void;
   onClose: () => void;
 }) {
@@ -737,6 +738,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         <h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2>
         <span className="terminal-location" data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
         {focusHint}
+        <Button type="button" data-file-opens onClick={onFileOpens}>{t("File opens")}</Button>
         <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
       </header>
       {watchEnvironment && environmentChanged && !sessionError && <p className="terminal-environment-notice" role="status">
