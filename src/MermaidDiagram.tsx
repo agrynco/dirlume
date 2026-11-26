@@ -62,6 +62,7 @@ export function MermaidDiagram({ source, light, colors, scale, fitByDefault }: {
   const [fitAtScale, setFitAtScale] = useState<number>();
   const [windowError, setWindowError] = useState("");
   const scroll = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ id: number; x: number; offset: number } | null>(null);
   const scrollId = useId();
   const [horizontal, setHorizontal] = useState({ width: 0, offset: 0, maximum: 0 });
   const background = colors?.["mermaid-node-bg"];
@@ -175,9 +176,29 @@ export function MermaidDiagram({ source, light, colors, scale, fitByDefault }: {
             setHorizontal((current) => ({ ...current, offset: Math.round(viewport.scrollLeft) }));
           }} />
       </label>}
-      <div ref={scroll} id={scrollId} dir="ltr" className="mermaid-scroll" tabIndex={0} role="group" aria-label={t("Mermaid diagram")}>
+      <div ref={scroll} id={scrollId} dir="ltr" className="mermaid-scroll" tabIndex={0} role="group"
+        aria-label={t("Mermaid diagram")} data-pannable={horizontal.maximum > 0 || undefined}>
         <img className="mermaid-diagram" alt={t("Mermaid diagram")} src={diagram.image}
-          width={diagram.width} height={diagram.height} style={{ width: diagram.width && diagram.width * inlineScale }}
+          width={diagram.width} height={diagram.height} style={{ width: diagram.width && diagram.width * inlineScale }} draggable={false}
+          onPointerDown={(event) => {
+            const viewport = scroll.current;
+            if (event.pointerType !== "mouse" || event.button !== 0 || !viewport || viewport.scrollWidth <= viewport.clientWidth) return;
+            event.preventDefault();
+            drag.current = { id: event.pointerId, x: event.clientX, offset: viewport.scrollLeft };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            event.currentTarget.dataset.panning = "";
+          }}
+          onPointerMove={(event) => {
+            const start = drag.current;
+            if (start?.id === event.pointerId && event.currentTarget.hasPointerCapture(event.pointerId) && scroll.current) {
+              scroll.current.scrollLeft = start.offset + start.x - event.clientX;
+            }
+          }}
+          onLostPointerCapture={(event) => {
+            if (drag.current?.id !== event.pointerId) return;
+            drag.current = null;
+            delete event.currentTarget.dataset.panning;
+          }}
           onLoad={({ currentTarget: image }) => {
             if ((diagram.width && diagram.height) || !image.naturalWidth || !image.naturalHeight) return;
             setResult((current) => current === diagram ? { ...diagram, width: image.naturalWidth, height: image.naturalHeight } : current);

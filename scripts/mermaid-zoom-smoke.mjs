@@ -42,6 +42,18 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
   const inlineOut = button(tools.first(), "Zoom out");
   const inlineReset = button(tools.first(), "Reset diagram zoom");
   const inlineFit = button(tools.first(), "Fit horizontally");
+  const wideViewport = images.first().locator("..");
+  const dragWideDiagram = async (direction) => {
+    const frame = await wideViewport.boundingBox();
+    const readingArea = await surface.boundingBox();
+    const y = Math.max(frame.y, readingArea.y + 50) + 20;
+    const left = frame.x + frame.width * 0.2;
+    const right = frame.x + frame.width * 0.8;
+    await page.mouse.move(direction === "left" ? right : left, y);
+    await page.mouse.down();
+    await page.mouse.move(direction === "left" ? left : right, y + 6, { steps: 5 });
+    await page.mouse.up();
+  };
   const setFigureWidth = (width) => images.first().evaluate((image, width) => { image.closest("figure").style.width = width; }, width);
   await setFigureWidth("75%");
   await page.waitForFunction((width) => {
@@ -52,6 +64,8 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
   await page.waitForFunction((width) =>
     Math.abs(document.querySelector(".text-window:not([hidden]) img.mermaid-diagram").width - width) <= 1, initial.diagrams[0].width);
   await slider.waitFor({ state: "hidden" });
+  await dragWideDiagram("left");
+  assert.equal(await wideViewport.evaluate((element) => element.scrollLeft), 0);
   await inlineIn.press("Enter");
   await slider.waitFor();
   const verticalPosition = await images.first().evaluate((image) => {
@@ -64,6 +78,15 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
     const surface = input.closest(".markdown").getBoundingClientRect();
     return top >= surface.top && bottom <= surface.bottom;
   }), "Horizontal scrolling remains visible midway through a tall diagram.");
+  await dragWideDiagram("left");
+  await page.waitForFunction(() => {
+    const slider = document.querySelector(".mermaid-pan input");
+    return slider && slider.valueAsNumber === Number(slider.max);
+  });
+  assert.equal(await surface.evaluate((element) => element.scrollTop), verticalPosition);
+  await dragWideDiagram("right");
+  await page.waitForFunction(() => document.querySelector(".mermaid-pan input")?.valueAsNumber === 0);
+  assert.equal(await surface.evaluate((element) => element.scrollTop), verticalPosition);
   await slider.press("End");
   const rightEdge = await images.first().locator("..").evaluate((element) => {
     return {
