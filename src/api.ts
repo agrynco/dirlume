@@ -196,7 +196,21 @@ export interface FtpProfile {
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
+  proxy?: ProxySettings;
 }
+
+export type ProxyMode = "none" | "socks5" | "httpConnect";
+export interface ProxySettings {
+  mode: ProxyMode;
+  host: string;
+  port: number;
+  username: string;
+  skipLoopback: boolean;
+  resolveLocally: boolean;
+  hasPassword?: boolean;
+}
+export type ProxyInput = Omit<ProxySettings, "hasPassword"> & { password?: string };
+type FtpProfileInput = Omit<FtpProfile, "id" | "proxy"> & { id?: string; password?: string; proxy?: ProxyInput };
 
 export type FtpEncryption = "plain" | "explicitTls" | "implicitTls";
 export interface FtpOptions {
@@ -256,6 +270,7 @@ export interface SshProfile extends SshHostSettings {
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
+  proxy?: ProxySettings;
 }
 
 export interface SshHostVerification {
@@ -273,6 +288,7 @@ export type SshHostInput = SshHostSettings & { secret?: string; clearSecret?: bo
 type SshProfileInput = SshHostInput & {
   id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences; environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
+  proxy?: ProxyInput;
 };
 
 export interface NamedFile {
@@ -600,9 +616,9 @@ export const api = {
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
   ftpProfiles: () => invoke<FtpProfile[]>("ftp_profiles"),
   ftpWindowsCodePage: () => invoke<number | null>("ftp_windows_code_page"),
-  saveFtpProfile: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
+  saveFtpProfile: (input: FtpProfileInput) =>
     invoke<string>("save_ftp_profile", { input }),
-  testFtpConnection: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }, signal?: AbortSignal) =>
+  testFtpConnection: (input: FtpProfileInput, signal?: AbortSignal) =>
     netBoxRequest(signal, (request) => invoke<void>("test_ftp_connection", { input, request })),
   removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
   connectFtp: (id: string, segments?: string[], remembered?: string[], signal?: AbortSignal) =>

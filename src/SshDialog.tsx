@@ -11,6 +11,7 @@ import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
 import { defaultDirectoryPreferences } from "./netboxDirectories";
 import { defaultEnvironmentPreferences, NetBoxEnvironmentPage } from "./NetBoxEnvironmentPage";
 import { defaultConnectionPreferences, NetBoxConnectionPage } from "./NetBoxConnectionPage";
+import { NetBoxProxyPage, proxyDraft, proxyInput } from "./NetBoxProxyPage";
 
 export function VerifyHostDialog({ verification, testing, onCancel, onApprove }: {
   verification: SshHostVerification;
@@ -142,6 +143,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
   const [environment, setEnvironment] = useState(profile?.environment ?? draft?.environment ?? defaultEnvironmentPreferences);
   const [connectionOptions, setConnectionOptions] = useState(profile?.connectionOptions ?? draft?.connectionOptions ?? defaultConnectionPreferences);
+  const [proxy, setProxy] = useState(() => draft?.proxy ?? proxyDraft(profile?.proxy));
   const [jumps, setJumps] = useState<JumpDraft[]>(() =>
     (profile?.jumpHosts ?? []).map((host) => ({ ...hostDraft(host), id: host.id })));
   const [editor, setEditor] = useState<JumpDraft>();
@@ -163,6 +165,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
     directories,
     environment,
     connectionOptions,
+    proxy: proxyInput(proxy),
   };
 
   const editingId = editor?.id;
@@ -244,12 +247,14 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
       directories: <NetBoxDirectoriesPage value={directories} symbolicLinks
       onChange={(settings) => { setDirectories(settings); changed(); }} />,
       connection: <NetBoxConnectionPage value={connectionOptions} ftp={false} jumpRoute={jumps.length > 0}
-        onChange={(settings) => { setConnectionOptions(settings); changed(); }} /> }}
+        onChange={(settings) => { setConnectionOptions(settings); changed(); }} />,
+      proxy: <NetBoxProxyPage value={proxy} saved={profile?.proxy} jumpRoute={jumps.length > 0}
+        onChange={(settings) => { setProxy(settings); changed(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t("SFTP connection successful.")}</p> : undefined}
     onChangeProtocol={onUseFtp && (() => onUseFtp({
       label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited, directories, environment,
-      connectionOptions,
+      connectionOptions, proxy,
       ftpEncryption: draft?.ftpEncryption,
       ftpOptions: draft?.ftpOptions,
     }))} onSave={(event) => { void save(event); }} onClose={onClose}>

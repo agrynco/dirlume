@@ -35,6 +35,7 @@ use crate::{
     netbox_connection::{self, ConnectionPreferences},
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     netbox_environment::EnvironmentPreferences,
+    netbox_proxy as proxy,
     protocol::{file_server_origin, RemoteListing},
 };
 use profiles::{
@@ -54,6 +55,7 @@ pub(crate) fn quote(value: &str) -> String {
 struct RouteOptions {
     preferences: ConnectionPreferences,
     stop: Option<CancellationToken>,
+    proxy: Option<proxy::Route>,
 }
 
 impl RouteOptions {
@@ -215,19 +217,16 @@ fn handshake(
                     .map_err(HandshakeError::Forwarding)?;
                 client::connect_stream(config, channel.into_stream(), verifier).await
             } else {
-                let addresses = options
-                    .preferences
-                    .address_family
-                    .resolve(&endpoint.host, endpoint.port)
-                    .await
-                    .map_err(HandshakeError::Network)?;
-                let socket = tokio::net::TcpStream::connect(addresses.as_slice())
-                    .await
-                    .map_err(|error| {
-                        HandshakeError::Network(
-                            options.preferences.address_family.connect_error(error),
-                        )
-                    })?;
+                let socket = proxy::connect(
+                    options.proxy.as_ref(),
+                    options.preferences.address_family,
+                    &endpoint.host,
+                    endpoint.port,
+                )
+                .await
+                .map_err(|error| {
+                    HandshakeError::Network(options.preferences.address_family.connect_error(error))
+                })?;
                 let _ = socket.set_nodelay(config.nodelay);
                 client::connect_stream(config, socket, verifier).await
             }
@@ -369,6 +368,7 @@ impl Connection {
             RouteOptions {
                 preferences: self.profile.connection_options,
                 stop,
+                proxy: self.profile.proxy_route()?,
             },
         )? {
             Ok((client, _)) => Ok(client),
@@ -645,12 +645,13 @@ pub async fn test_ssh_connection(
     let stop = requests.token(request)?;
     let approvals = route_approvals(approval, approvals);
     blocking(move || {
-        let (config, mut route, preferences) = {
+        let (config, mut route, preferences, proxy) = {
             let _lock = profiles::lock(&path)?;
             let config = Config::load(&path)?;
             let preferences = input.connection_preferences(&config)?;
+            let proxy = input.proxy_route(&config)?;
             let route = input.test_route(&config)?;
-            (config, route, preferences)
+            (config, route, preferences, proxy)
         };
         let endpoint = route
             .last()
@@ -662,7 +663,11 @@ pub async fn test_ssh_connection(
             route.iter_mut().map(RouteHost::Draft).collect(),
             |endpoint| config.fingerprint(endpoint).map(str::to_owned),
             &approvals,
-            RouteOptions { preferences, stop },
+            RouteOptions {
+                preferences,
+                stop,
+                proxy,
+            },
         )? {
             Ok(route) => route,
             Err(verification) => return Ok(TestOutcome::VerifyHost { verification }),
@@ -740,6 +745,7 @@ pub async fn connect_ssh(
             RouteOptions {
                 preferences: profile.connection_options,
                 stop,
+                proxy: profile.proxy_route()?,
             },
         )? {
             Ok(route) => route,

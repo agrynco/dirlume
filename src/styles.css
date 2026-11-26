@@ -1517,9 +1517,10 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
   gap: 4px;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
   padding: 2px;
 }
+.netbox-tabs::-webkit-scrollbar { display: none; }
 .netbox-tabs button { flex: none; white-space: nowrap; }
 .netbox-tabs button[aria-selected="true"] { border-color: var(--accent); background: var(--hover); font-weight: 600; }
 .netbox-page-arrows { display: flex; flex: none; gap: 4px; margin-block-start: 2px; }

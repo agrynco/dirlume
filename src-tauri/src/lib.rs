@@ -45,6 +45,8 @@ mod netbox_connection;
 mod netbox_directories;
 #[cfg(feature = "desktop")]
 mod netbox_environment;
+#[cfg(feature = "desktop")]
+mod netbox_proxy;
 #[cfg(all(feature = "desktop", windows))]
 mod portable;
 #[cfg(feature = "desktop")]

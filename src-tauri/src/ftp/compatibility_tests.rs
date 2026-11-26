@@ -121,6 +121,9 @@ fn selects_mlsd_fallback_and_list_policies() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut connection = connection(listener.local_addr().unwrap().port(), Encryption::Plain);
         connection.profile.ftp_options.mlsd = policy;
+        let proxy = (policy == MlsdPolicy::Off)
+            .then(|| proxy::fixture::Proxy::start(proxy::Mode::HttpConnect));
+        connection.proxy = proxy.as_ref().map(proxy::fixture::Proxy::route);
         let fixture = thread::spawn(move || {
             let mut peer = start(listener, b"USER fixture\r\n", b"PASS fixture-password\r\n");
             binary(&mut peer);
@@ -154,6 +157,13 @@ fn selects_mlsd_fallback_and_list_policies() {
         }
         drop(session);
         fixture.join().unwrap();
+        if let Some(proxy) = proxy {
+            assert_eq!(
+                proxy.requests().len(),
+                2,
+                "FTP control and passive listing connections"
+            );
+        }
     }
 }
 

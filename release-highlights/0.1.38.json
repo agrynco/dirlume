@@ -1,6 +1,7 @@
 {
   "version": "0.1.38",
   "highlights": [
-    "Stage or unstage files in Git View and review all staged paths before creating a local commit."
+    "Stage or unstage files in Git View and review all staged paths before creating a local commit.",
+    "Route NetBox FTP, FTPS, and SFTP profiles through a SOCKS5 or HTTP CONNECT proxy."
   ]
 }

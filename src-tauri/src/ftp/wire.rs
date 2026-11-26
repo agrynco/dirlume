@@ -15,6 +15,7 @@ use tokio::{
 };
 
 use super::{configure_socket, ConnectionPreferences};
+use crate::netbox_proxy;
 
 #[derive(Debug)]
 pub(super) struct Connector {
@@ -22,6 +23,7 @@ pub(super) struct Connector {
     first: AtomicBool,
     raw_iac: bool,
     options: ConnectionPreferences,
+    target: Option<netbox_proxy::Target>,
 }
 
 impl Connector {
@@ -35,7 +37,13 @@ impl Connector {
             first: AtomicBool::new(true),
             raw_iac,
             options,
+            target: None,
         }
+    }
+
+    pub(super) fn with_target(mut self, target: netbox_proxy::Target) -> Self {
+        self.target = Some(target);
+        self
     }
 }
 
@@ -45,6 +53,13 @@ impl AsyncTlsConnector for Connector {
 
     async fn connect(&self, name: &str, socket: TcpStream) -> FtpResult<Self::Stream> {
         let control = self.first.swap(false, Ordering::Relaxed);
+        let socket = match self.target.as_ref().filter(|_| control) {
+            Some(target) => target
+                .finish(socket)
+                .await
+                .map_err(FtpError::ConnectionError)?,
+            None => socket,
+        };
         configure_socket(&socket, self.options, !control).map_err(FtpError::ConnectionError)?;
         let transport = match &self.tls {
             Some(tls) => Transport::Tls(Box::new(tls.connect(name, socket).await?)),
