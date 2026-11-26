@@ -1661,7 +1661,7 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .preview-shortcuts kbd { margin-left: 5px; }
 .setting { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .field-checkbox { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
-.field-checkbox > input[type=checkbox] { flex: none; margin: 0; }
+.field-checkbox > input[type=checkbox] { order: -1; flex: none; margin: 0; }
 .field-checkbox > :is(span, small) { min-width: 0; overflow-wrap: anywhere; }
 .setting select { min-width: 156px; }
 .settings-layout label.setting,
@@ -1676,7 +1676,6 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .settings-layout :is(.field > .editable-dropdown, .settings-path-field > .path-field) {
   flex: 0 1 220px; min-width: 0; max-width: 100%;
 }
-.settings-layout .field-checkbox > input { order: -1; }
 .appearance-settings { display: grid; gap: 12px; min-height: 0; }
 .appearance-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .appearance-header .appearance-button { min-height: 34px; border-color: var(--line); }

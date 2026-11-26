@@ -17,6 +17,19 @@ async function verifyTabBar(popup) {
   assert.equal(await button(popup, "Next settings page").isVisible(), true);
 }
 
+async function verifyCheckbox(popup, name) {
+  const checkbox = popup.getByRole("checkbox", { name, exact: true });
+  const layout = await checkbox.evaluate((input) => {
+    const label = input.closest("label");
+    const text = label.querySelector("span");
+    return { left: input.getBoundingClientRect().left, right: input.getBoundingClientRect().right,
+      textLeft: text.getBoundingClientRect().left, rowLeft: label.getBoundingClientRect().left };
+  });
+  assert.ok(Math.abs(layout.left - layout.rowLeft) < 1, name + " checkbox starts at the row edge");
+  assert.ok(layout.right < layout.textLeft, name + " checkbox precedes the label");
+  return checkbox;
+}
+
 async function chooseSource(page, side, shortcut) {
   const panel = pane(page, side);
   await button(panel, `Locations for ${side} pane`).click();
@@ -87,7 +100,9 @@ try {
         transformCallback: () => 1,
         invoke: async (command, args) => {
           if (command === "locations") return [{ label: "Home", path: root }];
-          if (command === "list_directory") return { path: args.path, parent: null, entries: [], omitted: 0 };
+          if (command === "list_directory") return { path: args.path, parent: null, entries: [
+            { name: "reference.txt", directory: false, hidden: false, link: false, modified: null, size: 1 },
+          ], omitted: 0 };
           if (command === "file_icons") return args.items.map(() => null);
           if (command === "ftp_profiles") return JSON.parse(localStorage.getItem("fixture.ftp.profiles") ?? "[]");
           if (command === "ssh_profiles") return profile() ? [profile()] : [];
@@ -126,6 +141,13 @@ try {
     }, { hostnames, ftpSources, sshSources, nextPageKey: /Linux/.test(platform) ? "Ctrl+Alt+N" : null,
       previousPageDisabled: /Macintosh/.test(platform) });
     await page.goto("http://dirlume.test/");
+    const localFiles = page.getByRole("listbox", { name: "left files", exact: true });
+    await localFiles.getByRole("option", { name: /^reference.txt/ }).click();
+    await localFiles.press("F5");
+    const copy = dialog(page, "Copy");
+    await verifyCheckbox(copy, "Also ask about read-only files");
+    await verifyCheckbox(copy, "Process multiple destinations");
+    await button(copy, "Cancel").click();
     const left = await chooseSource(page, "left", expectedShortcut);
     await left.getByText("No saved connections.", { exact: true }).waitFor();
     await button(left, "Add connection").click();
@@ -143,6 +165,37 @@ try {
     await next.click();
     assert.equal(await selected("Environment"), "true");
     assert.equal(await add.getByLabel("Filename code page").count(), 0);
+    const preserveTimes = await verifyCheckbox(add, "Preserve modification times on downloads");
+    const recycle = await verifyCheckbox(add, "Move deleted items to the remote recycle bin");
+    await verifyCheckbox(add, "Keep previous versions of overwritten SFTP files");
+    const wasChecked = await preserveTimes.isChecked();
+    await add.getByText("Preserve modification times on downloads", { exact: true }).click();
+    assert.equal(await preserveTimes.isChecked(), !wasChecked);
+    await preserveTimes.press("Space");
+    assert.equal(await preserveTimes.isChecked(), wasChecked);
+    assert.equal(await recycle.isChecked(), false);
+    const overwriteName = "Keep previous versions of overwritten SFTP files";
+    const overwritten = add.getByRole("checkbox", { name: overwriteName, exact: true });
+    const overwriteLabel = add.getByText(overwriteName, { exact: true });
+    await add.evaluate((element) => { element.style.width = "245px"; });
+    for (const caption of ["Зберігати попередні версії перезаписаних файлів SFTP",
+      "Сохранять предыдущие версии перезаписанных файлов SFTP"]) {
+      const wrapsToTheRight = await overwritten.evaluate((input, caption) => {
+        const text = input.closest("label").querySelector("span");
+        const content = text.firstChild;
+        const original = content.nodeValue;
+        content.nodeValue = caption;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const lines = [...range.getClientRects()];
+        const check = input.getBoundingClientRect();
+        content.nodeValue = original;
+        return lines.length > 1 && lines.every((line) => line.left >= check.right);
+      }, caption);
+      assert.equal(wrapsToTheRight, true, caption);
+    }
+    await overwriteLabel.waitFor();
+    await add.evaluate((element) => { element.style.removeProperty("width"); });
     await next.click();
     assert.equal(await selected("Directories"), "true");
     await next.click();
@@ -208,7 +261,7 @@ try {
       document.activeElement instanceof HTMLInputElement && document.activeElement.value === "70000");
     await next.click();
     const directories = add.getByRole("tabpanel", { name: "Directories" });
-    assert.equal(await directories.getByLabel("Resolve directory symbolic links").isDisabled(), true);
+    assert.equal(await (await verifyCheckbox(directories, "Resolve directory symbolic links")).isDisabled(), true);
     assert.equal(await directories.getByLabel("Keep directory cache after closing Dirlume").isDisabled(), true);
     await directories.getByLabel("Starting folder").fill("/configured");
     await directories.getByLabel("Cache directory changes").check();
