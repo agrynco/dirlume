@@ -552,6 +552,12 @@ mod tests {
             &["config", "user.email", "fixture@example.test"],
         );
         git(&executable, root, &["config", "commit.gpgsign", "false"]);
+        let hooks = root.join(".git").join("hooks");
+        git(
+            &executable,
+            root,
+            &["config", "core.hooksPath", hooks.to_str().unwrap()],
+        );
         (executable, fixture)
     }
 

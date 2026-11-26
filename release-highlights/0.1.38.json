@@ -1,0 +1,6 @@
+{
+  "version": "0.1.38",
+  "highlights": [
+    "Stage or unstage files in Git View and review all staged paths before creating a local commit."
+  ]
+}
