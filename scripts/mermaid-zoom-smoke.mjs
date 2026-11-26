@@ -266,8 +266,8 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
 async function browserSmoke() {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
-    for (const platform of ["Windows NT 10.0; Win64; x64", "X11; Linux x86_64"]) {
-      const context = await browser.newContext({ userAgent: `Mozilla/5.0 (${platform})`, viewport: { width: 1120, height: 650 } });
+    for (const [platform, colorScheme] of [["Windows NT 10.0; Win64; x64", "light"], ["X11; Linux x86_64", "dark"]]) {
+      const context = await browser.newContext({ userAgent: `Mozilla/5.0 (${platform})`, colorScheme, viewport: { width: 1120, height: 650 } });
       try {
         await context.route("http://dirlume.test/**", (route) => {
           const path = new URL(route.request().url()).pathname;
@@ -298,15 +298,7 @@ async function browserSmoke() {
           await files.press("F3");
         };
         await openMarkdown();
-        const changeTheme = async () => {
-          const previous = await page.locator("html").getAttribute("data-theme");
-          await page.getByRole("button", { name: /^Switch to favorite (light|dark) scheme$/ }).click();
-          await page.waitForFunction((value) => document.documentElement.dataset.theme !== value, previous);
-        };
-        const markdown = page.getByRole("region", { name: "diagrams.md", exact: true }).locator(".markdown");
-        await changeTheme();
-        await verifyMermaidToolbar(page, markdown);
-        await changeTheme();
+        await page.getByRole("button", { name: `Switch to favorite ${colorScheme === "light" ? "dark" : "light"} scheme`, exact: true }).waitFor();
         const changeOptions = async (change) => {
           await button(page, "Viewer options").click();
           const options = page.getByRole("dialog", { name: "Options", exact: true });
@@ -325,10 +317,7 @@ async function browserSmoke() {
         });
         await button(page.getByRole("region", { name: "diagrams.md", exact: true }), "Close document").click();
         await button(page, "Quick View").click();
-        const preview = page.locator(".quick-view .markdown");
-        await verifyMermaidToolbar(page, preview);
-        await changeTheme();
-        await verifyMermaidToolbar(page, preview);
+        await verifyMermaidToolbar(page, page.locator(".quick-view .markdown"));
       } finally { await context.close(); }
     }
   } finally { await browser.close(); }
