@@ -11,13 +11,23 @@ const row = (hex, offset) => hex.locator(`[data-byte-offset="${offset}"]`);
 export async function verifyHexScroll(page, first = /41 41 41.*AAAAAAAAAAAAAAAA/) {
   const hex = page.getByLabel("Hexadecimal contents", { exact: true });
   await row(hex, 0).filter({ hasText: first }).waitFor();
+  const viewport = await hex.elementHandle();
   async function reach(offset, pattern, direction) {
-    const expected = row(hex, offset).filter({ hasText: pattern });
-    for (let attempt = 0; attempt < 20 && !await expected.count(); attempt++) {
-      await hex.evaluate((view, direction) => view.scrollBy({ top: direction * view.clientHeight / 2 }), direction);
-      await page.waitForTimeout(40);
+    const target = row(hex, offset);
+    for (let attempt = 0; attempt < 20 && !await target.count(); attempt++) {
+      const step = await viewport.evaluate((view, direction) => {
+        const top = view.scrollTop;
+        const first = view.querySelector("[data-byte-offset]")?.getAttribute("data-byte-offset");
+        view.scrollTop += direction * view.clientHeight / 2;
+        return { first, moved: view.scrollTop !== top };
+      }, direction);
+      if (!step.moved) break;
+      await page.waitForFunction(({ view, first, offset }) =>
+        view.querySelector(`[data-byte-offset="${offset}"]`) ||
+        view.querySelector("[data-byte-offset]")?.getAttribute("data-byte-offset") !== first,
+      { view: viewport, first: step.first, offset });
     }
-    await expected.waitFor();
+    await target.filter({ hasText: pattern }).waitFor();
     const offsets = await hex.locator("[data-byte-offset]").evaluateAll((lines) => lines.map((line) => Number(line.dataset.byteOffset)));
     assert.ok(offsets.slice(1).every((offset, index) => offset === offsets[index] + 16));
   }
