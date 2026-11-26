@@ -284,6 +284,9 @@ try {
     await connect(page, "right");
     const input = page.getByRole("combobox", { name: "Command line", exact: true });
     const choices = page.getByRole("listbox", { name: "Command suggestions", exact: true });
+    // The pane returns focus on a frame after its listing has been rendered.
+    const finishPaneFocus = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await finishPaneFocus();
     await input.fill("docker co");
     await choices.getByRole("option", { name: "container", exact: true }).waitFor();
     assert.equal(await page.locator(".terminal-card:visible").count(), 0);
@@ -295,7 +298,8 @@ try {
     const address = await editPaneAddress(page, "right");
     await address.fill("/elsewhere");
     await address.press("Enter");
-    await page.waitForFunction(() => document.getElementById("right-path")?.dataset.path === "/elsewhere");
+    await waitPath(page, "right", "/elsewhere");
+    await finishPaneFocus();
     await input.fill("docker co");
     await choices.getByRole("option", { name: "compose elsewhere", exact: true }).waitFor();
     await page.evaluate(() => window.sshFixture.releaseCompletion());
