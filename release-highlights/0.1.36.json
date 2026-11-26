@@ -1,0 +1,7 @@
+{
+  "version": "0.1.36",
+  "highlights": [
+    "Drag wide Mermaid diagrams sideways directly in Markdown. The horizontal scroll slider moves with the diagram and remains available.",
+    "Find the full file path and its copy button together on the right side of the Text Viewer and Editor menu row."
+  ]
+}
