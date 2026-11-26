@@ -25,6 +25,9 @@ pub trait Session {
 }
 
 pub trait DownloadSession: Session {
+    fn preserve_download_timestamps(&self) -> bool {
+        true
+    }
     fn children(&mut self, segments: &[String]) -> Result<Vec<Self::Entry>>;
     fn matches_file(&mut self, segments: &[String], expected: &Self::Entry) -> Result<bool> {
         Ok(self.stat(segments)?.as_ref() == Some(expected))
@@ -265,7 +268,10 @@ impl<S: DownloadSession> Download<'_, S> {
         if size.is_some_and(|size| size != actual) {
             return Err(file_changed::<S>());
         }
-        if let Some(time) = entry.modified() {
+        if let Some(time) = entry
+            .modified()
+            .filter(|_| self.session.preserve_download_timestamps())
+        {
             staged.set_modified(time).map_err(message)?;
         }
         staged.sync_all().map_err(message)?;

@@ -116,9 +116,11 @@ export type FileLocation =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
-  | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[]; directories?: DirectoryPreferences }
+  | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[];
+      directories?: DirectoryPreferences; environment?: EnvironmentPreferences }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; canAdd: boolean; address: string }
-  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; directories?: DirectoryPreferences }
+  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[];
+      directories?: DirectoryPreferences; environment?: EnvironmentPreferences }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
 export const connectionSourceNames = { netbox: "NetBox", smb: "SMB", remote: "Remote machine" } as const;
@@ -167,6 +169,14 @@ export interface DirectoryPreferences {
   resolveLinks: boolean;
 }
 
+export interface EnvironmentPreferences {
+  lineEnding: "lf" | "crlf";
+  listingTime: "asReported" | "fixedOffset" | "localZone";
+  serverOffsetMinutes: number;
+  daylightSaving: "atTimestamp" | "currentOffset";
+  preserveDownloadTimestamps: boolean;
+}
+
 export interface FtpProfile {
   id: string;
   label: string;
@@ -175,6 +185,7 @@ export interface FtpProfile {
   username: string;
   codePage: number | null;
   directories?: DirectoryPreferences;
+  environment?: EnvironmentPreferences;
 }
 
 export interface SshHostSettings {
@@ -195,6 +206,7 @@ export interface SshProfile extends SshHostSettings {
   hasSecret: boolean;
   jumpHosts?: SshJumpHost[];
   directories?: DirectoryPreferences;
+  environment?: EnvironmentPreferences;
 }
 
 export interface SshHostVerification {
@@ -204,10 +216,14 @@ export interface SshHostVerification {
 }
 
 type SshVerificationRequired = { kind: "verifyHost"; verification: SshHostVerification };
-type ConnectedFileServer = Connection & { segments: string[]; directories?: DirectoryPreferences; unavailableFolders?: string[] };
+type ConnectedFileServer = Connection & {
+  segments: string[]; directories?: DirectoryPreferences; environment?: EnvironmentPreferences; unavailableFolders?: string[];
+};
 type SshConnection = ({ kind: "connected" } & ConnectedFileServer) | SshVerificationRequired;
 export type SshHostInput = SshHostSettings & { secret?: string; clearSecret?: boolean };
-type SshProfileInput = SshHostInput & { id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences };
+type SshProfileInput = SshHostInput & {
+  id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences; environment?: EnvironmentPreferences;
+};
 
 export interface NamedFile {
   place: TextPlace;

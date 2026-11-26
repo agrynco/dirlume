@@ -9,3 +9,9 @@ test("both editor save paths preserve mixed endings across edits, insertions and
   assert.equal(restoreLineEndings(original, "a\nc\nd"), "a\r\nc\nd");
   assert.equal(restoreLineEndings("a\r\nb\n", "a\nb"), "a\r\nb");
 });
+
+test("a profile fallback applies only when the original contains no line endings", () => {
+  assert.equal(restoreLineEndings("a", "a\nb\n", "\r\n"), "a\r\nb\r\n");
+  assert.equal(restoreLineEndings("a\nb", "a\nB\n", "\r\n"), "a\nB\n");
+  assert.equal(restoreLineEndings("a\r\nb", "a\nB\n", "\n"), "a\r\nB\r\n");
+});

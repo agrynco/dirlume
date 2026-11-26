@@ -13,6 +13,7 @@ use zeroize::Zeroizing;
 use crate::{
     desktop::{blocking, message, Result},
     netbox_directories::DirectoryPreferences,
+    netbox_environment::EnvironmentPreferences,
 };
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -68,6 +69,8 @@ pub(super) struct SavedProfile {
     jump_hosts: Vec<SavedJumpHost>,
     #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
     pub(super) directories: DirectoryPreferences,
+    #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
+    pub(super) environment: EnvironmentPreferences,
 }
 
 impl SavedProfile {
@@ -187,6 +190,7 @@ pub struct ProfileSummary {
     destination: HostSummary,
     jump_hosts: Vec<JumpHostSummary>,
     directories: DirectoryPreferences,
+    environment: EnvironmentPreferences,
 }
 
 impl From<SavedProfile> for ProfileSummary {
@@ -195,6 +199,7 @@ impl From<SavedProfile> for ProfileSummary {
             id: item.id,
             label: item.label,
             directories: item.directories,
+            environment: item.environment,
             destination: item.destination.into(),
             jump_hosts: item
                 .jump_hosts
@@ -218,6 +223,7 @@ pub struct ProfileInput {
     #[serde(default)]
     jump_hosts: Vec<JumpHostInput>,
     directories: Option<DirectoryPreferences>,
+    environment: Option<EnvironmentPreferences>,
 }
 
 #[derive(Deserialize)]
@@ -484,12 +490,19 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             .or_else(|| previous.map(|profile| profile.directories.clone()))
             .unwrap_or_default()
             .normalized()?;
+        let environment = input
+            .environment
+            .clone()
+            .or_else(|| previous.map(|profile| profile.environment.clone()))
+            .unwrap_or_default()
+            .validated()?;
         let draft = input.prepare(previous)?;
         let mut new_credentials = NewCredentials::default();
         let item = SavedProfile {
             id,
             label,
             directories,
+            environment,
             destination: new_credentials.save(draft.destination)?,
             jump_hosts: draft
                 .jump_hosts

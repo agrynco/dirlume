@@ -1,12 +1,17 @@
 import { diffArrays } from "diff";
+import type { NamedFile } from "./api";
 
 export function normalized(text: string) {
   return text.replaceAll(/\r\n?/g, "\n");
 }
 
-export function restoreLineEndings(original: string, edited: string) {
+export function preferredLineEnding({ place }: NamedFile): "\n" | "\r\n" {
+  return (place.kind === "ftp" || place.kind === "ssh") && place.environment?.lineEnding === "crlf" ? "\r\n" : "\n";
+}
+
+export function restoreLineEndings(original: string, edited: string, missing: "\n" | "\r\n" = "\n") {
   const endings = original.match(/\r\n|\r|\n/g) ?? [];
-  const fallback = endings[0] ?? "\n";
+  const fallback = endings[0] ?? missing;
   if (endings.every((ending) => ending === fallback)) return edited.replaceAll("\n", fallback);
   const lines = edited.split("\n");
   const sourceLines = normalized(original).split("\n");

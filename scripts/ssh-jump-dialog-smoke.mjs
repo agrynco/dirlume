@@ -125,9 +125,12 @@ try {
     assert.equal(await selected("Session"), "true");
     assert.equal(await previous.isDisabled(), true);
     await next.click();
+    assert.equal(await selected("Environment"), "true");
+    assert.equal(await add.getByLabel("Filename code page").count(), 0);
+    await next.click();
     assert.equal(await selected("Directories"), "true");
     assert.equal(await next.isDisabled(), true);
-    await previous.click();
+    await tab("Session").click();
     const protocol = add.getByLabel("Protocol", { exact: true });
     await protocol.selectOption("ftp");
     await add.evaluate((element) => { element.style.width = "194px"; });
@@ -141,6 +144,7 @@ try {
     assert.equal(await tabs.evaluate((element) => element.scrollLeft > 0), true);
     assert.equal(await previous.isVisible(), true);
     await add.getByLabel("Filename code page").fill("1251");
+    await add.getByLabel("Line endings for files without line breaks").selectOption("crlf");
     await page.keyboard.press("Control+PageUp");
     if (/Macintosh/.test(platform)) {
       assert.equal(await selected("Environment"), "true");
@@ -176,7 +180,10 @@ try {
     await tab("Session").click();
     await add.evaluate((element) => { element.style.removeProperty("width"); });
     await protocol.selectOption("sftp");
-    assert.equal(await tab("Environment").count(), 0);
+    await tab("Environment").click();
+    assert.equal(await add.getByLabel("Filename code page").count(), 0);
+    assert.equal(await add.getByLabel("Line endings for files without line breaks").inputValue(), "crlf");
+    await tab("Session").click();
     assert.equal(await add.getByLabel("Connection name", { exact: true }).inputValue(), "Production");
     await tab("Directories").click();
     assert.equal(await directories.getByLabel("Starting folder").inputValue(), "/configured");

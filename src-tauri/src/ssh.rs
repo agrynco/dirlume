@@ -30,6 +30,7 @@ use zeroize::Zeroizing;
 use crate::{
     desktop::{blocking, message, Result},
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
+    netbox_environment::EnvironmentPreferences,
     protocol::{file_server_origin, RemoteListing},
 };
 use profiles::{
@@ -326,6 +327,10 @@ impl Connection {
 
     pub fn open(&self) -> Result<Session> {
         open_sftp(self.authenticated_client()?)
+            .map(|session| {
+                session
+                    .with_download_timestamps(self.profile.environment.preserve_download_timestamps)
+            })
             .map_err(|error| route_error(&self.profile.destination.settings.endpoint, None, error))
     }
 
@@ -620,6 +625,7 @@ pub enum ConnectOutcome {
         segments: Vec<String>,
         listing: RemoteListing,
         directories: DirectoryPreferences,
+        environment: EnvironmentPreferences,
         #[serde(rename = "unavailableFolders")]
         unavailable_folders: Vec<String>,
     },
@@ -700,6 +706,7 @@ pub async fn connect_ssh(
     };
     let address = connection.profile.label.clone();
     let directories = connection.profile.directories.clone();
+    let environment = connection.profile.environment.clone();
     let endpoint = &connection.profile.destination.settings.endpoint;
     let origin = file_server_origin("sftp", &endpoint.host, endpoint.port, 22);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
@@ -715,6 +722,7 @@ pub async fn connect_ssh(
         segments: start.segments,
         listing: start.listing,
         directories,
+        environment,
         unavailable_folders: start.unavailable,
     })
 }
