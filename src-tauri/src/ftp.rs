@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{self, Read, Write},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{Shutdown, SocketAddr, TcpStream},
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
@@ -13,17 +13,20 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use socket2::{SockRef, TcpKeepalive};
 use suppaftp::{
     list::{File, ListParser},
     types::FileType,
     FtpError, FtpStream, Mode, Status,
 };
 use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
     desktop::{blocking, message, Result},
     local,
+    netbox_connection::{self, ConnectionPreferences},
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     netbox_environment::EnvironmentPreferences,
     protocol::{file_server_origin, RemoteListing},
@@ -45,6 +48,8 @@ pub struct Profile {
     directories: DirectoryPreferences,
     #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
     environment: EnvironmentPreferences,
+    #[serde(default, skip_serializing_if = "ConnectionPreferences::is_default")]
+    connection_options: ConnectionPreferences,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -66,12 +71,13 @@ pub struct ProfileInput {
     code_page: Option<u16>,
     directories: Option<DirectoryPreferences>,
     environment: Option<EnvironmentPreferences>,
+    connection_options: Option<ConnectionPreferences>,
 }
 
 #[derive(Default)]
 pub struct FtpState {
     connections: Mutex<HashMap<u32, Arc<Connection>>>,
-    searches: Mutex<HashMap<u32, Arc<AtomicBool>>>,
+    searches: Mutex<HashMap<u32, CancellationToken>>,
     next: AtomicU32,
 }
 
@@ -217,6 +223,7 @@ impl ProfileInput {
             code_page: self.code_page.filter(|&page| page != 65001),
             directories,
             environment: self.environment.clone().unwrap_or_default().validated()?,
+            connection_options: self.connection_options.unwrap_or_default().validated()?,
         })
     }
 }
@@ -242,6 +249,9 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
         }
         if input.environment.is_none() {
             profile.environment = previous.map(|old| old.profile.environment.clone()).unwrap_or_default();
+        }
+        if input.connection_options.is_none() {
+            profile.connection_options = previous.map(|old| old.profile.connection_options).unwrap_or_default();
         }
         let mut key = previous.filter(|old| old.profile.same_login(&profile)).and_then(|old| old.credential.clone());
         let updated_key = if let Some(password) = input.password {
@@ -308,29 +318,43 @@ fn read_password(key: Option<&str>) -> Result<String> {
 }
 
 #[tauri::command]
-pub async fn test_ftp_connection(input: ProfileInput, app: AppHandle) -> Result<()> {
+pub async fn test_ftp_connection(
+    input: ProfileInput,
+    request: Option<Uuid>,
+    requests: State<'_, netbox_connection::Requests>,
+    app: AppHandle,
+) -> Result<()> {
     let path = profiles_path(&app)?;
+    let stop = requests.token(request)?;
     blocking(move || {
-        let profile = input.profile()?;
-        let password = match (input.password, input.id) {
-            (Some(password), _) => password,
-            (None, Some(id)) => {
+        let mut profile = input.profile()?;
+        let saved = input
+            .id
+            .filter(|_| input.password.is_none() || input.connection_options.is_none())
+            .map(|id| {
                 let _lock = lock_profiles(&path)?;
-                let saved = load_profiles(&path)?
+                load_profiles(&path)?
                     .into_iter()
                     .find(|item| item.profile.id == id)
-                    .ok_or("This FTP profile was removed.")?;
-                read_password(
-                    saved
-                        .profile
-                        .same_login(&profile)
-                        .then_some(saved.credential.as_deref())
-                        .flatten(),
-                )?
-            }
-            (None, None) => String::new(),
+                    .ok_or_else(|| "This FTP profile was removed.".to_owned())
+            })
+            .transpose()?;
+        if let Some(saved) = saved
+            .as_ref()
+            .filter(|_| input.connection_options.is_none())
+        {
+            profile.connection_options = saved.profile.connection_options;
+        }
+        let password = match input.password {
+            Some(password) => password,
+            None => read_password(
+                saved
+                    .as_ref()
+                    .filter(|saved| saved.profile.same_login(&profile))
+                    .and_then(|saved| saved.credential.as_deref()),
+            )?,
         };
-        let mut session = Connection { profile, password }.open()?;
+        let mut session = Connection { profile, password }.open_with_cancel(stop)?;
         let directory = parse_path(&session.stream.pwd().map_err(message)?)?;
         session.list(&directory)?;
         Ok(())
@@ -358,25 +382,129 @@ impl suppaftp::Encoding for LegacyEncoding {
     }
 }
 
-fn dial(addr: SocketAddr) -> io::Result<TcpStream> {
-    let stream = TcpStream::connect_timeout(&addr, TIMEOUT)?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
-    stream.set_write_timeout(Some(TIMEOUT))?;
+fn dial(
+    address: SocketAddr,
+    options: ConnectionPreferences,
+    stop: Option<&CancellationToken>,
+    data: bool,
+) -> io::Result<TcpStream> {
+    let timeout = options.response_timeout(TIMEOUT);
+    let stream = tauri::async_runtime::block_on(async {
+        netbox_connection::wait(timeout, stop, tokio::net::TcpStream::connect(address))
+            .await??
+            .into_std()
+    })?;
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(timeout)?;
+    stream.set_write_timeout(timeout)?;
+    let socket = SockRef::from(&stream);
+    if let Some(interval) = options.keepalive_interval(None) {
+        socket.set_tcp_keepalive(
+            &TcpKeepalive::new()
+                .with_time(interval)
+                .with_interval(interval),
+        )?;
+    }
+    if data && options.optimize_buffer {
+        const BUFFER_SIZE: usize = 256 * 1024;
+        if socket.recv_buffer_size()? < BUFFER_SIZE {
+            socket.set_recv_buffer_size(BUFFER_SIZE)?;
+        }
+        if socket.send_buffer_size()? < BUFFER_SIZE {
+            socket.set_send_buffer_size(BUFFER_SIZE)?;
+        }
+    }
     Ok(stream)
+}
+
+struct AbortSockets {
+    data: Arc<Mutex<Option<TcpStream>>>,
+    task: tauri::async_runtime::JoinHandle<()>,
+}
+
+impl AbortSockets {
+    fn new(control: &TcpStream, stop: &CancellationToken) -> io::Result<Self> {
+        let control = control.try_clone()?;
+        let data = Arc::new(Mutex::new(None::<TcpStream>));
+        let active_data = Arc::clone(&data);
+        let stop = stop.clone();
+        let task = tauri::async_runtime::spawn(async move {
+            stop.cancelled().await;
+            let _ = control.shutdown(Shutdown::Both);
+            if let Ok(mut active_data) = active_data.lock() {
+                if let Some(socket) = active_data.take() {
+                    let _ = socket.shutdown(Shutdown::Both);
+                }
+            }
+        });
+        Ok(Self { data, task })
+    }
+}
+
+impl Drop for AbortSockets {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 impl Connection {
     pub fn open(&self) -> Result<Session> {
-        let control = (self.profile.host.as_str(), self.profile.port)
-            .to_socket_addrs()
-            .map_err(message)?
-            .find_map(|addr| dial(addr).ok())
-            .ok_or("Could not reach the FTP server.")?;
+        self.open_with_cancel(None)
+    }
+
+    pub(crate) fn open_with_cancel(&self, stop: Option<CancellationToken>) -> Result<Session> {
+        let options = self.profile.connection_options;
+        let addresses = tauri::async_runtime::block_on(netbox_connection::wait(
+            options.response_timeout(TIMEOUT),
+            stop.as_ref(),
+            options
+                .address_family
+                .resolve(&self.profile.host, self.profile.port),
+        ))
+        .map_err(|error| message(io::Error::from(error)))?
+        .map_err(message)?;
+        let mut last = io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "Could not reach the FTP server.",
+        );
+        let mut control = None;
+        for address in addresses {
+            match dial(address, options, stop.as_ref(), false) {
+                Ok(stream) => {
+                    control = Some(stream);
+                    break;
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                    return Err(message(error))
+                }
+                Err(error) => last = error,
+            }
+        }
+        let control = control.ok_or_else(|| message(options.address_family.connect_error(last)))?;
         let peer = control.peer_addr().map_err(message)?.ip();
+        let abort = stop
+            .as_ref()
+            .map(|stop| AbortSockets::new(&control, stop))
+            .transpose()
+            .map_err(message)?;
+        let data = abort.as_ref().map(|abort| abort.data.clone());
         let mut stream = FtpStream::connect_with_stream(control)
             .map_err(message)?
             .passive_stream_builder(move |addr| {
-                dial(SocketAddr::new(peer, addr.port())).map_err(FtpError::ConnectionError)
+                let data_socket = |stop: Option<&CancellationToken>| {
+                    let socket = dial(SocketAddr::new(peer, addr.port()), options, stop, true)?;
+                    if let (Some(data), Some(stop)) = (&data, stop) {
+                        let mut active = data
+                            .lock()
+                            .map_err(|error| io::Error::other(message(error)))?;
+                        if stop.is_cancelled() {
+                            return Err(netbox_connection::WaitError::Canceled.into());
+                        }
+                        *active = Some(socket.try_clone()?);
+                    }
+                    Ok(socket)
+                };
+                data_socket(stop.as_ref()).map_err(FtpError::ConnectionError)
             });
         if peer.is_ipv6() {
             stream.set_mode(Mode::ExtendedPassive);
@@ -402,6 +530,7 @@ impl Connection {
             stream,
             use_mlsd: true,
             environment: self.profile.environment.clone(),
+            abort,
         })
     }
 }
@@ -424,10 +553,13 @@ pub async fn connect_ftp(
     id: Uuid,
     segments: Option<Vec<String>>,
     remembered: Option<Vec<String>>,
+    request: Option<Uuid>,
     app: AppHandle,
     state: State<'_, FtpState>,
+    requests: State<'_, netbox_connection::Requests>,
 ) -> Result<Connected> {
     let path = profiles_path(&app)?;
+    let stop = requests.token(request)?;
     let (connection, start) = blocking(move || {
         let (profile, password) = {
             let _lock = lock_profiles(&path)?;
@@ -439,7 +571,7 @@ pub async fn connect_ftp(
             (item.profile, password)
         };
         let connection = Arc::new(Connection { profile, password });
-        let mut session = connection.open()?;
+        let mut session = connection.open_with_cancel(stop)?;
         let start = list_initial(
             &connection.profile.directories,
             segments,
@@ -502,6 +634,7 @@ pub struct Session {
     stream: FtpStream,
     use_mlsd: bool,
     pub(crate) environment: EnvironmentPreferences,
+    abort: Option<AbortSockets>,
 }
 
 pub struct FtpEntry {
@@ -818,6 +951,10 @@ impl Session {
                 total += count as u64;
                 progress(total)?;
             }
+            // The final FTP response follows EOF on the data socket.
+            if let Some(abort) = &self.abort {
+                abort.data.lock().map_err(message)?.take();
+            }
             stream.finish().map_err(message)
         })();
         if let Err(error) = result {
@@ -862,12 +999,15 @@ impl Session {
 pub async fn list_ftp(
     id: u32,
     segments: Vec<String>,
+    request: Option<Uuid>,
     state: State<'_, FtpState>,
+    requests: State<'_, netbox_connection::Requests>,
 ) -> Result<RemoteListing> {
     let connection = state.connection(id)?;
+    let stop = requests.token(request)?;
     blocking(move || {
         connection
-            .open()?
+            .open_with_cancel(stop)?
             .list(&segments)
             .map(Entries::into_listing)
     })
@@ -908,16 +1048,16 @@ pub async fn search_ftp(
     state: State<'_, FtpState>,
 ) -> Result<()> {
     let connection = state.connection(request.connection)?;
-    let stop = Arc::new(AtomicBool::new(false));
+    let stop = CancellationToken::new();
     {
         let mut searches = state.searches.lock().map_err(message)?;
         if searches.contains_key(&id) {
             return Err("An FTP search is already running.".to_owned());
         }
-        searches.insert(id, Arc::clone(&stop));
+        searches.insert(id, stop.clone());
     }
     let result = blocking(move || {
-        let mut session = connection.open()?;
+        let mut session = connection.open_with_cancel(Some(stop.clone()))?;
         let search = search_session(&mut session, request, &stop, &output);
         let _ = session.stream.quit();
         search
@@ -930,7 +1070,7 @@ pub async fn search_ftp(
 #[tauri::command]
 pub fn cancel_ftp_search(id: u32, state: State<'_, FtpState>) -> Result<()> {
     if let Some(stop) = state.searches.lock().map_err(message)?.get(&id) {
-        stop.store(true, Ordering::Relaxed);
+        stop.cancel();
     }
     Ok(())
 }
@@ -938,7 +1078,7 @@ pub fn cancel_ftp_search(id: u32, state: State<'_, FtpState>) -> Result<()> {
 fn search_session(
     session: &mut Session,
     request: FtpSearchRequest,
-    stop: &AtomicBool,
+    stop: &CancellationToken,
     output: &Channel<FtpSearchEvent>,
 ) -> Result<()> {
     const BATCH_SIZE: usize = 128;
@@ -946,7 +1086,7 @@ fn search_session(
     let mut omitted = 0;
     let mut pending = vec![(request.segments, String::new())];
     while let Some((segments, prefix)) = pending.pop() {
-        if stop.load(Ordering::Relaxed) {
+        if stop.is_cancelled() {
             return Ok(());
         }
         let listing = match session.list(&segments) {
@@ -969,7 +1109,7 @@ fn search_session(
                 .map_err(message)
         };
         for file in listing.files {
-            if stop.load(Ordering::Relaxed) {
+            if stop.is_cancelled() {
                 return Ok(());
             }
             let entry = listing_entry(file);
@@ -994,7 +1134,7 @@ fn search_session(
             send(matches)?;
         }
     }
-    if !stop.load(Ordering::Relaxed) {
+    if !stop.is_cancelled() {
         output
             .send(FtpSearchEvent::Done { omitted })
             .map_err(message)?;
@@ -1066,4 +1206,36 @@ pub async fn delete_ftp(
 ) -> Result<()> {
     let connection = state.connection(id)?;
     blocking(move || connection.open()?.remove(&segments, recursive)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn data_and_control_sockets_inherit_the_profile_settings() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let default = dial(address, ConnectionPreferences::default(), None, false).unwrap();
+        let default = SockRef::from(&default);
+        assert_eq!(default.read_timeout().unwrap(), Some(TIMEOUT));
+        assert!(!default.keepalive().unwrap());
+
+        let options = serde_json::from_str::<ConnectionPreferences>(
+            r#"{"timeout":{"mode":"disabled"},"keepalive":{"mode":"custom","seconds":3},"optimizeBuffer":true}"#,
+        )
+        .unwrap()
+        .validated()
+        .unwrap();
+        let control = dial(address, options, None, false).unwrap();
+        let data = dial(address, options, None, true).unwrap();
+        let control = SockRef::from(&control);
+        let data = SockRef::from(&data);
+        assert_eq!(control.read_timeout().unwrap(), None);
+        assert_eq!(data.write_timeout().unwrap(), None);
+        assert!(control.keepalive().unwrap() && data.keepalive().unwrap());
+        assert!(data.recv_buffer_size().unwrap() >= control.recv_buffer_size().unwrap());
+        assert!(data.send_buffer_size().unwrap() >= control.send_buffer_size().unwrap());
+    }
 }

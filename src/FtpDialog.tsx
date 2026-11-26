@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, describeError, type FtpProfile } from "./api";
 import { Button } from "./Button";
 import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
@@ -7,6 +7,7 @@ import type { Bindings } from "./preferences";
 import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
 import { defaultDirectoryPreferences } from "./netboxDirectories";
 import { defaultEnvironmentPreferences, NetBoxEnvironmentPage } from "./NetBoxEnvironmentPage";
+import { defaultConnectionPreferences, NetBoxConnectionPage } from "./NetBoxConnectionPage";
 
 export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, bindings, onSave, onClose }: {
   profile: FtpProfile | null;
@@ -29,15 +30,20 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
   const [codePage, setCodePage] = useState(profile?.codePage?.toString() ?? "");
   const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
   const [environment, setEnvironment] = useState(profile?.environment ?? draft?.environment ?? defaultEnvironmentPreferences);
+  const [connectionOptions, setConnectionOptions] = useState(profile?.connectionOptions ?? draft?.connectionOptions ?? defaultConnectionPreferences);
   const [working, setWorking] = useState<"save" | "test">();
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
+  const testing = useRef<AbortController>(null);
+  useEffect(() => () => testing.current?.abort(), []);
 
   async function submit(action: "save" | "test") {
     if (working) return;
     setWorking(action);
     setError("");
     setVerified(false);
+    const attempt = action === "test" ? new AbortController() : null;
+    testing.current = attempt;
     try {
       const input: Parameters<typeof api.saveFtpProfile>[0] = {
         id: profile?.id, label: label.trim(), host: connection.host, port: Number(connection.port), username: connection.username,
@@ -45,15 +51,17 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
         codePage: codePage && Number(codePage) !== 65001 ? Number(codePage) : null,
         directories: { ...directories, resolveLinks: false },
         environment,
+        connectionOptions,
       };
       if (action === "save") await onSave(input);
       else {
-        await api.testFtpConnection(input);
-        setVerified(true);
+        await api.testFtpConnection(input, attempt?.signal);
+        if (!attempt?.signal.aborted) setVerified(true);
       }
     } catch (failure) {
-      setError(describeError(failure));
+      if (!attempt?.signal.aborted) setError(describeError(failure));
     } finally {
+      testing.current = null;
       setWorking(undefined);
     }
   }
@@ -80,12 +88,15 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
     </Button>}
   </div>;
   return <NetBoxSession editing={!!profile} protocol="ftp" working={working} bindings={bindings} onSave={save} onClose={onClose}
+    onCancelTest={() => testing.current?.abort()}
     pages={{ environment: <NetBoxEnvironmentPage value={environment} ftpEncoding={encoding}
       onChange={(settings) => { setEnvironment(settings); change(); }} />, directories: <NetBoxDirectoriesPage value={directories} symbolicLinks={false}
-      onChange={(settings) => { setDirectories(settings); change(); }} /> }}
+      onChange={(settings) => { setDirectories(settings); change(); }} />,
+      connection: <NetBoxConnectionPage value={connectionOptions} ftp
+        onChange={(settings) => { setConnectionOptions(settings); change(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t("FTP connection successful.")}</p> : undefined}
-    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment }))}>
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
           <ConnectionHostFields protocol="ftp" connection={connection} onChange={(update) => {
             setConnection((current) => ({ ...current, ...update }));
@@ -101,7 +112,9 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
           </label>}
           <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>
           <div className="dialog-actions">
-            <Button type="button" disabled={!!working || !canTest} onClick={() => { void submit("test"); }}>
+            <Button type="button" disabled={!!working || !canTest} onClick={({ currentTarget }) => {
+              if (currentTarget.form?.reportValidity()) void submit("test");
+            }}>
               {t(working === "test" ? "Testing…" : "Test connection")}
             </Button>
           </div>

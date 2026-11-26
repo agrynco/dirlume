@@ -7,11 +7,15 @@ use openssh_sftp_client::Sftp;
 use russh::ChannelMsg;
 use tauri::async_runtime;
 use tokio::{io::AsyncWriteExt, sync::Mutex};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::{wait, AuthenticatedRoute, Connection, Session};
-use crate::desktop::{message, Result};
+use super::{AuthenticatedRoute, Connection, Session};
+use crate::{
+    desktop::{message, Result},
+    netbox_connection,
+};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -30,16 +34,21 @@ impl Access {
         connection: &Connection,
         password: Option<Zeroizing<String>>,
         read_only: bool,
+        stop: Option<CancellationToken>,
         operation: impl FnOnce(&mut Session) -> Result<T>,
     ) -> Result<Option<T>> {
-        let mut state = self.0.blocking_lock();
+        let mut state =
+            async_runtime::block_on(netbox_connection::wait(None, stop.as_ref(), self.0.lock()))
+                .map_err(|error| message(std::io::Error::from(error)))?;
         if let Some(current) = state.as_mut().filter(|current| {
             password.is_none()
                 && current.expires > Instant::now()
                 && !current.session.is_closed()
                 && (!current.read_only || read_only)
         }) {
+            current.session.set_cancel(stop);
             let result = operation(&mut current.session);
+            current.session.set_cancel(None);
             if result.is_ok() {
                 current.expires = Instant::now() + IDLE_TIMEOUT;
             } else if current.session.is_closed() {
@@ -52,8 +61,13 @@ impl Access {
         let Some(password) = password else {
             return Ok(None);
         };
-        let mut session = open_sftp(connection.authenticated_client()?, password, read_only)?;
+        let mut session = open_sftp(
+            connection.authenticated_client_with_cancel(stop)?,
+            password,
+            read_only,
+        )?;
         let result = operation(&mut session)?;
+        session.set_cancel(None);
         let start_timer = state.is_none();
         *state = Some(Authorization {
             session,
@@ -103,7 +117,7 @@ fn open_sftp(
         done\nexit 127"
     );
     let command = format!("exec /bin/sh -c {}", super::quote(&script));
-    let sftp = wait(async {
+    let sftp = client.1.wait(async {
         let mut channel = client.channel_open_session().await.map_err(message)?;
         channel.exec(true, command).await.map_err(message)?;
         let mut supplied = false;

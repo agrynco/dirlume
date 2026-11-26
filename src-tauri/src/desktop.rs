@@ -1360,7 +1360,7 @@ async fn transfer_item(
             if let Some(connection) = ssh_destination {
                 if request.moving {
                     return move_to_ssh(
-                        &mut connection.open()?,
+                        &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
                         &request,
                         source,
                         name,
@@ -1370,7 +1370,7 @@ async fn transfer_item(
                     );
                 }
                 return upload_remote(
-                    connection.open()?,
+                    connection.open_with_cancel(Some(session.cancelled.clone()))?,
                     &request,
                     name,
                     source,
@@ -1380,7 +1380,7 @@ async fn transfer_item(
             }
             if let Some(connection) = ftp_destination {
                 return upload_remote(
-                    connection.open()?,
+                    connection.open_with_cancel(Some(session.cancelled.clone()))?,
                     &request,
                     name,
                     source,
@@ -1438,7 +1438,7 @@ async fn transfer_item(
             }
             let mut ftp = ftp_source
                 .ok_or("Connect to the FTP server first.")?
-                .open()?;
+                .open_with_cancel(Some(session.cancelled.clone()))?;
             return remote_transfer::download(&mut ftp, segments, &target, &options, progress, ask)
                 .map(transfer_outcome);
         }
@@ -1448,7 +1448,7 @@ async fn transfer_item(
             }
             if let TransferSource::Ssh { segments, .. } = &request.source {
                 return remote_transfer::download(
-                    &mut connection.open()?,
+                    &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
                     segments,
                     &target,
                     &options,
@@ -2905,6 +2905,7 @@ pub fn run() {
         .manage(crate::deletion::DeleteJobs::default())
         .manage(ftp::FtpState::default())
         .manage(ssh::SshState::default())
+        .manage(crate::netbox_connection::Requests::default())
         .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
@@ -2936,6 +2937,8 @@ pub fn run() {
         read_settings_archive,
         write_settings_archive,
         open_tool_window,
+        crate::netbox_connection::begin_netbox_request,
+        crate::netbox_connection::finish_netbox_request,
         set_appearance_picker,
         crate::updates::check_for_update,
         crate::updates::highlights::installed_release,

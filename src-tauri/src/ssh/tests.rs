@@ -54,6 +54,7 @@ fn route(input: Value, approved: &[HostVerification], pins: &[HostKey]) -> Resul
         hosts.iter_mut().map(RouteHost::Draft).collect(),
         |endpoint| stored_key(pins, endpoint),
         approved,
+        RouteOptions::default(),
     )
 }
 
@@ -169,17 +170,19 @@ fn opens_a_two_hop_sftp_route() {
         .expect("reopen the pinned route")
         .ok()
         .expect("pinned keys should connect without approval");
-    let shell = wait(async {
-        let mut channel = client.channel_open_session().await.map_err(message)?;
-        channel.exec(true, "fixture").await.map_err(message)?;
-        while let Some(event) = channel.wait().await {
-            if let ChannelMsg::Data { data } = event {
-                return Ok(String::from_utf8_lossy(&data).into_owned());
+    let shell = client
+        .1
+        .wait(async {
+            let mut channel = client.channel_open_session().await.map_err(message)?;
+            channel.exec(true, "fixture").await.map_err(message)?;
+            while let Some(event) = channel.wait().await {
+                if let ChannelMsg::Data { data } = event {
+                    return Ok(String::from_utf8_lossy(&data).into_owned());
+                }
             }
-        }
-        Err("The test shell did not produce output.".to_owned())
-    })
-    .expect("execute a command on the destination");
+            Err("The test shell did not produce output.".to_owned())
+        })
+        .expect("execute a command on the destination");
     assert!(shell.contains("jump-shell-ready"));
     let mut session = open_sftp(client).expect("open another SFTP channel on the route");
     let destination = temp.path().join("local.txt");
@@ -223,13 +226,13 @@ fn opens_a_two_hop_sftp_route() {
         sudo: sudo::Access::default(),
     };
     let missing = connection
-        .list(&["missing".to_owned()])
+        .list(&["missing".to_owned()], None)
         .err()
         .expect("missing path");
     assert!(serde_json::to_value(SshListingError::from(missing))
         .unwrap()
         .is_string());
-    assert!(connection.list(&[]).is_ok());
+    assert!(connection.list(&[], None).is_ok());
     fixture.request(json!({ "rotate": 1 }));
     let error = route(input, &[], &keys)
         .err()
@@ -244,7 +247,7 @@ fn opens_a_two_hop_sftp_route() {
         .wait()
         .expect("wait for the SSH server to stop");
     let failure = connection
-        .list(&[])
+        .list(&[], None)
         .err()
         .expect("the saved route cannot reconnect");
     let failure = serde_json::to_value(SshListingError::from(failure)).unwrap();

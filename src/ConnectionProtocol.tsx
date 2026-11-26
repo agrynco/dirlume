@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import type { DirectoryPreferences, EnvironmentPreferences } from "./api";
+import type { ConnectionPreferences, DirectoryPreferences, EnvironmentPreferences } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { HistoryField } from "./HistoryField";
@@ -10,6 +10,7 @@ import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./pr
 export type ConnectionDraft = {
   label: string; host: string; port: string; username: string; portEdited: boolean; directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
+  connectionOptions?: ConnectionPreferences;
 };
 
 const pageLabels = {
@@ -19,7 +20,7 @@ const pageLabels = {
 type Page = keyof typeof pageLabels;
 type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
-export function NetBoxSession({ editing, protocol, onChangeProtocol, working, saveDisabled, onSave, onClose, children, pages, feedback, bindings }: {
+export function NetBoxSession({ editing, protocol, onChangeProtocol, working, saveDisabled, onSave, onClose, onCancelTest, children, pages, feedback, bindings }: {
   editing: boolean;
   protocol: "ftp" | "sftp";
   onChangeProtocol?: () => void;
@@ -27,6 +28,7 @@ export function NetBoxSession({ editing, protocol, onChangeProtocol, working, sa
   saveDisabled?: boolean;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   onClose: () => void;
+  onCancelTest: () => void;
   children: ReactNode;
   pages?: Partial<Record<Exclude<Page, "session">, ReactNode>>;
   feedback?: ReactNode;
@@ -91,7 +93,12 @@ export function NetBoxSession({ editing, protocol, onChangeProtocol, working, sa
     });
   }
 
-  return <Dialog title={t(editing ? "Edit NetBox connection" : "Add NetBox connection")} onClose={() => { if (!working) onClose(); }}>
+  function cancel() {
+    if (working === "test") onCancelTest();
+    if (!working) onClose();
+  }
+
+  return <Dialog title={t(editing ? "Edit NetBox connection" : "Add NetBox connection")} onClose={cancel}>
     <form className="dialog-form" onSubmit={onSave} onInvalidCapture={invalid} onKeyDown={pageKeys} autoComplete="off">
       <div className="netbox-page-header" inert={!!working}>
         <div className="netbox-tabs" role="tablist" aria-label={t("NetBox settings pages")} onKeyDown={(event) => {
@@ -134,7 +141,7 @@ export function NetBoxSession({ editing, protocol, onChangeProtocol, working, sa
         {feedback && <div className="netbox-feedback">{feedback}</div>}
       </div>
       <footer className="dialog-footer">
-        <Button type="button" disabled={!!working} onClick={onClose}>{t("Cancel")}</Button>
+        <Button type="button" disabled={working === "save"} onClick={cancel}>{t(working === "test" ? "Cancel test" : "Cancel")}</Button>
         <Button type="submit" className="primary" disabled={!!working || saveDisabled}>{t(working === "save" ? "Saving…" : "Save connection")}</Button>
       </footer>
     </form>

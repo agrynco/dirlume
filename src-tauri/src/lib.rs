@@ -40,6 +40,8 @@ mod local_transfer;
 #[cfg(feature = "desktop")]
 mod mcp;
 #[cfg(feature = "desktop")]
+mod netbox_connection;
+#[cfg(feature = "desktop")]
 mod netbox_directories;
 #[cfg(feature = "desktop")]
 mod netbox_environment;

@@ -8,6 +8,7 @@ mod tests;
 use std::{
     collections::HashMap,
     future::Future,
+    io,
     ops::Deref,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -23,12 +24,14 @@ use russh::{
     ChannelMsg, Disconnect,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
     desktop::{blocking, message, Result},
+    netbox_connection::{self, ConnectionPreferences},
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     netbox_environment::EnvironmentPreferences,
     protocol::{file_server_origin, RemoteListing},
@@ -46,15 +49,29 @@ pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn wait<T, E: std::fmt::Display>(
-    operation: impl Future<Output = std::result::Result<T, E>>,
-) -> Result<T> {
-    tauri::async_runtime::block_on(async {
-        tokio::time::timeout(TIMEOUT, operation)
-            .await
-            .map_err(|_| "The SSH server did not respond in time.".to_owned())?
-            .map_err(message)
-    })
+#[derive(Default)]
+struct RouteOptions {
+    preferences: ConnectionPreferences,
+    stop: Option<CancellationToken>,
+}
+
+impl RouteOptions {
+    fn timeout(&self) -> Option<Duration> {
+        self.preferences.response_timeout(TIMEOUT)
+    }
+
+    fn wait<T, E: std::fmt::Display>(
+        &self,
+        operation: impl Future<Output = std::result::Result<T, E>>,
+    ) -> Result<T> {
+        tauri::async_runtime::block_on(netbox_connection::wait(
+            self.timeout(),
+            self.stop.as_ref(),
+            operation,
+        ))
+        .map_err(|error| message(io::Error::from(error)))?
+        .map_err(message)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -126,6 +143,7 @@ impl From<SftpFailure> for String {
 enum HandshakeError {
     Transport(russh::Error),
     Forwarding(russh::Error),
+    Network(io::Error),
     Unverified(String),
     Changed { expected: String, received: String },
 }
@@ -140,6 +158,7 @@ impl std::fmt::Display for HandshakeError {
     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Transport(error) => write!(output, "Could not connect to the SSH server. {error}"),
+            Self::Network(error) => error.fmt(output),
             Self::Forwarding(error) => write!(output, "The preceding jump host could not forward the connection. {error}"),
             Self::Unverified(fingerprint) => write!(output, "Verify the SSH host key {fingerprint} before connecting."),
             Self::Changed { expected, received } => write!(
@@ -175,16 +194,19 @@ fn handshake(
     endpoint: &Endpoint,
     expected: Option<String>,
     through: Option<&client::Handle<VerifyHost>>,
+    options: &RouteOptions,
 ) -> std::result::Result<client::Handle<VerifyHost>, HandshakeError> {
     let config = client::Config {
-        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_interval: options
+            .preferences
+            .keepalive_interval(Some(Duration::from_secs(30))),
         nodelay: true,
         ..Default::default()
     };
     tauri::async_runtime::block_on(async {
         let config = Arc::new(config);
         let verifier = VerifyHost(expected);
-        tokio::time::timeout(TIMEOUT, async {
+        netbox_connection::wait(options.timeout(), options.stop.as_ref(), async {
             if let Some(jump) = through {
                 let channel = jump
                     .channel_open_direct_tcpip(&endpoint.host, endpoint.port.into(), "127.0.0.1", 0)
@@ -192,11 +214,25 @@ fn handshake(
                     .map_err(HandshakeError::Forwarding)?;
                 client::connect_stream(config, channel.into_stream(), verifier).await
             } else {
-                client::connect(config, (endpoint.host.as_str(), endpoint.port), verifier).await
+                let addresses = options
+                    .preferences
+                    .address_family
+                    .resolve(&endpoint.host, endpoint.port)
+                    .await
+                    .map_err(HandshakeError::Network)?;
+                let socket = tokio::net::TcpStream::connect(addresses.as_slice())
+                    .await
+                    .map_err(|error| {
+                        HandshakeError::Network(
+                            options.preferences.address_family.connect_error(error),
+                        )
+                    })?;
+                let _ = socket.set_nodelay(config.nodelay);
+                client::connect_stream(config, socket, verifier).await
             }
         })
         .await
-        .map_err(|_| russh::Error::ConnectionTimeout)?
+        .map_err(|error| HandshakeError::Network(error.into()))?
     })
 }
 
@@ -204,12 +240,13 @@ fn authenticate(
     client: &mut client::Handle<VerifyHost>,
     settings: &ConnectionSettings,
     secret: Option<&str>,
+    options: &RouteOptions,
 ) -> Result<()> {
     let user = settings.username.as_str();
     let authenticated = match &settings.auth {
         Authentication::Password => {
             let password = secret.ok_or("Enter the SSH password.")?;
-            wait(client.authenticate_password(user, password))?
+            options.wait(client.authenticate_password(user, password))?
         }
         Authentication::PrivateKey { path } => {
             let key =
@@ -219,13 +256,14 @@ fn authenticate(
             let key = decode_secret_key(&key, secret)
                 .map_err(|error| format!("Could not read the SSH private key. {error}"))?;
             let hash = if key.algorithm().is_rsa() {
-                wait(client.best_supported_rsa_hash())?
+                options
+                    .wait(client.best_supported_rsa_hash())?
                     .flatten()
                     .or(Some(HashAlg::Sha256))
             } else {
                 None
             };
-            wait(
+            options.wait(
                 client
                     .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)),
             )?
@@ -238,7 +276,7 @@ fn authenticate(
 }
 
 // The destination is last so closing the route can disconnect it before the transports it uses.
-struct AuthenticatedRoute(Vec<client::Handle<VerifyHost>>);
+struct AuthenticatedRoute(Vec<client::Handle<VerifyHost>>, RouteOptions);
 
 impl Deref for AuthenticatedRoute {
     type Target = client::Handle<VerifyHost>;
@@ -271,7 +309,7 @@ impl Drop for AuthenticatedRoute {
 }
 
 fn open_sftp(client: AuthenticatedRoute) -> Result<Session> {
-    let sftp = wait(async {
+    let sftp = client.1.wait(async {
         let mut channel = client.channel_open_session().await.map_err(message)?;
         channel
             .request_subsystem(true, "sftp")
@@ -312,10 +350,21 @@ impl Connection {
     }
 
     fn authenticated_client(&self) -> Result<AuthenticatedRoute> {
+        self.authenticated_client_with_cancel(None)
+    }
+
+    fn authenticated_client_with_cancel(
+        &self,
+        stop: Option<CancellationToken>,
+    ) -> Result<AuthenticatedRoute> {
         match open_route(
             self.profile.route().map(RouteHost::Saved).collect(),
             |endpoint| stored_key(&self.host_keys, endpoint),
             &[],
+            RouteOptions {
+                preferences: self.profile.connection_options,
+                stop,
+            },
         )? {
             Ok((client, _)) => Ok(client),
             Err(verification) => Err(format!(
@@ -326,7 +375,11 @@ impl Connection {
     }
 
     pub fn open(&self) -> Result<Session> {
-        open_sftp(self.authenticated_client()?)
+        self.open_with_cancel(None)
+    }
+
+    pub(crate) fn open_with_cancel(&self, stop: Option<CancellationToken>) -> Result<Session> {
+        open_sftp(self.authenticated_client_with_cancel(stop)?)
             .map(|session| {
                 session
                     .with_download_timestamps(self.profile.environment.preserve_download_timestamps)
@@ -339,6 +392,7 @@ impl Connection {
         password: Option<Zeroizing<String>>,
         reuse: bool,
         read_only: bool,
+        stop: Option<CancellationToken>,
         ordinary: impl FnOnce() -> SftpResult<T>,
         elevated: impl FnOnce(&mut Session) -> SftpResult<T>,
     ) -> SftpResult<(T, bool)> {
@@ -351,7 +405,7 @@ impl Connection {
             false
         };
         self.sudo
-            .run(self, password, read_only, |session| {
+            .run(self, password, read_only, stop, |session| {
                 elevated(session).map_err(Into::into)
             })?
             .map(|value| (value, true))
@@ -374,6 +428,7 @@ impl Connection {
             password,
             true,
             read_only,
+            None,
             || operation(&mut self.open()?),
             &operation,
         )
@@ -381,17 +436,29 @@ impl Connection {
         .map_err(Into::into)
     }
 
-    fn list(&self, segments: &[String]) -> SftpResult<(Vec<String>, RemoteListing)> {
+    fn list(
+        &self,
+        segments: &[String],
+        stop: Option<CancellationToken>,
+    ) -> SftpResult<(Vec<String>, RemoteListing)> {
         let resolve_links = self.profile.directories.resolve_links;
         let mut session = self.listing.lock().map_err(message)?;
         if !session.is_closed() {
-            match session.list_profile_directory(segments, resolve_links) {
+            session.set_cancel(stop.clone());
+            let result = session.list_profile_directory(segments, resolve_links);
+            session.set_cancel(None);
+            match result {
                 Err(SftpFailure::ConnectionLost(_)) => {}
                 result => return result,
             }
         }
-        *session = self.open().map_err(SftpFailure::ConnectionLost)?;
-        session.list_profile_directory(segments, resolve_links)
+        let mut replacement = self
+            .open_with_cancel(stop)
+            .map_err(SftpFailure::ConnectionLost)?;
+        let result = replacement.list_profile_directory(segments, resolve_links);
+        replacement.set_cancel(None);
+        *session = replacement;
+        result
     }
 }
 
@@ -424,6 +491,7 @@ fn verified_handshake(
     pinned: Option<String>,
     approval: Option<&HostVerification>,
     through: Option<&client::Handle<VerifyHost>>,
+    options: &RouteOptions,
 ) -> Result<std::result::Result<(client::Handle<VerifyHost>, String), HostVerification>> {
     if let Some(approval) = &approval {
         if &approval.endpoint != endpoint
@@ -435,7 +503,7 @@ fn verified_handshake(
         }
     }
     let expected = pinned.or_else(|| approval.map(|approval| approval.fingerprint.clone()));
-    match handshake(endpoint, expected.clone(), through) {
+    match handshake(endpoint, expected.clone(), through, options) {
         Ok(client) => Ok(Ok((
             client,
             expected.ok_or("The SSH server did not provide a host key.")?,
@@ -492,6 +560,7 @@ fn open_route(
     hosts: Vec<RouteHost<'_>>,
     trusted: impl Fn(&Endpoint) -> Option<String>,
     approvals: &[HostVerification],
+    options: RouteOptions,
 ) -> Result<RouteHandshake> {
     for approval in approvals {
         if !hosts
@@ -502,7 +571,7 @@ fn open_route(
         }
     }
     let jumps = hosts.len().saturating_sub(1);
-    let mut clients = AuthenticatedRoute(Vec::with_capacity(hosts.len()));
+    let mut clients = AuthenticatedRoute(Vec::with_capacity(hosts.len()), options);
     let mut keys = Vec::with_capacity(hosts.len());
     for (index, host) in hosts.into_iter().enumerate() {
         let endpoint = host.settings().endpoint.clone();
@@ -513,7 +582,7 @@ fn open_route(
             .iter()
             .find(|approval| approval.endpoint == endpoint);
         let (client, fingerprint) =
-            match verified_handshake(&endpoint, pinned, approval, clients.0.last())
+            match verified_handshake(&endpoint, pinned, approval, clients.0.last(), &clients.1)
                 .map_err(&explain)?
             {
                 Ok(verified) => verified,
@@ -529,6 +598,7 @@ fn open_route(
                 .expect("the current SSH host was added"),
             settings,
             secret.as_deref().map(String::as_str),
+            &clients.1,
         )
         .map_err(&explain)?;
         keys.push(HostKey {
@@ -561,16 +631,20 @@ pub async fn test_ssh_connection(
     input: ProfileInput,
     approval: Option<HostVerification>,
     approvals: Option<Vec<HostVerification>>,
+    request: Option<Uuid>,
+    requests: State<'_, netbox_connection::Requests>,
     app: AppHandle,
 ) -> Result<TestOutcome> {
     let path = profiles::config_path(&app)?;
+    let stop = requests.token(request)?;
     let approvals = route_approvals(approval, approvals);
     blocking(move || {
-        let (config, mut route) = {
+        let (config, mut route, preferences) = {
             let _lock = profiles::lock(&path)?;
             let config = Config::load(&path)?;
+            let preferences = input.connection_preferences(&config)?;
             let route = input.test_route(&config)?;
-            (config, route)
+            (config, route, preferences)
         };
         let endpoint = route
             .last()
@@ -582,6 +656,7 @@ pub async fn test_ssh_connection(
             route.iter_mut().map(RouteHost::Draft).collect(),
             |endpoint| config.fingerprint(endpoint).map(str::to_owned),
             &approvals,
+            RouteOptions { preferences, stop },
         )? {
             Ok(route) => route,
             Err(verification) => return Ok(TestOutcome::VerifyHost { verification }),
@@ -638,10 +713,11 @@ pub async fn connect_ssh(
     approvals: Option<Vec<HostVerification>>,
     segments: Option<Vec<String>>,
     remembered: Option<Vec<String>>,
+    request: Option<Uuid>,
     app: AppHandle,
-    state: State<'_, SshState>,
 ) -> Result<ConnectOutcome> {
     let path = profiles::config_path(&app)?;
+    let stop = app.state::<netbox_connection::Requests>().token(request)?;
     let approvals = route_approvals(approval, approvals);
     let result = blocking(move || {
         let (profile, config) = {
@@ -655,12 +731,16 @@ pub async fn connect_ssh(
             profile.route().map(RouteHost::Saved).collect(),
             |endpoint| config.fingerprint(endpoint).map(str::to_owned),
             &approvals,
+            RouteOptions {
+                preferences: profile.connection_options,
+                stop,
+            },
         )? {
             Ok(route) => route,
             Err(verification) => return Ok(Err(verification)),
         };
         let explain = |error: String| route_error(endpoint, None, error);
-        let session = open_sftp(client).map_err(&explain)?;
+        let mut session = open_sftp(client).map_err(&explain)?;
         let start = list_initial(&profile.directories, segments, remembered, |candidate| {
             let path = match candidate {
                 Some(candidate) => candidate.to_vec(),
@@ -693,7 +773,10 @@ pub async fn connect_ssh(
             Connection {
                 profile,
                 host_keys,
-                listing: Mutex::new(session),
+                listing: Mutex::new({
+                    session.set_cancel(None);
+                    session
+                }),
                 sudo: sudo::Access::default(),
             },
             start,
@@ -709,6 +792,7 @@ pub async fn connect_ssh(
     let environment = connection.profile.environment.clone();
     let endpoint = &connection.profile.destination.settings.endpoint;
     let origin = file_server_origin("sftp", &endpoint.host, endpoint.port, 22);
+    let state = app.state::<SshState>();
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
         .connections
@@ -739,16 +823,20 @@ pub async fn list_ssh(
     segments: Vec<String>,
     sudo_password: Option<String>,
     reuse_sudo: Option<bool>,
+    request: Option<Uuid>,
     state: State<'_, SshState>,
+    requests: State<'_, netbox_connection::Requests>,
 ) -> std::result::Result<SshListing, SshListingError> {
     let sudo_password = sudo_password.map(Zeroizing::new);
     let connection = state.connection(id)?;
+    let stop = requests.token(request)?;
     blocking(move || {
         let result = connection.retry_with_sudo(
             sudo_password,
             reuse_sudo.unwrap_or(false),
             true,
-            || connection.list(&segments),
+            stop.clone(),
+            || connection.list(&segments, stop),
             |session| {
                 session
                     .list_profile_directory(&segments, connection.profile.directories.resolve_links)
