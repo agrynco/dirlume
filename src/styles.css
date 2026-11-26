@@ -734,7 +734,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-row[data-current="true"] { border-color: var(--line); }
 .pane.active .file-row:is([data-current="true"], .marked) { color: var(--panel-selected-ink); background: var(--panel-selection); }
 .pane.active .file-row[data-current="true"], .file-row.marked { box-shadow: inset 2px 0 var(--accent); }
-.file-row.marked .file-name { color: var(--accent); }
 .file-row[data-file-color="file-source"] { --entry-color: var(--file-source); }
 .file-row[data-file-color="file-text"] { --entry-color: var(--file-text); }
 .file-row[data-file-color="file-document"] { --entry-color: var(--file-document); }
@@ -746,14 +745,12 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-row[data-file-color="file-hidden"] { --entry-color: var(--file-hidden); }
 .file-row[data-file-color="file-system"] { --entry-color: var(--file-system); }
 .file-row:is([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name {
-  color: var(--entry-color);
   font-style: italic;
-  opacity: .9;
 }
 .file-row[data-file-color]:not(.marked):not([data-current="true"]) .file-name { color: var(--entry-color); }
-[data-theme="classic-blue"] .file-row[data-file-color] .file-name { color: var(--entry-color); }
-.pane .file-row.marked:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name { color: var(--panel-marked); }
-[data-theme="classic-blue"] .pane.active .file-row[data-current="true"] :is(.file-name, .file-size, .file-date, .file-time) {
+.file-row:is([data-file-color="file-hidden"], [data-file-color="file-system"]):not(.marked, [data-current="true"]) .file-name { opacity: .9; }
+.file-row:is(.marked, [data-current="true"]) .file-name { color: var(--panel-selected-ink); }
+[data-theme="classic-blue"] .pane.active .file-row[data-current="true"] :is(.file-size, .file-date, .file-time) {
   color: var(--panel-selected-ink);
 }
 .file-name, .file-size, .file-date, .file-time { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -2233,13 +2230,11 @@ button.color-swatch {
 .pane[data-layout="classic"] .file-size { justify-content: flex-end; }
 .pane[data-layout="classic"] .file-date { padding-left: 6px; }
 .pane[data-layout="classic"] .file-row[data-current="true"] { background: transparent; outline: 1px dashed var(--panel-muted); outline-offset: -1px; box-shadow: none; }
-.pane[data-layout="classic"].active .file-row[data-current="true"] { background: var(--accent-fill); outline: 0; }
-.pane[data-layout="classic"].active .file-row[data-current="true"] :is(.file-name, .file-size, .file-date) { color: var(--on-accent); }
-.pane[data-layout="classic"] .file-row.marked { background: transparent; box-shadow: none; }
-.pane[data-layout="classic"] .file-row.marked :is(.file-name, .file-size, .file-date) { color: var(--panel-marked); }
-.pane[data-layout="classic"].active .file-row.marked[data-current="true"] :is(.file-name, .file-size, .file-date) { color: var(--panel-marked); }
-.pane[data-layout="classic"] .file-row.marked:is([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name { color: var(--entry-color); }
-.pane[data-layout="classic"].active .file-row.marked[data-current="true"] { background: color-mix(in srgb, var(--accent-fill) 35%, var(--panel-bg)); }
+.pane[data-layout="classic"].active .file-row[data-current="true"] { background: var(--panel-selection); outline: 0; }
+.pane[data-layout="classic"].active .file-row[data-current="true"] :is(.file-size, .file-date) { color: var(--panel-selected-ink); }
+.pane[data-layout="classic"] .file-row.marked { background: var(--panel-inactive-selection); box-shadow: none; }
+.pane[data-layout="classic"] .file-row.marked :is(.file-size, .file-date) { color: var(--panel-marked); }
+.pane[data-layout="classic"].active .file-row.marked[data-current="true"] :is(.file-size, .file-date) { color: var(--panel-marked); }
 .pane[data-layout="classic"] .pane-footer { min-height: 22px; border-top: 0; border-radius: 0 0 3px 3px; font-family: var(--panel-font); }
 @container (max-width: 760px) {
   .pane[data-layout="classic"] .pane-free-full { display: none; }
@@ -2789,11 +2784,5 @@ button.color-swatch {
 }
 .preview-file-current-marked { color: var(--panel-selected-ink); }
 .preview-file-current-marked svg { color: var(--panel-marked); }
-.pane.active[data-layout] .file-row.marked[data-current="true"]:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name {
-  color: var(--panel-selected-ink);
-}
-.pane.active[data-layout="classic"] .file-row.marked[data-current="true"]:not([data-file-color="file-hidden"], [data-file-color="file-system"]) .file-name {
-  color: color-mix(in srgb, var(--panel-marked) 55%, var(--panel-selected-ink));
-}
 .computer-settings-list { list-style: none; padding: 0; margin: 0; }
 .computer-settings-list > li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 4px; }
