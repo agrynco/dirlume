@@ -22,6 +22,7 @@ const PreviewContext = createContext<{
   light: boolean;
   colors?: Palette;
   diagramScale: number;
+  fitDiagrams: boolean;
   onToggleTask?: (marker: TaskMarker, checked: boolean) => void;
   followLink?: (href: string, newTab: boolean) => void;
 } | null>(null);
@@ -170,7 +171,7 @@ function PreviewCode({ children }: ComponentProps<"pre">) {
   if (preview && isValidElement<{ className?: string; children?: ReactNode }>(children) &&
       children.props.className === "language-mermaid" && typeof children.props.children === "string") {
     return <MermaidDiagram key={children.props.children} source={children.props.children} light={preview.light} colors={preview.colors}
-      scale={preview.diagramScale} />;
+      scale={preview.diagramScale} fitByDefault={preview.fitDiagrams} />;
   }
   return <pre>{children}</pre>;
 }
@@ -194,13 +195,13 @@ function MarkdownContent({ source, prefix, htmlFormatting = false }: {
     rehypePlugins={[rehypeTaskRows, [rehypeSlug, { prefix }]]} skipHtml components={components}>{source}</Markdown>;
 }
 
-export function ReadOnlyMarkdown({ source, light, fontSize, mermaidScale = 100 }: {
+export function ReadOnlyMarkdown({ source, light, fontSize, mermaidScale }: {
   source: string; light: boolean; fontSize?: number; mermaidScale?: number;
 }) {
-  const diagramScale = useDiagramScale(fontSize, light) * mermaidScale / 100;
+  const diagramScale = useDiagramScale(fontSize, light) * (mermaidScale ?? 100) / 100;
   return <div className="markdown" tabIndex={0} data-font-zoom="markdown" style={viewFontStyle(fontSize)}>
     <div className="markdown-content">
-      <PreviewContext.Provider value={{ writable: false, saving: false, light, diagramScale }}>
+      <PreviewContext.Provider value={{ writable: false, saving: false, light, diagramScale, fitDiagrams: mermaidScale === undefined }}>
         <MarkdownContent source={source} prefix="dirlume-quick-view-" />
       </PreviewContext.Provider>
     </div>
@@ -224,7 +225,7 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
 }
 
 export function MarkdownPreview({ file, source, active, position, scroll, onContent, light, colors, writable, saving, htmlFormatting,
-  fontSize, mermaidScale = 100, onToggleTask, onOpenDocument, onError }: {
+  fontSize, mermaidScale, onToggleTask, onOpenDocument, onError }: {
   file: NamedFile;
   source: string;
   active: boolean;
@@ -244,7 +245,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
 }) {
   const handledPosition = useRef<MarkdownPosition | undefined>(undefined);
   const prefix = "dirlume-markdown-" + useId() + "-";
-  const diagramScale = useDiagramScale(fontSize, light, colors) * mermaidScale / 100;
+  const diagramScale = useDiagramScale(fontSize, light, colors) * (mermaidScale ?? 100) / 100;
 
   function scrollToFragment(fragment: string) {
     if (!fragment) {
@@ -293,7 +294,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
   return (
     <div ref={scroll} className="markdown" tabIndex={0}>
       <div className="markdown-content" ref={onContent}>
-        <PreviewContext.Provider value={{ writable, saving, light, colors, diagramScale, onToggleTask, followLink }}>
+        <PreviewContext.Provider value={{ writable, saving, light, colors, diagramScale, fitDiagrams: mermaidScale === undefined, onToggleTask, followLink }}>
           <MarkdownContent source={source} prefix={prefix} htmlFormatting={htmlFormatting} />
         </PreviewContext.Provider>
       </div>

@@ -1,6 +1,6 @@
 import { errorText, t } from "./i18n";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { ExternalLink, Maximize, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ExternalLink, Maximize, MoveHorizontal, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { ImageViewport, useImageViewport } from "./ImageViewport";
@@ -54,15 +54,16 @@ export function DiagramViewer({ diagram, shortcuts, onClose }: { diagram: Diagra
   </Dialog>;
 }
 
-export function MermaidDiagram({ source, light, colors, scale }: {
-  source: string; light: boolean; colors?: Palette; scale: number;
+export function MermaidDiagram({ source, light, colors, scale, fitByDefault }: {
+  source: string; light: boolean; colors?: Palette; scale: number; fitByDefault: boolean;
 }) {
   const [result, setResult] = useState<RenderedDiagram | { error: string } | null>(null);
   const [adjustment, setAdjustment] = useState(0);
+  const [fitAtScale, setFitAtScale] = useState<number>();
   const [windowError, setWindowError] = useState("");
   const scroll = useRef<HTMLDivElement>(null);
   const scrollId = useId();
-  const [horizontal, setHorizontal] = useState({ offset: 0, maximum: 0 });
+  const [horizontal, setHorizontal] = useState({ width: 0, offset: 0, maximum: 0 });
   const background = colors?.["mermaid-node-bg"];
   const text = colors?.["mermaid-node-ink"];
   const border = colors?.["mermaid-node-border"];
@@ -125,9 +126,11 @@ export function MermaidDiagram({ source, light, colors, scale }: {
     const image = viewport?.querySelector("img");
     if (!viewport || !image) return;
     const measure = () => {
-      const maximum = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      const width = viewport.clientWidth;
+      const maximum = Math.max(0, viewport.scrollWidth - width);
       const offset = Math.max(0, Math.min(maximum, Math.round(viewport.scrollLeft)));
-      setHorizontal((current) => current.offset === offset && current.maximum === maximum ? current : { offset, maximum });
+      setHorizontal((current) => current.width === width && current.offset === offset && current.maximum === maximum
+        ? current : { width, offset, maximum });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -139,7 +142,9 @@ export function MermaidDiagram({ source, light, colors, scale }: {
       viewport.removeEventListener("scroll", measure);
     };
   }, [diagram]);
-  const inlineScale = scale * zoomStep ** adjustment;
+  const widthScale = diagram?.width && horizontal.width ? Math.min(1, horizontal.width / diagram.width) : 1;
+  const initialScale = fitAtScale !== undefined ? widthScale * scale / fitAtScale : scale * (fitByDefault ? widthScale : 1);
+  const inlineScale = initialScale * zoomStep ** adjustment;
   return <>
     {!result && <p role="status">{t("Rendering diagram…")}</p>}
     {result && "error" in result && <pre className="diagram-error" role="alert">{errorText(result.error)}</pre>}
@@ -149,8 +154,12 @@ export function MermaidDiagram({ source, light, colors, scale }: {
           onClick={() => setAdjustment((current) => Math.max(-maxInlineSteps, current - 1))}><ZoomOut aria-hidden="true" /></Button>
         <Button type="button" className="icon-button" aria-label={t("Zoom in")} disabled={adjustment >= maxInlineSteps}
           onClick={() => setAdjustment((current) => Math.min(maxInlineSteps, current + 1))}><ZoomIn aria-hidden="true" /></Button>
-        <Button type="button" className="icon-button" aria-label={t("Reset diagram zoom")} disabled={!adjustment}
-          onClick={() => setAdjustment(0)}><RotateCcw aria-hidden="true" /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Reset diagram zoom")} disabled={!adjustment && fitAtScale === undefined}
+          onClick={() => { setAdjustment(0); setFitAtScale(undefined); }}><RotateCcw aria-hidden="true" /></Button>
+        <Button type="button" aria-label={t("Fit horizontally")} disabled={!diagram.width || !horizontal.width}
+          onClick={() => { setFitAtScale(scale); setAdjustment(0); }}>
+          <MoveHorizontal aria-hidden="true" />{t("Fit horizontally")}
+        </Button>
         <Button type="button" onClick={(event) => void openViewer(event.currentTarget, { ...diagram, scale: inlineScale })}>
           <ExternalLink aria-hidden="true" />{t("Open in new window")}
         </Button>
@@ -163,7 +172,7 @@ export function MermaidDiagram({ source, light, colors, scale }: {
             const viewport = scroll.current;
             if (!viewport) return;
             viewport.scrollLeft = event.currentTarget.valueAsNumber;
-            setHorizontal({ ...horizontal, offset: Math.round(viewport.scrollLeft) });
+            setHorizontal((current) => ({ ...current, offset: Math.round(viewport.scrollLeft) }));
           }} />
       </label>}
       <div ref={scroll} id={scrollId} dir="ltr" className="mermaid-scroll" tabIndex={0} role="group" aria-label={t("Mermaid diagram")}>

@@ -302,7 +302,7 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
         <fieldset className="view-font-group">
           <legend><SettingSearchLabel label="Mermaid diagrams" /></legend>
           <label className="setting"><SettingSearchLabel label="Default diagram scale (%)" />
-            <OptionalNumberInput label={t("Default diagram scale (%)")} size={preferences.mermaidScale} fallback="100"
+            <OptionalNumberInput label={t("Default diagram scale (%)")} size={preferences.mermaidScale} fallback={t("Fit horizontally")}
               min={minMermaidScale} max={maxMermaidScale}
               onChange={(mermaidScale) => onChange({ ...preferences, mermaidScale })} />
           </label>
