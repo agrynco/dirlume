@@ -2,9 +2,9 @@ import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, ChevronDown, ChevronRight, File, Folder, HardDrive, LoaderCircle } from "lucide-react";
-import { CompactAddressBreadcrumbs } from "./AddressField";
+import { AddressBreadcrumbs } from "./AddressField";
 import { Button } from "./Button";
-import { api, describeError, smbHost, watchDirectory, windowsClient, type FileLocation } from "./api";
+import { api, describeError, smbHost, watchDirectory, windowsClient } from "./api";
 import { FileContextMenu } from "./FileContextMenu";
 import { errorText, locale, t } from "./i18n";
 import { formatSize, type Side } from "./panes";
@@ -569,8 +569,8 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
       <span className="pane-title"><HardDrive aria-hidden="true" />{t("Space Analyzer")}</span>
       <Button ref={closeButton} data-help-topic="spaceActions" onClick={onClose}>{t("Close")}</Button>
     </header>
-    <div className="space-target" data-help-topic="spacePath"><CompactAddressBreadcrumbs place={currentFolder} path={spacePath(currentFolder)}
-      goTo={(target: FileLocation) => { if (canAnalyze(target)) onNavigate(target); }} /></div>
+    <div className="space-target" data-help-topic="spacePath"><AddressBreadcrumbs place={currentFolder} path={spacePath(currentFolder)} label={t("Path")}
+      onNavigate={(target) => { if (canAnalyze(target)) onNavigate(target); }} /></div>
     <div className="space-toolbar">
       <div ref={viewModes} className="space-view-modes" role="group" aria-label={t("View")}>
         <Button data-help-topic="spaceTree" aria-pressed={view === "tree"} onClick={() => changeView("tree")}>{t("Tree")}</Button>

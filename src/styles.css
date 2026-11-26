@@ -570,30 +570,27 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .address-breadcrumbs[data-editable="true"] { cursor: text; }
 .address-current, .address-ancestor { cursor: default; }
-.address-crumb-clip { min-width: 0; overflow: hidden; direction: rtl; }
+.address-crumb-clip { min-width: 0; overflow: hidden; flex: 0 1 auto; max-width: 100%; direction: ltr; }
 .address-crumbs { display: flex; align-items: center; width: max-content; direction: ltr; white-space: nowrap; }
 .address-ancestor { display: flex; align-items: center; }
 .address-ancestor[hidden] { display: none; }
-.address-crumb-clip[data-fit] { flex: 0 1 auto; max-width: 100%; direction: ltr; }
-.address-crumb-clip[data-fit] .address-crumbs { max-width: 100%; }
-.address-crumb-clip[data-fit] .address-ancestor { flex: none; }
-.address-crumb-clip[data-fit] .address-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.address-crumb-clip[data-fit] .address-crumbs[data-measuring] { max-width: none; }
+.address-crumb-clip .address-crumbs { max-width: 100%; }
+.address-crumb-clip .address-ancestor { flex: none; }
+.address-crumb-clip .address-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.address-crumb-clip .address-crumbs[data-measuring] { max-width: none; }
 .address-crumbs[data-measuring] .address-ancestor[hidden] { display: flex; }
 .address-ancestor button { min-height: 28px; padding: 2px 7px; }
 .address-ancestor > span { padding: 2px 7px; }
 .address-ancestor svg { width: var(--address-separator-width); height: 12px; flex: none; color: var(--muted); }
 .address-source { flex: none; min-width: 0; max-width: min(70%, max(32px, calc(100% - 2 * var(--address-overflow-width) - 2 * var(--address-separator-width) - 32px))); }
-.address-source button { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
+.address-source > :is(button, span) { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 .address-current { padding: 3px 8px; }
 .address-current svg { width: 14px; height: 14px; margin-inline-end: 6px; vertical-align: text-bottom; color: var(--panel-muted); }
 .address-forward { display: flex; flex: none; white-space: nowrap; }
 .address-forward button { opacity: .64; }
 .address-forward button:is(:hover, :focus-visible) { opacity: 1; }
-.address-overflow { position: absolute; inset-inline-start: 0; width: var(--address-overflow-width); background: var(--canvas); }
+.address-overflow { width: var(--address-overflow-width); background: var(--canvas); flex: none; }
 .address-overflow-segment { flex: none; }
-.address-overflow-segment .address-overflow { position: static; flex: none; }
-.address-ellipsis { padding: 2px 7px; pointer-events: none; }
 .address-actions {
   position: absolute; z-index: 6; top: 100%; right: 0; display: flex; width: max-content; gap: 2px; padding: 2px;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised); box-shadow: 0 3px 12px var(--overlay);

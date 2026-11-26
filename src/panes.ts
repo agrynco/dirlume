@@ -247,9 +247,9 @@ export function connectionSource(place: FileLocation | null): ConnectionSource |
   }
 }
 
-export function breadcrumbPlaces(place: FileLocation | null, limit = Infinity) {
+export function breadcrumbPlaces(place: FileLocation | null) {
   const places: FileLocation[] = [];
-  while (place && places.length < limit) {
+  while (place) {
     places.push(place);
     let parent = parentPlace(place);
     if (parent?.kind === "local") parent = { ...parent, parent: parentPath(parent.path, windowsClient) };
