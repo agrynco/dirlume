@@ -145,6 +145,7 @@ try {
   await editor.getByText("Unsaved editor draft", { exact: true }).waitFor();
   await button(editor, "Close document").click();
   await button(page.getByRole("dialog", { name: "Unsaved changes", exact: true }), "Discard changes").click();
+  await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "View service.log", exact: true }).click();
   await closeViewer();
 
   await show("reader.md");
