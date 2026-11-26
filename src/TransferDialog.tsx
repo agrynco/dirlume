@@ -23,7 +23,7 @@ export interface Transfer {
   chooseOperation?: boolean;
 }
 
-type Decision = "overwrite" | "skip";
+type Decision = "overwrite" | "overwrite_all" | "skip";
 let nextSession = 0;
 
 export const nextTransferId = () => ++nextSession;
@@ -336,7 +336,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
             <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">{t("Ask")}</option><option value="skip">{t("Skip")}</option>
-                {replaceable && <option value="overwrite">{t("Overwrite")}</option>}
+                {replaceable && <option value="overwrite">{t("Overwrite all")}</option>}
                 {replaceable && localTarget && <>
                   <option value="rename">{t("Rename incoming item")}</option>
                   <option value="newer">{t("Overwrite older files only")}</option>
@@ -344,7 +344,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               </select>
             </label>
             {replaceable && localTarget && <label className="field-checkbox">
-              <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} />
+              <input type="checkbox" checked={askReadOnly} disabled={policy === "overwrite"} onChange={(event) => setAskReadOnly(event.target.checked)} />
               <span>{t("Also ask about read-only files")}</span>
             </label>}
             {localCopy && <>
@@ -435,18 +435,19 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               <ConflictDetails label={t("Existing")} details={conflict.existing} />
             </tbody>
           </table>
-          {conflict.directory && conflict.replaceable && <p>{t("Merge the folders and handle conflicting files individually.")}</p>}
           {!conflict.replaceable && <p>{t("Skip this item or choose another destination.")}</p>}
           {conflict.allowRemember && <label className="field-checkbox">
-            <span>{t("Remember choice")}</span>
+            <span>{t(conflict.confirmReadOnly ? "Remember choice for read-only files" : "Remember choice")}</span>
             <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
           </label>}
         </div>
         <footer className="dialog-footer">
           {conflict.replaceable && (
             <Button type="button" className="alert-confirm" disabled={answering === conflict}
-              onClick={() => { void resolve("overwrite"); }}>{t(conflict.directory ? "Merge" : "Overwrite")}</Button>
+              onClick={() => { void resolve("overwrite"); }}>{t("Overwrite")}</Button>
           )}
+          {conflict.replaceable && <Button type="button" disabled={answering === conflict}
+            onClick={() => { void resolve("overwrite_all"); }}>{t("Overwrite all")}</Button>}
           <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>{t("Skip")}</Button>
           <Button type="button" onClick={cancel}>{t("Cancel")}</Button>
         </footer>

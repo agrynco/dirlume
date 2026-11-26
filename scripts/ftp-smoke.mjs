@@ -274,7 +274,6 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     assert.equal(await uploadPath.inputValue(), "/start/saved-folder");
     await uploadPath.fill("/start");
     await button(copy, "Copy").click();
-    await button(page.getByRole("dialog", { name: "Folder already exists" }), "Merge").click();
     await button(page.getByRole("dialog", { name: "File already exists" }), "Overwrite").click();
     await transferred();
     assert.equal(await readFile(join(remoteCopy, "existing.txt"), "utf8"), "local upload");
@@ -287,7 +286,6 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await page.keyboard.press("F5");
     await copy.getByLabel("Destination", { exact: true }).fill(destination);
     await button(copy, "Copy").click();
-    await button(page.getByRole("dialog", { name: "Folder already exists" }), "Merge").click();
     await button(page.getByRole("dialog", { name: "File already exists" }), "Skip").click();
     await complete.getByText("0 completed, 1 skipped.", { exact: true }).waitFor();
     await button(complete, "Done").click();

@@ -23,15 +23,15 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
       ({ name, directory: false, link: false, hidden: false, size: 600_000, modified: null }));
     entries.push({ ...entries[0], name: "folder", directory: true, size: null });
     window.transferFixture = {
-      requests: [], current: null,
+      requests: [], decisions: [], current: null,
       progress(bytes, total = 600_000) {
         const { output, request } = this.current;
         output.onmessage({ kind: "progress", file: request.source.name, path: request.source.name, bytes, total });
       },
-      conflict() {
+      conflict(readOnly = false) {
         this.current.output.onmessage({ kind: "conflict", conflict: {
-          path: "b.bin", directory: false, readOnly: false, replaceable: true,
-          allowRemember: false, existing: { size: 1, modified: null, directory: false },
+          path: "b.bin", directory: false, readOnly, confirmReadOnly: readOnly, replaceable: true,
+          allowRemember: true, existing: { size: 1, modified: null, directory: false },
         } });
       },
     };
@@ -53,7 +53,8 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
             state.requests.push(args.request);
             return new Promise((resolve, reject) => { state.current = { ...args, resolve, reject }; });
           case "resolve_transfer":
-            state.current.resolve({ kind: "skipped" });
+            state.decisions.push(args);
+            state.current.resolve({ kind: args.decision === "skip" ? "skipped" : "completed" });
             return null;
           case "cancel_transfer":
             state.current.reject(new Error("Transfer canceled."));
@@ -78,7 +79,7 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
   return page;
 }
 
-async function start(page, names, move = false) {
+async function start(page, names, move = false, policy = "ask") {
   const source = page.locator("#left-files");
   const row = (name) => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`);
   // Use selection events so the estimate test does not depend on how the
@@ -87,6 +88,12 @@ async function start(page, names, move = false) {
   if (names.length > 1) for (const name of names) await row(name).dispatchEvent("click", { button: 0, ctrlKey: true });
   await source.press(move ? "F6" : "F5");
   const setup = dialog(page, move ? "Rename or move" : "Copy");
+  if (policy !== "ask") {
+    const choice = setup.getByRole("combobox", { name: "Existing files", exact: true });
+    await choice.selectOption({ label: "Overwrite all" });
+    assert.equal(await choice.inputValue(), policy);
+    assert.equal(await setup.getByRole("checkbox", { name: "Also ask about read-only files" }).isDisabled(), true);
+  }
   await button(setup, move ? "Move" : "Copy").press("Enter");
   await waitForSource(page, names[0]);
   return dialog(page, move ? "Moving…" : "Copying…");
@@ -149,6 +156,22 @@ const browser = await chromium.launch({ channel: "chrome" });
 try {
   await verifyCopyCheckboxes(browser);
   console.log("Verified aligned Copy checkboxes, translated wrapping, and label and keyboard activation.");
+  const overwritePage = await fixture(browser, false, { mockClock: false });
+  await start(overwritePage, ["a.bin"], false, "overwrite");
+  assert.equal(await overwritePage.evaluate(() => window.transferFixture.current.request.policy), "overwrite");
+  await complete(overwritePage);
+  await dialog(overwritePage, "Copying…").waitFor({ state: "hidden" });
+  await start(overwritePage, ["b.bin"]);
+  assert.equal(await overwritePage.evaluate(() => window.transferFixture.current.request.policy), "ask");
+  await overwritePage.evaluate(() => window.transferFixture.conflict(true));
+  const readOnly = dialog(overwritePage, "File already exists");
+  const rememberReadOnly = readOnly.getByRole("checkbox", { name: "Remember choice for read-only files", exact: true });
+  await rememberReadOnly.waitFor();
+  assert.equal(await rememberReadOnly.isChecked(), false);
+  await button(readOnly, "Overwrite all").click();
+  await dialog(overwritePage, "Copying…").waitFor({ state: "hidden" });
+  assert.equal(await overwritePage.evaluate(() => window.transferFixture.decisions[0].decision), "overwrite_all");
+  await overwritePage.close();
   const copyPage = await fixture(browser);
   const copy = await start(copyPage, ["a.bin", "b.bin", "c.bin"]);
   const estimate = copy.locator(".transfer-estimate");
