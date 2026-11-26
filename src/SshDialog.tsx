@@ -10,6 +10,7 @@ import type { Bindings } from "./preferences";
 import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
 import { defaultDirectoryPreferences } from "./netboxDirectories";
 import { defaultEnvironmentPreferences, NetBoxEnvironmentPage } from "./NetBoxEnvironmentPage";
+import { defaultConnectionPreferences, NetBoxConnectionPage } from "./NetBoxConnectionPage";
 
 export function VerifyHostDialog({ verification, testing, onCancel, onApprove }: {
   verification: SshHostVerification;
@@ -140,6 +141,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   const [connection, setConnection] = useState(() => hostDraft(profile, draft));
   const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
   const [environment, setEnvironment] = useState(profile?.environment ?? draft?.environment ?? defaultEnvironmentPreferences);
+  const [connectionOptions, setConnectionOptions] = useState(profile?.connectionOptions ?? draft?.connectionOptions ?? defaultConnectionPreferences);
   const [jumps, setJumps] = useState<JumpDraft[]>(() =>
     (profile?.jumpHosts ?? []).map((host) => ({ ...hostDraft(host), id: host.id })));
   const [editor, setEditor] = useState<JumpDraft>();
@@ -148,6 +150,8 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   const jumpId = useId();
   const savedJump = (id: string): SshJumpHost | undefined => profile?.jumpHosts?.find((host) => host.id === id);
   const [working, setWorking] = useState<"save" | "test">();
+  const testing = useRef<AbortController>(null);
+  useEffect(() => () => testing.current?.abort(), []);
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
   const [pending, setPending] = useState<{ verification: SshHostVerification; approvals: readonly SshHostVerification[] }>();
@@ -158,6 +162,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
     jumpHosts: jumps.map((host) => ({ ...hostInput(host), id: savedJump(host.id)?.id })),
     directories,
     environment,
+    connectionOptions,
   };
 
   const editingId = editor?.id;
@@ -218,25 +223,33 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
     setPending(undefined);
     setVerified(false);
     setError("");
+    const attempt = new AbortController();
+    testing.current = attempt;
     try {
-      const result = await api.testSshConnection(input, approvals);
+      const result = await api.testSshConnection(input, approvals, attempt.signal);
+      if (attempt.signal.aborted) return;
       if (result.kind === "verifyHost") setPending({ verification: result.verification, approvals });
       else setVerified(true);
     } catch (failure) {
-      setError(describeError(failure));
+      if (!attempt.signal.aborted) setError(describeError(failure));
     } finally {
+      testing.current = null;
       setWorking(undefined);
     }
   }
 
   return <><NetBoxSession editing={!!profile} protocol="sftp" working={working} bindings={bindings} saveDisabled={!!editor}
+    onCancelTest={() => testing.current?.abort()}
     pages={{ environment: <NetBoxEnvironmentPage value={environment} onChange={(settings) => { setEnvironment(settings); changed(); }} />,
       directories: <NetBoxDirectoriesPage value={directories} symbolicLinks
-      onChange={(settings) => { setDirectories(settings); changed(); }} /> }}
+      onChange={(settings) => { setDirectories(settings); changed(); }} />,
+      connection: <NetBoxConnectionPage value={connectionOptions} ftp={false} jumpRoute={jumps.length > 0}
+        onChange={(settings) => { setConnectionOptions(settings); changed(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t("SFTP connection successful.")}</p> : undefined}
     onChangeProtocol={onUseFtp && (() => onUseFtp({
       label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited, directories, environment,
+      connectionOptions,
     }))} onSave={(event) => { void save(event); }} onClose={onClose}>
         <ConnectionNameField protocol="ssh" label={label} onChange={setLabel} />
         <SshHostFields connection={connection} saved={profile} onChange={(update) => {
@@ -287,7 +300,8 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
         </section>
         <div className="dialog-actions">
           <Button type="button" disabled={!!working || !canTest}
-            onClick={() => { void testConnection(); }}>{t(working === "test" ? "Testing…" : "Test connection")}</Button>
+            onClick={({ currentTarget }) => { if (currentTarget.form?.reportValidity()) void testConnection(); }}>
+            {t(working === "test" ? "Testing…" : "Test connection")}</Button>
         </div>
   </NetBoxSession>
   {pending && <VerifyHostDialog verification={pending.verification} testing onCancel={() => setPending(undefined)}

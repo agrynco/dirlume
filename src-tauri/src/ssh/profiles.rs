@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     desktop::{blocking, message, Result},
+    netbox_connection::ConnectionPreferences,
     netbox_directories::DirectoryPreferences,
     netbox_environment::EnvironmentPreferences,
 };
@@ -71,6 +72,8 @@ pub(super) struct SavedProfile {
     pub(super) directories: DirectoryPreferences,
     #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
     pub(super) environment: EnvironmentPreferences,
+    #[serde(default, skip_serializing_if = "ConnectionPreferences::is_default")]
+    pub(super) connection_options: ConnectionPreferences,
 }
 
 impl SavedProfile {
@@ -191,6 +194,7 @@ pub struct ProfileSummary {
     jump_hosts: Vec<JumpHostSummary>,
     directories: DirectoryPreferences,
     environment: EnvironmentPreferences,
+    connection_options: ConnectionPreferences,
 }
 
 impl From<SavedProfile> for ProfileSummary {
@@ -200,6 +204,7 @@ impl From<SavedProfile> for ProfileSummary {
             label: item.label,
             directories: item.directories,
             environment: item.environment,
+            connection_options: item.connection_options,
             destination: item.destination.into(),
             jump_hosts: item
                 .jump_hosts
@@ -224,6 +229,7 @@ pub struct ProfileInput {
     jump_hosts: Vec<JumpHostInput>,
     directories: Option<DirectoryPreferences>,
     environment: Option<EnvironmentPreferences>,
+    connection_options: Option<ConnectionPreferences>,
 }
 
 #[derive(Deserialize)]
@@ -332,6 +338,14 @@ struct DraftProfile {
 }
 
 impl ProfileInput {
+    pub(super) fn connection_preferences(&self, config: &Config) -> Result<ConnectionPreferences> {
+        let previous = self.id.map(|id| config.profile(id)).transpose()?;
+        self.connection_options
+            .or_else(|| previous.map(|profile| profile.connection_options))
+            .unwrap_or_default()
+            .validated()
+    }
+
     fn prepare(self, previous: Option<&SavedProfile>) -> Result<DraftProfile> {
         let destination = self
             .destination
@@ -496,6 +510,11 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             .or_else(|| previous.map(|profile| profile.environment.clone()))
             .unwrap_or_default()
             .validated()?;
+        let connection_options = input
+            .connection_options
+            .or_else(|| previous.map(|profile| profile.connection_options))
+            .unwrap_or_default()
+            .validated()?;
         let draft = input.prepare(previous)?;
         let mut new_credentials = NewCredentials::default();
         let item = SavedProfile {
@@ -503,6 +522,7 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             label,
             directories,
             environment,
+            connection_options,
             destination: new_credentials.save(draft.destination)?,
             jump_hosts: draft
                 .jump_hosts

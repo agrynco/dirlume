@@ -679,7 +679,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         }
       }
       const cacheRevision = isFileServer(place) ? directoryCacheRevision(place) : undefined;
-      const result = await waitForListing(readPlace(place, sudoPassword, !background), signal);
+      const result = await waitForListing(readPlace(place, sudoPassword, !background, signal), signal);
       if (result && ticket === request.current[side] && isFileServer(place) && isFileServer(result.place) && !result.elevated) {
         cacheDirectory(place, result.place, result.listing, cacheRevision);
       }
@@ -757,7 +757,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             const { ticket, signal } = beginListing(side);
             updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: "/" + savedFtp.segments.join("/") }));
             try {
-              const connection = connectFtpLocation(savedFtp.profileId, savedFtp.segments).then((result) => {
+              const connection = connectFtpLocation(savedFtp.profileId, savedFtp.segments, undefined, signal).then((result) => {
                 if (signal.aborted || cancelled) {
                   disconnect(result.place);
                   return;
@@ -1505,7 +1505,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const { ticket, signal } = beginListing(target);
     try {
-      const result = await waitForListing(readPlace(place), signal);
+      const result = await waitForListing(readPlace(place, undefined, undefined, signal), signal);
       if (!result || ticket !== request.current[target]) return;
       if (reveal !== undefined && !result.listing.entries.some((entry) => entry.name === reveal)) {
         throw new Error(t("File no longer found: {0}", reveal));
@@ -1600,7 +1600,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
     const { approvals = [], segments, fromRecent } = options;
     const remembered = segments === undefined && "host" in profile ? rememberedDirectory(profile) : undefined;
-    const { ticket } = beginListing(side);
+    const { ticket, signal } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
     function complete(place: Place, listing: Listing, unavailable?: string[]) {
       if (request.current[side] !== ticket) {
@@ -1618,12 +1618,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     try {
       switch (profile.kind) {
         case "ftp": {
-          const { place, listing, unavailableFolders } = await connectFtpLocation(profile.id, segments, remembered);
+          const { place, listing, unavailableFolders } = await connectFtpLocation(profile.id, segments, remembered, signal);
           complete(place, listing, unavailableFolders);
           break;
         }
         case "ssh": {
-          const result = await api.connectSsh(profile.id, approvals, segments, remembered);
+          const result = await api.connectSsh(profile.id, approvals, segments, remembered, signal);
           if (result.kind === "verifyHost") {
             if (request.current[side] !== ticket) break;
             if (activeModal.current) throw new Error(t("Open this connection again to verify its host key."));
@@ -1844,9 +1844,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       let place: NetworkPlace;
       let listing: Listing;
       if (remote.kind === "ftp") {
-        ({ place, listing } = await connectFtpLocation(remote.id, segments));
+        ({ place, listing } = await connectFtpLocation(remote.id, segments, undefined, signal));
       } else if (remote.kind === "ssh") {
-        const result = await api.connectSsh(remote.id, undefined, segments);
+        const result = await api.connectSsh(remote.id, undefined, segments, undefined, signal);
         if (result.kind === "verifyHost") throw new Error(t("Verify the host key in SSH connections before opening this shortcut."));
         place = { kind: "ssh", id: result.id, profileId: remote.id, address: result.address, origin: result.origin, segments: result.segments };
         listing = result.listing;

@@ -296,14 +296,14 @@ function folderInAncestor(from: Place | null, to: Place) {
 }
 
 type PlaceListing<Location extends Place> = { place: Location; listing: Listing; elevated?: boolean };
-export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<FileLocation>>;
-export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>>;
-export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>> {
+export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<FileLocation>>;
+export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<Place>>;
+export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<Place>> {
   if (place.kind === "connections") return { place, listing: { entries: await connectionEntries(place.source), omitted: 0 } };
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
-  if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
+  if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments, signal) };
   if (place.kind === "ssh") {
-    const { elevated, segments, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo);
+    const { elevated, segments, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo, signal);
     const canonical = segments && JSON.stringify(segments) !== JSON.stringify(place.segments)
       ? { ...place, segments } : place;
     return { place: canonical, listing, elevated };

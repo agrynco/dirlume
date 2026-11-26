@@ -1,4 +1,4 @@
-import { Channel } from "@tauri-apps/api/core";
+import { Channel, isTauri } from "@tauri-apps/api/core";
 import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
 import type { ImageTransform, Size } from "./imageCrop";
 
@@ -186,6 +186,35 @@ export interface FtpProfile {
   codePage: number | null;
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
+  connectionOptions?: ConnectionPreferences;
+}
+
+export type ConnectionTiming = { mode: "default" | "disabled" } | { mode: "custom"; seconds: number };
+export interface ConnectionPreferences {
+  timeout: ConnectionTiming;
+  keepalive: ConnectionTiming;
+  addressFamily: "auto" | "ipv4" | "ipv6";
+  optimizeBuffer: boolean;
+}
+
+async function netBoxRequest<T>(signal: AbortSignal | undefined, run: (request?: string) => Promise<T>): Promise<T> {
+  signal?.throwIfAborted();
+  if (!signal || !isTauri()) return run();
+  const request = await invoke<string>("begin_netbox_request");
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    void invoke<void>("finish_netbox_request", { id: request }).catch(() => {});
+  };
+  signal.addEventListener("abort", finish, { once: true });
+  try {
+    signal.throwIfAborted();
+    return await run(request);
+  } finally {
+    signal.removeEventListener("abort", finish);
+    finish();
+  }
 }
 
 export interface SshHostSettings {
@@ -207,6 +236,7 @@ export interface SshProfile extends SshHostSettings {
   jumpHosts?: SshJumpHost[];
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
+  connectionOptions?: ConnectionPreferences;
 }
 
 export interface SshHostVerification {
@@ -223,6 +253,7 @@ type SshConnection = ({ kind: "connected" } & ConnectedFileServer) | SshVerifica
 export type SshHostInput = SshHostSettings & { secret?: string; clearSecret?: boolean };
 type SshProfileInput = SshHostInput & {
   id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences; environment?: EnvironmentPreferences;
+  connectionOptions?: ConnectionPreferences;
 };
 
 export interface NamedFile {
@@ -535,29 +566,32 @@ export const api = {
   ftpWindowsCodePage: () => invoke<number | null>("ftp_windows_code_page"),
   saveFtpProfile: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
     invoke<string>("save_ftp_profile", { input }),
-  testFtpConnection: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
-    invoke<void>("test_ftp_connection", { input }),
+  testFtpConnection: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }, signal?: AbortSignal) =>
+    netBoxRequest(signal, (request) => invoke<void>("test_ftp_connection", { input, request })),
   removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
-  connectFtp: (id: string, segments?: string[], remembered?: string[]) =>
-    invoke<ConnectedFileServer>("connect_ftp", { id, segments, remembered }),
+  connectFtp: (id: string, segments?: string[], remembered?: string[], signal?: AbortSignal) =>
+    netBoxRequest(signal, (request) => invoke<ConnectedFileServer>("connect_ftp", { id, segments, remembered, request })),
   disconnectFtp: (id: number) => invoke<void>("disconnect_ftp", { id }),
-  listFtp: (id: number, segments: string[]) => invoke<Listing>("list_ftp", { id, segments }),
+  listFtp: (id: number, segments: string[], signal?: AbortSignal) =>
+    netBoxRequest(signal, (request) => invoke<Listing>("list_ftp", { id, segments, request })),
   searchFtp: (id: number, request: { connection: number; segments: string[]; mask: string; showHidden: boolean },
     output: Channel<FtpSearchEvent>) => invoke<void>("search_ftp", { id, request, output }),
   cancelFtpSearch: (id: number) => invoke<void>("cancel_ftp_search", { id }),
   sshProfiles: () => invoke<SshProfile[]>("ssh_profiles"),
   saveSshProfile: (input: SshProfileInput) =>
     invoke<SshProfile>("save_ssh_profile", { input }),
-  testSshConnection: (input: SshProfileInput, approvals: readonly SshHostVerification[]) =>
-    invoke<{ kind: "success" } | SshVerificationRequired>("test_ssh_connection", {
-      input, approval: approvals[0], approvals,
-    }),
+  testSshConnection: (input: SshProfileInput, approvals: readonly SshHostVerification[], signal?: AbortSignal) =>
+    netBoxRequest(signal, (request) => invoke<{ kind: "success" } | SshVerificationRequired>("test_ssh_connection", {
+      input, approval: approvals[0], approvals, request,
+    })),
   removeSshProfile: (id: string) => invoke<void>("remove_ssh_profile", { id }),
-  connectSsh: (id: string, approvals?: readonly SshHostVerification[], segments?: string[], remembered?: string[]) =>
-    invoke<SshConnection>("connect_ssh", { id, approval: approvals?.[0], approvals, segments, remembered }),
+  connectSsh: (id: string, approvals?: readonly SshHostVerification[], segments?: string[], remembered?: string[], signal?: AbortSignal) =>
+    netBoxRequest(signal, (request) =>
+      invoke<SshConnection>("connect_ssh", { id, approval: approvals?.[0], approvals, segments, remembered, request })),
   disconnectSsh: (id: number) => invoke<void>("disconnect_ssh", { id }),
-  listSsh: (id: number, segments: string[], sudoPassword?: string, reuseSudo?: boolean) =>
-    invoke<Listing & { elevated: boolean; segments?: string[] }>("list_ssh", { id, segments, sudoPassword, reuseSudo }),
+  listSsh: (id: number, segments: string[], sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal) =>
+    netBoxRequest(signal, (request) =>
+      invoke<Listing & { elevated: boolean; segments?: string[] }>("list_ssh", { id, segments, sudoPassword, reuseSudo, request })),
   deleteSsh: (id: number, segments: string[], recursive: boolean) => invoke<void>("delete_ssh", { id, segments, recursive }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
   deleteFtp: (id: number, segments: string[], recursive: boolean) =>
@@ -662,8 +696,8 @@ export function smbLocation(result: Exclude<SmbConnection, { kind: "credentials_
   return { place: { kind: "smbRoot", path: result.server }, listing: { entries, omitted: 0 } };
 }
 
-export async function connectFtpLocation(profileId: string, segments?: string[], remembered?: string[]) {
-  const { listing, unavailableFolders, ...location } = await api.connectFtp(profileId, segments, remembered);
+export async function connectFtpLocation(profileId: string, segments?: string[], remembered?: string[], signal?: AbortSignal) {
+  const { listing, unavailableFolders, ...location } = await api.connectFtp(profileId, segments, remembered, signal);
   const place: FtpPlace = { kind: "ftp", profileId, ...location };
   return { place, listing, unavailableFolders };
 }

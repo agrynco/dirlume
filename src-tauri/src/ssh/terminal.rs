@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 use russh::{client::Msg, ChannelMsg, ChannelWriteHalf};
 use tauri::{async_runtime, ipc::Channel};
 
-use super::{quote, wait, AuthenticatedRoute, Connection, Session};
+use super::{quote, AuthenticatedRoute, Connection, Session};
 use crate::{
     desktop::{message, Result},
     remote_transfer::UploadSession as _,
@@ -19,11 +19,13 @@ pub struct RemoteTerminal {
 
 impl RemoteTerminal {
     pub fn write(&self, data: String) -> Result<()> {
-        wait(self.writer.data_bytes(data))
+        self.client.1.wait(self.writer.data_bytes(data))
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
-        wait(self.writer.window_change(cols.into(), rows.into(), 0, 0))
+        self.client
+            .1
+            .wait(self.writer.window_change(cols.into(), rows.into(), 0, 0))
     }
 
     pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {
@@ -32,7 +34,12 @@ impl RemoteTerminal {
 }
 
 pub(super) async fn complete(client: &AuthenticatedRoute, script: &str) -> Result<Vec<u8>> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let quick_response = Duration::from_secs(3);
+    let timeout = client
+        .1
+        .timeout()
+        .map_or(quick_response, |timeout| timeout.min(quick_response));
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut channel = tokio::time::timeout_at(deadline, client.channel_open_session())
         .await
         .map_err(message)?
@@ -98,7 +105,7 @@ pub fn open_shell(
         exec \"$shell\" -i",
         quote(&path)
     );
-    let channel = wait(async {
+    let channel = client.1.wait(async {
         let mut channel = client.channel_open_session().await.map_err(message)?;
         channel
             .request_pty(true, "xterm-256color", cols.into(), rows.into(), 0, 0, &[])
