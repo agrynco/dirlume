@@ -1250,6 +1250,9 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 [data-theme="classic-blue"] .dialog input::placeholder { color: var(--dialog-field-ink); opacity: .85; }
 .dialog::backdrop { background: var(--overlay); }
 .dialog-wide { width: min(1100px, calc(100vw - 36px)); }
+.dialog-modeless { position: fixed; inset: 52px 12px auto auto; margin: 0; z-index: 20;
+  width: min(580px, calc(100vw - 36px)); }
+.dialog-modeless > .dialog-heading { cursor: move; touch-action: none; user-select: none; }
 .dialog-resizable {
   min-width: min(500px, calc(100vw - 36px)); max-width: calc(100vw - 36px);
   min-height: min(350px, calc(100vh - 42px)); max-height: calc(100vh - 42px);
@@ -1411,15 +1414,16 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .folder-shortcut-row:hover { background: var(--hover); }
 .folder-shortcut-row[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
 .file-bookmarks { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: 8px; }
-.file-bookmarks-path { overflow-wrap: anywhere; color: var(--dialog-muted); }
 .file-bookmark-list { min-height: 0; max-height: min(46vh, 420px); overflow: auto; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius); }
+.file-bookmark-group + .file-bookmark-group { border-block-start: 1px solid var(--line); margin-block-start: 6px; }
+.file-bookmark-group h3 { margin: 0; padding: 6px 7px 3px; font-size: 1em; overflow-wrap: anywhere; }
+.file-bookmark-group h3 small { display: block; font-weight: normal; color: var(--dialog-muted); }
 .file-bookmark-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 7px; border-radius: 4px; cursor: default; }
 .file-bookmark-row > svg { width: 15px; height: 15px; color: var(--accent); }
-.file-bookmark-row > span:first-of-type { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.file-bookmark-row small { color: var(--dialog-muted); }
+.file-bookmark-row > strong { min-width: 0; overflow-wrap: anywhere; }
 .file-bookmark-row:hover { background: var(--hover); }
 .file-bookmark-row[aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
-.file-bookmark-row[aria-selected="true"] :is(small, svg) { color: inherit; }
+.file-bookmark-row[aria-selected="true"] svg { color: inherit; }
 .bookmark-position-status { margin: 0; padding: 5px 9px; background: var(--raised); color: var(--muted); border-bottom: 1px solid var(--line); }
 .code-surface .cm-file-bookmarks { min-width: 16px; }
 .cm-file-bookmarks .cm-gutterElement { display: grid; place-items: start center; min-width: 16px; cursor: pointer; }
