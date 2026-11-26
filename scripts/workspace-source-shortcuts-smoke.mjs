@@ -140,6 +140,7 @@ try {
     await scope.focus();
     await page.keyboard.press("Shift+Tab");
     assert.equal(await control.evaluate((node) => node === document.activeElement), true);
+    await control.evaluate((node) => node.dispatchEvent(new Event("scroll")));
     await tooltip.getByText(detail, { exact: true }).waitFor();
     await page.setViewportSize({ width: 1400, height: 760 });
     await files("left").getByRole("option", { name: /^nested/ }).dblclick();
@@ -266,7 +267,7 @@ try {
         await page.keyboard.press("Digit0");
         await pane(side).getByRole("grid", { name: "Running processes", exact: true }).waitFor();
       } else {
-        await button(sources(side), "FTP").click();
+        await button(sources(side), "NetBox").click();
       }
       if (view === "Remote files") await files(side).getByRole("option", { name: /^FTP fixture/ }).dblclick();
       return files(side);

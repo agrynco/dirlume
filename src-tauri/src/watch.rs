@@ -11,6 +11,7 @@ use std::{
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     desktop::{blocking, message, Result},
@@ -22,7 +23,13 @@ use crate::{
 pub struct Watches(Mutex<HashMap<u32, RecommendedWatcher>>);
 
 #[derive(Default)]
-pub struct Measurements(Mutex<HashMap<u32, Arc<AtomicBool>>>);
+pub struct Measurements(Mutex<HashMap<u32, Arc<MeasurementStop>>>);
+
+#[derive(Default)]
+struct MeasurementStop {
+    local: AtomicBool,
+    remote: CancellationToken,
+}
 
 #[derive(Clone, Serialize)]
 pub struct SizeResult {
@@ -56,7 +63,7 @@ pub async fn measure_folders(
         MeasurementSource::Ftp { connection, .. } => Some(ftp_state.connection(*connection)?),
         MeasurementSource::Local { .. } => None,
     };
-    let stop = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(MeasurementStop::default());
     state
         .0
         .lock()
@@ -77,7 +84,7 @@ pub async fn measure_folders(
                         scope.spawn(|| {
                             let pending = std::iter::from_fn(|| names.lock().ok()?.next());
                             report_sizes(pending, &output, &reported_incomplete, |name| {
-                                space_analyzer::measure_folder(&directory.join(name), &stop)
+                                space_analyzer::measure_folder(&directory.join(name), &stop.local)
                             });
                         });
                     }
@@ -86,9 +93,9 @@ pub async fn measure_folders(
             MeasurementSource::Ftp { segments, .. } => {
                 let mut ftp = connection
                     .ok_or("Connect to the FTP server first.")?
-                    .open()?;
+                    .open_with_cancel(Some(stop.remote.clone()))?;
                 report_sizes(names, &output, &reported_incomplete, |name| {
-                    ftp.folder_size(&ftp::child(&segments, name), &stop)
+                    ftp.folder_size(&ftp::child(&segments, name), &stop.local)
                 });
             }
         }
@@ -123,7 +130,8 @@ fn report_sizes(
 #[tauri::command]
 pub fn cancel_measurement(id: u32, state: State<'_, Measurements>) -> Result<()> {
     if let Some(flag) = state.0.lock().map_err(message)?.get(&id) {
-        flag.store(true, Ordering::Relaxed);
+        flag.local.store(true, Ordering::Relaxed);
+        flag.remote.cancel();
     }
     Ok(())
 }

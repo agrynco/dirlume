@@ -8,7 +8,6 @@ import { errorText, t } from "./i18n";
 import { isMarkdownFile } from "./markdown";
 import { ReadOnlyMarkdown } from "./MarkdownPreview";
 import type { Side } from "./panes";
-import type { Bindings } from "./preferences";
 
 type PreviewContent = { kind: "image"; url: string } | { kind: "text"; text: string } |
   { kind: "binary"; page: BytePage } | { kind: "error"; message: string };
@@ -73,12 +72,12 @@ function ImagePreview({ name, url }: { name: string; url: string }) {
   </>;
 }
 
-function PreviewFile({ file, source, light, markdownSize, shortcuts, onFocusFiles }: {
+function PreviewFile({ file, source, light, markdownSize, mermaidScale, onFocusFiles }: {
   file: NamedFile;
   source: boolean;
   light: boolean;
   markdownSize?: number;
-  shortcuts: Bindings;
+  mermaidScale?: number;
   onFocusFiles: () => void;
 }) {
   const [target] = useState(file);
@@ -130,13 +129,13 @@ function PreviewFile({ file, source, light, markdownSize, shortcuts, onFocusFile
   if (content.kind === "image") return <ImagePreview name={target.name} url={content.url} />;
   if (content.kind === "binary") return <BinaryPreview file={target} initial={content.page} />;
   if (!source && isMarkdownFile(target.name)) return <ReadOnlyMarkdown source={content.text} light={light}
-    fontSize={markdownSize} shortcuts={shortcuts} />;
+    fontSize={markdownSize} mermaidScale={mermaidScale} />;
   if (!source && /\.html?$/i.test(target.name)) return <HtmlPreview name={target.name}
     text={content.text} light={light} onFocusFiles={onFocusFiles} />;
   return <pre className="text-view" tabIndex={0}>{content.text || t("This file is empty.")}</pre>;
 }
 
-export default function QuickView({ side, file, fileKey, name, message, source, light, markdownSize, shortcuts, onFocusFiles,
+export default function QuickView({ side, file, fileKey, name, message, source, light, markdownSize, mermaidScale, onFocusFiles,
   onPrevious, onNext, previousShortcut, nextShortcut }: {
   side: Side;
   file: NamedFile | null;
@@ -146,7 +145,7 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
   source: boolean;
   light: boolean;
   markdownSize?: number;
-  shortcuts: Bindings;
+  mermaidScale?: number;
   onFocusFiles: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
@@ -168,7 +167,7 @@ export default function QuickView({ side, file, fileKey, name, message, source, 
       </div>
     </header>
     {file ? <PreviewFile key={fileKey} file={file} source={source} light={light} markdownSize={markdownSize}
-      shortcuts={shortcuts} onFocusFiles={onFocusFiles} /> :
+      mermaidScale={mermaidScale} onFocusFiles={onFocusFiles} /> :
       <p className="pane-empty" role="status">{message}</p>}
   </section>;
 }

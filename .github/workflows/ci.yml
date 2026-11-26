@@ -88,13 +88,13 @@ jobs:
     name: Build and test (${{ matrix.platform }})
     if: needs.version.outputs.product-version != ''
     needs: version
-    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04"}')[matrix.platform] }}
+    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[matrix.platform] }}
     timeout-minutes: 45
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
       DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
-      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage"}')[matrix.platform] }}
+      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage","macos-arm64":"app,dmg","macos-x64":"app,dmg"}')[matrix.platform] }}
     strategy:
       fail-fast: false
       matrix:
@@ -202,7 +202,8 @@ jobs:
         if: github.event.action != 'closed'
         run: node scripts/ssh-jump-dialog-smoke.mjs
       - name: Verify remote connection breadcrumbs and history
-        if: github.event.action != 'closed'
+        # The browser fixture simulates all three platforms on each host.
+        if: github.event.action != 'closed' && runner.os != 'macOS'
         run: node scripts/connection-breadcrumbs-smoke.mjs
       - name: Verify file pane stability when the window regains focus
         if: github.event.action != 'closed'
@@ -247,6 +248,7 @@ jobs:
         if: github.event.action != 'closed'
         env:
           DIRLUME_VERIFY_ARCHIVES: '1'
+          DIRLUME_VERIFY_FILE_OPEN: ${{ runner.os != 'Linux' && '1' || '' }}
           DIRLUME_SSH_FIXTURE_PYTHON: python
           PYTHONPATH: ${{ github.workspace }}/.smoke/sftp-test-deps
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features server
@@ -255,6 +257,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         run: |
           $configArgs = @()
           if ($env:DIRLUME_SIGNED_RELEASE -eq 'true') {

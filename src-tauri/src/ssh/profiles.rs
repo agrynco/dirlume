@@ -10,7 +10,12 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::desktop::{blocking, message, Result};
+use crate::{
+    desktop::{blocking, message, Result},
+    netbox_connection::ConnectionPreferences,
+    netbox_directories::DirectoryPreferences,
+    netbox_environment::EnvironmentPreferences,
+};
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -63,6 +68,12 @@ pub(super) struct SavedProfile {
     pub destination: SavedHost,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     jump_hosts: Vec<SavedJumpHost>,
+    #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
+    pub(super) directories: DirectoryPreferences,
+    #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
+    pub(super) environment: EnvironmentPreferences,
+    #[serde(default, skip_serializing_if = "ConnectionPreferences::is_default")]
+    pub(super) connection_options: ConnectionPreferences,
 }
 
 impl SavedProfile {
@@ -181,6 +192,9 @@ pub struct ProfileSummary {
     #[serde(flatten)]
     destination: HostSummary,
     jump_hosts: Vec<JumpHostSummary>,
+    directories: DirectoryPreferences,
+    environment: EnvironmentPreferences,
+    connection_options: ConnectionPreferences,
 }
 
 impl From<SavedProfile> for ProfileSummary {
@@ -188,6 +202,9 @@ impl From<SavedProfile> for ProfileSummary {
         Self {
             id: item.id,
             label: item.label,
+            directories: item.directories,
+            environment: item.environment,
+            connection_options: item.connection_options,
             destination: item.destination.into(),
             jump_hosts: item
                 .jump_hosts
@@ -210,6 +227,9 @@ pub struct ProfileInput {
     destination: HostInput,
     #[serde(default)]
     jump_hosts: Vec<JumpHostInput>,
+    directories: Option<DirectoryPreferences>,
+    environment: Option<EnvironmentPreferences>,
+    connection_options: Option<ConnectionPreferences>,
 }
 
 #[derive(Deserialize)]
@@ -318,6 +338,14 @@ struct DraftProfile {
 }
 
 impl ProfileInput {
+    pub(super) fn connection_preferences(&self, config: &Config) -> Result<ConnectionPreferences> {
+        let previous = self.id.map(|id| config.profile(id)).transpose()?;
+        self.connection_options
+            .or_else(|| previous.map(|profile| profile.connection_options))
+            .unwrap_or_default()
+            .validated()
+    }
+
     fn prepare(self, previous: Option<&SavedProfile>) -> Result<DraftProfile> {
         let destination = self
             .destination
@@ -470,11 +498,31 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             .into_iter()
             .flat_map(SavedProfile::credentials)
             .collect::<Vec<_>>();
+        let directories = input
+            .directories
+            .clone()
+            .or_else(|| previous.map(|profile| profile.directories.clone()))
+            .unwrap_or_default()
+            .normalized()?;
+        let environment = input
+            .environment
+            .clone()
+            .or_else(|| previous.map(|profile| profile.environment.clone()))
+            .unwrap_or_default()
+            .validated()?;
+        let connection_options = input
+            .connection_options
+            .or_else(|| previous.map(|profile| profile.connection_options))
+            .unwrap_or_default()
+            .validated()?;
         let draft = input.prepare(previous)?;
         let mut new_credentials = NewCredentials::default();
         let item = SavedProfile {
             id,
             label,
+            directories,
+            environment,
+            connection_options,
             destination: new_credentials.save(draft.destination)?,
             jump_hosts: draft
                 .jump_hosts

@@ -464,9 +464,8 @@ try {
   }
 
   for (const [menu, profile, source, label] of [
-    ["FTP", "FTP fixture", "ftp", "Analyze connection root"],
-    ["FTP", "SFTP fixture", "ssh", "Analyze connection root"],
-    ["SSH", "SFTP fixture", "ssh", "Analyze connection root"],
+    ["NetBox", "FTP fixture", "ftp", "Analyze connection root"],
+    ["NetBox", "SFTP fixture", "ssh", "Analyze connection root"],
     ["Remote machine", "Server fixture", "server", "Analyze share"],
     ["Remote machine", "Bridge fixture", "kswitcher", "Analyze share"],
   ]) {
@@ -608,7 +607,7 @@ try {
     assert.equal(await row(tree, "obsolete.txt").count(), 0);
     assert.equal(await tree.evaluate((element) => document.activeElement === element), true);
     await button(right, "Locations for right pane").click();
-    await button(right, "FTP").click();
+    await button(right, "NetBox").click();
     await right.getByRole("option", { name: /^FTP fixture/ }).waitFor();
     await row(tree, "new.txt").click();
     await tree.press("F5");

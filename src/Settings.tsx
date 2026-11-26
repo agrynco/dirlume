@@ -140,7 +140,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       ...Object.values(panelLayouts), ...Object.values(actionButtonWidths), ...Object.values(colorGroups.panels.colors),
     ] :
       feature === "viewer" ? ["Reading area", "Max width (px)", "Maximum content width (px)", "Full width", "Mermaid diagrams",
-        "Markdown reading width", "Markdown max width (px)", "Use shared width", "Custom width",
+        "Default diagram scale (%)", "Markdown reading width", "Markdown max width (px)", "Use shared width", "Custom width",
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
       feature === "terminal" ? ["Resize step (rows)", "Paste on right-click", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Installed fonts", "Size (px)", "font size",

@@ -29,6 +29,14 @@ use crate::{
 
 pub(crate) use crate::{message, Result};
 
+#[derive(Deserialize, Serialize)]
+struct DiagramWindowData {
+    image: String,
+    width: Option<f64>,
+    height: Option<f64>,
+    scale: f64,
+}
+
 #[tauri::command]
 async fn open_tool_window(
     main: WebviewWindow,
@@ -37,18 +45,17 @@ async fn open_tool_window(
     height: Option<f64>,
     comparison: Option<serde_json::Value>,
     initial_page: Option<String>,
+    diagram: Option<DiagramWindowData>,
 ) -> Result<()> {
     if main.label() != "main" {
         return Err("Open this window from the main Dirlume window.".into());
     }
     let app = main.app_handle();
-    static NEXT_COMPARISON: AtomicU32 = AtomicU32::new(1);
-    let label = match comparison {
-        Some(_) => format!(
-            "compare-{}",
-            NEXT_COMPARISON.fetch_add(1, Ordering::Relaxed)
-        ),
-        None => "options".to_owned(),
+    static NEXT_WINDOW: AtomicU32 = AtomicU32::new(1);
+    let label = match (&comparison, &diagram) {
+        (Some(_), _) => format!("compare-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed)),
+        (_, Some(_)) => format!("diagram-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed)),
+        _ => "options".to_owned(),
     };
     if let Some(window) = app.get_webview_window(&label) {
         if let Some(page) = initial_page {
@@ -101,19 +108,21 @@ async fn open_tool_window(
     config.minimizable = true;
     config.closable = true;
     let mut builder = WebviewWindowBuilder::from_config(app, &config).map_err(message)?;
-    let is_comparison = comparison.is_some();
+    let wait_for_close = comparison.is_some() || diagram.is_some();
     if let Some(comparison) = comparison {
         builder = builder
             .parent(&main)
             .map_err(message)?
             .initialization_script(format!("window.__dirlumeComparison = {comparison};"));
+    } else if let Some(diagram) = diagram {
+        let diagram = serde_json::to_string(&diagram).map_err(message)?;
+        builder = builder.initialization_script(format!("window.__dirlumeDiagram = {diagram};"));
     } else if let Some(page) = initial_page {
         let page = serde_json::to_string(&page).map_err(message)?;
         builder = builder.initialization_script(format!("window.__dirlumeOptionsPage = {page};"));
     }
     let window = builder.build().map_err(message)?;
-    if is_comparison {
-        // The main workspace retains both files until this native window is destroyed.
+    if wait_for_close {
         let (closed, receiver) = tokio::sync::oneshot::channel();
         let closed = Mutex::new(Some(closed));
         window.on_window_event(move |event| {
@@ -472,6 +481,31 @@ async fn operate(directory: String, operation: Operation) -> Result<()> {
         .map_err(message)
     })
     .await
+}
+
+#[cfg(test)]
+mod file_open_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_open_hands_unicode_path_to_the_default_application() {
+        if std::env::var("DIRLUME_VERIFY_FILE_OPEN").as_deref() != Ok("1") {
+            return;
+        }
+        let fixture = tempfile::tempdir().unwrap();
+        let directory = fixture.path().join("Open request fixture");
+        fs::create_dir(&directory).unwrap();
+        let name = "Звіт дня.txt";
+        fs::write(directory.join(name), "Dirlume file open fixture\n").unwrap();
+        operate(
+            directory.to_str().unwrap().to_owned(),
+            Operation::Open {
+                name: name.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
 }
 
 struct Connection {
@@ -1351,7 +1385,7 @@ async fn transfer_item(
             if let Some(connection) = ssh_destination {
                 if request.moving {
                     return move_to_ssh(
-                        &mut connection.open()?,
+                        &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
                         &request,
                         source,
                         name,
@@ -1361,7 +1395,7 @@ async fn transfer_item(
                     );
                 }
                 return upload_remote(
-                    connection.open()?,
+                    connection.open_with_cancel(Some(session.cancelled.clone()))?,
                     &request,
                     name,
                     source,
@@ -1371,7 +1405,7 @@ async fn transfer_item(
             }
             if let Some(connection) = ftp_destination {
                 return upload_remote(
-                    connection.open()?,
+                    connection.open_with_cancel(Some(session.cancelled.clone()))?,
                     &request,
                     name,
                     source,
@@ -1429,7 +1463,7 @@ async fn transfer_item(
             }
             let mut ftp = ftp_source
                 .ok_or("Connect to the FTP server first.")?
-                .open()?;
+                .open_with_cancel(Some(session.cancelled.clone()))?;
             return remote_transfer::download(&mut ftp, segments, &target, &options, progress, ask)
                 .map(transfer_outcome);
         }
@@ -1439,7 +1473,7 @@ async fn transfer_item(
             }
             if let TransferSource::Ssh { segments, .. } = &request.source {
                 return remote_transfer::download(
-                    &mut connection.open()?,
+                    &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
                     segments,
                     &target,
                     &options,
@@ -2877,7 +2911,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 for (label, tool) in window.app_handle().webview_windows() {
-                    if label == "options" || label.starts_with("compare-") {
+                    if label == "options"
+                        || label.starts_with("compare-")
+                        || label.starts_with("diagram-")
+                    {
                         let _ = tool.destroy();
                     }
                 }
@@ -2893,6 +2930,7 @@ pub fn run() {
         .manage(crate::deletion::DeleteJobs::default())
         .manage(ftp::FtpState::default())
         .manage(ssh::SshState::default())
+        .manage(crate::netbox_connection::Requests::default())
         .manage(TransferSessions::default())
         .manage(terminal::Terminals::default())
         .manage(watch::Watches::default())
@@ -2924,6 +2962,8 @@ pub fn run() {
         read_settings_archive,
         write_settings_archive,
         open_tool_window,
+        crate::netbox_connection::begin_netbox_request,
+        crate::netbox_connection::finish_netbox_request,
         set_appearance_picker,
         crate::updates::check_for_update,
         crate::updates::highlights::installed_release,
@@ -3017,6 +3057,7 @@ pub fn run() {
         disconnect_server,
         ftp::ftp_profiles,
         ftp::ftp_windows_code_page,
+        ftp::test_ftp_connection,
         ftp::save_ftp_profile,
         ftp::remove_ftp_profile,
         ftp::connect_ftp,

@@ -27,19 +27,22 @@ const formats = {
 const platformLabels = {
   "windows-x64": "Windows x64",
   "linux-x64": "Ubuntu / Linux x64",
+  "macos-arm64": "macOS Apple Silicon",
+  "macos-x64": "macOS Intel",
 };
 
 const updaterFormats = {
   "windows-x64": { target: "windows-x86_64", bundle: "nsis", suffix: "-setup.exe", extension: "setup.exe" },
   "linux-x64": { target: "linux-x86_64", bundle: "appimage", suffix: ".AppImage", extension: "AppImage" },
+  "macos-arm64": { target: "darwin-aarch64", bundle: "macos", suffix: ".app.tar.gz", extension: "app.tar.gz" },
+  "macos-x64": { target: "darwin-x86_64", bundle: "macos", suffix: ".app.tar.gz", extension: "app.tar.gz" },
 };
 
 function bundleFormats(platform, signed) {
   if (!signed) return formats[platform];
-  const format = updaterFormats[platform];
-  if (!format) throw new Error(`Release publication is disabled for ${platform}.`);
-  const { bundle, suffix, extension } = format;
-  return [...formats[platform], [bundle, suffix + ".sig", extension + ".sig"]];
+  const { bundle, suffix, extension } = updaterFormats[platform];
+  const updateArchives = bundle === "macos" ? [[bundle, suffix, extension]] : [];
+  return [...formats[platform], ...updateArchives, [bundle, suffix + ".sig", extension + ".sig"]];
 }
 
 function artifactNames(platform, label, signed) {
@@ -87,9 +90,12 @@ async function collectPortable(platform, target, serverBinary, output) {
     } else if (platform === "linux-x64") {
       await copyFile(await findBundle(target, "appimage", ".AppImage"), join(stage, "Dirlume.AppImage"));
     } else {
-      await cp(await findBundle(target, "macos", ".app"), join(stage, "Dirlume.app"), {
-        recursive: true, verbatimSymlinks: true,
-      });
+      const app = await findBundle(target, "macos", ".app");
+      const copy = spawnSync("ditto", [app, join(stage, "Dirlume.app")], { stdio: "inherit" });
+      if (copy.status !== 0) throw copy.error ?? new Error("Could not stage the macOS app bundle.");
+      const archive = spawnSync("ditto", ["-c", "-k", "--sequesterRsrc", stage, resolve(output)], { stdio: "inherit" });
+      if (archive.status !== 0) throw archive.error ?? new Error("Could not archive the portable macOS package.");
+      return;
     }
 
     const files = await readdir(stage);

@@ -54,6 +54,7 @@ export interface PaneState {
   elevationPath?: string;
   deniedSshListing?: DeniedSshListing;
   sudoListing?: boolean;
+  cachedListing?: boolean;
   search: SearchResults | null;
   sort: FileSort;
 }
@@ -237,8 +238,8 @@ export function placeKey(place: FileLocation) {
 
 export function connectionSource(place: FileLocation | null): ConnectionSource | undefined {
   switch (place?.kind) {
-    case "ftp": return "ftp";
-    case "ssh": return place.catalogSource ?? "ssh";
+    case "ftp":
+    case "ssh": return "netbox";
     case "server":
     case "kswitcher": return "remote";
     case "local":
@@ -295,15 +296,17 @@ function folderInAncestor(from: Place | null, to: Place) {
 }
 
 type PlaceListing<Location extends Place> = { place: Location; listing: Listing; elevated?: boolean };
-export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<FileLocation>>;
-export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>>;
-export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean): Promise<PlaceListing<Place>> {
+export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<FileLocation>>;
+export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<Place>>;
+export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<Place>> {
   if (place.kind === "connections") return { place, listing: { entries: await connectionEntries(place.source), omitted: 0 } };
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
-  if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
+  if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments, signal) };
   if (place.kind === "ssh") {
-    const { elevated, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo);
-    return { place, listing, elevated };
+    const { elevated, segments, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo, signal);
+    const canonical = segments && JSON.stringify(segments) !== JSON.stringify(place.segments)
+      ? { ...place, segments } : place;
+    return { place: canonical, listing, elevated };
   }
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
@@ -382,6 +385,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     elevationPath: undefined,
     deniedSshListing: undefined,
     sudoListing: undefined,
+    cachedListing: undefined,
   };
 }
 

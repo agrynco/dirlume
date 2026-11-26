@@ -43,6 +43,7 @@ import { bookmarkFile, fileBookmarkKey, readFileBookmarks, saveFileBookmarks, ty
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
+import { FileOpenFeedback, FileOpensTerminal, useFileOpens } from "./FileOpens";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, DonationButton, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
@@ -51,6 +52,8 @@ import { PaneSources, type PaneSource } from "./PaneSources";
 import { RecentLocationsPane } from "./RecentLocationsPane";
 import { persistRecentLocations, readRecentLocations, recentLocation, recentLocationKey, recentLocationLimit, type RecentLocation } from "./recentLocations";
 import { connectionEntries, readRemoteProfiles } from "./savedConnections";
+import { cacheDirectory, directoryCacheRevision, forgetDirectoryProfile, invalidateDirectories, readCachedDirectory, registerDirectorySession, rememberDirectory,
+  rememberedDirectory } from "./netboxDirectories";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { findFiles, SearchDialog } from "./SearchDialog";
@@ -109,7 +112,7 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
 type SshPaneTarget = { side: Side; place: SshPlace; revision: number };
-type SavedConnectionTarget = Exclude<SavedConnection, { kind: "ftp" | "ssh" }> |
+type SavedConnectionTarget = SavedConnection |
   { kind: "ftp" | "ssh"; id: string; label: string };
 type ConnectionOpenOptions = {
   approvals?: readonly SshHostVerification[];
@@ -146,6 +149,11 @@ type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string; side?: Side }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[]; relativePaths?: string[][]; searchSide?: Side }
 ) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace };
+
+type RemoteDeletionProgress = {
+  signal: AbortSignal;
+  completed: (count: number) => void;
+};
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
@@ -303,6 +311,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [fileOpensVisible, setFileOpensVisible] = useState(false);
+  const fileOpens = useFileOpens();
   const [terminalCompletion, setTerminalCompletion] = useState<Record<number, TerminalCompletionContext & { id: number }>>({});
   const [terminalInputFocused, setTerminalInputFocused] = useState(false);
   const [terminalShare, setTerminalShare] = useState(0);
@@ -438,7 +448,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
-  const permanentDelete = Boolean(fileServer || smbHost(local));
+  const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
+  const permanentDelete = Boolean(fileServer && !remoteTrash || smbHost(local));
   const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
@@ -530,6 +541,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, []);
 
   const rememberRecentLocation = useCallback((place: Place) => {
+    if (isFileServer(place)) rememberDirectory(place);
     const entry = recentLocation(place);
     if (!entry) return;
     const key = recentLocationKey(entry);
@@ -611,7 +623,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     dropTerminal("ssh:" + current[0].place.id);
     setStatus({ text: "SSH connection lost. Select a saved connection to reconnect." });
     for (const { side, place } of current) {
-      const catalog = { kind: "connections", source: place.catalogSource ?? "ssh", from: null } as const;
+      const catalog = { kind: "connections", source: "netbox", from: null } as const;
       const restoreFocus = focusedTerminal && document.getElementById(side + "-pane")?.classList.contains("active");
       void openCatalog(side, catalog).then((opened) => {
         if (!opened) return;
@@ -644,7 +656,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       kswitcherAvailabilityError: undefined,
       deniedSshListing: elevated ? pane.deniedSshListing : undefined,
     }));
-    const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean) => {
+    const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean, cachedListing = false) => {
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const revealed = reveal !== undefined ? openedListing.entries.find((entry) => entry.name === reveal) : undefined;
@@ -652,9 +664,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("Item no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         if (background && pane.place !== place) return pane;
-        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action, addressFrom), sudoListing };
+        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action, addressFrom), sudoListing, cachedListing };
         if (background && pane.error !== pane.kswitcherAvailabilityError) {
           Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
+        }
+        const source = openedPlace.kind === "connections" && openedPlace.source === "netbox" ? openedPlace.from : null;
+        if (action === "push" && isFileServer(source)) {
+          const profile = listing.entries.find(({ connection }) => connection?.kind === source.kind && connection.id === source.profileId);
+          if (profile) listing.selected = profile.name;
         }
         return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
       });
@@ -662,7 +679,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return true;
     };
     try {
-      const result = await waitForListing(readPlace(place, sudoPassword, !background), signal);
+      if (isFileServer(place)) {
+        if (action === "refresh") invalidateDirectories({ kind: place.kind, id: place.profileId });
+        if (!elevated && !latest.current[side].sudoListing && (action === "push" && place.directories?.cacheChanges ||
+          typeof action === "number" && place.directories?.cacheListings)) {
+          const cached = readCachedDirectory(place);
+          if (cached) return complete({ ...place, segments: cached.segments }, cached.listing, false, true);
+        }
+      }
+      const cacheRevision = isFileServer(place) ? directoryCacheRevision(place) : undefined;
+      const result = await waitForListing(readPlace(place, sudoPassword, !background, signal), signal);
+      if (result && ticket === request.current[side] && isFileServer(place) && isFileServer(result.place) && !result.elevated) {
+        cacheDirectory(place, result.place, result.listing, cacheRevision);
+      }
       return result ? complete(result.place, result.listing, result.elevated) : false;
     } catch (error) {
       if (ticket === request.current[side]) {
@@ -681,6 +710,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         updatePane(side, (pane) => {
           if (background && (pane.place !== place || pane.error === text ||
             pane.error && pane.error !== pane.kswitcherAvailabilityError)) return pane;
+          if (place.kind === "connections" && place.source === "netbox" &&
+            (action === "push" || typeof action === "number")) {
+            return { ...applyListing(pane, place, { entries: [], omitted: 0 }, action, addressFrom), error: text };
+          }
           return {
             ...pane, loading: false, loadingPath: undefined, error: text,
             kswitcherAvailabilityError: pane.place === place && error instanceof KSwitcherUnavailableError ? text : undefined,
@@ -733,7 +766,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             const { ticket, signal } = beginListing(side);
             updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: "/" + savedFtp.segments.join("/") }));
             try {
-              const connection = connectFtpLocation(savedFtp.profileId, savedFtp.segments).then((result) => {
+              const connection = connectFtpLocation(savedFtp.profileId, savedFtp.segments, undefined, signal).then((result) => {
                 if (signal.aborted || cancelled) {
                   disconnect(result.place);
                   return;
@@ -748,6 +781,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                 return;
               }
               connected.current[side] = place;
+              registerDirectorySession(place);
+              cacheDirectory(place, place, listing);
               updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
               return;
             } catch (error) {
@@ -1365,6 +1400,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (previous.kind === "ssh") dropTerminal("ssh:" + previous.id);
     }
     connected.current[side] = place.kind === "server" || isFileServer(place) ? place : null;
+    if (isFileServer(place)) {
+      registerDirectorySession(place);
+      cacheDirectory(place, place, listing);
+    }
     rememberRecentLocation(place);
     setActive(side);
     updatePane(side, (pane) => {
@@ -1475,7 +1514,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const { ticket, signal } = beginListing(target);
     try {
-      const result = await waitForListing(readPlace(place), signal);
+      const result = await waitForListing(readPlace(place, undefined, undefined, signal), signal);
       if (!result || ticket !== request.current[target]) return;
       if (reveal !== undefined && !result.listing.entries.some((entry) => entry.name === reveal)) {
         throw new Error(t("File no longer found: {0}", reveal));
@@ -1522,8 +1561,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         });
         return;
       }
-      void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
-        setStatus({ text: describeError(error), error: true }));
+      if (smbHost(place)) {
+        void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
+          setStatus({ text: describeError(error), error: true }));
+      } else void fileOpens.openFile(side, place, file.name);
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
     }
@@ -1569,15 +1610,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
     const { approvals = [], segments, fromRecent } = options;
-    const location = panes[side].place;
-    const { ticket } = beginListing(side);
+    const remembered = segments === undefined && "host" in profile ? rememberedDirectory(profile) : undefined;
+    const { ticket, signal } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
-    function complete(place: Place, listing: Listing) {
+    function complete(place: Place, listing: Listing, unavailable?: string[]) {
       if (request.current[side] !== ticket) {
         if (place.kind === "server" || isFileServer(place)) disconnect(place);
         return false;
       }
       routeLocation(side, place, listing);
+      if (unavailable?.length && isFileServer(place)) {
+        setStatus({ text: t("Could not open {0}. Opened {1} instead.", unavailable.join(", "), placePath(place)) });
+      }
       if (fromRecent) closeRecent(side, false);
       else requestAnimationFrame(() => focus(side));
       return true;
@@ -1585,12 +1629,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     try {
       switch (profile.kind) {
         case "ftp": {
-          const { place, listing } = await connectFtpLocation(profile.id, segments);
-          complete(place, listing);
+          const { place, listing, unavailableFolders } = await connectFtpLocation(profile.id, segments, remembered, signal);
+          complete(place, listing, unavailableFolders);
           break;
         }
         case "ssh": {
-          const result = await api.connectSsh(profile.id, approvals, segments);
+          const result = await api.connectSsh(profile.id, approvals, segments, remembered, signal);
           if (result.kind === "verifyHost") {
             if (request.current[side] !== ticket) break;
             if (activeModal.current) throw new Error(t("Open this connection again to verify its host key."));
@@ -1598,9 +1642,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             activeModal.current = verification;
             setModal(verification);
           } else {
-            const { id, address, origin, segments, listing } = result;
-            const catalogSource = location?.kind === "connections" && location.source === "ftp" ? "ftp" : undefined;
-            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, catalogSource }, listing);
+            const { id, address, origin, segments, listing, directories, environment, unavailableFolders } = result;
+            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, directories, environment }, listing, unavailableFolders);
           }
           break;
         }
@@ -1680,7 +1723,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   async function editRecentConnection(side: Side, location: RecentLocation) {
     if (!("profileId" in location)) return;
-    const source = location.kind === "server" ? "remote" : location.kind;
+    const source = location.kind === "server" ? "remote" : "netbox";
     const stillOpen = () => document.getElementById(side + "-recent") && !activeModal.current;
     try {
       const entries = await connectionEntries(source);
@@ -1812,9 +1855,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       let place: NetworkPlace;
       let listing: Listing;
       if (remote.kind === "ftp") {
-        ({ place, listing } = await connectFtpLocation(remote.id, segments));
+        ({ place, listing } = await connectFtpLocation(remote.id, segments, undefined, signal));
       } else if (remote.kind === "ssh") {
-        const result = await api.connectSsh(remote.id, undefined, segments);
+        const result = await api.connectSsh(remote.id, undefined, segments, undefined, signal);
         if (result.kind === "verifyHost") throw new Error(t("Verify the host key in SSH connections before opening this shortcut."));
         place = { kind: "ssh", id: result.id, profileId: remote.id, address: result.address, origin: result.origin, segments: result.segments };
         listing = result.listing;
@@ -1975,10 +2018,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     requestAnimationFrame(() => focus(side));
   }
 
-  async function batch(items: string[], action: (name: string) => Promise<void>) {
+  async function batch(items: string[], action: (name: string, index: number) => Promise<void>, progress?: RemoteDeletionProgress) {
     for (const [index, name] of items.entries()) {
+      if (progress?.signal.aborted) break;
       try {
-        await action(name);
+        await action(name, index);
+        progress?.completed(index + 1);
       } catch (error) {
         throw new Error(`${name} · ${errorText(describeError(error))}${index > 0 ? ` (${t("{0} of {1} completed", index, items.length)})` : ""}`, { cause: error });
       }
@@ -2066,7 +2111,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const remote = place.kind === "ftp" || place.kind === "ssh" ? place : undefined;
     const archive = place.kind === "archive" ? place : undefined;
     setModal({
-      kind: remote || archive || smbHost(place) ? "delete" : command,
+      kind: remote && !remote.environment?.recycleBin?.keepDeleted || archive || smbHost(place) ? "delete" : command,
       path: placePath(place), remote, archive, names: entries.map(({ name }) => name),
       directories: entries.filter(({ directory, link }) => directory && !link).map(({ name }) => name),
       relativePaths: searchSide ? entries.map(({ name }) => name.split("/")) :
@@ -2284,7 +2329,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   async function renameItem(place: RenameLocation, name: string, newName: string) {
-    if (place.kind === "ftp") await api.renameFtp(place.id, [...place.segments, name], newName);
+    if (place.kind === "ftp") {
+      await api.renameFtp(place.id, [...place.segments, name], newName);
+      invalidateDirectories({ kind: place.kind, id: place.profileId });
+    }
     else await api.operate(place.path, { kind: "rename", name, new_name: newName });
   }
 
@@ -2345,7 +2393,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function followShellDirectory(session: TerminalSession, path: string) {
-    if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active] || diskActive) return;
+    if (session.id !== terminal?.id || !terminalVisible || fileOpensVisible || activeDocument !== null || processPanels[active] || diskActive) return;
     const place = terminalPlace;
     if (!place || (session.kind === "local" ? place.kind !== "local" :
       place.kind !== "ssh" || place.id !== session.connection)) return;
@@ -2402,8 +2450,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   const followTerminal = useEffectEvent(() => { openTerminal(false); });
   useEffect(() => {
-    if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
-  }, [terminalVisible, terminalKey, terminal, activeDocument]);
+    if (terminalVisible && !fileOpensVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
+  }, [terminalVisible, fileOpensVisible, terminalKey, terminal, activeDocument]);
   useEffect(() => {
     const syncFocus = () => setTerminalInputFocused(document.hasFocus() && hasTerminalShortcutFocus(document.activeElement));
     window.addEventListener("focus", syncFocus);
@@ -2416,6 +2464,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function showCommandLine(moveFocus = true) {
     setTerminalInputFocused(false);
+    setFileOpensVisible(false);
     setTerminalShare(0);
     setPanelsHidden(false);
     if (moveFocus) requestAnimationFrame(() => {
@@ -2441,12 +2490,26 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function toggleTerminal() {
     if (terminalVisible) showCommandLine();
+    else if (!terminalPlace && fileOpens.history.length) {
+      setTerminalShare(terminalHeight);
+      setFileOpensVisible(true);
+    }
     else if (openTerminal()) setTerminalShare(terminalHeight);
+  }
+
+  function showFileOpens() {
+    setTerminalInputFocused(false);
+    setFileOpensVisible(true);
+  }
+
+  function backFromFileOpens() {
+    setFileOpensVisible(false);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(".terminal-card:not([hidden]) [data-file-opens]")?.focus());
   }
 
   function terminalBounds() {
     const card = document.querySelector<HTMLElement>(".terminal-card:not([hidden])");
-    const surface = card?.querySelector<HTMLElement>(".terminal-surface");
+    const surface = card?.querySelector<HTMLElement>(".terminal-surface, .file-open-history");
     const workspace = document.querySelector(".workspace");
     if (!card || !surface || !workspace) return;
     const style = getComputedStyle(card);
@@ -3217,7 +3280,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ...(windowsClient ? [menuCommand("lockingProcesses", !!previewSide || !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
-      ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search && !localSearchRoot(pane) || !current || busy)]),
+      ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local && !remoteTrash ||
+        !!pane.search && !localSearchRoot(pane) || !current || busy)]),
     ] },
     { label: "Commands", items: [
       { ...commandWithIcon(ScanEye, "quickView", !canToggleQuickView), checked: quickViewSource !== null },
@@ -3251,6 +3315,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const commandLineVisible = showFileActions && !panelsHidden;
   const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
+  const terminalPlaceholder = terminalVisible && !fileOpensVisible && activeDocument === null ?
+    <section className="terminal-card" data-font-zoom="terminal" data-help-topic="terminal" aria-label={t("Terminal")}>
+      <header><h2>{t("Terminal")}</h2><Button type="button" data-file-opens onClick={showFileOpens}>{t("File opens")}</Button></header>
+      <div className="pane-empty" role="status">{t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}</div>
+    </section> : null;
 
   return (
     <ElevationContext value={openAdministrator}>
@@ -3338,6 +3407,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onRightClickMark={(names, mark) => setRightClickMarks(side, names, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
+            fileOpenFeedback={<FileOpenFeedback attempts={fileOpens.notices.filter((attempt) => attempt.side === side)} onDismiss={fileOpens.dismiss} />}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
               showProcesses(side, false);
@@ -3358,6 +3428,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else void load(side, place);
             }}
             onOpenConnections={(source) => openConnections(side, source)}
+            onAddNetBoxConnection={() => editConnection(side, "netbox")}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={parentAction(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
@@ -3433,7 +3504,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </section>}>
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
             message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} markdownSize={preferences.viewFontSizes.markdown}
-            shortcuts={shortcuts} onFocusFiles={() => focus(active)}
+            mermaidScale={preferences.mermaidScale} onFocusFiles={() => focus(active)}
             onPrevious={previousPreview && (() => navigateQuickView(previousPreview))}
             onNext={nextPreview && (() => navigateQuickView(nextPreview))}
             previousShortcut={keyLabel("quickViewPrevious")} nextShortcut={keyLabel("quickViewNext")} />
@@ -3518,6 +3589,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmark={addFileBookmark}
             onFileBookmarks={(path) => setModal({ kind: "fileBookmarks", path })}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
+            mermaidScale={preferences.mermaidScale}
             colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes}
@@ -3535,6 +3607,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
+              if (isFileServer(file.place)) invalidateDirectories({ kind: file.place.kind, id: file.place.profileId });
               if (gitView) setGitRefresh((revision) => revision + 1);
               if (editing && file.place.kind !== "local") {
                 // A remote Viewer reloads after a save because it has no local directory watch.
@@ -3546,12 +3619,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           );
         })}
       </div>
-      <Suspense fallback={terminalVisible && activeDocument === null ?
-        <div className="terminal-card pane-empty" role="status">{t("Opening terminal…")}</div> : null}>
+      <Suspense fallback={terminalPlaceholder}>
         {Object.entries(terminals).map(([key, session]) => (
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
-            visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
+            visible={key === terminalKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
             fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
@@ -3573,12 +3645,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             })}
             onRestart={session.kind === "local" && terminalPlace?.kind === "local"
               ? () => openTerminal(true, terminalPlace, session.id) : undefined}
+            onFileOpens={showFileOpens}
             onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
+        {!terminal && terminalPlaceholder}
       </Suspense>
-      {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
-        {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
-      </div>}
+      {terminalVisible && fileOpensVisible && activeDocument === null &&
+        <FileOpensTerminal history={fileOpens.history} onBack={backFromFileOpens} onClose={() => showCommandLine()} />}
       <form className="command-bar" data-font-zoom="command" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
@@ -3718,6 +3791,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               removeSearchMatches(modal.side, (match) => removed.has(match.relativePath));
             }
             const destination = modal.transfer.remoteDestination;
+            if (destination) invalidateDirectories({ kind: destination.kind, id: destination.profileId });
             if (destination?.kind === "ssh") {
               setSshUploadRefresh(destination.id);
               if (modal.transfer.kind === "move") refresh(modal.side);
@@ -3788,6 +3862,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
+            {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
+            </>}
             {item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               void copyClipboard(side, entry, !!entry && state.marked.includes(entry.name));
@@ -3848,11 +3926,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
         onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setModal(null)} />}
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
+        bindings={shortcuts}
         remoteProvider="server" bridgeDirectory={preferences.kswitcher}
-        onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
+        onSaved={(kind, id) => {
+          if (kind === "ftp" || kind === "ssh") invalidateDirectories({ kind, id }, true);
+          reloadConnectionLists(modal.side, { kind, id });
+        }}
         onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
-        onRemoved={() => reloadConnectionLists(modal.side)} onClose={() => connectionDialogsClosed(modal.side)} />}
+        onRemoved={() => {
+          const { kind, id } = modal.profile;
+          if (kind === "ftp" || kind === "ssh") forgetDirectoryProfile({ kind, id });
+          reloadConnectionLists(modal.side);
+        }} onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}
         onCancel={() => connectionDialogsClosed(modal.side)} onApprove={() => {
           connectionDialogsClosed(modal.side);
@@ -3884,7 +3970,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
-          hasNonemptyFolders={modal.remote && "names" in modal ? async () => {
+          hasNonemptyFolders={modal.remote && modal.kind === "delete" ? async () => {
             const remote = modal.remote!;
             const list = remote.kind === "ssh" ? api.listSsh : api.listFtp;
             for (const name of modal.directories ?? []) {
@@ -3893,7 +3979,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             }
             return false;
           } : undefined}
-          onSubmit={async (operation, recursive) => {
+          onSubmit={async (operation, recursive, progress) => {
           const remote = modal.remote;
           if ("names" in modal && modal.archive) {
             const archive = modal.archive;
@@ -3901,16 +3987,45 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             refresh("left");
             refresh("right");
           } else if ("names" in modal && remote) {
+            const completed: string[][] = [];
             try {
               const remove = remote.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
-              await batch(modal.names, (name) => remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false)));
+              await batch(modal.names, async (name, index) => {
+                const segments = [...remote.segments, ...(modal.relativePaths?.[index] ?? [name])];
+                await remove(remote.id, segments, recursive && (modal.directories?.includes(name) ?? false), modal.kind === "recycle");
+                completed.push(segments);
+              }, progress);
+              if (progress?.signal.aborted) {
+                setStatus({ text: t("{0} of {1} completed", completed.length, modal.names.length) });
+              } else if (modal.kind === "recycle") {
+                setStatus({ text: t("Moved {0} to the remote recycle bin.", countText(completed.length, "item")) });
+              }
             } catch (error) {
               setStatus({ text: describeError(error), error: true });
               setModal(null);
               return;
             } finally {
-              refresh("left");
-              refresh("right");
+              invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+              for (const side of ["left", "right"] as const) {
+                const place = latest.current[side].place;
+                if (!isFileServer(place) || place.kind !== remote.kind || place.profileId !== remote.profileId) {
+                  refresh(side);
+                  continue;
+                }
+                const removed = completed.find((segments) => segments.every((segment, index) => place.segments[index] === segment));
+                if (removed) {
+                  await load(side, { ...place, segments: removed.slice(0, -1) }, "push");
+                  continue;
+                }
+                const names = new Set(completed.flatMap((segments) =>
+                  segments.length === place.segments.length + 1 && place.segments.every((segment, index) => segments[index] === segment)
+                    ? [segments[segments.length - 1]] : []));
+                if (names.size) updatePane(side, (current) => current.place === place
+                  ? applyListing(current, place, { entries: current.entries.filter(({ name }) => !names.has(name)), omitted: current.omitted }, "refresh")
+                  : current);
+                // Supersede stale work and avoid opening both FTP data channels at once.
+                await load(side, place, "refresh");
+              }
             }
           } else if ("names" in modal) {
             setModal({ kind: "deletion", searchSide: modal.searchSide, deletion: { directory: modal.path, names: modal.names,
@@ -4009,7 +4124,7 @@ function CommandHistory({ commands, onChoose, onClose }: {
 function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   modal: ActionModal;
   onClose: () => void;
-  onSubmit: (operation: Operation | undefined, recursive: boolean) => Promise<void>;
+  onSubmit: (operation: Operation | undefined, recursive: boolean, progress?: RemoteDeletionProgress) => Promise<void>;
   hasNonemptyFolders?: () => Promise<boolean>;
 }) {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
@@ -4018,10 +4133,14 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
+  const [completed, setCompleted] = useState(0);
+  const [cancelingRemote, setCancelingRemote] = useState(false);
+  const cancelRemote = useRef<AbortController>(null);
   const archiveChange = useArchiveChange();
   const renameInArchive = modal.kind === "rename" && modal.archive;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
-  const title = t(titles[modal.kind]);
+  const remoteRecycle = modal.kind === "recycle" && !!modal.remote;
+  const title = t(remoteRecycle ? "Move to remote recycle bin" : titles[modal.kind]);
   const removing = "names" in modal;
   const permanent = modal.kind === "delete";
 
@@ -4030,6 +4149,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     if (waiting) return;
     setWaiting(true);
     setError("");
+    const controller = remoteRecycle ? new AbortController() : null;
+    cancelRemote.current = controller;
+    setCancelingRemote(false);
+    setCompleted(0);
     try {
       if (hasNonemptyFolders && !recursive && await hasNonemptyFolders()) {
         setRecursive(true);
@@ -4039,17 +4162,23 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
       }
       await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
-        modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
+        modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive,
+        controller ? { signal: controller.signal, completed: setCompleted } : undefined);
     } catch (error) {
       setError(describeError(error));
     } finally {
       setWaiting(false);
+      cancelRemote.current = null;
     }
   }
 
   function close() {
     if (!waiting) onClose();
     else if (renameInArchive) archiveChange.cancel();
+    else if (cancelRemote.current) {
+      cancelRemote.current.abort();
+      setCancelingRemote(true);
+    }
   }
 
   return (
@@ -4064,11 +4193,12 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
               <div>
                 <p>{recursive ? t(modal.remote?.kind === "ssh" ? "Permanently delete the selected SSH folders and all their contents?" :
                   "Permanently delete the selected FTP folders and all their contents?") :
-                  <Message text={permanent ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
+                  <Message text={permanent ? "Permanently delete {0}?" : remoteRecycle ? "Move {0} to the remote recycle bin?" : "Move {0} to Trash?"}>
                     <strong>{modal.names.length === 1 ? modal.names[0] : countText(modal.names.length, "item")}</strong>
                   </Message>}</p>
                 {permanent && <p className="permanent-delete-note">{t(modal.archive ?
                   "These items will be permanently deleted from the archive." : "This action cannot be undone.")}</p>}
+                {remoteRecycle && <p dir="auto">{modal.remote?.environment?.recycleBin?.folder}</p>}
               </div>
             </div>
             : <label className="field">{t("Name")}
@@ -4083,6 +4213,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
           </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {renameInArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
+          {remoteRecycle && removing && waiting && <>
+            <progress aria-label={t("Moving to the remote recycle bin")} max={modal.names.length} value={completed} />
+            <p role="status">{t("{0} of {1} completed", completed, modal.names.length)}</p>
+          </>}
           {!modal.remote && !modal.archive && windowsClient && isPermissionError(error) &&
             <ElevationButton directory={modal.path} selected={modal.kind === "rename" ? modal.name : undefined} />}
           {!modal.remote && !modal.archive && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
@@ -4091,7 +4225,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={close}
-            disabled={waiting && (!renameInArchive || archiveChange.canceling)}>{t(archiveChange.canceling ? "Canceling…" : "Cancel")}</Button>
+            disabled={waiting && (remoteRecycle ? cancelingRemote : !renameInArchive || archiveChange.canceling)}>
+            {t(archiveChange.canceling || cancelingRemote ? "Canceling…" : "Cancel")}
+          </Button>
           <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}

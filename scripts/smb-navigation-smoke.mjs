@@ -37,6 +37,7 @@ export async function testSmbNavigation() {
             case "locations": return [{ label: "Home", path: home }, { label: "C:", path: "C:\\" }, { label: "D:", path: "D:\\" }];
             case "list_directory": return { path: args.path, parent: null, entries: [], omitted: 0 };
             case "file_icons": return args.items.map(() => null);
+            case "ftp_profiles": return [];
             case "ssh_profiles": return sshProfile ? [sshProfile] : [];
             case "save_ssh_profile": {
               const { secret, clearSecret: _clearSecret, ...fields } = args.input;
@@ -213,8 +214,8 @@ export async function testSmbNavigation() {
 
     async function openSsh(side) {
       await pane(side).getByRole("button", { name: "Locations for " + side + " pane", exact: true }).click();
-      await pane(side).getByRole("button", { name: "SSH", exact: true }).click();
-      await pathIs(side, "SSH");
+      await pane(side).getByRole("button", { name: "NetBox", exact: true }).click();
+      await pathIs(side, "NetBox");
     }
     const right = fileList("right");
     await openSsh("right");
@@ -224,7 +225,7 @@ export async function testSmbNavigation() {
     await pathIs("right", root);
     await openSsh("right");
     await right.press("Shift+F4");
-    const addSsh = page.getByRole("dialog", { name: "Add SSH connection", exact: true });
+    const addSsh = page.getByRole("dialog", { name: "Add NetBox connection", exact: true });
     await addSsh.getByLabel("Connection name").fill("SSH fixture");
     await addSsh.getByLabel("Server", { exact: true }).fill("fixture.example");
     await addSsh.getByLabel("Username").fill("fixture");
@@ -232,7 +233,7 @@ export async function testSmbNavigation() {
     await addSsh.getByRole("button", { name: "Save connection", exact: true }).click();
     await right.getByRole("option", { name: /^SSH fixture/ }).click();
     await right.press("F4");
-    const editSsh = page.getByRole("dialog", { name: "Edit SSH connection", exact: true });
+    const editSsh = page.getByRole("dialog", { name: "Edit NetBox connection", exact: true });
     assert.equal(await editSsh.getByLabel("Server", { exact: true }).inputValue(), "fixture.example");
     await editSsh.getByLabel("Connection name").fill("Edited SSH");
     await editSsh.getByRole("button", { name: "Save connection", exact: true }).click();

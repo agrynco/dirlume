@@ -1,7 +1,7 @@
 use std::{
     io::{Read, SeekFrom, Write},
     sync::Arc,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use futures_util::StreamExt;
@@ -11,6 +11,7 @@ use openssh_sftp_client::{
     Error, Sftp,
 };
 use tokio::io::AsyncSeekExt;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{AuthenticatedRoute, SftpFailure, SftpResult};
@@ -18,22 +19,11 @@ use super::{AuthenticatedRoute, SftpFailure, SftpResult};
 use crate::{
     desktop::{message, Result},
     local,
+    netbox_connection::{self, WaitError},
     protocol::RemoteListing,
+    remote_recycle::{protect_path, RecoveryPath, RecyclePreferences},
     remote_transfer::{self, DownloadSession as _, Entry as _, Session as _, UploadSession as _},
 };
-
-fn wait<T, E: Into<SftpFailure>>(
-    operation: impl std::future::Future<Output = std::result::Result<T, E>>,
-) -> SftpResult<T> {
-    tauri::async_runtime::block_on(async {
-        tokio::time::timeout(super::TIMEOUT, operation)
-            .await
-            .map_err(|_| {
-                SftpFailure::ConnectionLost("The SSH server did not respond in time.".to_owned())
-            })?
-            .map_err(Into::into)
-    })
-}
 
 const CHUNK: u32 = 32 * 1024;
 const MAX_DEPTH: usize = 128;
@@ -41,6 +31,10 @@ const MAX_DEPTH: usize = 128;
 pub struct Session {
     sftp: Sftp,
     client: Arc<AuthenticatedRoute>,
+    stop: Option<CancellationToken>,
+    preserve_download_timestamps: bool,
+    recycle_bin: RecyclePreferences,
+    elevated: bool,
 }
 
 #[derive(Debug)]
@@ -128,6 +122,30 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Session {
+    fn wait<T, E: Into<SftpFailure>>(
+        &self,
+        operation: impl std::future::Future<Output = std::result::Result<T, E>>,
+    ) -> SftpResult<T> {
+        tauri::async_runtime::block_on(netbox_connection::wait(
+            self.client.1.timeout(),
+            self.stop.as_ref(),
+            operation,
+        ))
+        .map_err(|error| match error {
+            WaitError::TimedOut => {
+                SftpFailure::ConnectionLost("The SSH server did not respond in time.".to_owned())
+            }
+            WaitError::Canceled => {
+                SftpFailure::Other("The connection operation was canceled.".to_owned())
+            }
+        })?
+        .map_err(Into::into)
+    }
+
+    pub(super) fn set_cancel(&mut self, stop: Option<CancellationToken>) {
+        self.stop = stop;
+    }
+
     pub(crate) fn verify_uploaded_contents(
         &mut self,
         segments: &[String],
@@ -136,11 +154,11 @@ impl Session {
     ) -> Result<()> {
         let changed = "The uploaded SSH file changed. The local source was kept.";
         let original = self.stat(segments)?.filter(Entry::is_file).ok_or(changed)?;
-        let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
+        let mut file = self.wait(self.sftp.open(Self::absolute(segments)?))?;
         let result = (|| {
             let mut buffer = Default::default();
             let mut local = vec![0; CHUNK as usize];
-            while let Some(mut data) = wait(file.read(CHUNK, buffer))? {
+            while let Some(mut data) = self.wait(file.read(CHUNK, buffer))? {
                 check()?;
                 if data.is_empty() || data.len() > local.len() {
                     return Err("The SSH server returned an invalid data packet.".to_owned());
@@ -164,7 +182,7 @@ impl Session {
             }
             Ok(())
         })();
-        let closed = wait(file.close());
+        let closed = self.wait(file.close());
         result.and(closed.map_err(Into::into))?;
         if self.stat(segments)?.as_ref() != Some(&original) {
             return Err(changed.to_owned());
@@ -174,9 +192,153 @@ impl Session {
 
     pub(super) fn new(client: AuthenticatedRoute, sftp: Sftp) -> Self {
         Self {
+            stop: client.1.stop.clone(),
             client: Arc::new(client),
             sftp,
+            preserve_download_timestamps: true,
+            recycle_bin: RecyclePreferences::default(),
+            elevated: false,
         }
+    }
+
+    pub(super) fn with_download_timestamps(mut self, preserve: bool) -> Self {
+        self.preserve_download_timestamps = preserve;
+        self
+    }
+
+    pub(super) fn with_recycle(mut self, options: RecyclePreferences, elevated: bool) -> Self {
+        self.recycle_bin = options;
+        self.elevated = elevated;
+        self
+    }
+
+    fn prepare_recovery(&mut self, source: &[String]) -> Result<(String, String)> {
+        let bin = self.recycle_bin.segments()?;
+        protect_path(&bin, source)?;
+        let (name, parent) = source.split_last().ok_or("Choose a remote item.")?;
+        let parent = self.wait(self.sftp.fs().canonicalize(Self::absolute(parent)?))?;
+        let parent = Self::parse_path(
+            parent
+                .to_str()
+                .ok_or("The SSH server returned an invalid folder path.")?,
+        )?;
+        let source = remote_transfer::child(&parent, name);
+        let bin = self
+            .wait(self.sftp.fs().canonicalize(Self::absolute(&bin)?))
+            .map_err(|error| {
+                format!(
+                    "Could not open the remote recycle bin. {}",
+                    String::from(error)
+                )
+            })?;
+        let bin = Self::parse_path(
+            bin.to_str()
+                .ok_or("The SSH server returned an invalid recycle-bin path.")?,
+        )?;
+        let path = RecoveryPath::new(&bin, &source)?;
+        for folder in path.directories() {
+            self.wait(
+                self.sftp
+                    .fs()
+                    .dir_builder()
+                    .permissions(Permissions::from(0o700))
+                    .create(Self::absolute(folder)?),
+            )
+            .map_err(|error| {
+                format!(
+                    "Could not prepare the remote recycle bin. {}",
+                    String::from(error)
+                )
+            })?;
+        }
+        Ok((Self::absolute(&source)?, Self::absolute(&path.destination)?))
+    }
+
+    pub(super) fn recycle(&mut self, segments: &[String]) -> Result<()> {
+        if !self.recycle_bin.keep_deleted {
+            return Err("The remote recycle bin is disabled for this profile.".to_owned());
+        }
+        let (source, recovery) = self.prepare_recovery(segments)?;
+        self.wait(self.sftp.fs().rename(source, &recovery))
+            .map_err(|error| {
+                format!(
+                    "Could not confirm the move to {recovery}. {}",
+                    String::from(error)
+                )
+            })
+    }
+
+    fn critical<T>(&self, operation: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+        let deadline = self.client.1.timeout().unwrap_or(Duration::from_secs(15));
+        tauri::async_runtime::block_on(netbox_connection::wait(Some(deadline), None, operation))
+            .map_err(|error| message(std::io::Error::from(error)))?
+    }
+
+    fn can_preserve_overwrite(&self) -> Result<()> {
+        if self.elevated && self.sftp.support_posix_rename() && !self.sftp.support_hardlink() {
+            return Err("This elevated SSH session cannot safely restore a file without replacing an existing item.".to_owned());
+        }
+        Ok(())
+    }
+
+    fn publish_without_replacing(&self, from: &str, to: &str) -> Result<()> {
+        if !self.sftp.support_posix_rename() {
+            return self.critical(async { self.sftp.fs().rename(from, to).await.map_err(message) });
+        }
+        if self.sftp.support_hardlink() {
+            self.critical(async { self.sftp.fs().hard_link(from, to).await.map_err(message) })?;
+            let _ = tauri::async_runtime::block_on(netbox_connection::wait(
+                Some(Duration::from_millis(500)),
+                None,
+                self.sftp.fs().remove_file(from),
+            ));
+            return Ok(());
+        }
+        self.critical(super::standard_rename::run(&self.client, from, to))
+    }
+
+    fn publish_preserving_original(&mut self, stage: &str, target: &[String]) -> Result<()> {
+        self.can_preserve_overwrite()?;
+        let (target, recovery) = self.prepare_recovery(target)?;
+        if self
+            .stop
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err("The connection operation was canceled.".to_owned());
+        }
+        // Once the original can move, finish publication or recovery even if the user
+        // stops the batch. Never replace an item that arrived at the destination meanwhile.
+        self.critical(async {
+            self.sftp
+                .fs()
+                .rename(&target, &recovery)
+                .await
+                .map_err(message)
+        })
+        .map_err(|error| {
+            format!(
+                "Could not confirm preservation of the previous file. Check {recovery}. {error}"
+            )
+        })?;
+        let publish = if self
+            .stop
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            Err("The connection operation was canceled.".to_owned())
+        } else {
+            self.publish_without_replacing(stage, &target)
+        };
+        if let Err(error) = publish {
+            return match self.publish_without_replacing(&recovery, &target) {
+                Ok(()) => Err(format!("Could not publish the replacement. The previous file was restored. {error}")),
+                Err(restore) => Err(format!(
+                    "Could not publish the replacement or restore the previous file. Check {recovery} for the previous file. {error} {restore}"
+                )),
+            };
+        }
+        Ok(())
     }
 
     pub(super) fn completion_client(&self) -> Arc<AuthenticatedRoute> {
@@ -188,7 +350,7 @@ impl Session {
     }
 
     pub(super) fn initial_directory(&self) -> Result<Vec<String>> {
-        let home = wait(self.sftp.fs().canonicalize("."))?;
+        let home = self.wait(self.sftp.fs().canonicalize("."))?;
         Self::parse_path(
             home.to_str()
                 .ok_or("The SSH server returned an invalid initial directory.")?,
@@ -196,12 +358,12 @@ impl Session {
     }
 
     fn entries(&self, segments: &[String]) -> SftpResult<(Vec<Entry>, usize)> {
-        let directory = wait(self.sftp.fs().open_dir(Self::absolute(segments)?))?;
+        let directory = self.wait(self.sftp.fs().open_dir(Self::absolute(segments)?))?;
         let mut stream = Box::pin(directory.clone().read_dir());
         let mut entries = Vec::new();
         let mut omitted = 0;
         let result = (|| {
-            while let Some(entry) = wait(async { stream.next().await.transpose() })? {
+            while let Some(entry) = self.wait(async { stream.next().await.transpose() })? {
                 match entry.filename().as_os_str().to_str() {
                     Some("." | "..") => {}
                     Some(name) if valid_name(name) => {
@@ -213,17 +375,54 @@ impl Session {
             Ok((entries, omitted))
         })();
         drop(stream);
-        let closed = wait(directory.close());
+        let closed = self.wait(directory.close());
         result.and_then(|entries| closed.map(|()| entries))
     }
 
     pub(super) fn listing(&self, segments: &[String]) -> SftpResult<RemoteListing> {
+        self.listing_with_links(segments, false)
+    }
+
+    pub(super) fn list_profile_directory(
+        &self,
+        segments: &[String],
+        resolve_links: bool,
+    ) -> SftpResult<(Vec<String>, RemoteListing)> {
+        let canonical = if resolve_links {
+            let path = self.wait(self.sftp.fs().canonicalize(Self::absolute(segments)?))?;
+            Self::parse_path(
+                path.to_str()
+                    .ok_or("The SSH server returned an invalid directory path.")?,
+            )?
+        } else {
+            segments.to_vec()
+        };
+        let listing = self.listing_with_links(&canonical, resolve_links)?;
+        Ok((canonical, listing))
+    }
+
+    fn listing_with_links(
+        &self,
+        segments: &[String],
+        resolve_links: bool,
+    ) -> SftpResult<RemoteListing> {
         let (entries, omitted) = self.entries(segments)?;
         let entries = entries
             .into_iter()
             .map(|entry| {
-                let directory = entry.is_directory();
+                let mut directory = entry.is_directory();
                 let link = entry.kind.is_some_and(|kind| kind.is_symlink());
+                if resolve_links && link {
+                    let path = Self::absolute(&remote_transfer::child(segments, &entry.name))?;
+                    match self.wait(self.sftp.fs().metadata(path)) {
+                        Ok(metadata) => {
+                            directory = metadata.file_type().is_some_and(|kind| kind.is_dir())
+                        }
+                        Err(error @ SftpFailure::ConnectionLost(_)) => return Err(error),
+                        // A dangling, cyclic, or inaccessible target remains a link without folder navigation.
+                        Err(_) => {}
+                    }
+                }
                 let mut result = local::Entry::new(
                     entry.name,
                     directory,
@@ -234,9 +433,9 @@ impl Session {
                 );
                 result.owner = entry.uid.map(|uid| uid.to_string());
                 result.accessed = entry.accessed;
-                result
+                Ok(result)
             })
-            .collect();
+            .collect::<SftpResult<_>>()?;
         Ok(RemoteListing { entries, omitted })
     }
 
@@ -257,9 +456,11 @@ impl Session {
                     self.remove(&remote_transfer::child(segments, child.name()), true)?;
                 }
             }
-            wait(self.sftp.fs().remove_dir(path)).map_err(Into::into)
+            self.wait(self.sftp.fs().remove_dir(path))
+                .map_err(Into::into)
         } else {
-            wait(self.sftp.fs().remove_file(path)).map_err(Into::into)
+            self.wait(self.sftp.fs().remove_file(path))
+                .map_err(Into::into)
         }
     }
 
@@ -269,13 +470,14 @@ impl Session {
         offset: u64,
         length: u64,
     ) -> SftpResult<Vec<u8>> {
-        let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
+        let mut file = self.wait(self.sftp.open(Self::absolute(segments)?))?;
         let result = (|| {
-            wait(file.seek(SeekFrom::Start(offset)))?;
+            self.wait(file.seek(SeekFrom::Start(offset)))?;
             let mut bytes = Vec::new();
             let mut remaining = length;
             while remaining > 0 {
-                let data = wait(file.read(remaining.min(CHUNK.into()) as u32, Default::default()))?
+                let data = self
+                    .wait(file.read(remaining.min(CHUNK.into()) as u32, Default::default()))?
                     .filter(|data| !data.is_empty())
                     .ok_or("The SSH file changed during the read.")?;
                 remaining = remaining
@@ -285,7 +487,7 @@ impl Session {
             }
             Ok(bytes)
         })();
-        let closed = wait(file.close());
+        let closed = self.wait(file.close());
         result.and_then(|bytes| closed.map(|()| bytes))
     }
 
@@ -305,17 +507,15 @@ impl Session {
                 "Edit this SSH file on the server to preserve its special permissions.".into(),
             );
         }
-        if !self.sftp.support_posix_rename() {
-            return Err("This SSH server does not support safe file replacement.".into());
-        }
+        self.check_publication(true)?;
         // Confirm write access to the original file without truncating it.
-        let writable = wait(self.sftp.options().write(true).open(&target))?;
-        wait(writable.close())?;
+        let writable = self.wait(self.sftp.options().write(true).open(&target))?;
+        self.wait(writable.close())?;
         let (_, parent) = segments.split_last().ok_or("Choose a regular SSH file.")?;
         let directory =
             remote_transfer::child(parent, &format!(".dirlume-{}.edit", Uuid::new_v4()));
         let directory_path = Self::absolute(&directory)?;
-        wait(
+        self.wait(
             self.sftp
                 .fs()
                 .dir_builder()
@@ -330,7 +530,7 @@ impl Session {
                 |_| Ok(()),
             )?;
             let result = (|| {
-                let metadata = wait(self.sftp.fs().symlink_metadata(&staged))?;
+                let metadata = self.wait(self.sftp.fs().symlink_metadata(&staged))?;
                 let mut attributes = MetaDataBuilder::new();
                 if (metadata.uid(), metadata.gid()) != (original.uid, original.gid) {
                     let owner = original
@@ -340,7 +540,7 @@ impl Session {
                     attributes.id(owner);
                 }
                 attributes.permissions(permissions);
-                wait(self.sftp.fs().set_metadata(&staged, attributes.create()))?;
+                self.wait(self.sftp.fs().set_metadata(&staged, attributes.create()))?;
                 revalidate(self)?;
                 self.publish_stage(&staged, segments, true)
             })();
@@ -349,7 +549,7 @@ impl Session {
             }
             result
         })();
-        let _ = wait(self.sftp.fs().remove_dir(directory_path));
+        let _ = self.wait(self.sftp.fs().remove_dir(directory_path));
         result
     }
 }
@@ -366,7 +566,7 @@ impl Session {
     fn stat_entry(&self, segments: &[String]) -> SftpResult<Option<Entry>> {
         let name = segments.last().ok_or("Choose an SSH file or folder.")?;
         let path = Self::absolute(segments)?;
-        wait(async {
+        self.wait(async {
             match self.sftp.fs().symlink_metadata(path).await {
                 Ok(metadata) => Ok(Some(Entry::new(name.clone(), metadata))),
                 Err(Error::SftpError(SftpErrorKind::NoSuchFile, _)) => Ok(None),
@@ -377,6 +577,9 @@ impl Session {
 }
 
 impl remote_transfer::DownloadSession for Session {
+    fn preserve_download_timestamps(&self) -> bool {
+        self.preserve_download_timestamps
+    }
     fn children(&mut self, segments: &[String]) -> Result<Vec<Entry>> {
         let (entries, omitted) = self.entries(segments)?;
         if omitted != 0 {
@@ -391,11 +594,11 @@ impl remote_transfer::DownloadSession for Session {
         output: &mut std::fs::File,
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
-        let mut file = wait(self.sftp.open(Self::absolute(segments)?))?;
+        let mut file = self.wait(self.sftp.open(Self::absolute(segments)?))?;
         let result = (|| {
             let mut buffer = Default::default();
             let mut total = 0;
-            while let Some(mut data) = wait(file.read(CHUNK, buffer))? {
+            while let Some(mut data) = self.wait(file.read(CHUNK, buffer))? {
                 if data.is_empty() {
                     return Err("The SSH server returned an empty data packet.".to_owned());
                 }
@@ -407,7 +610,7 @@ impl remote_transfer::DownloadSession for Session {
             }
             Ok(())
         })();
-        let closed = wait(file.close());
+        let closed = self.wait(file.close());
         result.and(closed.map_err(Into::into))
     }
 }
@@ -434,6 +637,9 @@ impl remote_transfer::UploadSession for Session {
     }
 
     fn check_publication(&self, overwrite: bool) -> Result<()> {
+        if overwrite && self.recycle_bin.keep_overwritten {
+            return self.can_preserve_overwrite();
+        }
         publish_with_link(
             overwrite,
             self.sftp.support_posix_rename(),
@@ -442,7 +648,8 @@ impl remote_transfer::UploadSession for Session {
         .map(|_| ())
     }
     fn mkdir(&mut self, segments: &[String]) -> Result<()> {
-        wait(self.sftp.fs().create_dir(Self::absolute(segments)?)).map_err(Into::into)
+        self.wait(self.sftp.fs().create_dir(Self::absolute(segments)?))
+            .map_err(Into::into)
     }
 
     fn upload_to_stage(
@@ -455,7 +662,11 @@ impl remote_transfer::UploadSession for Session {
             .map_err(Into::into)
     }
     fn remove_stage(&mut self, stage: &str) {
-        let _ = wait(self.sftp.fs().remove_file(stage));
+        let _ = tauri::async_runtime::block_on(netbox_connection::wait(
+            Some(Duration::from_millis(500)),
+            None,
+            self.sftp.fs().remove_file(stage),
+        ));
     }
 
     fn rename_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> Result<()> {
@@ -477,7 +688,7 @@ impl Session {
             parent,
             &format!(".dirlume-{}.part", Uuid::new_v4()),
         ))?;
-        let mut file = wait(
+        let mut file = self.wait(
             self.sftp
                 .options()
                 .write(true)
@@ -492,13 +703,13 @@ impl Session {
                 if count == 0 {
                     break;
                 }
-                wait(file.write_all(&buffer[..count]))?;
+                self.wait(file.write_all(&buffer[..count]))?;
                 total += count as u64;
                 progress(total)?;
             }
             Ok(())
         })();
-        let closed = wait(file.close());
+        let closed = self.wait(file.close());
         if let Err(error) = result.and(closed) {
             self.remove_stage(&stage);
             return Err(error);
@@ -507,6 +718,11 @@ impl Session {
     }
 
     fn publish_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> SftpResult<()> {
+        if overwrite && self.recycle_bin.keep_overwritten {
+            return self
+                .publish_preserving_original(stage, target)
+                .map_err(Into::into);
+        }
         let target = Self::absolute(target)?;
         if publish_with_link(
             overwrite,
@@ -515,11 +731,11 @@ impl Session {
         )? {
             // The POSIX rename extension replaces existing names. Link the new file
             // instead so that an item created concurrently is preserved.
-            wait(self.sftp.fs().hard_link(stage, &target))?;
+            self.wait(self.sftp.fs().hard_link(stage, &target))?;
             self.remove_stage(stage);
             return Ok(());
         }
-        wait(self.sftp.fs().rename(stage, target))
+        self.wait(self.sftp.fs().rename(stage, target))
     }
 }
 

@@ -276,13 +276,13 @@ try {
   const leftTools = page.getByRole("region", { name: "left pane", exact: true });
   const locationsTrigger = leftTools.getByRole("button", { name: "Locations for left pane", exact: true });
   await locationsTrigger.click();
-  const sshSource = leftTools.getByRole("button", { name: "SSH", exact: true });
-  assert.equal(await sshSource.locator("kbd").innerText(), "5");
+  const netboxSource = leftTools.getByRole("button", { name: "NetBox", exact: true });
+  assert.equal(await netboxSource.locator("kbd").innerText(), "2");
   const homeLocation = leftTools.getByRole("button", { name: "Home", exact: true });
   const homePath = await homeLocation.getAttribute("data-tooltip");
   assert.ok(homePath && homePath !== "Home");
   await checkTooltip(homeLocation, homePath);
-  await checkTooltip(sshSource);
+  await checkTooltip(netboxSource);
   await locationsTrigger.click();
   await testNativeAppearancePicker(page);
   function editAddress(side) {

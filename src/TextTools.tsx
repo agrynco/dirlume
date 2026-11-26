@@ -21,7 +21,7 @@ import { captureMarkdownAnchor, locateMarkdownAnchor, markdownSelection } from "
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { viewFontStyle, type ViewFontSizes } from "./viewFonts";
-import { normalized, restoreLineEndings } from "./textFormat";
+import { normalized, preferredLineEnding, restoreLineEndings } from "./textFormat";
 import type { CompareRequest, DiffBlock, DiffLine, DiffResult } from "./compare.worker";
 import { SplitDivider } from "./SplitDivider";
 import { PathField } from "./PathField";
@@ -34,7 +34,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors, diagnosticLog,
+export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
   onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
   fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks }: {
   file: NamedFile;
@@ -45,6 +45,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   fontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
+  mermaidScale?: number;
   colors?: Palette;
   diagnosticLog?: boolean;
   onOptions: () => void;
@@ -297,7 +298,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
 
   async function save(sudoPassword?: string) {
     if (!document || !dirty) return;
-    await write(restoreLineEndings(document.text, text), sudoPassword);
+    await write(restoreLineEndings(document.text, text, preferredLineEnding(file)), sudoPassword);
   }
 
   function toggleTask({ start, end }: TaskMarker, checked: boolean) {
@@ -528,7 +529,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {preview && !hex && (
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
           <MarkdownPreview file={file} source={markdownSource} active={active} position={position} light={light} colors={colors}
-            scroll={markdownScroll} onContent={setMarkdownContent} fontSize={fontSizes.markdown} shortcuts={shortcuts}
+            scroll={markdownScroll} onContent={setMarkdownContent} fontSize={fontSizes.markdown} mermaidScale={mermaidScale}
             writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
             onOpenDocument={(target, newTab, next) => onOpenDocument(target, newTab, next, markdownScroll.current?.scrollTop ?? 0)} onError={setError} />
           </Suspense>
@@ -763,7 +764,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
     try {
       for (const side of dirty) {
         const original = originals[side];
-        const text = restoreLineEndings(original.text, documents[side]);
+        const text = restoreLineEndings(original.text, documents[side], preferredLineEnding(files[side]));
         const destination = destinations[side];
         let saved: TextDocument;
         if (destination === null) saved = await savePlaceText(files[side], original, text);

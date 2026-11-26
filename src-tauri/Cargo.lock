@@ -1516,10 +1516,12 @@ dependencies = [
 name = "dirlume"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "axum-server",
  "base64 0.22.1",
  "block2",
+ "bytes",
  "cap-std",
  "clap",
  "clipboard-rs",
@@ -1530,6 +1532,7 @@ dependencies = [
  "futures-util",
  "gio",
  "image",
+ "jiff 0.2.46",
  "junction",
  "keyring",
  "libc",
@@ -1538,6 +1541,7 @@ dependencies = [
  "objc2-app-kit",
  "open",
  "openssh-sftp-client",
+ "openssh-sftp-client-lowlevel",
  "png",
  "portable-pty",
  "rcgen",
@@ -1546,10 +1550,12 @@ dependencies = [
  "ring",
  "russh",
  "rustls",
+ "rustls-native-certs",
  "same-file",
  "semver",
  "serde",
  "serde_json",
+ "socket2",
  "subtle",
  "suppaftp",
  "sysinfo",
@@ -5640,6 +5646,7 @@ version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -6529,10 +6536,15 @@ version = "13.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "919688e3d2128f0c3e77f4dff7a2035f2d73ccf488851ba96ba42002e850cad5"
 dependencies = [
+ "async-trait",
  "jiff 1.0.1",
  "lazy-regex",
  "log",
+ "pin-project",
+ "rustls-pki-types",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]

@@ -154,7 +154,7 @@ async function fixture(browser, refresh) {
   return page;
 }
 
-async function connect(page, side, profile = "Remote fixture", source = "SSH") {
+async function connect(page, side, profile = "Remote fixture", source = "NetBox") {
   const panel = pane(page, side);
   await button(panel, `Locations for ${side} pane`).click();
   await button(panel, source).click();
@@ -186,7 +186,7 @@ async function closeSshTerminal(page, event) {
 async function verifyConnectionLoss(browser) {
   const page = await fixture(browser);
   try {
-    await connect(page, "left", "Remote fixture", "FTP");
+    await connect(page, "left", "Remote fixture", "NetBox");
     await connect(page, "right");
     await startSshTerminal(page, "right");
     await page.evaluate(() => { window.sshFixture.listings = []; });
@@ -205,8 +205,8 @@ async function verifyConnectionLoss(browser) {
     await startSshTerminal(page, "right");
     await page.evaluate(() => { window.sshFixture.offline = 37; });
     await closeSshTerminal(page, "disconnected");
-    await Promise.all([waitPath(page, "left", "FTP"), waitPath(page, "right", "SSH")]);
-    for (const [side, source] of [["left", "FTP"], ["right", "SSH"]]) {
+    await Promise.all([waitPath(page, "left", "NetBox"), waitPath(page, "right", "NetBox")]);
+    for (const [side, source] of [["left", "NetBox"], ["right", "NetBox"]]) {
       const address = page.locator(`#${side}-path nav`);
       assert.equal(await address.locator("[aria-current=location]").innerText(), source);
       assert.equal(await address.locator(".address-forward, .address-overflow").count(), 0);
@@ -217,7 +217,7 @@ async function verifyConnectionLoss(browser) {
     await page.evaluate(() => { window.sshFixture.offline = null; });
     await list(page, "left").press("Enter");
     await waitPath(page, "left", "/destination");
-    await waitPath(page, "right", "SSH");
+    await waitPath(page, "right", "NetBox");
     assert.deepEqual(await page.evaluate(() => window.sshFixture.connectAttempts), ["ssh", "ssh", "ssh"]);
   } finally { await page.close(); }
 
@@ -233,7 +233,7 @@ async function verifyConnectionLoss(browser) {
     }
     await explicit.evaluate(() => { window.sshFixture.offline = 37; });
     await button(pane(explicit, "left"), "Refresh folder").click();
-    await waitPath(explicit, "left", "SSH");
+    await waitPath(explicit, "left", "NetBox");
     await waitPath(explicit, "right", "/destination");
     await explicit.evaluate(() => { window.sshFixture.offline = null; });
     await list(explicit, "left").press("Enter");
@@ -242,7 +242,7 @@ async function verifyConnectionLoss(browser) {
     await address.fill("/elsewhere");
     await explicit.evaluate(() => { window.sshFixture.offline = 37; });
     await address.press("Enter");
-    await waitPath(explicit, "left", "SSH");
+    await waitPath(explicit, "left", "NetBox");
     await waitPath(explicit, "right", "/destination");
   } finally { await explicit.close(); }
 
@@ -284,6 +284,9 @@ try {
     await connect(page, "right");
     const input = page.getByRole("combobox", { name: "Command line", exact: true });
     const choices = page.getByRole("listbox", { name: "Command suggestions", exact: true });
+    // The pane returns focus on a frame after its listing has been rendered.
+    const finishPaneFocus = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await finishPaneFocus();
     await input.fill("docker co");
     await choices.getByRole("option", { name: "container", exact: true }).waitFor();
     assert.equal(await page.locator(".terminal-card:visible").count(), 0);
@@ -295,7 +298,8 @@ try {
     const address = await editPaneAddress(page, "right");
     await address.fill("/elsewhere");
     await address.press("Enter");
-    await page.waitForFunction(() => document.getElementById("right-path")?.dataset.path === "/elsewhere");
+    await waitPath(page, "right", "/elsewhere");
+    await finishPaneFocus();
     await input.fill("docker co");
     await choices.getByRole("option", { name: "compose elsewhere", exact: true }).waitFor();
     await page.evaluate(() => window.sshFixture.releaseCompletion());

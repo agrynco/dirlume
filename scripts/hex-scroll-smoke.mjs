@@ -11,13 +11,23 @@ const row = (hex, offset) => hex.locator(`[data-byte-offset="${offset}"]`);
 export async function verifyHexScroll(page, first = /41 41 41.*AAAAAAAAAAAAAAAA/) {
   const hex = page.getByLabel("Hexadecimal contents", { exact: true });
   await row(hex, 0).filter({ hasText: first }).waitFor();
+  const viewport = await hex.elementHandle();
   async function reach(offset, pattern, direction) {
-    const expected = row(hex, offset).filter({ hasText: pattern });
-    for (let attempt = 0; attempt < 20 && !await expected.count(); attempt++) {
-      await hex.evaluate((view, direction) => view.scrollBy({ top: direction * view.clientHeight / 2 }), direction);
-      await page.waitForTimeout(40);
+    const target = row(hex, offset);
+    for (let attempt = 0; attempt < 20 && !await target.count(); attempt++) {
+      const step = await viewport.evaluate((view, direction) => {
+        const top = view.scrollTop;
+        const first = view.querySelector("[data-byte-offset]")?.getAttribute("data-byte-offset");
+        view.scrollTop += direction * view.clientHeight / 2;
+        return { first, moved: view.scrollTop !== top };
+      }, direction);
+      if (!step.moved) break;
+      await page.waitForFunction(({ view, first, offset }) =>
+        view.querySelector(`[data-byte-offset="${offset}"]`) ||
+        view.querySelector("[data-byte-offset]")?.getAttribute("data-byte-offset") !== first,
+      { view: viewport, first: step.first, offset });
     }
-    await expected.waitFor();
+    await target.filter({ hasText: pattern }).waitFor();
     const offsets = await hex.locator("[data-byte-offset]").evaluateAll((lines) => lines.map((line) => Number(line.dataset.byteOffset)));
     assert.ok(offsets.slice(1).every((offset, index) => offset === offsets[index] + 16));
   }
@@ -57,6 +67,7 @@ async function browserSmoke() {
           if (command === "locations") return [{ label: "Home", path: home }];
           if (command === "list_directory") return { path: args.path, entries, parent: null, omitted: 0 };
           if (command === "read_text") return { text: files[args.name], encoding: "utf8" };
+          if (command === "ftp_profiles") return [];
           if (command === "ssh_profiles") return [{ id: "ssh", label: "Hex fixture", host: "fixture", port: 22 }];
           if (command === "connect_ssh") return { kind: "connected", id: 5, address: "Hex fixture", origin: "sftp://fixture",
             segments: ["remote"], listing: { entries, omitted: 0, elevated: false } };
@@ -119,7 +130,7 @@ async function browserSmoke() {
 
     const right = page.getByRole("region", { name: "right pane", exact: true });
     await button(right, "Locations for right pane").click();
-    await button(right, "SSH").click();
+    await button(right, "NetBox").click();
     await right.getByRole("option", { name: /^Hex fixture/ }).dblclick();
     await page.waitForFunction(() => document.querySelector("#right-path")?.dataset.path === "/remote");
     await open("417.txt", page.locator("#right-files"));

@@ -3,10 +3,14 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowDown, ArrowUp, Plus } from "lucide-react";
 import { api, describeError, type SshHostInput, type SshHostVerification, type SshJumpHost, type SshProfile } from "./api";
 import { Button } from "./Button";
-import { ConnectionProtocol, type ConnectionDraft } from "./ConnectionProtocol";
+import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { Dialog } from "./Dialog";
-import { HistoryField } from "./HistoryField";
 import { errorText, t } from "./i18n";
+import type { Bindings } from "./preferences";
+import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
+import { defaultDirectoryPreferences } from "./netboxDirectories";
+import { defaultEnvironmentPreferences, NetBoxEnvironmentPage } from "./NetBoxEnvironmentPage";
+import { defaultConnectionPreferences, NetBoxConnectionPage } from "./NetBoxConnectionPage";
 
 export function VerifyHostDialog({ verification, testing, onCancel, onApprove }: {
   verification: SshHostVerification;
@@ -31,6 +35,7 @@ export function VerifyHostDialog({ verification, testing, onCancel, onApprove }:
 type HostDraft = {
   host: string;
   port: string;
+  portEdited: boolean;
   username: string;
   auth: SshHostInput["auth"]["kind"];
   path: string;
@@ -43,6 +48,7 @@ type JumpDraft = HostDraft & { id: string };
 function hostDraft(saved?: SavedHost | null, draft?: ConnectionDraft): HostDraft {
   return {
     host: saved?.host ?? draft?.host ?? "", port: draft?.port ?? String(saved?.port ?? 22),
+    portEdited: draft?.portEdited ?? false,
     username: saved?.username ?? draft?.username ?? "",
     auth: saved?.auth.kind ?? "password", path: saved?.auth.kind === "privateKey" ? saved.auth.path : "",
     secret: "", clearSecret: false,
@@ -82,7 +88,7 @@ function SshHostFields({ connection, saved, onChange, onError, jump = false }: {
   onError: (error: string) => void;
   jump?: boolean;
 }) {
-  const { host, port, username, auth, path, secret, clearSecret } = connection;
+  const { auth, path, secret, clearSecret } = connection;
   const useKey = auth === "privateKey";
   const savedSecret = keepsSecret(connection, saved);
 
@@ -96,19 +102,7 @@ function SshHostFields({ connection, saved, onChange, onError, jump = false }: {
   }
 
   return <>
-    <div className="ftp-host-row">
-      <label className="field">{t("Server")}
-        <HistoryField historyKey="ssh-host" aria-label={t("Server")} required spellCheck={false}
-          placeholder={jump ? "bastion.example.com" : "ssh.example.com"} value={host} onValueChange={(host) => onChange({ host })} />
-      </label>
-      <label className="field">{t("Port")}
-        <input required type="number" min={1} max={65535} value={port} onChange={(event) => onChange({ port: event.target.value })} />
-      </label>
-    </div>
-    <label className="field">{t("Username")}
-      <HistoryField historyKey="ssh-username" aria-label={t("Username")} required spellCheck={false}
-        value={username} onValueChange={(username) => onChange({ username })} />
-    </label>
+    <ConnectionHostFields protocol="ssh" connection={connection} onChange={onChange} jump={jump} />
     <label className="field">{t("Authentication")}
       <select aria-label={t("Authentication")} value={auth} onChange={(event) => onChange({
         auth: event.target.value === "privateKey" ? "privateKey" : "password", secret: "", clearSecret: false,
@@ -135,16 +129,19 @@ function SshHostFields({ connection, saved, onChange, onError, jump = false }: {
   </>;
 }
 
-export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClose }: {
+export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, onClose }: {
   profile: SshProfile | null;
   draft?: ConnectionDraft;
   onUseFtp?: (draft: ConnectionDraft) => void;
-  sftp?: boolean;
+  bindings: Bindings;
   onSave: (input: Parameters<typeof api.saveSshProfile>[0]) => Promise<void>;
   onClose: () => void;
 }) {
   const [label, setLabel] = useState(profile?.label ?? draft?.label ?? "");
   const [connection, setConnection] = useState(() => hostDraft(profile, draft));
+  const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
+  const [environment, setEnvironment] = useState(profile?.environment ?? draft?.environment ?? defaultEnvironmentPreferences);
+  const [connectionOptions, setConnectionOptions] = useState(profile?.connectionOptions ?? draft?.connectionOptions ?? defaultConnectionPreferences);
   const [jumps, setJumps] = useState<JumpDraft[]>(() =>
     (profile?.jumpHosts ?? []).map((host) => ({ ...hostDraft(host), id: host.id })));
   const [editor, setEditor] = useState<JumpDraft>();
@@ -153,6 +150,8 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
   const jumpId = useId();
   const savedJump = (id: string): SshJumpHost | undefined => profile?.jumpHosts?.find((host) => host.id === id);
   const [working, setWorking] = useState<"save" | "test">();
+  const testing = useRef<AbortController>(null);
+  useEffect(() => () => testing.current?.abort(), []);
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
   const [pending, setPending] = useState<{ verification: SshHostVerification; approvals: readonly SshHostVerification[] }>();
@@ -161,6 +160,9 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
   const input: Parameters<typeof api.saveSshProfile>[0] = {
     ...hostInput(connection), id: profile?.id, label,
     jumpHosts: jumps.map((host) => ({ ...hostInput(host), id: savedJump(host.id)?.id })),
+    directories,
+    environment,
+    connectionOptions,
   };
 
   const editingId = editor?.id;
@@ -221,28 +223,37 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
     setPending(undefined);
     setVerified(false);
     setError("");
+    const attempt = new AbortController();
+    testing.current = attempt;
     try {
-      const result = await api.testSshConnection(input, approvals);
+      const result = await api.testSshConnection(input, approvals, attempt.signal);
+      if (attempt.signal.aborted) return;
       if (result.kind === "verifyHost") setPending({ verification: result.verification, approvals });
       else setVerified(true);
     } catch (failure) {
-      setError(describeError(failure));
+      if (!attempt.signal.aborted) setError(describeError(failure));
     } finally {
+      testing.current = null;
       setWorking(undefined);
     }
   }
 
-  const title = sftp ? profile ? "Edit SFTP connection" : "Add SFTP connection" :
-    profile ? "Edit SSH connection" : "Add SSH connection";
-  return <><Dialog title={t(title)} onClose={() => { if (!working) onClose(); }}>
-    <form className="dialog-form" onSubmit={(event) => { void save(event); }} autoComplete="off">
-      <div className="dialog-body ftp-fields" inert={!!working}>
-        {onUseFtp && <ConnectionProtocol value="sftp" onChange={() => onUseFtp({
-          label, host: connection.host, port: connection.port, username: connection.username,
-        })} />}
-        <label className="field">{t("Connection name")}
-          <HistoryField historyKey="ssh-name" aria-label={t("Connection name")} data-initial-focus required value={label} onValueChange={setLabel} />
-        </label>
+  return <><NetBoxSession editing={!!profile} protocol="sftp" working={working} bindings={bindings} saveDisabled={!!editor}
+    onCancelTest={() => testing.current?.abort()}
+    pages={{ environment: <NetBoxEnvironmentPage value={environment} onChange={(settings) => { setEnvironment(settings); changed(); }} />,
+      directories: <NetBoxDirectoriesPage value={directories} symbolicLinks
+      onChange={(settings) => { setDirectories(settings); changed(); }} />,
+      connection: <NetBoxConnectionPage value={connectionOptions} ftp={false} jumpRoute={jumps.length > 0}
+        onChange={(settings) => { setConnectionOptions(settings); changed(); }} /> }}
+    feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
+      verified ? <p role="status">{t("SFTP connection successful.")}</p> : undefined}
+    onChangeProtocol={onUseFtp && (() => onUseFtp({
+      label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited, directories, environment,
+      connectionOptions,
+      ftpEncryption: draft?.ftpEncryption,
+      ftpOptions: draft?.ftpOptions,
+    }))} onSave={(event) => { void save(event); }} onClose={onClose}>
+        <ConnectionNameField protocol="ssh" label={label} onChange={setLabel} />
         <SshHostFields connection={connection} saved={profile} onChange={(update) => {
           setConnection((current) => ({ ...current, ...update }));
           changed();
@@ -289,19 +300,12 @@ export function SshProfileDialog({ profile, draft, onUseFtp, sftp, onSave, onClo
             <output aria-label={t("Route")} dir="auto">{route.join(" → ")}</output>
           </div>
         </section>
-        {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-        {verified && <p role="status">{t("SFTP connection successful.")}</p>}
         <div className="dialog-actions">
           <Button type="button" disabled={!!working || !canTest}
-            onClick={() => { void testConnection(); }}>{t(working === "test" ? "Testing…" : "Test connection")}</Button>
+            onClick={({ currentTarget }) => { if (currentTarget.form?.reportValidity()) void testConnection(); }}>
+            {t(working === "test" ? "Testing…" : "Test connection")}</Button>
         </div>
-      </div>
-      <footer className="dialog-footer">
-        <Button type="button" disabled={!!working} onClick={onClose}>{t("Cancel")}</Button>
-        <Button type="submit" className="primary" disabled={!!working || !!editor}>{t(working === "save" ? "Saving…" : "Save connection")}</Button>
-      </footer>
-    </form>
-  </Dialog>
+  </NetBoxSession>
   {pending && <VerifyHostDialog verification={pending.verification} testing onCancel={() => setPending(undefined)}
     onApprove={() => { void testConnection([...pending.approvals, pending.verification]); }} />}
   </>;

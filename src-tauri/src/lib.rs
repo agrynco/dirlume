@@ -39,11 +39,19 @@ mod local;
 mod local_transfer;
 #[cfg(feature = "desktop")]
 mod mcp;
+#[cfg(feature = "desktop")]
+mod netbox_connection;
+#[cfg(feature = "desktop")]
+mod netbox_directories;
+#[cfg(feature = "desktop")]
+mod netbox_environment;
 #[cfg(all(feature = "desktop", windows))]
 mod portable;
 #[cfg(feature = "desktop")]
 mod processes;
 mod protocol;
+#[cfg(feature = "desktop")]
+mod remote_recycle;
 #[cfg(feature = "desktop")]
 mod remote_transfer;
 #[cfg(feature = "desktop")]

@@ -1,4 +1,4 @@
-use std::{fs, io::Read, time::SystemTime};
+use std::{fs, io::Read, ops::Deref, time::SystemTime};
 
 use crate::{
     ftp,
@@ -6,27 +6,27 @@ use crate::{
     Result,
 };
 
-impl Entry for suppaftp::list::File {
+impl Entry for ftp::FtpEntry {
     fn name(&self) -> &str {
-        self.name()
+        self.deref().name()
     }
     fn is_directory(&self) -> bool {
-        self.is_directory()
+        self.deref().is_directory()
     }
     fn is_file(&self) -> bool {
-        self.is_file()
+        self.deref().is_file()
     }
     fn size(&self) -> Option<u64> {
-        Some(self.size() as u64)
+        Some(self.deref().size() as u64)
     }
     fn modified(&self) -> Option<SystemTime> {
-        Some(self.modified())
+        Some(self.corrected)
     }
 }
 
 impl Session for ftp::Session {
     const SOURCE: &'static str = "FTP";
-    type Entry = suppaftp::list::File;
+    type Entry = ftp::FtpEntry;
 
     fn stat(&mut self, segments: &[String]) -> Result<Option<Self::Entry>> {
         self.stat(segments)
@@ -34,6 +34,9 @@ impl Session for ftp::Session {
 }
 
 impl DownloadSession for ftp::Session {
+    fn preserve_download_timestamps(&self) -> bool {
+        self.environment.preserve_download_timestamps
+    }
     fn children(&mut self, segments: &[String]) -> Result<Vec<Self::Entry>> {
         self.list(segments)?.complete()
     }
