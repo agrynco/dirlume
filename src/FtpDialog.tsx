@@ -8,6 +8,7 @@ import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
 import { defaultDirectoryPreferences } from "./netboxDirectories";
 import { defaultEnvironmentPreferences, NetBoxEnvironmentPage } from "./NetBoxEnvironmentPage";
 import { defaultConnectionPreferences, NetBoxConnectionPage } from "./NetBoxConnectionPage";
+import { defaultFtpOptions, NetBoxFtpPage } from "./NetBoxFtpPage";
 
 export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, bindings, onSave, onClose }: {
   profile: FtpProfile | null;
@@ -20,6 +21,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
 }) {
   const [label, setLabel] = useState(profile?.label ?? draft?.label ?? "");
   const [encryption, setEncryption] = useState<FtpEncryption>(profile?.encryption ?? draft?.ftpEncryption ?? "plain");
+  const [ftpOptions, setFtpOptions] = useState(profile?.ftpOptions ?? draft?.ftpOptions ?? defaultFtpOptions);
   const [connection, setConnection] = useState(() => ({
     host: profile?.host ?? draft?.host ?? "",
     port: draft?.portEdited ? draft.port : String(profile?.port ?? (encryption === "implicitTls" ? 990 : 21)),
@@ -48,9 +50,10 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
     try {
       const input: Parameters<typeof api.saveFtpProfile>[0] = {
         id: profile?.id, label: label.trim(), host: connection.host, port: Number(connection.port), username: connection.username,
-        password: clearPassword ? "" : password || undefined,
+        password: ftpOptions.emptyPassword ? undefined : clearPassword ? "" : password || undefined,
         codePage: codePage && Number(codePage) !== 65001 ? Number(codePage) : null,
         encryption,
+        ftpOptions,
         directories: { ...directories, resolveLinks: false },
         environment,
         connectionOptions,
@@ -94,11 +97,12 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
     pages={{ environment: <NetBoxEnvironmentPage value={environment} ftpEncoding={encoding}
       onChange={(settings) => { setEnvironment(settings); change(); }} />, directories: <NetBoxDirectoriesPage value={directories} symbolicLinks={false}
       onChange={(settings) => { setDirectories(settings); change(); }} />,
+      ftp: <NetBoxFtpPage value={ftpOptions} onChange={(settings) => { setFtpOptions(settings); change(); }} />,
       connection: <NetBoxConnectionPage value={connectionOptions} ftp
         onChange={(settings) => { setConnectionOptions(settings); change(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t(encryption === "plain" ? "FTP connection successful." : "FTPS connection successful.")}</p> : undefined}
-    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions, ftpEncryption: encryption }))}>
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions, ftpEncryption: encryption, ftpOptions }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
           <label className="field">{t("Encryption")}
             <select aria-label={t("Encryption")} value={encryption} onChange={({ target }) => {
@@ -118,11 +122,13 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
           }} />
           <label className="field">{t("Password")}
             <input type="password" autoComplete="new-password" placeholder={profile ? t("Keep saved password") : undefined}
-              value={password} disabled={clearPassword} onChange={(event) => { setPassword(event.target.value); change(); }} />
+              value={ftpOptions.emptyPassword ? "" : password} disabled={clearPassword || ftpOptions.emptyPassword}
+              onChange={(event) => { setPassword(event.target.value); change(); }} />
           </label>
           {profile && <label className="field-checkbox">
             <span>{t("Clear saved password")}</span>
-            <input type="checkbox" checked={clearPassword} onChange={(event) => { setClearPassword(event.target.checked); change(); }} />
+            <input type="checkbox" checked={clearPassword} disabled={ftpOptions.emptyPassword}
+              onChange={(event) => { setClearPassword(event.target.checked); change(); }} />
           </label>}
           {encryption === "plain" && <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>}
           <div className="dialog-actions">

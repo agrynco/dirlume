@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use suppaftp::{
     list::{File, ListParser},
-    tokio::{AsyncRustlsConnector, AsyncRustlsFtpStream, AsyncRustlsStream, AsyncTlsConnector},
+    tokio::{AsyncRustlsConnector, ImplAsyncFtpStream, TransferStream},
     types::FileType,
     FtpError, FtpResult, Mode, Status,
 };
@@ -40,6 +40,47 @@ use crate::{
 
 const TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_DEPTH: usize = 128;
+const ACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
+
+mod wire;
+type FtpStream = ImplAsyncFtpStream<wire::WireStream>;
+
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum MlsdPolicy {
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+#[derive(Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct FtpOptions {
+    mlsd: MlsdPolicy,
+    active_mode: bool,
+    empty_password: bool,
+    post_login_commands: Vec<String>,
+    raw_iac_commands: bool,
+    raw_iac_pwd: bool,
+}
+
+impl FtpOptions {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    fn validated(self) -> Result<Self> {
+        if self
+            .post_login_commands
+            .iter()
+            .any(|command| command.trim().is_empty() || !safe_argument(command))
+        {
+            return Err("Enter one non-empty FTP command per line.".to_owned());
+        }
+        Ok(self)
+    }
+}
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +108,8 @@ pub struct Profile {
     code_page: Option<u16>,
     #[serde(default, skip_serializing_if = "Encryption::is_plain")]
     encryption: Encryption,
+    #[serde(default, skip_serializing_if = "FtpOptions::is_default")]
+    ftp_options: FtpOptions,
     #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
     directories: DirectoryPreferences,
     #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
@@ -93,6 +136,7 @@ pub struct ProfileInput {
     password: Option<String>,
     code_page: Option<u16>,
     encryption: Option<Encryption>,
+    ftp_options: Option<FtpOptions>,
     directories: Option<DirectoryPreferences>,
     environment: Option<EnvironmentPreferences>,
     connection_options: Option<ConnectionPreferences>,
@@ -246,6 +290,7 @@ impl ProfileInput {
             username,
             code_page: self.code_page.filter(|&page| page != 65001),
             encryption: self.encryption.unwrap_or_default(),
+            ftp_options: self.ftp_options.clone().unwrap_or_default().validated()?,
             directories,
             environment: self.environment.clone().unwrap_or_default().validated()?,
             connection_options: self.connection_options.unwrap_or_default().validated()?,
@@ -271,6 +316,9 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
         let previous = index.map(|index| &saved[index]);
         if input.encryption.is_none() {
             profile.encryption = previous.map(|old| old.profile.encryption).unwrap_or_default();
+        }
+        if input.ftp_options.is_none() {
+            profile.ftp_options = previous.map(|old| old.profile.ftp_options.clone()).unwrap_or_default();
         }
         if input.directories.is_none() {
             profile.directories = previous.map(|old| old.profile.directories.clone()).unwrap_or_default();
@@ -362,6 +410,7 @@ pub async fn test_ftp_connection(
                 input.password.is_none()
                     || input.connection_options.is_none()
                     || input.encryption.is_none()
+                    || input.ftp_options.is_none()
             })
             .map(|id| {
                 let _lock = lock_profiles(&path)?;
@@ -378,10 +427,14 @@ pub async fn test_ftp_connection(
             if input.encryption.is_none() {
                 profile.encryption = saved.profile.encryption;
             }
+            if input.ftp_options.is_none() {
+                profile.ftp_options = saved.profile.ftp_options.clone();
+            }
         }
-        let password = match input.password {
-            Some(password) => password,
-            None => read_password(
+        let password = match (profile.ftp_options.empty_password, input.password) {
+            (true, _) => String::new(),
+            (false, Some(password)) => password,
+            (false, None) => read_password(
                 saved
                     .as_ref()
                     .filter(|saved| saved.profile.same_login(&profile))
@@ -389,7 +442,7 @@ pub async fn test_ftp_connection(
             )?,
         };
         let mut session = Connection { profile, password }.open_with_cancel(stop)?;
-        let directory = parse_path(&session.limits.call(session.stream.pwd()).map_err(message)?)?;
+        let directory = parse_path(&session.pwd().map_err(message)?)?;
         session.list(&directory)?;
         Ok(())
     })
@@ -475,24 +528,29 @@ impl OperationLimits {
             operation,
         ))?
     }
-}
 
-#[derive(Debug)]
-struct TlsConnector {
-    connector: AsyncRustlsConnector,
-    implicit_control: AtomicBool,
-    options: ConnectionPreferences,
-}
-
-#[async_trait::async_trait]
-impl AsyncTlsConnector for TlsConnector {
-    type Stream = AsyncRustlsStream;
-
-    async fn connect(&self, name: &str, socket: TcpStream) -> FtpResult<Self::Stream> {
-        if self.implicit_control.swap(false, Ordering::Relaxed) {
-            configure_socket(&socket, self.options, false).map_err(FtpError::ConnectionError)?;
+    fn data(
+        &self,
+        operation: impl Future<Output = FtpResult<TransferStream<wire::WireStream>>>,
+        options: ConnectionPreferences,
+        active: bool,
+    ) -> FtpResult<TransferStream<wire::WireStream>> {
+        let stream = self.call(operation).map_err(|error| match error {
+            FtpError::ConnectionError(error)
+                if active && error.kind() == io::ErrorKind::TimedOut =>
+            {
+                FtpError::ConnectionError(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "The active FTP data connection timed out.",
+                ))
+            }
+            error => error,
+        })?;
+        if active {
+            configure_socket(stream.get_ref().get_ref(), options, true)
+                .map_err(FtpError::ConnectionError)?;
         }
-        self.connector.connect(name, socket).await
+        Ok(stream)
     }
 }
 
@@ -533,25 +591,28 @@ async fn open_control(
     encryption: Encryption,
     tls: Option<&Arc<rustls::ClientConfig>>,
     name: &str,
-) -> FtpResult<AsyncRustlsFtpStream> {
+    raw_iac: bool,
+) -> FtpResult<FtpStream> {
     if encryption == Encryption::Plain {
+        if raw_iac {
+            // This constructor accepts a control adapter before reading the greeting.
+            // The plain adapter adds no TLS layer.
+            let connector = wire::Connector::new(None, true, options);
+            return FtpStream::connect_secure_implicit(address, connector, "").await;
+        }
         let stream = dial(address, options, false).await?;
-        return AsyncRustlsFtpStream::connect_with_stream(stream).await;
+        return FtpStream::connect_with_stream(stream).await;
     }
     let config =
         tls.ok_or_else(|| FtpError::SecureError("FTPS TLS configuration is missing.".to_owned()))?;
-    let connector = TlsConnector {
-        connector: AsyncRustlsConnector::from(suppaftp::tokio_rustls::TlsConnector::from(
-            Arc::clone(config),
-        )),
-        implicit_control: AtomicBool::new(encryption == Encryption::ImplicitTls),
-        options,
-    };
+    let tls = AsyncRustlsConnector::from(suppaftp::tokio_rustls::TlsConnector::from(Arc::clone(
+        config,
+    )));
+    let connector = wire::Connector::new(Some(tls), raw_iac, options);
     if encryption == Encryption::ImplicitTls {
-        return AsyncRustlsFtpStream::connect_secure_implicit(address, connector, name).await;
+        return FtpStream::connect_secure_implicit(address, connector, name).await;
     }
-    let stream =
-        AsyncRustlsFtpStream::connect_with_stream(dial(address, options, false).await?).await?;
+    let stream = FtpStream::connect_with_stream(dial(address, options, false).await?).await?;
     stream.into_secure(connector, name).await.map_err(|error| {
         FtpError::SecureError(format!(
             "Could not negotiate explicit TLS or protected data connections. {error}"
@@ -577,6 +638,7 @@ impl Connection {
         tls: Option<Arc<rustls::ClientConfig>>,
     ) -> Result<Session> {
         let options = self.profile.connection_options;
+        let ftp_options = &self.profile.ftp_options;
         let limits = OperationLimits {
             timeout: options.response_timeout(TIMEOUT),
             stop,
@@ -604,6 +666,7 @@ impl Connection {
                 encryption,
                 tls.as_ref(),
                 &name,
+                ftp_options.raw_iac_commands,
             )) {
                 Ok(stream) => {
                     control = Some((stream, address.ip()));
@@ -622,7 +685,9 @@ impl Connection {
         let mut stream = stream.passive_stream_builder(move |address| {
             Box::pin(dial(SocketAddr::new(peer, address.port()), options, true))
         });
-        if peer.is_ipv6() {
+        if ftp_options.active_mode {
+            stream = stream.active_mode(limits.timeout.unwrap_or(ACTIVE_TIMEOUT));
+        } else if peer.is_ipv6() {
             stream.set_mode(Mode::ExtendedPassive);
         }
         let user = if self.profile.username.is_empty() {
@@ -630,11 +695,14 @@ impl Connection {
         } else {
             &self.profile.username
         };
-        limits
-            .call(stream.login(user, &self.password))
-            .map_err(|error| {
-                format!("FTP login failed. Check the username and password. {error}")
-            })?;
+        let password = if ftp_options.empty_password {
+            ""
+        } else {
+            &self.password
+        };
+        limits.call(stream.login(user, password)).map_err(|error| {
+            format!("FTP login failed. Check the username and password. {error}")
+        })?;
         if encryption == Encryption::ImplicitTls {
             for command in ["PBSZ 0", "PROT P"] {
                 limits
@@ -657,6 +725,29 @@ impl Connection {
         }
         let _ =
             limits.call(stream.opts("UTF8", Some(if encoding.is_some() { "OFF" } else { "ON" })));
+        if !ftp_options.post_login_commands.is_empty() {
+            let success: Vec<_> = (200..300)
+                .map(Status::from)
+                .filter(|status| (200..300).contains(&(*status as u32)))
+                .collect();
+            for (index, command) in ftp_options.post_login_commands.iter().enumerate() {
+                if let Err(error) = limits.call(stream.custom_command(command, &success)) {
+                    let number = index + 1;
+                    return Err(match error {
+                        FtpError::UnexpectedResponse(response) => format!(
+                            "FTP post-login command {number} failed (server status {}).",
+                            response.status as u32,
+                        ),
+                        FtpError::ConnectionError(error)
+                            if error.kind() == io::ErrorKind::Interrupted =>
+                        {
+                            message(error)
+                        }
+                        _ => format!("FTP post-login command {number} failed."),
+                    });
+                }
+            }
+        }
         limits
             .call(stream.transfer_type(FileType::Binary))
             .map_err(message)?;
@@ -664,7 +755,9 @@ impl Connection {
             stream,
             limits,
             encoding,
-            use_mlsd: true,
+            use_mlsd: ftp_options.mlsd != MlsdPolicy::Off,
+            options,
+            ftp_options: ftp_options.clone(),
             environment: self.profile.environment.clone(),
         })
     }
@@ -702,7 +795,11 @@ pub async fn connect_ftp(
                 .into_iter()
                 .find(|item| item.profile.id == id)
                 .ok_or("This FTP profile was removed.")?;
-            let password = read_password(item.credential.as_deref())?;
+            let password = if item.profile.ftp_options.empty_password {
+                String::new()
+            } else {
+                read_password(item.credential.as_deref())?
+            };
             (item.profile, password)
         };
         let connection = Arc::new(Connection { profile, password });
@@ -716,8 +813,7 @@ pub async fn connect_ftp(
                     Some(candidate) => candidate.to_vec(),
                     None => parse_path(
                         &session
-                            .limits
-                            .call(session.stream.pwd())
+                            .pwd()
                             .map_err(|error| InitialListingError::Other(message(error)))?,
                     )
                     .map_err(InitialListingError::Other)?,
@@ -776,11 +872,13 @@ pub fn disconnect_ftp(id: u32, state: State<'_, FtpState>) -> Result<()> {
 }
 
 pub struct Session {
-    stream: AsyncRustlsFtpStream,
+    stream: FtpStream,
     use_mlsd: bool,
     pub(crate) environment: EnvironmentPreferences,
     limits: OperationLimits,
     encoding: Option<&'static encoding_rs::Encoding>,
+    options: ConnectionPreferences,
+    ftp_options: FtpOptions,
 }
 
 pub struct FtpEntry {
@@ -888,6 +986,27 @@ fn start_directory_error(error: FtpError) -> InitialListingError {
 }
 
 impl Session {
+    fn decode(&self, bytes: &[u8]) -> String {
+        match self.encoding {
+            Some(encoding) => encoding.decode_without_bom_handling(bytes).0.into_owned(),
+            None => String::from_utf8_lossy(bytes).into_owned(),
+        }
+    }
+
+    fn pwd(&mut self) -> FtpResult<String> {
+        if !self.ftp_options.raw_iac_pwd {
+            return self.limits.call(self.stream.pwd());
+        }
+        let response = self
+            .limits
+            .call(self.stream.custom_command("PWD", &[Status::PathCreated]))?;
+        let path = self.decode(&response.body);
+        match (path.find('"'), path.rfind('"')) {
+            (Some(begin), Some(end)) if begin < end => Ok(path[begin + 1..end].to_owned()),
+            _ => Err(FtpError::BadResponse),
+        }
+    }
+
     pub fn list(&mut self, segments: &[String]) -> Result<Entries> {
         self.limits
             .call(self.stream.cwd(absolute(segments)?))
@@ -896,9 +1015,15 @@ impl Session {
     }
 
     fn listing_lines(&mut self, command: &str) -> FtpResult<Vec<String>> {
-        let (_, data) = self.limits.call(
-            self.stream
-                .custom_data_command(command, &[Status::AboutToSend, Status::AlreadyOpen]),
+        let data = self.limits.data(
+            async {
+                self.stream
+                    .custom_data_command(command, &[Status::AboutToSend, Status::AlreadyOpen])
+                    .await
+                    .map(|(_, stream)| stream)
+            },
+            self.options,
+            self.ftp_options.active_mode,
         )?;
         let mut reader = BufReader::new(data);
         let mut lines = Vec::new();
@@ -912,11 +1037,7 @@ impl Session {
             let bytes = buffer.strip_suffix(b"\n").unwrap_or(&buffer);
             let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
             if !bytes.is_empty() {
-                let line = match self.encoding {
-                    Some(encoding) => encoding.decode_without_bom_handling(bytes).0.into_owned(),
-                    None => String::from_utf8_lossy(bytes).into_owned(),
-                };
-                lines.push(line);
+                lines.push(self.decode(bytes));
             }
             buffer.clear();
         }
@@ -928,7 +1049,7 @@ impl Session {
         let lines = if self.use_mlsd {
             match self.listing_lines("MLSD") {
                 Ok(lines) => lines,
-                Err(error) if unsupported(&error) => {
+                Err(error) if self.ftp_options.mlsd == MlsdPolicy::Auto && unsupported(&error) => {
                     self.use_mlsd = false;
                     self.listing_lines("LIST")?
                 }
@@ -1051,7 +1172,11 @@ impl Session {
     ) -> Result<()> {
         let mut stream = self
             .limits
-            .call(self.stream.retr_as_stream(absolute(segments)?))
+            .data(
+                self.stream.retr_as_stream(absolute(segments)?),
+                self.options,
+                self.ftp_options.active_mode,
+            )
             .map_err(message)?;
         let mut buffer = vec![0; 64 * 1024];
         let mut total = 0;
@@ -1089,7 +1214,11 @@ impl Session {
         let mut bytes = Vec::new();
         let mut stream = self
             .limits
-            .call(self.stream.retr_as_stream(absolute(segments)?))
+            .data(
+                self.stream.retr_as_stream(absolute(segments)?),
+                self.options,
+                self.ftp_options.active_mode,
+            )
             .map_err(message)?;
         let mut buffer = [0; 64 * 1024];
         while bytes.len() as u64 != count {
@@ -1126,7 +1255,11 @@ impl Session {
         let result = (|| {
             let mut stream = self
                 .limits
-                .call(self.stream.put_with_stream(&stage))
+                .data(
+                    self.stream.put_with_stream(&stage),
+                    self.options,
+                    self.ftp_options.active_mode,
+                )
                 .map_err(message)?;
             let mut buffer = vec![0; 64 * 1024];
             let mut total = 0;
@@ -1405,6 +1538,9 @@ pub async fn delete_ftp(
     let connection = state.connection(id)?;
     blocking(move || connection.open()?.remove(&segments, recursive)).await
 }
+
+#[cfg(test)]
+mod compatibility_tests;
 
 #[cfg(test)]
 mod tls_tests;

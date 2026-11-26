@@ -70,7 +70,7 @@ fn setup(
     Ok(control)
 }
 
-fn connection(port: u16, encryption: Encryption) -> Connection {
+pub(super) fn connection(port: u16, encryption: Encryption) -> Connection {
     let mut profile = ProfileInput {
         id: None,
         label: "Local FTPS fixture".to_owned(),
@@ -80,6 +80,7 @@ fn connection(port: u16, encryption: Encryption) -> Connection {
         password: None,
         code_page: None,
         encryption: Some(encryption),
+        ftp_options: None,
         directories: None,
         environment: None,
         connection_options: None,
@@ -107,6 +108,7 @@ fn exercise_server(
 ) -> io::Result<Vec<u8>> {
     let mut control = BufReader::new(setup(&listener, Arc::clone(&config), encryption)?);
     let mut passive = None;
+    let mut active = None;
     let mut protected = false;
     let mut uploaded = Vec::new();
     let mut transfers = 0;
@@ -140,10 +142,44 @@ fn exercise_server(
                 line.clear();
                 continue;
             }
+            "PORT" => {
+                let values: Vec<u8> = line
+                    .trim_end()
+                    .split_once(' ')
+                    .unwrap()
+                    .1
+                    .split(',')
+                    .map(|number| number.parse().unwrap())
+                    .collect();
+                active = Some(SocketAddr::from((
+                    [values[0], values[1], values[2], values[3]],
+                    u16::from_be_bytes([values[4], values[5]]),
+                )));
+                "200 Active address accepted\r\n"
+            }
+            "EPRT" => {
+                let fields: Vec<_> = line
+                    .trim_end()
+                    .split_once(' ')
+                    .unwrap()
+                    .1
+                    .split('|')
+                    .collect();
+                active = Some(SocketAddr::new(
+                    fields[2].parse().unwrap(),
+                    fields[3].parse().unwrap(),
+                ));
+                "200 Active address accepted\r\n"
+            }
             "MLSD" | "RETR" | "STOR" => {
                 assert!(protected, "Files and listings require PROT P");
                 control.get_mut().write_all(b"150 Opening data\r\n")?;
-                let (socket, _) = passive.take().expect("PASV requested").accept()?;
+                let socket = if let Some(address) = active.take() {
+                    assert!(address.ip().is_loopback());
+                    BlockingStream::connect(address)?
+                } else {
+                    passive.take().expect("PASV requested").accept()?.0
+                };
                 let mut data = secure(socket, Arc::clone(&config))?;
                 assert_eq!(
                     data.conn.handshake_kind(),
@@ -181,10 +217,16 @@ fn exercise_server(
 
 #[test]
 fn explicit_and_implicit_ftps_protect_transfers_and_reuse_the_control_session() {
-    for encryption in [Encryption::ExplicitTls, Encryption::ImplicitTls] {
+    for (encryption, active_mode) in [
+        (Encryption::ExplicitTls, false),
+        (Encryption::ExplicitTls, true),
+        (Encryption::ImplicitTls, false),
+        (Encryption::ImplicitTls, true),
+    ] {
         let (server, roots) = credentials("127.0.0.1", false);
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let connection = connection(listener.local_addr().unwrap().port(), encryption);
+        let mut connection = connection(listener.local_addr().unwrap().port(), encryption);
+        connection.profile.ftp_options.active_mode = active_mode;
         let server = thread::spawn(move || exercise_server(listener, server, encryption));
         let mut session = connection
             .open_session(None, Some(client_tls_config(roots).unwrap()))
