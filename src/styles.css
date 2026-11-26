@@ -1949,6 +1949,8 @@ button.color-swatch {
 .mermaid-pan input { flex: 1; min-width: 0; accent-color: var(--accent); }
 .mermaid-scroll { overflow-x: auto; }
 .mermaid-scroll:focus-visible { outline-offset: -2px; }
+.mermaid-scroll[data-pannable] > .mermaid-diagram { cursor: grab; }
+.mermaid-scroll[data-pannable] > .mermaid-diagram[data-panning] { cursor: grabbing; }
 .mermaid-diagram {
   display: block;
   max-width: none;
