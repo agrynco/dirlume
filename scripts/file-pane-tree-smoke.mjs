@@ -46,6 +46,10 @@ try {
         }
         if (command === "list_directory") {
           window.treeCalls.push([command, args.path]);
+          if (window.rejectNextListing === args.path) {
+            window.rejectNextListing = null;
+            throw new Error("Permission denied");
+          }
           if (window.holdTreeListing === args.path) {
             window.holdTreeListing = null;
             const names = await new Promise((resolve) => { window.finishTreeListing = resolve; });
@@ -230,6 +234,24 @@ try {
   await files("right").waitFor();
   assert.equal(await files("right").getAttribute("data-file-view"), "tree");
   assert.equal(await button(pane("left"), "Folder sizes").getAttribute("aria-pressed"), "false");
+
+  await row("..").dblclick();
+  await row("B").waitFor();
+  await button(pane("left"), "Tree").click();
+  await button(row("B"), "Expand folder").click();
+  await row("B/report.txt").click();
+  await page.evaluate(() => { window.rejectNextListing = "/fixture/B"; });
+  await button(pane("left"), "List").click();
+  await pane("left").getByRole("alert").filter({ hasText: "Permission denied" }).waitFor();
+  assert.equal(await button(pane("left"), "List").getAttribute("aria-pressed"), "true");
+  assert.equal(await files().getAttribute("role"), "listbox");
+  assert.equal(await page.locator("#left-path").getAttribute("data-path"), "/fixture");
+  assert.equal(await row("B/report.txt").count(), 0);
+  assert.equal(await files("right").getAttribute("data-file-view"), "tree");
+  await page.reload();
+  await row("B").waitFor();
+  assert.equal(await button(pane("left"), "List").getAttribute("aria-pressed"), "true");
+  assert.equal(await files("right").getAttribute("data-file-view"), "tree");
 
   for (const width of ["6", "5%"]) {
     await page.goto(`http://dirlume.test/?sizeWidth=${encodeURIComponent(width)}`);
