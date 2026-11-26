@@ -190,8 +190,15 @@ async function checkViews(page) {
   await row(page, "left", "folder").click();
   await right.getByText("Folders cannot be previewed.", { exact: true }).waitFor();
   assert.equal(await image.count(), 0);
+  // The native suite can leave sort groups enabled with directories mixed into the file order.
+  const nextName = await list(page, "left").locator(".file-row").evaluateAll((rows) => {
+    const folder = rows.findIndex((entry) => entry.dataset.tooltip === "folder");
+    return folder < 0 ? undefined : rows[folder + 1]?.dataset.tooltip;
+  });
+  assert.ok(nextName && nextName !== "..", "Expected a visible file after the fixture folder.");
   await control(right, "Next File").click();
-  await right.getByText(front["01-alpha.txt"], { exact: true }).waitFor();
+  await right.locator(".quick-view-name").getByText(nextName, { exact: true }).waitFor();
+  assert.equal(await row(page, "left", nextName).getAttribute("data-current"), "true");
   await row(page, "left", "06-binary.bin").click();
   const dump = right.getByLabel("Binary contents", { exact: true });
   const firstRow = dump.locator('[data-byte-offset="0"]');
