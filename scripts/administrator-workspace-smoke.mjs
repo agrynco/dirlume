@@ -12,7 +12,7 @@ const stale = { theme: "light", layout: "classic", viewFontSizes: { left: 12 } }
 const files = (page, side) => page.locator(`#${side}-files`);
 const blocked = (page, side) => files(page, side).locator('.file-row[data-tooltip="Protected folder"]');
 
-async function openWindow(browser, { administrator = false, workspace = null, portable = false, missing = false } = {}) {
+async function openWindow(browser, { administrator = false, workspace = null, portable = false, missing = false, settings } = {}) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 710 }, locale: "en-US",
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
   page.setDefaultTimeout(8000);
@@ -20,7 +20,7 @@ async function openWindow(browser, { administrator = false, workspace = null, po
     const path = new URL(route.request().url()).pathname;
     return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
   });
-  await page.addInitScript(({ administrator, workspace, portable, missing, folders, dark, stale }) => {
+  await page.addInitScript(({ administrator, workspace, portable, missing, folders, dark, stale, settings }) => {
     window.isTauri = true;
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.elevationRequests = [];
@@ -28,7 +28,7 @@ async function openWindow(browser, { administrator = false, workspace = null, po
     window.acceptUac = false;
     window.portableWrites = 0;
     const normal = (name) => ({ kind: "local", path: folders[name], parent: null });
-    localStorage.setItem("dirlume.preferences.v1", JSON.stringify(administrator ? stale : dark));
+    localStorage.setItem("dirlume.preferences.v1", JSON.stringify(settings ?? (administrator ? stale : dark)));
     localStorage.setItem("dirlume.workspace.v1", JSON.stringify({
       panels: { left: { place: normal("left") }, right: { place: normal("right") } },
       active: "left", split: 58, documents: [], activeDocument: null,
@@ -64,9 +64,59 @@ async function openWindow(browser, { administrator = false, workspace = null, po
         return null;
       },
     };
-  }, { administrator, workspace, portable, missing, folders, dark, stale });
+  }, { administrator, workspace, portable, missing, folders, dark, stale, settings });
   await page.goto("http://dirlume.test/");
   return page;
+}
+
+function contrast(first, second) {
+  const luminance = (color) => color.match(/[\d.]+/g).slice(0, 3).map((value) => Number(value) / 255)
+    .map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    .reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+  const values = [luminance(first), luminance(second)];
+  return (Math.max(...values) + .05) / (Math.min(...values) + .05);
+}
+
+async function checkBadge(browser) {
+  const custom = { id: "badge-match", name: "Matching badge", base: "light",
+    colors: { surface: "#7f2332", raised: "#7f2332", line: "#7f2332" }, fonts: {} };
+  const themes = ["light", "dark", "slate", "classic-blue", "lavender", "emerald", "aurora", "midnight", "sunrise", "graphite", "custom:badge-match"];
+  for (const [language, label] of [["en", "Administrator"], ["uk", "Адміністратор"], ["ru", "Администратор"]]) {
+    const page = await openWindow(browser, { administrator: true, settings: {
+      language, theme: "light", showTitlebarScheme: true, schemes: [custom],
+    } });
+    await page.setViewportSize({ width: 760, height: 460 });
+    const badge = page.locator(".administrator-label");
+    await badge.getByText(label, { exact: true }).waitFor();
+    const scheme = page.locator(".topbar-scheme");
+    for (const theme of themes) {
+      await scheme.selectOption(theme);
+      const expected = theme.startsWith("custom:") ? custom.base : theme;
+      await page.locator(`html[data-theme="${expected}"]`).waitFor();
+      const style = await badge.evaluate((element) => {
+        const css = getComputedStyle(element);
+        const topbar = element.closest(".topbar");
+        const bounds = element.getBoundingClientRect();
+        const menu = topbar.querySelector(".main-menu-strip").getBoundingClientRect();
+        const controls = topbar.querySelector(".window-controls").getBoundingClientRect();
+        return {
+          text: css.color,
+          fill: css.backgroundColor,
+          innerEdge: css.borderTopColor,
+          outerEdge: css.boxShadow.match(/rgba?\([^)]+\)/)?.[0],
+          background: getComputedStyle(topbar).backgroundColor,
+          fits: element.scrollWidth <= element.clientWidth && bounds.right <= menu.left && menu.right <= controls.left &&
+            controls.right <= innerWidth && bounds.bottom <= topbar.getBoundingClientRect().bottom,
+        };
+      });
+      assert.ok(contrast(style.text, style.fill) >= 7, `${language}/${theme} text contrast`);
+      assert.ok([style.fill, style.innerEdge, style.outerEdge].some((color) => contrast(color, style.background) >= 3),
+        `${language}/${theme} edge contrast`);
+      assert.ok(style.fits, `${language}/${theme} badge fits`);
+      if (theme === "custom:badge-match") assert.equal(style.background, style.fill);
+    }
+    await page.close();
+  }
 }
 
 async function denyRename(page, side) {
@@ -142,6 +192,8 @@ try {
 
   const direct = await openWindow(browser, { administrator: true });
   await direct.getByRole("heading", { name: "Dirlume (Administrator)", exact: true }).waitFor();
+  await checkBadge(browser);
+  console.log("Verified Administrator badge contrast in every built-in scheme and a matching custom scheme at minimum width in all three languages.");
   console.log("Verified administrator workspace handoff, original window after UAC cancellation, both panes, missing selection, and isolated Portable settings.");
 } finally {
   await browser.close();
