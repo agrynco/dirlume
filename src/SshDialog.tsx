@@ -1,7 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowDown, ArrowUp, Plus } from "lucide-react";
-import { api, describeError, type SshHostInput, type SshHostVerification, type SshJumpHost, type SshProfile } from "./api";
+import { api, describeError, type SshCompatibility, type SshHostInput, type SshHostVerification, type SshJumpHost, type SshProfile } from "./api";
 import { Button } from "./Button";
 import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { Dialog } from "./Dialog";
@@ -144,6 +144,8 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   const [environment, setEnvironment] = useState(profile?.environment ?? draft?.environment ?? defaultEnvironmentPreferences);
   const [connectionOptions, setConnectionOptions] = useState(profile?.connectionOptions ?? draft?.connectionOptions ?? defaultConnectionPreferences);
   const [proxy, setProxy] = useState(() => draft?.proxy ?? proxyDraft(profile?.proxy));
+  const [compatibility, setCompatibility] = useState<SshCompatibility>(profile?.compatibility ?? draft?.sshCompatibility ??
+    { sftpCommand: "", signedTimestamps: false, shell: "automatic" });
   const [jumps, setJumps] = useState<JumpDraft[]>(() =>
     (profile?.jumpHosts ?? []).map((host) => ({ ...hostDraft(host), id: host.id })));
   const [editor, setEditor] = useState<JumpDraft>();
@@ -166,6 +168,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
     environment,
     connectionOptions,
     proxy: proxyInput(proxy),
+    compatibility,
   };
 
   const editingId = editor?.id;
@@ -176,6 +179,11 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   function changed() {
     setVerified(false);
     setError("");
+  }
+
+  function changeCompatibility(update: Partial<SshCompatibility>) {
+    setCompatibility((current) => ({ ...current, ...update }));
+    changed();
   }
 
   function closeEditor(id?: string) {
@@ -244,6 +252,27 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   return <><NetBoxSession editing={!!profile} protocol="sftp" working={working} bindings={bindings} saveDisabled={!!editor}
     onCancelTest={() => testing.current?.abort()}
     pages={{ environment: <NetBoxEnvironmentPage value={environment} onChange={(settings) => { setEnvironment(settings); changed(); }} />,
+      sftp: <>
+        <label className="field">{t("SFTP server command")}
+          <input value={compatibility.sftpCommand} maxLength={4096}
+            placeholder={t("Default SFTP subsystem")}
+            onChange={(event) => changeCompatibility({ sftpCommand: event.target.value })} />
+        </label>
+        <label className="field-checkbox">
+          <input type="checkbox" checked={compatibility.signedTimestamps}
+            onChange={(event) => changeCompatibility({ signedTimestamps: event.target.checked })} />
+          <span>{t("Interpret SFTP modification times as signed")}</span>
+        </label>
+      </>,
+      shell: <label className="field">{t("SSH terminal shell")}
+        <select aria-label={t("SSH terminal shell")} value={compatibility.shell}
+          onChange={(event) => changeCompatibility({ shell: event.target.value as SshCompatibility["shell"] })}>
+          <option value="automatic">{t("Default shell")}</option>
+          <option value="bash">bash</option>
+          <option value="zsh">zsh</option>
+          <option value="sh">sh</option>
+        </select>
+      </label>,
       directories: <NetBoxDirectoriesPage value={directories} symbolicLinks
       onChange={(settings) => { setDirectories(settings); changed(); }} />,
       connection: <NetBoxConnectionPage value={connectionOptions} ftp={false} jumpRoute={jumps.length > 0}
@@ -254,7 +283,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
       verified ? <p role="status">{t("SFTP connection successful.")}</p> : undefined}
     onChangeProtocol={onUseFtp && (() => onUseFtp({
       label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited, directories, environment,
-      connectionOptions, proxy,
+      connectionOptions, proxy, sshCompatibility: compatibility,
       ftpEncryption: draft?.ftpEncryption,
       ftpOptions: draft?.ftpOptions,
     }))} onSave={(event) => { void save(event); }} onClose={onClose}>

@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import type { ConnectionPreferences, DirectoryPreferences, EnvironmentPreferences, FtpEncryption, FtpOptions } from "./api";
+import type { ConnectionPreferences, DirectoryPreferences, EnvironmentPreferences, FtpEncryption, FtpOptions, SshCompatibility } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { HistoryField } from "./HistoryField";
@@ -15,6 +15,7 @@ export type ConnectionDraft = {
   ftpEncryption?: FtpEncryption;
   ftpOptions?: FtpOptions;
   proxy?: ProxyDraft;
+  sshCompatibility?: SshCompatibility;
 };
 
 const pageLabels = {

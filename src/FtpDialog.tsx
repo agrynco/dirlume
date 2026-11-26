@@ -107,7 +107,8 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
         onChange={(settings) => { setProxy(settings); change(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t(encryption === "plain" ? "FTP connection successful." : "FTPS connection successful.")}</p> : undefined}
-    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions, proxy, ftpEncryption: encryption, ftpOptions }))}>
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions,
+      proxy, ftpEncryption: encryption, ftpOptions, sshCompatibility: draft?.sshCompatibility }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
           <label className="field">{t("Encryption")}
             <select aria-label={t("Encryption")} value={encryption} onChange={({ target }) => {

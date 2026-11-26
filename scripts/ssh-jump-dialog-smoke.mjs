@@ -146,6 +146,13 @@ try {
     await next.click();
     assert.equal(await selected("Directories"), "true");
     await next.click();
+    assert.equal(await selected("SFTP"), "true");
+    await add.getByLabel("SFTP server command").fill("fixture-sftp");
+    await add.getByLabel("Interpret SFTP modification times as signed").check();
+    await next.click();
+    assert.equal(await selected("Shell"), "true");
+    await add.getByLabel("SSH terminal shell", { exact: true }).selectOption("zsh");
+    await next.click();
     assert.equal(await selected("Connection"), "true");
     await next.click();
     assert.equal(await selected("Proxy"), "true");
@@ -306,6 +313,11 @@ try {
     await right.press("F4");
     const edit = dialog(page, "Edit NetBox connection");
     await verifyTabBar(edit);
+    await edit.getByRole("tab", { name: "SFTP", exact: true }).click();
+    assert.equal(await edit.getByLabel("SFTP server command").inputValue(), "fixture-sftp");
+    assert.equal(await edit.getByLabel("Interpret SFTP modification times as signed").isChecked(), true);
+    await edit.getByRole("tab", { name: "Shell", exact: true }).click();
+    assert.equal(await edit.getByLabel("SSH terminal shell", { exact: true }).inputValue(), "zsh");
     assert.equal(await edit.getByLabel("Route", { exact: true }).textContent(), routeText(hostnames[0], second, hostnames[2]));
     await edit.getByRole("tab", { name: "Proxy", exact: true }).click();
     const savedProxy = edit.getByRole("tabpanel", { name: "Proxy" });
