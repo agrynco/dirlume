@@ -77,6 +77,8 @@ export async function testDocumentWatch(page, root) {
   await editor.waitFor();
   assert.equal(await changed.isVisible(), false, "Dirlume's own save opened an external-change prompt.");
   await editor.press("F10");
+  await page.getByRole("navigation", { name: "Open documents", exact: true })
+    .getByRole("button", { name: `View ${name}`, exact: true }).click();
   await viewer.press("F10");
   const restored = await editPaneAddress(page);
   await restored.fill(previousDirectory);

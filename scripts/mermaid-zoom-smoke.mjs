@@ -12,6 +12,37 @@ export const diagramFixture = ["# Diagram zoom", "", mermaid(wide), mermaid(tall
 const button = (parent, name) => parent.getByRole("button", { name, exact: true });
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1, `${actual} vs ${expected}`);
 
+export async function verifyMermaidToolbar(page, surface) {
+  const toolbars = surface.locator(".mermaid-tools");
+  const toolbar = toolbars.first();
+  const style = (target) => target.evaluate((element) => {
+    const markup = getComputedStyle(element);
+    return { background: markup.backgroundColor, color: markup.color, width: element.offsetWidth, height: element.offsetHeight };
+  });
+  await toolbar.waitFor();
+  await toolbars.nth(1).waitFor();
+  await page.mouse.move(0, 0);
+  const quiet = await style(toolbar);
+  const other = await style(toolbars.nth(1));
+  const out = button(toolbar, "Zoom out");
+  assert.equal(await button(toolbar, "Reset diagram zoom").isDisabled(), true);
+  await toolbar.hover({ position: { x: 2, y: quiet.height / 2 } });
+  const highlighted = await style(toolbar);
+  assert.notEqual(highlighted.background, quiet.background);
+  assert.notEqual(highlighted.color, quiet.color);
+  assert.deepEqual([highlighted.width, highlighted.height], [quiet.width, quiet.height]);
+  assert.deepEqual(await style(toolbars.nth(1)), other);
+  await page.mouse.move(0, 0);
+  assert.deepEqual(await style(toolbar), quiet);
+  await out.press("Tab");
+  assert.ok(await button(toolbar, "Zoom in").evaluate((element) => element.matches(":focus-visible")));
+  assert.deepEqual(await style(toolbar), highlighted);
+  await toolbar.evaluate((element) => {
+    if (element.contains(document.activeElement)) document.activeElement.blur();
+  });
+  assert.deepEqual(await style(toolbar), quiet);
+}
+
 export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale, reopen, resize }) {
   const viewer = page.getByRole("region", { name: "diagrams.md", exact: true });
   const surface = viewer.locator(".markdown");
@@ -21,6 +52,7 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
   await images.nth(1).waitFor();
   await surface.getByRole("alert").waitFor();
   assert.equal(await open.count(), 2);
+  await verifyMermaidToolbar(page, surface);
 
   const measure = () => surface.evaluate((element) => ({
     font: parseFloat(getComputedStyle(element).fontSize),
@@ -229,13 +261,25 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
   await wheel(images.first(), "Control");
   await wheel(images.first(), "Alt");
   assert.deepEqual(await measure(), disabled);
+
+  if (reopen) {
+    await reopen();
+    await images.nth(1).waitFor();
+    const reopened = await measure();
+    assert.equal(reopened.font, disabled.font, "The larger Markdown font is saved.");
+    assert.ok(reopened.font > initial.font);
+    for (const { width, availableWidth, originalWidth } of reopened.diagrams) {
+      near(width, Math.min(availableWidth, originalWidth));
+    }
+    assert.equal(await slider.count(), 0);
+  }
 }
 
 async function browserSmoke() {
   const browser = await chromium.launch({ channel: "chrome" });
   try {
-    for (const platform of ["Windows NT 10.0; Win64; x64", "X11; Linux x86_64"]) {
-      const context = await browser.newContext({ userAgent: `Mozilla/5.0 (${platform})`, viewport: { width: 1120, height: 650 } });
+    for (const [platform, colorScheme] of [["Windows NT 10.0; Win64; x64", "light"], ["X11; Linux x86_64", "dark"]]) {
+      const context = await browser.newContext({ userAgent: `Mozilla/5.0 (${platform})`, colorScheme, viewport: { width: 1120, height: 650 } });
       try {
         await context.route("http://dirlume.test/**", (route) => {
           const path = new URL(route.request().url()).pathname;
@@ -266,6 +310,7 @@ async function browserSmoke() {
           await files.press("F3");
         };
         await openMarkdown();
+        await page.getByRole("button", { name: `Switch to favorite ${colorScheme === "light" ? "dark" : "light"} scheme`, exact: true }).waitFor();
         const changeOptions = async (change) => {
           await button(page, "Viewer options").click();
           const options = page.getByRole("dialog", { name: "Options", exact: true });
@@ -282,6 +327,9 @@ async function browserSmoke() {
           reopen: async () => { await page.reload(); await openMarkdown(); },
           resize: (popup) => popup.setViewportSize({ width: 610, height: 400 }),
         });
+        await button(page.getByRole("region", { name: "diagrams.md", exact: true }), "Close document").click();
+        await button(page, "Quick View").click();
+        await verifyMermaidToolbar(page, page.locator(".quick-view .markdown"));
       } finally { await context.close(); }
     }
   } finally { await browser.close(); }

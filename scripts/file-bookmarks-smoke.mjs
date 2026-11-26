@@ -145,6 +145,7 @@ try {
   await editor.getByText("Unsaved editor draft", { exact: true }).waitFor();
   await button(editor, "Close document").click();
   await button(page.getByRole("dialog", { name: "Unsaved changes", exact: true }), "Discard changes").click();
+  await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "View service.log", exact: true }).click();
   await closeViewer();
 
   await show("reader.md");
@@ -158,7 +159,8 @@ try {
     const bookmarks = JSON.parse(localStorage.getItem("dirlume.file-bookmarks.v1"));
     return bookmarks.filter((bookmark) => bookmark.anchor?.quote === quote).length === 1;
   }, quote);
-  const selectPassage = () => markdown.evaluate((surface) => {
+  const selectPassage = () => markdown.evaluate(async (surface) => {
+    surface.focus({ preventScroll: true });
     const paragraph = Array.from(surface.querySelectorAll("p")).find((item) => item.textContent.startsWith("Second copy before"));
     const link = paragraph.querySelector("a").firstChild;
     const code = paragraph.querySelector("code").firstChild;
@@ -167,12 +169,15 @@ try {
     range.setStart(link, 0);
     range.setEnd(code, code.length);
     const selection = window.getSelection();
+    const selectionChanged = new Promise((resolve) => document.addEventListener("selectionchange", resolve, { once: true }));
     selection.removeAllRanges();
     selection.addRange(range);
+    await selectionChanged;
+    await new Promise(requestAnimationFrame);
   });
   await markdown.getByText(/Second copy before/).waitFor();
   await selectPassage();
-  await markdown.press(addKey);
+  await page.keyboard.press(addKey);
   await storedPreview();
   await selectPassage();
   const documentNav = viewer.getByRole("menubar", { name: "Document menu" });

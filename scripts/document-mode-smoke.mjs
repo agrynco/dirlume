@@ -4,6 +4,97 @@ import { join } from "node:path";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
+export async function testDocumentReturn(page, root) {
+  const directory = join(root, "document-return");
+  await mkdir(directory);
+  await writeFile(join(directory, "unrelated.txt"), "An unrelated open document.");
+  await writeFile(join(directory, "origin.md"), "[Open target](target.md)");
+  await writeFile(join(directory, "target.md"), "# Target document");
+  const previousPaths = {};
+  for (const side of ["left", "right"]) {
+    const address = await editPaneAddress(page, side);
+    previousPaths[side] = await address.inputValue();
+    await address.fill(directory);
+    await address.press("Enter");
+  }
+
+  const tabs = page.getByRole("navigation", { name: "Open documents", exact: true });
+  const selectTab = (label) => tabs.getByRole("button", { name: label, exact: true }).click();
+  const row = (side, name) => page.locator(`#${side}-files [role="option"][data-tooltip="${name}"]`);
+  const textWindow = (name, editing = false) => page.locator(`.text-window[data-editing="${editing}"][aria-label="${name}"]`);
+  const show = async (side, name) => {
+    await row(side, name).click();
+    await page.locator(`#${side}-files`).press("F3");
+    await textWindow(name).waitFor();
+  };
+  const verifyFiles = async (side, name) => {
+    await page.waitForFunction((side) => document.activeElement?.id === side + "-files", side);
+    if (name) assert.equal(await row(side, name).getAttribute("aria-selected"), "true");
+  };
+  const close = (window) => window.getByRole("button", { name: "Close document", exact: true }).click();
+  const target = textWindow("target.md");
+  const editor = textWindow("target.md", true);
+  const origin = textWindow("origin.md");
+
+  await show("left", "unrelated.txt");
+  await selectTab("Files");
+  await show("left", "target.md");
+  await target.press("Escape");
+  await verifyFiles("left", "target.md");
+  await show("left", "target.md");
+  await selectTab("Files");
+  await show("right", "target.md");
+  await target.press("Escape");
+  await verifyFiles("right", "target.md");
+
+  await show("right", "target.md");
+  await target.press("F6");
+  await editor.locator(".cm-content").fill("Unsaved text");
+  await editor.press("Escape");
+  const unsaved = page.getByRole("dialog", { name: "Unsaved changes", exact: true });
+  await unsaved.getByRole("button", { name: "Keep editing", exact: true }).click();
+  assert.ok(await editor.isVisible());
+  await editor.press("Escape");
+  await unsaved.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await verifyFiles("right", "target.md");
+
+  await show("right", "target.md");
+  await target.press("F6");
+  await editor.press("F6");
+  const menu = target.getByRole("menubar", { name: "Document menu", exact: true });
+  await menu.getByRole("menuitem", { name: "File", exact: true }).click();
+  await menu.getByRole("menuitem", { name: "Close", exact: true }).click();
+  await verifyFiles("right", "target.md");
+  await selectTab("Edit target.md");
+  await close(editor);
+  await verifyFiles("right", "target.md");
+
+  await show("left", "origin.md");
+  const link = origin.getByRole("link", { name: "Open target", exact: true });
+  await link.click({ modifiers: ["Control"] });
+  await target.waitFor();
+  await close(target);
+  await origin.waitFor();
+  assert.ok(await origin.evaluate((element) => element === document.activeElement));
+  await link.click({ modifiers: ["Control"] });
+  await target.waitFor();
+  await selectTab("View origin.md");
+  await close(origin);
+  await verifyFiles("left", "origin.md");
+  await selectTab("View target.md");
+  await close(target);
+  await verifyFiles("left");
+  await selectTab("View unrelated.txt");
+  await close(textWindow("unrelated.txt"));
+
+  for (const side of ["left", "right"]) {
+    const address = await editPaneAddress(page, side);
+    await address.fill(previousPaths[side]);
+    await address.press("Enter");
+  }
+  console.log("Verified document close destinations for both panes, mode switching, prompt cancellation, and Markdown tabs.");
+}
+
 export async function testDocumentMode(page, root) {
   const directory = join(root, "document-mode");
   await mkdir(directory);
@@ -89,6 +180,7 @@ export async function testDocumentMode(page, root) {
   await editor.press("Control+Shift+F6");
   assert.equal(await editor.isVisible(), true);
   await editor.getByRole("button", { name: "Close document", exact: true }).click();
+  await page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: `View ${name}`, exact: true }).click();
   await verifyViewerShortcutHint("");
   await viewer.press("Control+Shift+F6");
   assert.equal(await viewer.isVisible(), true);
@@ -107,4 +199,5 @@ export async function testDocumentMode(page, root) {
   await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path &&
     document.getElementById("left-files")?.getAttribute("aria-busy") === "false", previousDirectory);
   console.log("Verified F6 mode switching, unsaved text, saved Viewer refresh, shortcut editing, and file-pane rename.");
+  await testDocumentReturn(page, root);
 }

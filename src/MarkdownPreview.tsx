@@ -1,5 +1,5 @@
 import { t } from "./i18n";
-import { createContext, isValidElement, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { createContext, isValidElement, useContext, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
@@ -22,18 +22,23 @@ const PreviewContext = createContext<{
   light: boolean;
   colors?: Palette;
   diagramScale: number;
-  fitDiagrams: boolean;
+  mermaidScale?: number;
   onToggleTask?: (marker: TaskMarker, checked: boolean) => void;
   followLink?: (href: string, newTab: boolean) => void;
 } | null>(null);
 const documentOrigin = "https://markdown.dirlume.invalid";
 const scheme = /^[a-z][a-z\d+.-]*:/i;
 
+function readDiagramScale(fontSize: number | undefined) {
+  if (fontSize === undefined) return 1;
+  const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--markdown-size"));
+  return base > 0 ? fontSize / base : 1;
+}
+
 function useDiagramScale(fontSize: number | undefined, light: boolean, colors?: Palette) {
-  const [scale, setScale] = useState(1);
-  useEffect(() => {
-    const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--markdown-size"));
-    setScale(fontSize !== undefined && base > 0 ? fontSize / base : 1);
+  const [scale, setScale] = useState(() => readDiagramScale(fontSize));
+  useLayoutEffect(() => {
+    setScale(readDiagramScale(fontSize));
   }, [fontSize, light, colors]);
   return scale;
 }
@@ -171,7 +176,7 @@ function PreviewCode({ children }: ComponentProps<"pre">) {
   if (preview && isValidElement<{ className?: string; children?: ReactNode }>(children) &&
       children.props.className === "language-mermaid" && typeof children.props.children === "string") {
     return <MermaidDiagram key={children.props.children} source={children.props.children} light={preview.light} colors={preview.colors}
-      scale={preview.diagramScale} fitByDefault={preview.fitDiagrams} />;
+      sharedScale={preview.diagramScale} preferredScale={preview.mermaidScale} />;
   }
   return <pre>{children}</pre>;
 }
@@ -198,10 +203,10 @@ function MarkdownContent({ source, prefix, htmlFormatting = false }: {
 export function ReadOnlyMarkdown({ source, light, fontSize, mermaidScale }: {
   source: string; light: boolean; fontSize?: number; mermaidScale?: number;
 }) {
-  const diagramScale = useDiagramScale(fontSize, light) * (mermaidScale ?? 100) / 100;
+  const diagramScale = useDiagramScale(fontSize, light);
   return <div className="markdown" tabIndex={0} data-font-zoom="markdown" style={viewFontStyle(fontSize)}>
     <div className="markdown-content">
-      <PreviewContext.Provider value={{ writable: false, saving: false, light, diagramScale, fitDiagrams: mermaidScale === undefined }}>
+      <PreviewContext.Provider value={{ writable: false, saving: false, light, diagramScale, mermaidScale }}>
         <MarkdownContent source={source} prefix="dirlume-quick-view-" />
       </PreviewContext.Provider>
     </div>
@@ -245,7 +250,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
 }) {
   const handledPosition = useRef<MarkdownPosition | undefined>(undefined);
   const prefix = "dirlume-markdown-" + useId() + "-";
-  const diagramScale = useDiagramScale(fontSize, light, colors) * (mermaidScale ?? 100) / 100;
+  const diagramScale = useDiagramScale(fontSize, light, colors);
 
   function scrollToFragment(fragment: string) {
     if (!fragment) {
@@ -294,7 +299,7 @@ export function MarkdownPreview({ file, source, active, position, scroll, onCont
   return (
     <div ref={scroll} className="markdown" tabIndex={0}>
       <div className="markdown-content" ref={onContent}>
-        <PreviewContext.Provider value={{ writable, saving, light, colors, diagramScale, fitDiagrams: mermaidScale === undefined, onToggleTask, followLink }}>
+        <PreviewContext.Provider value={{ writable, saving, light, colors, diagramScale, mermaidScale, onToggleTask, followLink }}>
           <MarkdownContent source={source} prefix={prefix} htmlFormatting={htmlFormatting} />
         </PreviewContext.Provider>
       </div>

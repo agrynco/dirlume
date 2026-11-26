@@ -54,12 +54,13 @@ export function DiagramViewer({ diagram, shortcuts, onClose }: { diagram: Diagra
   </Dialog>;
 }
 
-export function MermaidDiagram({ source, light, colors, scale, fitByDefault }: {
-  source: string; light: boolean; colors?: Palette; scale: number; fitByDefault: boolean;
+export function MermaidDiagram({ source, light, colors, sharedScale, preferredScale }: {
+  source: string; light: boolean; colors?: Palette; sharedScale: number; preferredScale?: number;
 }) {
   const [result, setResult] = useState<RenderedDiagram | { error: string } | null>(null);
   const [adjustment, setAdjustment] = useState(0);
   const [fitAtScale, setFitAtScale] = useState<number>();
+  const [openingScale] = useState(sharedScale);
   const [windowError, setWindowError] = useState("");
   const scroll = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x: number; offset: number } | null>(null);
@@ -144,7 +145,9 @@ export function MermaidDiagram({ source, light, colors, scale, fitByDefault }: {
     };
   }, [diagram]);
   const widthScale = diagram?.width && horizontal.width ? Math.min(1, horizontal.width / diagram.width) : 1;
-  const initialScale = fitAtScale !== undefined ? widthScale * scale / fitAtScale : scale * (fitByDefault ? widthScale : 1);
+  const scale = sharedScale * (preferredScale ?? 100) / 100;
+  const fittedAt = fitAtScale ?? (preferredScale === undefined ? openingScale : undefined);
+  const initialScale = fittedAt === undefined ? scale : widthScale * scale / fittedAt;
   const inlineScale = initialScale * zoomStep ** adjustment;
   return <>
     {!result && <p role="status">{t("Rendering diagram…")}</p>}

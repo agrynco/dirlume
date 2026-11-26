@@ -190,6 +190,10 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
     const replaced = await waitFor("the Editor prompt for a replaced file", changeDialog, { recordPhase: false });
     reload(replaced).click();
     key(await mode(true, "Replaced file"), "F10");
+    await waitFor("return to the file pane after closing Editor", () => document.activeElement === pane);
+    const retainedViewer = await waitFor("the retained Viewer tab", () =>
+      document.querySelector(`[aria-label="Open documents"] button[aria-label="View ${fileName}"]`));
+    retainedViewer.click();
     key(await mode(false, "Replaced file"), "F10");
     await waitFor("return to the file pane", () => document.activeElement === pane);
     key(pane, "F6");
