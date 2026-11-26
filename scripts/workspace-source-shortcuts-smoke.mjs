@@ -140,6 +140,7 @@ try {
     await scope.focus();
     await page.keyboard.press("Shift+Tab");
     assert.equal(await control.evaluate((node) => node === document.activeElement), true);
+    await control.evaluate((node) => node.dispatchEvent(new Event("scroll")));
     await tooltip.getByText(detail, { exact: true }).waitFor();
     await page.setViewportSize({ width: 1400, height: 760 });
     await files("left").getByRole("option", { name: /^nested/ }).dblclick();
