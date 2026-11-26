@@ -678,7 +678,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           </div>
         )}
       </div>
-      {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={pane.selected}
+      {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={pane.selected} fileNames={!catalog}
         items={folderItems.map(({ name, tree }) => ({ id: name, name: matches?.get(name)?.entry.name ?? tree?.segments.at(-1) ?? name }))}
         onChange={setQuickSearch} onMatch={onQuickMatch}
         onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
