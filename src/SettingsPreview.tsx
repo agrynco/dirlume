@@ -84,7 +84,7 @@ function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences:
   const background = ["panel-current-marked-bg", "danger-action", "accent-fill", "panel-selection", "panel-inactive-selection", "viewer-bg", "text-bg", "dialog-input",
     "document-header", "dialog-header", "dialog-bg", "mermaid-node-bg", "panel-header", "panel-bg", "raised", "surface", "canvas"]
     .find((color) => pick.colors.some((item) => item === color));
-  const foreground = ["panel-marked", "on-danger-action", "on-accent", "panel-selected-ink", ...pick.colors.filter((color) => color.startsWith("file-")),
+  const foreground = ["panel-selected-ink", "panel-marked", "on-danger-action", "on-accent", ...pick.colors.filter((color) => color.startsWith("file-")),
     "mermaid-node-ink", "dialog-ink", "text-ink", "panel-ink", "muted", "ink"]
     .find((color) => pick.colors.some((item) => item === color));
   const style: CSSProperties = {
@@ -96,7 +96,7 @@ function PickPreview({ pick, preferences }: { pick: AppearancePick; preferences:
     borderColor: pick.colors.includes("accent") ? "var(--accent)" : "var(--line)",
   };
   return <div className={`preview-picked-element${pick.row === "currentMarked" ? " preview-file-current-marked" : ""}`}
-    style={pick.row === "currentMarked" ? { ...style, color: "var(--panel-selected-ink)" } : style}>{pickLabel(pick)}</div>;
+    style={style}>{pickLabel(pick)}</div>;
 }
 
 export function SettingsPreview({ page, preferences, pick }: { page: PreviewPage; preferences: Preferences; pick?: AppearancePick }) {

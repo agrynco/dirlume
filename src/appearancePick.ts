@@ -117,17 +117,16 @@ export function resolvePick(element: Element): Target | null {
       font: "panel", layout, view, row: "currentMarked" } };
     const fileColor = row.dataset.fileColor as Color | undefined;
     const colors: Color[] = ["panel-bg", "panel-ink", "panel-muted"];
-    if (layout === "classic" && current && active) colors.push("accent-fill", ...(marked ? [] : ["on-accent"] as const));
+    if (layout === "classic" && current && active) colors.push("panel-selection");
+    if (layout === "classic" && marked) colors.push("panel-inactive-selection");
     if (layout === "twin" && current && active) colors.push("accent");
     if (layout !== "classic" && layout !== "twin" && (current || marked)) {
       colors.push(active ? "panel-selection" : "panel-inactive-selection");
-      if (active) colors.push("panel-selected-ink");
       colors.push("line", "accent");
     }
+    if (current || marked) colors.push("panel-selected-ink");
     if (marked) colors.push("panel-marked");
-    if (fileColor && Object.hasOwn(colorLabels, fileColor) &&
-        ((!current && !marked) || fileColor === "file-hidden" || fileColor === "file-system" ||
-          (document.documentElement.dataset.theme === "classic-blue" && !active && !marked))) colors.push(fileColor);
+    if (!current && !marked && fileColor && Object.hasOwn(colorLabels, fileColor)) colors.push(fileColor);
     if (!marked && row.querySelector(".folder-icon")) colors.push("folder");
     return { element: row, pick: { target: "row", colors, font: "panel", layout,
       view, row: current ? "current" : marked ? "marked" : undefined } };

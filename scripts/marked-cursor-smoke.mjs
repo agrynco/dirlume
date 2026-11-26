@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
 const themes = ["dark", "light", "slate", "classic-blue", "lavender", "emerald", "aurora", "midnight", "sunrise", "graphite"];
-const names = ["01-first.txt", "02-second.txt", "03-third.txt", "04-last.txt"];
+const names = ["01-first.txt", "02-second.fixture", "03-third.txt", "04-last.txt"];
 const background = "Current marked row background";
 const outline = "Current marked row outline";
 const markModifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -13,6 +13,27 @@ const style = (row) => row.evaluate((item) => {
   const background = css.backgroundColor === "rgba(0, 0, 0, 0)" ? getComputedStyle(item.closest(".pane")).backgroundColor : css.backgroundColor;
   return { background, outline: css.outlineColor, line: `${css.outlineWidth} ${css.outlineStyle}` };
 });
+
+async function verifySelectedNames(list) {
+  const colors = await list.locator(".file-row:is(.marked, [data-current=true]) .file-name-text").evaluateAll((names) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--panel-selected-ink)";
+    names[0].append(probe);
+    const selection = getComputedStyle(probe).color;
+    probe.remove();
+    return names.map((name) => ({
+      name: name.textContent,
+      actual: getComputedStyle(name).color,
+      selection,
+      opacity: getComputedStyle(name.closest(".file-name")).opacity,
+    }));
+  });
+  assert.ok(colors.length > 0);
+  for (const { name, actual, selection, opacity } of colors) {
+    assert.equal(actual, selection, name);
+    assert.equal(opacity, "1", name);
+  }
+}
 
 function contrast(first, second) {
   const luminance = (rgb) => rgb.match(/[\d.]+/g).slice(0, 3).map((channel) => Number(channel) / 255)
@@ -25,7 +46,9 @@ function contrast(first, second) {
 const browser = await chromium.launch({ channel: "chrome" });
 try {
   for (const layout of ["standard", "twin", "classic"]) {
-    const page = await browser.newPage({ viewport: { width: 1120, height: 720 }, locale: "en-US" });
+    const platform = process.env.DIRLUME_TEST_PLATFORM;
+    const page = await browser.newPage({ viewport: { width: 1120, height: 720 }, locale: "en-US",
+      userAgent: platform && `Mozilla/5.0 (${platform})` });
     page.setDefaultTimeout(8000);
     await page.route("http://dirlume.test/**", (route) => {
       const path = new URL(route.request().url()).pathname;
@@ -34,12 +57,17 @@ try {
     await page.addInitScript(({ layout, names }) => {
       const key = "dirlume.preferences.v1";
       if (!localStorage.getItem(key)) {
-        localStorage.setItem(key, JSON.stringify({ layout, theme: "light", showTitlebarScheme: true,
-          schemes: [{ id: "legacy", name: "Legacy panels", base: "light", colors: { "panel-selection": "#e1f1ef" }, fonts: {} }] }));
+        localStorage.setItem(key, JSON.stringify({ layout, theme: "light", hidden: true, showTitlebarScheme: true,
+          schemes: [
+            { id: "legacy", name: "Legacy panels", base: "light", colors: { "panel-selection": "#e1f1ef" }, fonts: {} },
+            { id: "file-colors", name: "File colors", base: "light", colors: { "panel-selected-ink": "#292941" }, fonts: {},
+              fileTypes: [{ id: "fixture", name: "Fixture files", extensions: ["fixture"], color: "#a22da4" }] },
+          ] }));
       }
       const home = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
-      const entries = [...names, "sample-folder"].map((name) =>
-        ({ name, directory: name === "sample-folder", hidden: false, link: false, size: 0, modified: null }));
+      const entries = [...names, "sample-folder"].map((name, index) =>
+        ({ name, directory: name === "sample-folder", hidden: index === 2 || index === 3,
+          system: index === 3, link: false, size: 0, modified: null }));
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: async (command, args) => {
@@ -94,6 +122,8 @@ try {
       assert.deepEqual(await style(row(1)), first);
       assert.equal(await left.locator(".marked").count(), names.length);
       assert.notEqual((await style(row(0))).line, "2px solid");
+      await verifySelectedNames(left);
+      await verifySelectedNames(page.locator("#right-files"));
     }
 
     await row(3).click({ modifiers: [markModifier] });
@@ -149,6 +179,22 @@ try {
       assert.deepEqual(await style(row(0)), inherited);
     }
     const right = page.locator("#right-files");
+    await schemes.selectOption("custom:file-colors");
+    await row(0, "right").click();
+    await right.press("ArrowDown");
+    await row(1, "right").and(right.locator("[data-current=true]")).waitFor();
+    await verifySelectedNames(left);
+    await verifySelectedNames(right);
+    await right.press("ArrowUp");
+    assert.equal(await row(1, "right").locator(".file-name-text").evaluate((name) => getComputedStyle(name).color), "rgb(162, 45, 164)");
+    await schemes.selectOption("system");
+    for (const colorScheme of ["light", "dark"]) {
+      await page.emulateMedia({ colorScheme });
+      await page.locator(`html[data-theme=${JSON.stringify(colorScheme)}]`).waitFor();
+      await verifySelectedNames(left);
+      await verifySelectedNames(right);
+    }
+    await schemes.selectOption("light");
     await row(1, "right").click({ modifiers: [markModifier] });
     assert.equal(await right.locator(".marked").count(), 2);
     await row(2).click();
