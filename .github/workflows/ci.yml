@@ -89,7 +89,7 @@ jobs:
     if: needs.version.outputs.product-version != ''
     needs: version
     runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[matrix.platform] }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.platform == 'macos-x64' && 60 || 45 }}
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
