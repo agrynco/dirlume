@@ -134,10 +134,78 @@ fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::R
     Ok(true)
 }
 
+#[cfg(unix)]
+fn configure_zsh(
+    command: &mut CommandBuilder,
+    cwd: &std::path::Path,
+) -> std::io::Result<tempfile::TempDir> {
+    // Source the user's startup files before installing the hook. A long command
+    // written to the PTY during startup can be echoed or clipped by the line discipline.
+    let startup = tempfile::Builder::new().prefix("dirlume-zsh-").tempdir()?;
+    let dotdir = command
+        .get_env("ZDOTDIR")
+        .map(std::ffi::OsStr::to_os_string);
+    if let Some(dotdir) = dotdir {
+        command.env("DIRLUME_ZSH_USER_DOTDIR", dotdir);
+    } else {
+        command.env_remove("DIRLUME_ZSH_USER_DOTDIR");
+    }
+    command.env("ZDOTDIR", startup.path());
+    command.env("DIRLUME_ZSH_STARTUP", startup.path());
+    command.env("DIRLUME_ZSH_DIRECTORY", cwd);
+    std::fs::write(
+        startup.path().join(".zshenv"),
+        r#"
+if (( ${+DIRLUME_ZSH_USER_DOTDIR} )); then
+    export ZDOTDIR="$DIRLUME_ZSH_USER_DOTDIR"
+else
+    unset ZDOTDIR
+fi
+unset DIRLUME_ZSH_USER_DOTDIR
+if [[ -r "${ZDOTDIR-$HOME}/.zshenv" ]]; then
+    builtin source "${ZDOTDIR-$HOME}/.zshenv"
+fi
+if [[ -o rcs ]]; then
+    if (( ${+ZDOTDIR} )); then
+        export DIRLUME_ZSH_USER_DOTDIR="$ZDOTDIR"
+    fi
+    export ZDOTDIR="$DIRLUME_ZSH_STARTUP"
+else
+    builtin source "$DIRLUME_ZSH_STARTUP/dirlume-prompt"
+fi
+"#,
+    )?;
+    std::fs::write(
+        startup.path().join(".zshrc"),
+        r#"
+if (( ${+DIRLUME_ZSH_USER_DOTDIR} )); then
+    export ZDOTDIR="$DIRLUME_ZSH_USER_DOTDIR"
+else
+    unset ZDOTDIR
+fi
+unset DIRLUME_ZSH_USER_DOTDIR
+if [[ -r "${ZDOTDIR-$HOME}/.zshrc" ]]; then
+    builtin source "${ZDOTDIR-$HOME}/.zshrc"
+fi
+builtin source "$DIRLUME_ZSH_STARTUP/dirlume-prompt"
+"#,
+    )?;
+    let prompt = format!(
+        "{}\n{}\n",
+        r#"if [[ "$PWD" != "$DIRLUME_ZSH_DIRECTORY" ]]; then builtin cd -- "$DIRLUME_ZSH_DIRECTORY"; fi
+unset DIRLUME_ZSH_STARTUP DIRLUME_ZSH_DIRECTORY"#,
+        unix_prompt("zsh", false)
+    );
+    std::fs::write(startup.path().join("dirlume-prompt"), prompt)?;
+    Ok(startup)
+}
+
 struct Terminal {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn ChildKiller + Send + Sync>,
+    #[cfg(unix)]
+    _zsh_startup: Option<tempfile::TempDir>,
 }
 
 impl Drop for Terminal {
@@ -242,6 +310,14 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
     };
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(&shell);
+    #[cfg(unix)]
+    let zsh_startup = (std::path::Path::new(&shell).file_name()
+        == Some(std::ffi::OsStr::new("zsh")))
+    .then(|| configure_zsh(&mut command, &cwd))
+    .transpose()
+    .map_err(message)?;
+    #[cfg(unix)]
+    let zsh_tracks_prompt = zsh_startup.is_some();
     #[cfg(not(windows))]
     let _ = request.refresh_environment;
     command.cwd(cwd);
@@ -255,6 +331,8 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
         master: pair.master,
         writer,
         child: child.clone_killer(),
+        #[cfg(unix)]
+        _zsh_startup: zsh_startup,
     }));
     std::thread::Builder::new()
         .name("dirlume-terminal".into())
@@ -292,8 +370,9 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
         })
         .map_err(message)?;
     #[cfg(not(windows))]
-    let tracks_prompt =
-        install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer).map_err(message)?;
+    let tracks_prompt = zsh_tracks_prompt
+        || install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer)
+            .map_err(message)?;
     #[cfg(windows)]
     let tracks_prompt = true;
     Ok((terminal, tracks_prompt))
@@ -380,6 +459,76 @@ pub async fn close_terminal(id: u32, state: State<'_, Terminals>) -> Result<()> 
         Ok(())
     })
     .await
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn zsh_initializes_from_files_before_the_first_pty_prompt() {
+    use std::{fs, path::Path, sync::mpsc, time::Duration};
+
+    let shell = ["/bin/zsh", "/usr/bin/zsh"]
+        .into_iter()
+        .find(|shell| Path::new(shell).is_file());
+    let Some(shell) = shell else { return };
+    let fixture = tempfile::tempdir().unwrap();
+    let dotdir = fixture.path().join("user startup");
+    fs::create_dir(&dotdir).unwrap();
+    fs::write(dotdir.join(".zshenv"), "export STARTUP_FROM_USER=present\n").unwrap();
+    fs::write(dotdir.join(".zshrc"), "cd /\n").unwrap();
+    let token = "Dirlume-zsh-startup-test";
+    for pane in ["left", "right"] {
+        let root = fixture.path().join(pane);
+        let next = root.join("test directory");
+        fs::create_dir_all(&next).unwrap();
+        let root = root.canonicalize().unwrap();
+        let next = next.canonicalize().unwrap();
+        let pair = native_pty_system().openpty(size(24, 80)).unwrap();
+        let mut command = CommandBuilder::new(shell);
+        command.cwd(&root);
+        command.env("ZDOTDIR", &dotdir);
+        command.env("DIRLUME_PROMPT_TOKEN", token);
+        command.env("TERM", "xterm-256color");
+        command.env("HISTFILE", "/dev/null");
+        let _startup = configure_zsh(&mut command, &root).unwrap();
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut writer = pair.master.take_writer().unwrap();
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let (send, receive) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut transcript = Vec::new();
+            let _ = reader.read_to_end(&mut transcript);
+            let _ = send.send(String::from_utf8_lossy(&transcript).into_owned());
+        });
+        writer.write_all(b"printf 'profile:%s\\n' \"$STARTUP_FROM_USER\"\ncd -- 'test directory'\npwd\nexit\n").unwrap();
+        writer.flush().unwrap();
+        let transcript = receive
+            .recv_timeout(Duration::from_secs(15))
+            .unwrap_or_else(|error| {
+                let _ = child.kill();
+                panic!("Zsh did not finish: {error}");
+            });
+        assert!(child.wait().unwrap().success(), "{transcript:?}");
+        assert!(transcript.contains("profile:present"));
+        assert!(!transcript.contains("__dirlume_prompt"), "{transcript:?}");
+        let marker = format!("\x1b]2;{token}:0:");
+        let directories: Vec<_> = transcript
+            .split(&marker)
+            .skip(1)
+            .map(|tail| STANDARD.decode(tail.split_once(':').unwrap().0).unwrap())
+            .collect();
+        assert_eq!(
+            directories.first().map(Vec::as_slice),
+            Some(root.as_os_str().as_encoded_bytes()),
+            "{transcript:?}"
+        );
+        assert!(
+            directories
+                .iter()
+                .any(|path| path.as_slice() == next.as_os_str().as_encoded_bytes()),
+            "{transcript:?}"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
