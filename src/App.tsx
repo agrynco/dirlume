@@ -14,7 +14,7 @@ import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLa
 import {
   ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
   FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
-  ScanEye, Search, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
+  ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -3358,7 +3358,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
         <div className="brand">
           <img className="brand-icon" src={appIcon} alt="" /><h1 aria-label={administratorTitle}>Dirlume</h1>
-          {administrator && <span className="administrator-label" aria-hidden="true">{t("Administrator")}</span>}
+          {administrator && <span className="administrator-label" aria-hidden="true"><ShieldAlert />{t("Administrator")}</span>}
         </div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault={!preferences.showMainMenu} />
         <div className="top-actions">

@@ -45,6 +45,9 @@
   --danger-bg: #492934;
   --danger-action: #a32337;
   --on-danger-action: #ffffff;
+  --administrator-fill: #7f2332;
+  --administrator-ink: #ffffff;
+  --administrator-outer-edge: #000000;
   --added: #1c362e;
   --removed: #432831;
   --overlay: #060a10af;
@@ -419,9 +422,13 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .brand { gap: 9px; }
 .brand h1 { margin: 0; font-size: 1.23em; font-weight: 650; letter-spacing: -.03em; }
 .administrator-label {
-  padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius);
-  background: var(--raised); color: var(--ink); font-size: .9em; font-weight: 600; white-space: nowrap;
+  display: inline-flex; flex: none; align-items: center; gap: 4px;
+  padding: 2px 6px; border: 1px solid var(--administrator-ink); border-radius: var(--radius);
+  background: var(--administrator-fill); color: var(--administrator-ink);
+  box-shadow: 0 0 0 1px var(--administrator-outer-edge);
+  font-size: .9em; font-weight: 700; white-space: nowrap;
 }
+.administrator-label svg { width: 13px; height: 13px; }
 .brand-icon { flex: none; width: 29px; height: 29px; }
 .top-actions { gap: 4px; }
 .window-titlebar .top-actions { margin-inline-end: 20px; }
