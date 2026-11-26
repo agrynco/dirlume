@@ -88,13 +88,13 @@ jobs:
     name: Build and test (${{ matrix.platform }})
     if: needs.version.outputs.product-version != ''
     needs: version
-    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04"}')[matrix.platform] }}
+    runs-on: ${{ fromJSON('{"windows-x64":"windows-2025","linux-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[matrix.platform] }}
     timeout-minutes: 45
     env:
       DIRLUME_PRODUCT_VERSION: ${{ needs.version.outputs.product-version }}
       DIRLUME_BUILD_NUMBER: ${{ needs.version.outputs.build-number }}
       DIRLUME_SIGNED_RELEASE: ${{ needs.version.outputs.publish }}
-      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage"}')[matrix.platform] }}
+      DIRLUME_BUNDLES: ${{ fromJSON('{"windows-x64":"nsis","linux-x64":"deb,appimage","macos-arm64":"app,dmg","macos-x64":"app,dmg"}')[matrix.platform] }}
     strategy:
       fail-fast: false
       matrix:
@@ -255,6 +255,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         run: |
           $configArgs = @()
           if ($env:DIRLUME_SIGNED_RELEASE -eq 'true') {
