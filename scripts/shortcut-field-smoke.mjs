@@ -56,13 +56,15 @@ export async function testShortcutFields(page) {
     await check("Forward", "Alt+→");
   };
   await verify();
-  await verifyShortcutCapture(options);
+  const regularSize = await window.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   await window.setViewportSize({ width: 600, height: 400 });
   await verify();
-  await verifyShortcutCapture(options);
   await remove("Forward", "Alt+→").click();
   assert.equal(await lookup("Forward", "Alt+→").count(), 0);
   assert.equal(await options.getByRole("button", { name: "Add shortcut for Forward", exact: true }).isEnabled(), true);
+  await verifyShortcutCapture(options);
+  await window.setViewportSize(regularSize);
+  await verifyShortcutCapture(options);
   await closeToolWindow(window);
   console.log("Verified long shortcut labels fit at normal and minimum Options width and the remove button stays usable.");
 }
