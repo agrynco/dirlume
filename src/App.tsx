@@ -1996,19 +1996,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? { ...pane, selected: entry.name } : pane);
   }
 
-  async function setFilePaneView(side: Side, view: FilePaneView) {
+  function setFilePaneView(side: Side, view: FilePaneView) {
     const pane = panes[side];
     if (pane.loading || pane.search || pane.place?.kind !== "local" || preferences.paneViews[side] === view) return;
-    if (view === "list" && pane.selected?.includes("/")) {
-      const row = trees[side].lookup(pane, pane.selected);
-      const item = paneItem(pane, row ?? undefined);
-      if (item && !await load(side, item.place, "push", item.entry.name)) return;
-    }
+    const nested = view === "list" && pane.selected?.includes("/") ? trees[side].lookup(pane, pane.selected) : null;
+    const item = nested && paneItem(pane, nested);
     if (view === "list") updatePane(side, (current) => ({ ...current,
       selected: current.selected?.includes("/") ? null : current.selected,
       marked: current.marked.filter((key) => !key.includes("/")),
     }));
     setPreferences((before) => ({ ...before, paneViews: { ...before.paneViews, [side]: view } }));
+    if (item) void load(side, item.place, "push", item.entry.name);
     requestAnimationFrame(() => focus(side));
   }
 
