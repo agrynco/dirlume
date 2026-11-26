@@ -247,6 +247,7 @@ jobs:
         if: github.event.action != 'closed'
         env:
           DIRLUME_VERIFY_ARCHIVES: '1'
+          DIRLUME_VERIFY_FILE_OPEN: ${{ runner.os != 'Linux' && '1' || '' }}
           DIRLUME_SSH_FIXTURE_PYTHON: python
           PYTHONPATH: ${{ github.workspace }}/.smoke/sftp-test-deps
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features server

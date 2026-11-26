@@ -43,6 +43,7 @@ import { bookmarkFile, fileBookmarkKey, readFileBookmarks, saveFileBookmarks, ty
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
+import { FileOpenFeedback, FileOpensTerminal, useFileOpens } from "./FileOpens";
 import { topicForControl, useHelpShortcut } from "./contextHelp";
 import { AboutDialog, DonationButton, donationUrl, MainMenu, type MainMenuHandle, type MenuGroup } from "./MainMenu";
 import { McpDialog, McpRequests } from "./McpDialog";
@@ -310,6 +311,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [fileOpensVisible, setFileOpensVisible] = useState(false);
+  const fileOpens = useFileOpens();
   const [terminalCompletion, setTerminalCompletion] = useState<Record<number, TerminalCompletionContext & { id: number }>>({});
   const [terminalInputFocused, setTerminalInputFocused] = useState(false);
   const [terminalShare, setTerminalShare] = useState(0);
@@ -1558,8 +1561,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         });
         return;
       }
-      void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
-        setStatus({ text: describeError(error), error: true }));
+      if (smbHost(place)) {
+        void api.operate(place.path, { kind: "open", name: file.name }).catch((error: unknown) =>
+          setStatus({ text: describeError(error), error: true }));
+      } else void fileOpens.openFile(side, place, file.name);
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
     }
@@ -2388,7 +2393,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function followShellDirectory(session: TerminalSession, path: string) {
-    if (session.id !== terminal?.id || !terminalVisible || activeDocument !== null || processPanels[active] || diskActive) return;
+    if (session.id !== terminal?.id || !terminalVisible || fileOpensVisible || activeDocument !== null || processPanels[active] || diskActive) return;
     const place = terminalPlace;
     if (!place || (session.kind === "local" ? place.kind !== "local" :
       place.kind !== "ssh" || place.id !== session.connection)) return;
@@ -2445,8 +2450,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   const followTerminal = useEffectEvent(() => { openTerminal(false); });
   useEffect(() => {
-    if (terminalVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
-  }, [terminalVisible, terminalKey, terminal, activeDocument]);
+    if (terminalVisible && !fileOpensVisible && terminalKey && !terminal && activeDocument === null) followTerminal();
+  }, [terminalVisible, fileOpensVisible, terminalKey, terminal, activeDocument]);
   useEffect(() => {
     const syncFocus = () => setTerminalInputFocused(document.hasFocus() && hasTerminalShortcutFocus(document.activeElement));
     window.addEventListener("focus", syncFocus);
@@ -2459,6 +2464,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function showCommandLine(moveFocus = true) {
     setTerminalInputFocused(false);
+    setFileOpensVisible(false);
     setTerminalShare(0);
     setPanelsHidden(false);
     if (moveFocus) requestAnimationFrame(() => {
@@ -2484,12 +2490,26 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function toggleTerminal() {
     if (terminalVisible) showCommandLine();
+    else if (!terminalPlace && fileOpens.history.length) {
+      setTerminalShare(terminalHeight);
+      setFileOpensVisible(true);
+    }
     else if (openTerminal()) setTerminalShare(terminalHeight);
+  }
+
+  function showFileOpens() {
+    setTerminalInputFocused(false);
+    setFileOpensVisible(true);
+  }
+
+  function backFromFileOpens() {
+    setFileOpensVisible(false);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(".terminal-card:not([hidden]) [data-file-opens]")?.focus());
   }
 
   function terminalBounds() {
     const card = document.querySelector<HTMLElement>(".terminal-card:not([hidden])");
-    const surface = card?.querySelector<HTMLElement>(".terminal-surface");
+    const surface = card?.querySelector<HTMLElement>(".terminal-surface, .file-open-history");
     const workspace = document.querySelector(".workspace");
     if (!card || !surface || !workspace) return;
     const style = getComputedStyle(card);
@@ -3295,6 +3315,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const commandLineVisible = showFileActions && !panelsHidden;
   const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
+  const terminalPlaceholder = terminalVisible && !fileOpensVisible && activeDocument === null ?
+    <section className="terminal-card" data-font-zoom="terminal" data-help-topic="terminal" aria-label={t("Terminal")}>
+      <header><h2>{t("Terminal")}</h2><Button type="button" data-file-opens onClick={showFileOpens}>{t("File opens")}</Button></header>
+      <div className="pane-empty" role="status">{t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}</div>
+    </section> : null;
 
   return (
     <ElevationContext value={openAdministrator}>
@@ -3382,6 +3407,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             activate={() => setActive(side)} onRow={(entry, range, mark) => selectRow(side, entry, range, mark)}
             onRightClickMark={(names, mark) => setRightClickMarks(side, names, mark)}
             onQuickMatch={(name) => updatePane(side, (pane) => pane.selected === name ? pane : { ...pane, selected: name })}
+            fileOpenFeedback={<FileOpenFeedback attempts={fileOpens.notices.filter((attempt) => attempt.side === side)} onDismiss={fileOpens.dismiss} />}
             onOpen={(entry) => open(side, entry)} onPath={(path) => {
               const place = panes[side].place;
               showProcesses(side, false);
@@ -3593,12 +3619,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           );
         })}
       </div>
-      <Suspense fallback={terminalVisible && activeDocument === null ?
-        <div className="terminal-card pane-empty" role="status">{t("Opening terminal…")}</div> : null}>
+      <Suspense fallback={terminalPlaceholder}>
         {Object.entries(terminals).map(([key, session]) => (
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
-            visible={key === terminalKey && terminalVisible && activeDocument === null} theme={theme} scheme={scheme}
+            visible={key === terminalKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
             fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
@@ -3620,12 +3645,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             })}
             onRestart={session.kind === "local" && terminalPlace?.kind === "local"
               ? () => openTerminal(true, terminalPlace, session.id) : undefined}
+            onFileOpens={showFileOpens}
             onClose={() => { dropTerminal(key); showCommandLine(); }} />
         ))}
+        {!terminal && terminalPlaceholder}
       </Suspense>
-      {terminalVisible && activeDocument === null && !terminal && <div className="terminal-card pane-empty" role="status">
-        {t(terminalKey ? "Opening terminal…" : "Choose a local or SSH folder to open a terminal.")}
-      </div>}
+      {terminalVisible && fileOpensVisible && activeDocument === null &&
+        <FileOpensTerminal history={fileOpens.history} onBack={backFromFileOpens} onClose={() => showCommandLine()} />}
       <form className="command-bar" data-font-zoom="command" data-help-topic="terminal" hidden={!commandLineVisible} onSubmit={submitCommand}>
         <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}

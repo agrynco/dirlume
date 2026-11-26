@@ -80,6 +80,7 @@ interface PaneProps {
   onRightClickMark: (names: readonly string[], mark: boolean) => void;
   onQuickMatch: (name: string) => void;
   onOpen: (entry: Entry) => void;
+  fileOpenFeedback: ReactNode;
   onPath: (path: string) => void;
   onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
@@ -151,7 +152,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 
 export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, addressPlace,
   rightClickSelection, pane, entries: availableEntries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
-  onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
+  onRightClickMark, onQuickMatch, onOpen, fileOpenFeedback, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
@@ -683,6 +684,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         onChange={setQuickSearch} onMatch={onQuickMatch}
         onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
         onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
+      {fileOpenFeedback}
       {pane.error && <div className="pane-error" data-help-topic="paneStatus">
         <span role="alert">{errorText(pane.error)}</span>
         {netbox && !pane.loading && <Button type="button" onClick={onRefresh}>{t("Refresh connections")}</Button>}
