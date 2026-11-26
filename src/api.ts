@@ -185,12 +185,21 @@ export interface FtpProfile {
   username: string;
   codePage: number | null;
   encryption?: FtpEncryption;
+  ftpOptions?: FtpOptions;
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
 }
 
 export type FtpEncryption = "plain" | "explicitTls" | "implicitTls";
+export interface FtpOptions {
+  mlsd: "auto" | "on" | "off";
+  activeMode: boolean;
+  emptyPassword: boolean;
+  postLoginCommands: string[];
+  rawIacCommands: boolean;
+  rawIacPwd: boolean;
+}
 
 export type ConnectionTiming = { mode: "default" | "disabled" } | { mode: "custom"; seconds: number };
 export interface ConnectionPreferences {
