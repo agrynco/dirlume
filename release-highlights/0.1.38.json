@@ -3,6 +3,7 @@
   "highlights": [
     "Stage or unstage files in Git View and review all staged paths before creating a local commit.",
     "Route NetBox FTP, FTPS, and SFTP profiles through a SOCKS5 or HTTP CONNECT proxy.",
-    "Choose a custom SFTP server command, legacy timestamp handling, and the SSH terminal shell in NetBox."
+    "Choose a custom SFTP server command, legacy timestamp handling, and the SSH terminal shell in NetBox.",
+    "Checkboxes are consistently placed to the left of their labels in dialogs."
   ]
 }
