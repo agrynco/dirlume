@@ -125,7 +125,10 @@ type AnalysisPane = {
   id: number; root: SpacePlace; location: { place: SpacePlace; reveal?: string };
   navigation: SpaceNavigation; initialView: SpaceAnalyzerView;
 };
+type PaneDocumentOrigin = { kind: "pane"; side: Side; file: NamedFile };
+type DocumentOrigin = PaneDocumentOrigin | { kind: "document"; id: number };
 type DocumentTab = DocumentWindow & {
+  returnTo?: DocumentOrigin;
   position?: MarkdownPosition;
   bookmarkJump?: BookmarkJump;
   back?: MarkdownLocation[];
@@ -1158,13 +1161,13 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       onPick={(source) => openPaneSource(side, source)} />;
   }
 
-  function selectDocument(id: number | null) {
+  function selectDocument(id: number | null, paneOrigin?: PaneDocumentOrigin) {
     setActiveDocument(id);
     if (id === null && !panelsHidden) {
       const document = documents.find((tab) => tab.id === activeDocument);
-      const source = document?.imageOrigin ?? active;
-      if (document?.imageOrigin) {
-        const file = document.file;
+      const source = paneOrigin?.side ?? document?.imageOrigin ?? active;
+      const file = paneOrigin?.file ?? (document?.imageOrigin ? document.file : undefined);
+      if (file) {
         const row = entries[source].find((entry) => {
           const candidate = fileFor(source, entry);
           return candidate && sameDocumentFile(candidate, file);
@@ -1255,19 +1258,28 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  function openDocument(file: NamedFile, editing: boolean, position?: MarkdownPosition, origin?: Side, diagnosticLog?: true, bookmarkJump?: BookmarkJump) {
+  function openDocument(file: NamedFile, editing: boolean, { position, fromPane, origin, diagnosticLog, bookmarkJump }: {
+    position?: MarkdownPosition;
+    fromPane?: Side;
+    origin?: DocumentOrigin;
+    diagnosticLog?: true;
+    bookmarkJump?: BookmarkJump;
+  } = {}) {
     const image = !!imageType(file.name);
     const existing = documents.find((item) => item.diagnosticLog === diagnosticLog &&
       (image || item.editing === editing) && sameDocumentFile(item.file, file));
     const id = existing?.id ?? ++nextDocument.current;
-    const imageOrigin = image ? origin : undefined;
+    const imageOrigin = image ? fromPane : undefined;
     const imageIndex = imageOrigin ? imagesInPane(imageOrigin, file).findIndex((candidate) => sameDocumentFile(candidate, file)) : undefined;
+    const returnTo: DocumentOrigin | undefined = image ? undefined : fromPane ? { kind: "pane", side: fromPane, file } :
+      origin?.kind === "document" && origin.id === id ? existing?.returnTo : origin;
     const canEdit = editing && (!image || canEditImage(file));
     if (!existing) {
-      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex, diagnosticLog, bookmarkJump }]);
-    } else if (position || image || bookmarkJump) {
+      setDocuments((current) => [...current, { id, file, editing: canEdit, position, imageOrigin, imageIndex, diagnosticLog, bookmarkJump, returnTo }]);
+    } else {
       setDocuments((current) => current.map((tab) => tab.id === id
-        ? { ...tab, position: bookmarkJump ? undefined : position ?? tab.position, bookmarkJump,
+        ? { ...tab, position: bookmarkJump ? undefined : position ?? tab.position,
+          bookmarkJump: position || bookmarkJump || image ? bookmarkJump : tab.bookmarkJump, returnTo,
           imageOrigin: imageOrigin ?? tab.imageOrigin, imageIndex: imageIndex ?? tab.imageIndex,
           editing: canEdit, imageEditorOpened: image && (tab.imageEditorOpened || tab.editing) }
         : tab));
@@ -1301,8 +1313,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const file = bookmarkFile(bookmark.path);
     if (!file) return;
     const request = ++bookmarkRequest.current;
-    openDocument(file, false, undefined, undefined, undefined, "anchor" in bookmark
-      ? { anchor: bookmark.anchor, request } : { line: bookmark.line, fingerprint: bookmark.fingerprint, request });
+    openDocument(file, false, { bookmarkJump: "anchor" in bookmark
+      ? { anchor: bookmark.anchor, request } : { line: bookmark.line, fingerprint: bookmark.fingerprint, request } });
   }
 
   function followMarkdownLink(id: number, from: NamedFile, file: NamedFile, position: MarkdownPosition, scrollTop: number) {
@@ -1333,7 +1345,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setDocuments(remaining);
     dirtyDocuments.current.delete(id);
     if (activeDocument === id) {
-      selectDocument(imageType(documents[index].file.name) ? null : documents[index - 1]?.id ?? null);
+      const origin = documents[index].returnTo;
+      if (origin?.kind === "document" && remaining.some((tab) => tab.id === origin.id)) selectDocument(origin.id);
+      else selectDocument(null, origin?.kind === "pane" ? origin : undefined);
     }
   }
 
@@ -1346,7 +1360,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }
       const end = Math.max(path.lastIndexOf("/"), windowsClient ? path.lastIndexOf("\\") : -1);
       openDocument({ place: { kind: "local", path: path.slice(0, end), parent: null }, name: path.slice(end + 1) },
-        false, undefined, undefined, true);
+        false, { diagnosticLog: true });
       setStatus({ text: "Ready" });
     } catch (error) {
       setStatus({ text: describeError(error), error: true });
@@ -1557,7 +1571,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (entry.tree && !file.link) { toggleTreeBranch(side, entry); return; }
       void load(side, childPlace(place, file.name), "push", selectParent && place.kind === "local" ? ".." : undefined);
     } else if ((isFileServer(place) || place.kind === "archive") && !file.link) {
-      openDocument({ place, name: file.name }, false);
+      openDocument({ place, name: file.name }, false, { fromPane: side });
     } else if (place.kind === "local") {
       if (!file.link && isArchiveName(file.name)) {
         const path = placePath(childPlace(place, file.name));
@@ -3045,7 +3059,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           break;
         }
         const file = fileFor(active);
-        if (file && (command === "view" || imageType(file.name) || writableTextPlace(file.place))) openDocument(file, command === "edit", undefined, active);
+        if (file && (command === "view" || imageType(file.name) || writableTextPlace(file.place))) {
+          openDocument(file, command === "edit", { fromPane: active });
+        }
         break;
       }
       case "compare": {
@@ -3545,7 +3561,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <SplitDivider label={t("Pane divider")} className="pane-divider" value={split} onResize={setSplit} />
       </main>
       <div className="document-workspace" hidden={activeDocument === null}>
-        {documents.map(({ id, file, editing, position, bookmarkJump, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0, diagnosticLog }) => {
+        {documents.map(({ id, file, editing, position, bookmarkJump, back, forward, imageOrigin, imageIndex, imageEditorOpened, imageRevision = 0, diagnosticLog, returnTo }) => {
           const documentKey = JSON.stringify([id, placePath(file.place), file.name]);
           if (imageType(file.name)) {
             const candidates = activeDocument === id ? imagesInPane(imageOrigin ?? active, file) : [];
@@ -3602,11 +3618,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             fontSizes={preferences.viewFontSizes}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
             onCopyPath={copyPath}
-            onSwitchMode={() => openDocument(file, !editing)}
+            onSwitchMode={() => openDocument(file, !editing, { origin: returnTo })}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
             onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}
             onOpenDocument={(target, newTab, next, scrollTop) => {
-              if (newTab || (editing && target !== file)) openDocument(target, false, next);
+              if (newTab || (editing && target !== file)) openDocument(target, false, { position: next, origin: { kind: "document", id } });
               else if (editing) setDocuments((current) => current.map((tab) => tab.id === id ? { ...tab, position: next } : tab));
               else followMarkdownLink(id, file, target, next ?? { scrollTop: 0 }, scrollTop);
             }}
@@ -4058,7 +4074,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             else await api.operate(modal.path, operation);
             fileLocationsChanged();
             if (modal.kind === "newFile") {
-              openDocument({ place: { kind: "local", path: modal.path, parent: null }, name: operation.name }, true);
+              openDocument({ place: { kind: "local", path: modal.path, parent: null }, name: operation.name }, true, { fromPane: modal.side });
             }
           }
           setModal(null);
