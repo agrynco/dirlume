@@ -1926,6 +1926,13 @@ button.color-swatch {
 .syntax-invalid { color: var(--danger); }
 .mermaid-figure { margin: 16px 0; }
 .mermaid-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-block-end: 6px; }
+.mermaid-pan {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 8px; padding: 3px 6px;
+  background: var(--markdown-bg, var(--viewer-bg)); border-block-end: 1px solid var(--line);
+  font-size: var(--ui-size);
+}
+.mermaid-pan input { flex: 1; min-width: 0; accent-color: var(--accent); }
 .mermaid-scroll { overflow-x: auto; }
 .mermaid-scroll:focus-visible { outline-offset: -2px; }
 .mermaid-diagram {
