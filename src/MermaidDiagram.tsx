@@ -1,26 +1,28 @@
 import { errorText, t } from "./i18n";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Expand, Maximize, ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ExternalLink, Maximize, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { ImageViewport, useImageViewport } from "./ImageViewport";
+import { describeError } from "./api";
 import { reportFrontendError } from "./diagnostics";
+import { openDiagramWindow, type DiagramWindowData, type RenderedDiagram } from "./diagramWindow";
 import type { Palette } from "./appearance";
 import { bindingMatches, eventShortcut, showShortcuts, type Bindings } from "./preferences";
 
 let nextDiagram = 0;
 let renderQueue = Promise.resolve();
 
-type Diagram = { image: string; width?: number; height?: number };
+const zoomStep = 1.25;
+const maxInlineSteps = 6;
 
-function DiagramViewer({ diagram, shortcuts, onClose }: { diagram: Diagram; shortcuts: Bindings; onClose: () => void }) {
-  const view = useImageViewport(shortcuts.zoomFont);
+export function DiagramViewer({ diagram, shortcuts, onClose }: { diagram: DiagramWindowData; shortcuts: Bindings; onClose: () => void }) {
+  const view = useImageViewport(shortcuts.zoomFont, diagram.scale);
   const naturalSize = diagram.width && diagram.height ? { width: diagram.width, height: diagram.height } : undefined;
   const canZoom = Boolean(view.natural && !view.failed);
   const actions = {
-    imageZoomOut: () => view.zoomBy(0.8),
-    imageZoomIn: () => view.zoomBy(1.25),
+    imageZoomOut: () => view.zoomBy(1 / zoomStep),
+    imageZoomIn: () => view.zoomBy(zoomStep),
     imageFit: view.fitToWindow,
   };
   const controls = [
@@ -28,7 +30,7 @@ function DiagramViewer({ diagram, shortcuts, onClose }: { diagram: Diagram; shor
     { command: "imageZoomIn", label: "Zoom in", Icon: ZoomIn },
     { command: "imageFit", label: "Fit", Icon: Maximize },
   ] as const;
-  return <Dialog title={t("Mermaid diagram")} onClose={onClose} resizeKey="mermaid-diagram" helpTopic="viewer" fontZoom="none"
+  return <Dialog title={t("Mermaid diagram")} onClose={onClose} standalone helpTopic="viewer" fontZoom="none"
     onKeyDown={(event) => {
       const shortcut = eventShortcut(event);
       if (!canZoom || event.repeat || event.nativeEvent.isComposing) return;
@@ -43,19 +45,21 @@ function DiagramViewer({ diagram, shortcuts, onClose }: { diagram: Diagram; shor
         aria-keyshortcuts={shortcuts[command].join(" ") || undefined} shortcut={showShortcuts(shortcuts[command])}
         disabled={!canZoom} onClick={actions[command]}><Icon aria-hidden="true" />{t(label)}</Button>)}
       {canZoom && <span role="status">{Math.round(view.scale * 100)}%</span>}
+      <Button type="button" className="icon-button diagram-close" aria-label={t("Close")} onClick={onClose}>
+        <X aria-hidden="true" />
+      </Button>
     </div>
     {view.failed && <p className="dialog-error" role="alert">{t("Could not display this image.")}</p>}
     <ImageViewport name={t("Mermaid diagram")} url={diagram.image} view={view} naturalSize={naturalSize} hidden={view.failed} />
   </Dialog>;
 }
 
-export function MermaidDiagram({ source, light, colors, scale = 1, shortcuts }: {
-  source: string; light: boolean; colors?: Palette; scale?: number; shortcuts: Bindings;
+export function MermaidDiagram({ source, light, colors, scale }: {
+  source: string; light: boolean; colors?: Palette; scale: number;
 }) {
-  const [result, setResult] = useState<Diagram | { error: string } | null>(null);
-  const [viewer, setViewer] = useState<Diagram | null>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-  const position = useRef<{ surface: HTMLElement; left: number; top: number }>(null);
+  const [result, setResult] = useState<RenderedDiagram | { error: string } | null>(null);
+  const [adjustment, setAdjustment] = useState(0);
+  const [windowError, setWindowError] = useState("");
   const background = colors?.["mermaid-node-bg"];
   const text = colors?.["mermaid-node-ink"];
   const border = colors?.["mermaid-node-border"];
@@ -86,8 +90,8 @@ export function MermaidDiagram({ source, light, colors, scale = 1, shortcuts }: 
         const [, , width, height] = root.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number) ?? [];
         setResult({
           image: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-          width: Number.isFinite(width) && width > 0 ? Math.ceil(width) : undefined,
-          height: Number.isFinite(height) && height > 0 ? Math.ceil(height) : undefined,
+          width: Number.isFinite(width) && width > 0 ? width : undefined,
+          height: Number.isFinite(height) && height > 0 ? height : undefined,
         });
       } catch (failure) {
         reportFrontendError("render_mermaid", failure);
@@ -98,32 +102,46 @@ export function MermaidDiagram({ source, light, colors, scale = 1, shortcuts }: 
     return () => { canceled = true; };
   }, [source, light, background, text, border]);
 
-  function closeViewer() {
-    setViewer(null);
-    requestAnimationFrame(() => {
-      opener.current?.focus({ preventScroll: true });
-      const old = position.current;
-      old?.surface.scrollTo({ left: old.left, top: old.top });
-    });
+  async function openViewer(opener: HTMLButtonElement, diagram: DiagramWindowData) {
+    setWindowError("");
+    opener.focus({ preventScroll: true });
+    try {
+      await openDiagramWindow(diagram);
+      const focused = document.activeElement;
+      if (opener.getClientRects().length && (focused === document.body || focused?.closest(".mermaid-tools"))) {
+        opener.focus({ preventScroll: true });
+      }
+    } catch (error) {
+      reportFrontendError("open_diagram_window", error);
+      if (opener.isConnected) setWindowError(describeError(error));
+    }
   }
   const diagram = result && "image" in result ? result : null;
-  const ratio = diagram?.width && diagram.height ? diagram.width / diagram.height : null;
-  const width = ratio ? `calc(min(${diagram?.width}px, 100%, 960px, ${70 * ratio}vh, ${640 * ratio}px) * ${scale})` : undefined;
+  const inlineScale = scale * zoomStep ** adjustment;
   return <>
     {!result && <p role="status">{t("Rendering diagram…")}</p>}
     {result && "error" in result && <pre className="diagram-error" role="alert">{errorText(result.error)}</pre>}
     {diagram && <figure className="mermaid-figure">
-      <figcaption data-markdown-control><Button ref={opener} type="button" aria-haspopup="dialog" onClick={(event) => {
-        const surface = event.currentTarget.closest<HTMLElement>(".markdown");
-        position.current = surface ? { surface, left: surface.scrollLeft, top: surface.scrollTop } : null;
-        event.currentTarget.focus({ preventScroll: true });
-        setViewer(diagram);
-      }}><Expand aria-hidden="true" />{t("Open diagram")}</Button></figcaption>
+      <figcaption data-markdown-control className="mermaid-tools">
+        <Button type="button" className="icon-button" aria-label={t("Zoom out")} disabled={adjustment <= -maxInlineSteps}
+          onClick={() => setAdjustment((current) => Math.max(-maxInlineSteps, current - 1))}><ZoomOut aria-hidden="true" /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Zoom in")} disabled={adjustment >= maxInlineSteps}
+          onClick={() => setAdjustment((current) => Math.min(maxInlineSteps, current + 1))}><ZoomIn aria-hidden="true" /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Reset diagram zoom")} disabled={!adjustment}
+          onClick={() => setAdjustment(0)}><RotateCcw aria-hidden="true" /></Button>
+        <Button type="button" onClick={(event) => void openViewer(event.currentTarget, { ...diagram, scale: inlineScale })}>
+          <ExternalLink aria-hidden="true" />{t("Open in new window")}
+        </Button>
+      </figcaption>
+      {windowError && <p className="diagram-error" role="alert">{errorText(windowError)}</p>}
       <div className="mermaid-scroll" tabIndex={0} role="group" aria-label={t("Mermaid diagram")}>
         <img className="mermaid-diagram" alt={t("Mermaid diagram")} src={diagram.image}
-          width={diagram.width} height={diagram.height} style={width ? { width, maxWidth: "none", maxHeight: "none" } : undefined} />
+          width={diagram.width} height={diagram.height} style={{ width: diagram.width && diagram.width * inlineScale }}
+          onLoad={({ currentTarget: image }) => {
+            if ((diagram.width && diagram.height) || !image.naturalWidth || !image.naturalHeight) return;
+            setResult((current) => current === diagram ? { ...diagram, width: image.naturalWidth, height: image.naturalHeight } : current);
+          }} />
       </div>
     </figure>}
-    {viewer && createPortal(<DiagramViewer diagram={viewer} shortcuts={shortcuts} onClose={closeViewer} />, document.body)}
   </>;
 }

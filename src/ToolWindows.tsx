@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
 import { applyAppearance, isLightTheme, resolveAppearance, useSystemTheme } from "./appearance";
@@ -14,12 +15,15 @@ import { pickFromDesktop } from "./AppearancePicker";
 import { windowsClient, type NamedFile } from "./api";
 import { useFontZoom } from "./useFontZoom";
 import { resizeViewFont } from "./viewFonts";
+import { DiagramViewer } from "./MermaidDiagram";
+import type { DiagramWindowData } from "./diagramWindow";
 
 const HelpDialog = lazy(() => import("./HelpDialog"));
 
-export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
+export function ToolWindow({ initialPreferences, comparison, diagram, optionsPage }: {
   initialPreferences: Preferences;
   comparison?: { left: NamedFile; right: NamedFile };
+  diagram?: DiagramWindowData;
   optionsPage?: FeaturePage;
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
@@ -32,10 +36,10 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
     persistPreferences(next);
     setPreferences(next);
   });
-  const [help, setHelp] = useHelpShortcut(shortcuts.help, comparison ? "compare" : "general");
+  const [help, setHelp] = useHelpShortcut(shortcuts.help, diagram ? "viewer" : comparison ? "compare" : "general");
   const { scheme, theme } = resolveAppearance(preferences, useSystemTheme());
-  const title = t(comparison ? "Compare files" : "Options");
-  const windowHandle = getCurrentWindow();
+  const title = t(diagram ? "Mermaid diagram" : comparison ? "Compare files" : "Options");
+  const windowHandle = isTauri() ? getCurrentWindow() : null;
 
   useLayoutEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -47,11 +51,13 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
 
   useEffect(() => {
     // Forcing a native Windows theme also overrides the system color query in WebView2.
-    if (!windowsClient) void windowHandle.setTheme(isLightTheme(theme) ? "light" : "dark").catch(() => {});
-    void windowHandle.setTitle(title).catch(() => {});
+    if (!windowsClient) void windowHandle?.setTheme(isLightTheme(theme) ? "light" : "dark").catch(() => {});
+    document.title = title;
+    void windowHandle?.setTitle(title).catch(() => {});
   }, [theme, title]);
 
   useEffect(() => {
+    if (!isTauri()) return;
     const window = getCurrentWindow();
     void window.show().then(() => window.setFocus()).catch((error: unknown) => {
       reportFrontendError("show_tool_window", error, "native_error");
@@ -60,13 +66,13 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
 
   useEffect(() => {
     const saveSize = () => {
-      void windowHandle.isMaximized().then((maximized) => {
+      void windowHandle?.isMaximized().then((maximized) => {
         if (!maximized && innerWidth >= 600 && innerHeight >= 380) {
           saveDialogSize("options", { width: innerWidth, height: innerHeight });
         }
       }).catch(() => {});
     };
-    if (!comparison) {
+    if (!comparison && !diagram) {
       window.addEventListener("resize", saveSize);
     }
     const sync = (event: StorageEvent) => {
@@ -77,18 +83,20 @@ export function ToolWindow({ initialPreferences, comparison, optionsPage }: {
     };
     window.addEventListener("storage", sync);
     return () => {
-      if (!comparison) window.removeEventListener("resize", saveSize);
+      if (!comparison && !diagram) window.removeEventListener("resize", saveSize);
       window.removeEventListener("storage", sync);
     };
-  }, [comparison]);
+  }, [comparison, diagram]);
 
-  const reportDirty = (dirty: boolean) => emitTo("main", "dirlume:comparison-dirty", { label: windowHandle.label, dirty });
+  const reportDirty = (dirty: boolean) => emitTo("main", "dirlume:comparison-dirty", { label: windowHandle?.label, dirty });
   const close = () => {
-    if (comparison) void reportDirty(false).finally(() => windowHandle.destroy()).catch(() => {});
-    else void windowHandle.close();
+    if (comparison) void reportDirty(false).finally(() => windowHandle?.destroy()).catch(() => {});
+    else if (windowHandle) void windowHandle.close();
+    else window.close();
   };
   return <>
-    {comparison ? <CompareDialog {...comparison} standalone
+    {diagram ? <DiagramViewer diagram={diagram} shortcuts={shortcuts} onClose={close} /> :
+      comparison ? <CompareDialog {...comparison} standalone
       previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap}
       onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} /> :
       <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {

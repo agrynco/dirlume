@@ -29,6 +29,14 @@ use crate::{
 
 pub(crate) use crate::{message, Result};
 
+#[derive(Deserialize, Serialize)]
+struct DiagramWindowData {
+    image: String,
+    width: Option<f64>,
+    height: Option<f64>,
+    scale: f64,
+}
+
 #[tauri::command]
 async fn open_tool_window(
     main: WebviewWindow,
@@ -37,18 +45,17 @@ async fn open_tool_window(
     height: Option<f64>,
     comparison: Option<serde_json::Value>,
     initial_page: Option<String>,
+    diagram: Option<DiagramWindowData>,
 ) -> Result<()> {
     if main.label() != "main" {
         return Err("Open this window from the main Dirlume window.".into());
     }
     let app = main.app_handle();
-    static NEXT_COMPARISON: AtomicU32 = AtomicU32::new(1);
-    let label = match comparison {
-        Some(_) => format!(
-            "compare-{}",
-            NEXT_COMPARISON.fetch_add(1, Ordering::Relaxed)
-        ),
-        None => "options".to_owned(),
+    static NEXT_WINDOW: AtomicU32 = AtomicU32::new(1);
+    let label = match (&comparison, &diagram) {
+        (Some(_), _) => format!("compare-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed)),
+        (_, Some(_)) => format!("diagram-{}", NEXT_WINDOW.fetch_add(1, Ordering::Relaxed)),
+        _ => "options".to_owned(),
     };
     if let Some(window) = app.get_webview_window(&label) {
         if let Some(page) = initial_page {
@@ -101,19 +108,21 @@ async fn open_tool_window(
     config.minimizable = true;
     config.closable = true;
     let mut builder = WebviewWindowBuilder::from_config(app, &config).map_err(message)?;
-    let is_comparison = comparison.is_some();
+    let wait_for_close = comparison.is_some() || diagram.is_some();
     if let Some(comparison) = comparison {
         builder = builder
             .parent(&main)
             .map_err(message)?
             .initialization_script(format!("window.__dirlumeComparison = {comparison};"));
+    } else if let Some(diagram) = diagram {
+        let diagram = serde_json::to_string(&diagram).map_err(message)?;
+        builder = builder.initialization_script(format!("window.__dirlumeDiagram = {diagram};"));
     } else if let Some(page) = initial_page {
         let page = serde_json::to_string(&page).map_err(message)?;
         builder = builder.initialization_script(format!("window.__dirlumeOptionsPage = {page};"));
     }
     let window = builder.build().map_err(message)?;
-    if is_comparison {
-        // The main workspace retains both files until this native window is destroyed.
+    if wait_for_close {
         let (closed, receiver) = tokio::sync::oneshot::channel();
         let closed = Mutex::new(Some(closed));
         window.on_window_event(move |event| {
@@ -2877,7 +2886,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 for (label, tool) in window.app_handle().webview_windows() {
-                    if label == "options" || label.starts_with("compare-") {
+                    if label == "options"
+                        || label.starts_with("compare-")
+                        || label.starts_with("diagram-")
+                    {
                         let _ = tool.destroy();
                     }
                 }

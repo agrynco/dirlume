@@ -341,11 +341,14 @@ export interface Preferences {
   viewFontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
+  mermaidScale?: number;
   terminalResizeRows: number;
 }
 
 export const minViewerContentWidth = 320;
 export const maxViewerContentWidth = 2400;
+export const minMermaidScale = 25;
+export const maxMermaidScale = 400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
@@ -577,6 +580,7 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
   viewerMarkdownContentWidth: { group: "viewer", portable: true, read: (value) => value === "full" ? "full" :
     readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
+  mermaidScale: { group: "viewer", portable: true, read: (value) => readInteger(value, minMermaidScale, maxMermaidScale) },
 };
 
 export const preferenceKeys = Object.keys(preferenceDefinitions) as (keyof Preferences)[];

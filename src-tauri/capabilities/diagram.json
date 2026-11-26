@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "diagram",
+  "description": "Standalone Mermaid diagram windows",
+  "windows": ["diagram-*"],
+  "permissions": ["core:window:allow-show", "core:window:allow-set-theme", "core:window:allow-set-title", "core:window:allow-set-focus", "core:window:allow-close"]
+}
