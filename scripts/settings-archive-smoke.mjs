@@ -26,7 +26,7 @@ try {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({
       layout: "standard", mainMenuAlignment: "right", schemes: [local, evening], activeScheme: null,
       kswitcher: "Fixture installation folder",
-      viewerContentWidth: 630, viewerMarkdownContentWidth: "full",
+      viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150,
       activeShortcutScheme: "custom-keys", bindingDefaults: 7,
       shortcutSchemes: [{ id: "custom-keys", name: "My keys", bindings: { newFile: ["Ctrl+Alt+N"] } }],
     }));
@@ -194,7 +194,7 @@ try {
   assert.equal(Object.hasOwn(settingsFile.groups.general, "kswitcher"), false);
   assert.deepEqual(settingsFile.groups.shortcuts.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
   assert.equal(settingsFile.groups.filePanels.hideActionButtonIcons, true);
-  assert.deepEqual(settingsFile.groups.viewer, { viewerContentWidth: 630, viewerMarkdownContentWidth: "full" });
+  assert.deepEqual(settingsFile.groups.viewer, { viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150 });
   await button(options, "Main File Panels").click();
   await visibility.uncheck();
   await button(options, "Apply").click();
@@ -303,6 +303,7 @@ try {
     const saved = JSON.parse(localStorage.getItem(key));
     delete saved.viewerContentWidth;
     delete saved.viewerMarkdownContentWidth;
+    delete saved.mermaidScale;
     localStorage.setItem(key, JSON.stringify({ ...saved, schemes: [], shortcutSchemes: [], activeShortcutScheme: null }));
   });
   await page.reload();
@@ -318,6 +319,7 @@ try {
   await button(importDialog, "Import").click();
   assert.equal((await readPreferences()).viewerContentWidth, 640);
   assert.equal((await readPreferences()).viewerMarkdownContentWidth, undefined);
+  assert.equal((await readPreferences()).mermaidScale, undefined);
   await startImport(archive({ shortcuts: settingsFile.groups.shortcuts, viewer: settingsFile.groups.viewer }, []));
   await button(importDialog, "Import").click();
   const restored = await readPreferences();
@@ -325,6 +327,7 @@ try {
   assert.deepEqual(restored.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
   assert.equal(restored.viewerContentWidth, 630);
   assert.equal(restored.viewerMarkdownContentWidth, "full");
+  assert.equal(restored.mermaidScale, 150);
   const localBefore = restored.schemes.find(({ id }) => id === local.id);
   const openManagement = async () => {
     const search = options.getByRole("searchbox", { name: "Search settings" });
