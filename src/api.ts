@@ -118,10 +118,10 @@ export type FileLocation =
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; canAdd: boolean; address: string }
-  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; catalogSource?: "ftp" }
+  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[] }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
-export const connectionSourceNames = { ftp: "FTP", ssh: "SSH", smb: "SMB", remote: "Remote machine" } as const;
+export const connectionSourceNames = { netbox: "NetBox", smb: "SMB", remote: "Remote machine" } as const;
 export type ConnectionSource = keyof typeof connectionSourceNames;
 export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null; trail?: FileLocation };
 export type Place = FileLocation | ConnectionLocation;
@@ -507,6 +507,8 @@ export const api = {
   ftpWindowsCodePage: () => invoke<number | null>("ftp_windows_code_page"),
   saveFtpProfile: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
     invoke<string>("save_ftp_profile", { input }),
+  testFtpConnection: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
+    invoke<void>("test_ftp_connection", { input }),
   removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
   connectFtp: (id: string, segments?: string[]) =>
     invoke<Connection & { segments: string[] }>("connect_ftp", { id, segments }),

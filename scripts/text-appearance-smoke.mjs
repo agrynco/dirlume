@@ -40,6 +40,7 @@ try {
         if (command === "read_text") return { text: files[args.name], encoding: "utf8" };
         if (command === "read_bytes") return { length: files[args.name].length, data: [...new TextEncoder().encode(files[args.name])] };
         if (command === "installed_fonts") return ["Fixture Sans"];
+        if (command === "ftp_profiles") return [];
         if (command === "ssh_profiles") return [{ id: "ssh", label: "SSH fixture", host: "fixture", port: 22 }];
         if (command === "connect_ssh") return { kind: "connected", id: 17, address: "fixture", origin: "sftp://fixture",
           segments: ["home"], listing: { entries, omitted: 0, elevated: false } };
@@ -199,7 +200,7 @@ try {
   await compare.waitFor({ state: "hidden" });
 
   await right.press("Alt+F2");
-  await exactButton(page.locator("#right-pane .location-popup"), "SSH").click();
+  await exactButton(page.locator("#right-pane .location-popup"), "NetBox").click();
   await file(right, "SSH fixture").click();
   await right.press("Enter");
   await file(right, "sample.rs").waitFor();

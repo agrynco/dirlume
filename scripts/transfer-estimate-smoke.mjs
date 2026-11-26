@@ -43,6 +43,7 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
           case "locations": return [{ label: "Home", path: home }];
           case "list_directory": return { path: args.path, entries: args.path === home ? entries : [], parent: null, omitted: 0 };
           case "file_icons": return args.items.map(() => null);
+          case "ftp_profiles": return [];
           case "ssh_profiles": return [{ id: "fixture", label: "Fixture", host: "fixture.example", port: 22 }];
           case "connect_ssh":
             return { kind: "connected", id: 12, address: "Fixture", origin: "sftp://fixture.example",
@@ -66,7 +67,7 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
   const right = page.getByRole("region", { name: "right pane", exact: true });
   if (remote) {
     await button(right, "Locations for right pane").press("Enter");
-    await button(right, "SSH").press("Enter");
+    await button(right, "NetBox").press("Enter");
     await right.getByRole("option", { name: /^Fixture/ }).dispatchEvent("dblclick", { button: 0 });
   } else {
     const address = await editPaneAddress(page, "right");

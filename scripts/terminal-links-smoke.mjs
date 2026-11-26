@@ -158,6 +158,7 @@ async function testBrowserTerminalLinks() {
               if (command === "locations") return [{ label: "Home", path }];
               if (command === "list_directory") return { path, parent: null, entries: [file], omitted: 0 };
               if (command === "file_icons") return args.items.map(() => null);
+              if (command === "ftp_profiles") return [];
               if (command === "ssh_profiles") return [{ id: "ssh", label: "SSH fixture", host: "fixture", port: 22 }];
               if (command === "connect_ssh") return { kind: "connected", id: 17, address: "fixture", origin: "sftp://fixture",
                 segments: ["home"], listing: { entries: [file], omitted: 0, elevated: false } };
@@ -179,7 +180,7 @@ async function testBrowserTerminalLinks() {
         const list = page.getByRole("listbox", { name: "left files", exact: true });
         if (ssh) {
           await list.press("Alt+F1");
-          await page.locator("#left-pane .location-popup").getByRole("button", { name: "SSH", exact: true }).click();
+          await page.locator("#left-pane .location-popup").getByRole("button", { name: "NetBox", exact: true }).click();
           await list.getByRole("option", { name: /SSH fixture/ }).dblclick();
         }
         await list.getByRole("option", { name: /^fixture\.txt/ }).waitFor();

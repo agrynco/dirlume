@@ -63,7 +63,7 @@ export async function testNativeJumpHosts(page, temp, destination, config, resta
     await invoke(page, "save_ssh_profile", { input: { ...savedDestination, jumpHosts: [first, second] } });
 
     await button(pane(), "Locations for right pane").click();
-    await button(pane(), "FTP").click();
+    await button(pane(), "NetBox").click();
     await row("right", "Production jump route").waitFor();
     await row("right", "Production jump route").click();
     await list("right").press("Enter");

@@ -168,15 +168,12 @@ export const commands = {
   nextChange: { label: "Next difference", key: "F8" },
   folderNameHistory: { label: "Folder name history", key: "Alt+ArrowDown" },
   processSources: { label: "Select Processes in the sources menu", key: "0" },
-  ftpSources: { label: "Select FTP in the sources menu", key: "2" },
+  netboxSources: { label: "Select NetBox in the sources menu", key: "2" },
   smbSources: { label: "Select SMB in the sources menu", key: "3" },
   remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
-  sshSources: { label: "Select SSH in the sources menu", key: "5" },
   ...driveSourceCommands,
-  addFtpProfile: { label: "Add FTP connection", key: "Shift+F4" },
-  editFtpProfile: { label: "Edit FTP connection", key: "F4" },
-  addSshProfile: { label: "Add SSH connection", key: "Shift+F4" },
-  editSshProfile: { label: "Edit SSH connection", key: "F4" },
+  addNetBoxProfile: { label: "Add NetBox connection", key: "Shift+F4" },
+  editNetBoxProfile: { label: "Edit NetBox connection", key: "F4" },
   addSmbProfile: { label: "Add SMB connection", key: "Shift+F4" },
   editSmbProfile: { label: "Edit SMB connection", key: "F4" },
   addRemoteProfile: { label: "Add remote machine", key: "Shift+F4" },
@@ -238,8 +235,7 @@ export function commandScope(command: Command) {
   if (command === "pasteTerminalText" || command === "copyTerminalText") return "terminal";
   if (command === "processContextMenu") return "processPane";
   if (command.endsWith("Sources")) return "sources";
-  if (command === "addFtpProfile" || command === "editFtpProfile") return "ftp";
-  if (command === "addSshProfile" || command === "editSshProfile") return "ssh";
+  if (command === "addNetBoxProfile" || command === "editNetBoxProfile") return "netbox";
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
@@ -262,7 +258,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if ([leftScope, rightScope].includes("processPane") && [leftScope, rightScope].includes("main")) return true;
   const commands = [left, right];
   if (commands.includes("fileBookmarks") && [leftScope, rightScope].some((scope) => scope === "text" || scope === "viewer")) return true;
-  if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["ftp", "ssh", "smb", "remote"].includes(scope))) return true;
+  if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["netbox", "smb", "remote"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
   if ((leftScope === "image" || rightScope === "image") &&
       commands.some((command) => ["viewAsHex", "closeText", "cancelText", "switchDocumentMode", "nextDocument", "previousDocument", "settings"].includes(command))) return true;
@@ -350,7 +346,7 @@ export const maxViewerContentWidth = 2400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
-export const preferenceBindingVersion = 10;
+export const preferenceBindingVersion = 11;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -372,6 +368,21 @@ export function shortcutBindings(preferences: Preferences) {
 }
 
 function readBindings(saved: Record<string, unknown> | undefined, version: number): Bindings {
+  if (saved) {
+    saved = { ...saved };
+    for (const [unified, ftp, ssh, ftpDefault, sshDefault] of [
+      ["netboxSources", "ftpSources", "sshSources", version < 5 ? "1" : "2", "5"],
+      ["addNetBoxProfile", "addFtpProfile", "addSshProfile", "Shift+F4", "Shift+F4"],
+      ["editNetBoxProfile", "editFtpProfile", "editSshProfile", "F4", "F4"],
+    ]) {
+      if (Object.hasOwn(saved, unified)) continue;
+      const customized = (value: unknown, defaultKey: string) => Array.isArray(value)
+        ? value.length !== 1 || value[0] !== defaultKey
+        : typeof value === "string" && value !== defaultKey;
+      if (customized(saved[ftp], ftpDefault)) saved[unified] = saved[ftp];
+      else if (customized(saved[ssh], sshDefault)) saved[unified] = saved[ssh];
+    }
+  }
   if (saved && version < 8) {
     saved = { ...saved };
     for (const [edge, horizontal, boundary] of [["firstRow", "leftRow", "Home"], ["lastRow", "rightRow", "End"]] as const) {
@@ -409,7 +420,6 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
       typeof key === "string" && key && (command !== "zoomFont" || wheelBindings.includes(key)) ? [{ command, key, configured: true }] : []);
     const useSaved = typeof value === "string" && (version > 0 || value !== oldDefaults[command]) &&
       !(command === "settings" && version < 3 && value === (mac ? "Meta+," : "Ctrl+,")) &&
-      !(command === "ftpSources" && version < 5 && value === "1") &&
       !(command === "rename" && version < 4 && !value && saved?.refreshAlternate === "F2");
     const alternate = alternateDefaults[command];
     const alternateValue = alternate && saved?.[alternate.oldCommand];

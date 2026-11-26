@@ -166,28 +166,65 @@ fn safe_argument(text: &str) -> bool {
     !text.contains(['\r', '\n', '\0'])
 }
 
+impl ProfileInput {
+    fn profile(&self) -> Result<Profile> {
+        let label = self.label.trim().to_owned();
+        let host = self
+            .host
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_owned();
+        let username = self.username.trim().to_owned();
+        if label.is_empty()
+            || host.is_empty()
+            || self.port == 0
+            || host.contains(['/', '\\', '@', '?', '#'])
+            || host.chars().any(char::is_whitespace)
+            || !safe_argument(&username)
+            || self
+                .password
+                .as_deref()
+                .is_some_and(|password| !safe_argument(password))
+        {
+            return Err(
+                "Enter a connection name, server host, port, and valid credentials.".to_owned(),
+            );
+        }
+        if self
+            .code_page
+            .is_some_and(|page| codepage::to_encoding_no_replacement(page).is_none())
+        {
+            return Err("Enter a supported Windows code page or use UTF-8.".to_owned());
+        }
+        Ok(Profile {
+            id: self.id.unwrap_or_else(Uuid::new_v4),
+            label,
+            host,
+            port: self.port,
+            username,
+            code_page: self.code_page.filter(|&page| page != 65001),
+        })
+    }
+}
+
+impl Profile {
+    fn same_login(&self, other: &Self) -> bool {
+        self.host == other.host && self.port == other.port && self.username == other.username
+    }
+}
+
 #[tauri::command]
 pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uuid> {
     let path = profiles_path(&app)?;
     blocking(move || {
-        let label = input.label.trim().to_owned();
-        let host = input.host.trim().trim_start_matches('[').trim_end_matches(']').to_owned();
-        let username = input.username.trim().to_owned();
-        if label.is_empty() || host.is_empty() || input.port == 0
-            || host.contains(['/', '\\', '@', '?', '#']) || host.chars().any(char::is_whitespace)
-            || !safe_argument(&username) || input.password.as_deref().is_some_and(|password| !safe_argument(password)) {
-            return Err("Enter a connection name, server host, port, and valid credentials.".to_owned());
-        }
-        if input.code_page.is_some_and(|page| codepage::to_encoding_no_replacement(page).is_none()) {
-            return Err("Enter a supported Windows code page or use UTF-8.".to_owned());
-        }
+        let profile = input.profile()?;
         let _lock = lock_profiles(&path)?;
         let mut saved = load_profiles(&path)?;
         let index = input.id.map(|id| saved.iter().position(|item| item.profile.id == id)
             .ok_or_else(|| "This FTP profile was removed.".to_owned())).transpose()?;
         let previous = index.map(|index| &saved[index]);
-        let mut key = previous.filter(|old| old.profile.host == host && old.profile.port == input.port
-            && old.profile.username == username).and_then(|old| old.credential.clone());
+        let mut key = previous.filter(|old| old.profile.same_login(&profile)).and_then(|old| old.credential.clone());
         let updated_key = if let Some(password) = input.password {
             key = None;
             if password.is_empty() {
@@ -203,11 +240,8 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
             None
         };
         let old_key = previous.and_then(|old| old.credential.clone()).filter(|old| Some(old) != key.as_ref());
-        let id = input.id.unwrap_or_else(Uuid::new_v4);
-        let item = SavedProfile {
-            profile: Profile { id, label, host, port: input.port, username, code_page: input.code_page.filter(|&page| page != 65001) },
-            credential: key,
-        };
+        let id = profile.id;
+        let item = SavedProfile { profile, credential: key };
         if let Some(index) = index { saved[index] = item; } else { saved.push(item); }
         if let Err(error) = persist_profiles(&path, &saved) {
             if let Some(key) = updated_key { delete_credential(&key); }
@@ -241,6 +275,48 @@ pub async fn remove_ftp_profile(id: Uuid, app: AppHandle) -> Result<()> {
 pub struct Connection {
     profile: Profile,
     password: String,
+}
+
+fn read_password(key: Option<&str>) -> Result<String> {
+    Ok(key
+        .map(|key| {
+            credential(key)?.get_password().map_err(|error| {
+                format!("Could not read the FTP password from the system credential store: {error}")
+            })
+        })
+        .transpose()?
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn test_ftp_connection(input: ProfileInput, app: AppHandle) -> Result<()> {
+    let path = profiles_path(&app)?;
+    blocking(move || {
+        let profile = input.profile()?;
+        let password = match (input.password, input.id) {
+            (Some(password), _) => password,
+            (None, Some(id)) => {
+                let _lock = lock_profiles(&path)?;
+                let saved = load_profiles(&path)?
+                    .into_iter()
+                    .find(|item| item.profile.id == id)
+                    .ok_or("This FTP profile was removed.")?;
+                read_password(
+                    saved
+                        .profile
+                        .same_login(&profile)
+                        .then_some(saved.credential.as_deref())
+                        .flatten(),
+                )?
+            }
+            (None, None) => String::new(),
+        };
+        let mut session = Connection { profile, password }.open()?;
+        let directory = parse_path(&session.stream.pwd().map_err(message)?)?;
+        session.list(&directory)?;
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Debug)]
@@ -331,11 +407,11 @@ pub async fn connect_ftp(
     let (connection, segments, listing) = blocking(move || {
         let (profile, password) = {
             let _lock = lock_profiles(&path)?;
-            let item = load_profiles(&path)?.into_iter().find(|item| item.profile.id == id)
+            let item = load_profiles(&path)?
+                .into_iter()
+                .find(|item| item.profile.id == id)
                 .ok_or("This FTP profile was removed.")?;
-            let password = item.credential.as_deref().map(|key| credential(key)?.get_password()
-                .map_err(|error| format!("Could not read the FTP password from the system credential store: {error}")))
-                .transpose()?.unwrap_or_default();
+            let password = read_password(item.credential.as_deref())?;
             (item.profile, password)
         };
         let connection = Arc::new(Connection { profile, password });
@@ -346,7 +422,8 @@ pub async fn connect_ftp(
         };
         let listing = session.list(&segments)?.into_listing();
         Ok((connection, segments, listing))
-    }).await?;
+    })
+    .await?;
     let address = connection.profile.label.clone();
     let origin = file_server_origin("ftp", &connection.profile.host, connection.profile.port, 21);
     let id = state.next.fetch_add(1, Ordering::Relaxed);

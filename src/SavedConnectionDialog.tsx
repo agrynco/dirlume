@@ -12,8 +12,7 @@ import { removeSavedConnection, saveRemoteConnection, saveSmbLocation } from "./
 import { SshProfileDialog } from "./SshDialog";
 
 export const connectionCommands = {
-  ftp: ["addFtpProfile", "editFtpProfile"],
-  ssh: ["addSshProfile", "editSshProfile"],
+  netbox: ["addNetBoxProfile", "editNetBoxProfile"],
   smb: ["addSmbProfile", "editSmbProfile"],
   remote: ["addRemoteProfile", "editRemoteProfile"],
 } as const;
@@ -26,26 +25,26 @@ export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeD
   onSaved: (kind: SavedConnection["kind"], id: string) => void;
   onClose: () => void;
 }) {
-  const [selection, setSelection] = useState<{ kind: "ftp" | "ssh"; draft?: ConnectionDraft }>({ kind: source === "ssh" ? "ssh" : "ftp" });
+  const [selection, setSelection] = useState<{ kind: "ftp" | "ssh"; draft?: ConnectionDraft }>({ kind: "ssh" });
   const [codePage, setCodePage] = useState<number | null>(null);
   const kind = profile?.kind ?? selection.kind;
   useEffect(() => {
-    if (source !== "ftp" || kind !== "ftp") return;
+    if (source !== "netbox" || kind !== "ftp") return;
     let mounted = true;
     void api.ftpWindowsCodePage().then((page) => { if (mounted) setCodePage(page); }).catch(() => {});
     return () => { mounted = false; };
   }, [source, kind]);
 
-  if (source === "ftp" || source === "ssh") {
-    const changeProtocol = source === "ftp" && !profile;
+  if (source === "netbox") {
+    const changeProtocol = !profile;
     return kind === "ftp" ? (
       <FtpProfileDialog profile={profile?.kind === "ftp" ? profile : null} draft={selection.draft} windowsCodePage={codePage}
         onClose={onClose} onSave={async (input) => onSaved("ftp", await api.saveFtpProfile(input))}
-        onUseSftp={changeProtocol ? (draft) => setSelection({ kind: "ssh", draft: { ...draft, port: draft.port === "21" ? "22" : draft.port } }) : undefined} />
+        onUseSftp={changeProtocol ? (draft) => setSelection({ kind: "ssh", draft: { ...draft, port: draft.portEdited ? draft.port : "22" } }) : undefined} />
     ) : (
-      <SshProfileDialog profile={profile?.kind === "ssh" ? profile : null} draft={selection.draft} sftp={source === "ftp"}
+      <SshProfileDialog profile={profile?.kind === "ssh" ? profile : null} draft={selection.draft}
         onClose={onClose} onSave={async (input) => onSaved("ssh", (await api.saveSshProfile(input)).id)}
-        onUseFtp={changeProtocol ? (draft) => setSelection({ kind: "ftp", draft: { ...draft, port: draft.port === "22" ? "21" : draft.port } }) : undefined} />
+        onUseFtp={changeProtocol ? (draft) => setSelection({ kind: "ftp", draft: { ...draft, port: draft.portEdited ? draft.port : "21" } }) : undefined} />
     );
   }
   return <LocationConnectionDialog source={source} profile={profile} remoteProvider={remoteProvider}

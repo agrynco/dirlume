@@ -84,14 +84,11 @@ export async function removeSavedConnection(profile: SavedConnection) {
 export async function connectionEntries(source: ConnectionSource): Promise<Entry[]> {
   let profiles: SavedConnection[];
   switch (source) {
-    case "ftp": {
+    case "netbox": {
       const [ftp, ssh] = await Promise.all([api.ftpProfiles(), api.sshProfiles()]);
       profiles = [...ftp.map((item) => ({ ...item, kind: "ftp" as const })), ...ssh.map((item) => ({ ...item, kind: "ssh" as const }))];
       break;
     }
-    case "ssh":
-      profiles = (await api.sshProfiles()).map((item) => ({ ...item, kind: "ssh" }));
-      break;
     case "smb":
       profiles = readSmbLocations();
       break;
