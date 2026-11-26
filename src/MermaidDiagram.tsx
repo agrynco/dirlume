@@ -1,5 +1,5 @@
 import { errorText, t } from "./i18n";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink, Maximize, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
@@ -60,6 +60,9 @@ export function MermaidDiagram({ source, light, colors, scale }: {
   const [result, setResult] = useState<RenderedDiagram | { error: string } | null>(null);
   const [adjustment, setAdjustment] = useState(0);
   const [windowError, setWindowError] = useState("");
+  const scroll = useRef<HTMLDivElement>(null);
+  const scrollId = useId();
+  const [horizontal, setHorizontal] = useState({ offset: 0, maximum: 0 });
   const background = colors?.["mermaid-node-bg"];
   const text = colors?.["mermaid-node-ink"];
   const border = colors?.["mermaid-node-border"];
@@ -117,6 +120,25 @@ export function MermaidDiagram({ source, light, colors, scale }: {
     }
   }
   const diagram = result && "image" in result ? result : null;
+  useLayoutEffect(() => {
+    const viewport = scroll.current;
+    const image = viewport?.querySelector("img");
+    if (!viewport || !image) return;
+    const measure = () => {
+      const maximum = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      const offset = Math.max(0, Math.min(maximum, Math.round(viewport.scrollLeft)));
+      setHorizontal((current) => current.offset === offset && current.maximum === maximum ? current : { offset, maximum });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(image);
+    viewport.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      viewport.removeEventListener("scroll", measure);
+    };
+  }, [diagram]);
   const inlineScale = scale * zoomStep ** adjustment;
   return <>
     {!result && <p role="status">{t("Rendering diagram…")}</p>}
@@ -134,7 +156,17 @@ export function MermaidDiagram({ source, light, colors, scale }: {
         </Button>
       </figcaption>
       {windowError && <p className="diagram-error" role="alert">{errorText(windowError)}</p>}
-      <div className="mermaid-scroll" tabIndex={0} role="group" aria-label={t("Mermaid diagram")}>
+      {horizontal.maximum > 0 && <label className="mermaid-pan">
+        <span>{t("Horizontal scroll")}</span>
+        <input type="range" dir="ltr" min={0} max={horizontal.maximum} value={horizontal.offset} aria-controls={scrollId}
+          onChange={(event) => {
+            const viewport = scroll.current;
+            if (!viewport) return;
+            viewport.scrollLeft = event.currentTarget.valueAsNumber;
+            setHorizontal({ ...horizontal, offset: Math.round(viewport.scrollLeft) });
+          }} />
+      </label>}
+      <div ref={scroll} id={scrollId} dir="ltr" className="mermaid-scroll" tabIndex={0} role="group" aria-label={t("Mermaid diagram")}>
         <img className="mermaid-diagram" alt={t("Mermaid diagram")} src={diagram.image}
           width={diagram.width} height={diagram.height} style={{ width: diagram.width && diagram.width * inlineScale }}
           onLoad={({ currentTarget: image }) => {

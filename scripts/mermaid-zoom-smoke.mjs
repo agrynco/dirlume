@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-const wide = ["sequenceDiagram", ...Array.from({ length: 12 }, (_, i) => `participant P${i} as Participant ${i}`), "P0->>P11: Wide diagram"];
+const wide = ["sequenceDiagram",
+  ...Array.from({ length: 12 }, (_, i) => `participant P${i} as Participant ${i}`),
+  ...Array.from({ length: 32 }, (_, i) => `P0->>P11: Wide diagram message ${i + 1}`),
+];
 const tall = ["flowchart TD", ...Array.from({ length: 24 }, (_, i) => `N${i}[Step ${i}] --> N${i + 1}`)];
 const mermaid = (lines) => ["```mermaid", ...lines, "```", ""].join("\n");
 export const diagramFixture = ["# Diagram zoom", "", mermaid(wide), mermaid(tall), mermaid(["Not a Mermaid diagram"])].join("\n");
@@ -32,8 +35,19 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
     near(height, originalHeight);
   }
   assert.equal(await images.first().evaluate((image) => image.src.startsWith("data:image/svg+xml")), true);
+  const slider = surface.getByRole("slider", { name: "Horizontal scroll", exact: true }).first();
+  const verticalPosition = await images.first().evaluate((image) => {
+    const surface = image.closest(".markdown");
+    surface.scrollTop += image.getBoundingClientRect().top - surface.getBoundingClientRect().top + image.clientHeight / 2;
+    return surface.scrollTop;
+  });
+  assert.ok(await slider.evaluate((input) => {
+    const { top, bottom } = input.getBoundingClientRect();
+    const surface = input.closest(".markdown").getBoundingClientRect();
+    return top >= surface.top && bottom <= surface.bottom;
+  }), "Horizontal scrolling remains visible midway through a tall diagram.");
+  await slider.press("End");
   const rightEdge = await images.first().locator("..").evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
     return {
       scrollLeft: element.scrollLeft,
       imageRight: element.querySelector("img").getBoundingClientRect().right,
@@ -41,6 +55,9 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
     };
   });
   assert.ok(rightEdge.scrollLeft > 0 && rightEdge.imageRight <= rightEdge.visibleRight + 1, JSON.stringify(rightEdge));
+  await slider.press("Home");
+  assert.equal(await images.first().locator("..").evaluate((element) => element.scrollLeft), 0);
+  assert.equal(await surface.evaluate((element) => element.scrollTop), verticalPosition);
   assert.ok(await images.nth(1).evaluate((image) => {
     const surface = image.closest(".markdown");
     surface.scrollTop = surface.scrollHeight;
