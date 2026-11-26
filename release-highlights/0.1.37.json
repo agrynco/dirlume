@@ -3,6 +3,7 @@
   "highlights": [
     "Read and use the Distinguish left and right Ctrl checkbox when adding or replacing a keyboard shortcut, including in a compact Options window.",
     "Inline Mermaid controls stay subtle until you point at the toolbar or focus a control.",
+    "Wide Mermaid diagrams fit the reading area when Markdown opens, even with a larger saved text size.",
     "Closing a text file returns to the file pane or document that opened it, including after switching between Viewer and Editor."
   ]
 }

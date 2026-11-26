@@ -261,6 +261,18 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
   await wheel(images.first(), "Control");
   await wheel(images.first(), "Alt");
   assert.deepEqual(await measure(), disabled);
+
+  if (reopen) {
+    await reopen();
+    await images.nth(1).waitFor();
+    const reopened = await measure();
+    assert.equal(reopened.font, disabled.font, "The larger Markdown font is saved.");
+    assert.ok(reopened.font > initial.font);
+    for (const { width, availableWidth, originalWidth } of reopened.diagrams) {
+      near(width, Math.min(availableWidth, originalWidth));
+    }
+    assert.equal(await slider.count(), 0);
+  }
 }
 
 async function browserSmoke() {
