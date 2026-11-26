@@ -7,6 +7,7 @@ const storageKey = "dirlume.preferences.v1";
 
 async function testProfiles(browser, userAgent) {
   const page = await browser.newPage({ viewport: { width: 1150, height: 750 }, userAgent });
+  const parentShortcut = /Macintosh/.test(userAgent) ? "⌃PageUp" : "Ctrl+PageUp";
   try {
     page.setDefaultTimeout(8000);
     await page.route("http://dirlume.test/**", (route) => {
@@ -79,7 +80,7 @@ async function testProfiles(browser, userAgent) {
     await query.fill("");
     await choose("Far Manager");
     assert.equal(await activeProfile.inputValue(), "far");
-    assert.match(await options.locator(".profile-shortcuts").innerText(), /Ctrl\+PageUp/);
+    assert.ok((await options.locator(".profile-shortcuts").innerText()).includes(parentShortcut));
     assert.equal((await preferences()).layout, "standard");
     await page.keyboard.press("Escape");
     await options.waitFor({ state: "hidden" });
@@ -108,7 +109,7 @@ async function testProfiles(browser, userAgent) {
     await saveName("Duplicate profile", "My layout");
     await choose("My layout");
     await shortcuts();
-    await button(options, "Remove Ctrl+PageUp from Parent folder").click();
+    await button(options, `Remove ${parentShortcut} from Parent folder`).click();
     await profiles();
     await options.getByText("Modified", { exact: true }).waitFor();
     await button(options, "Update profile").click();
@@ -182,8 +183,9 @@ async function testProfiles(browser, userAgent) {
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
-  await testProfiles(browser);
-  await testProfiles(browser, process.platform === "win32" ? "Mozilla/5.0 (X11; Linux x86_64)" : "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+  await testProfiles(browser, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+  await testProfiles(browser, "Mozilla/5.0 (X11; Linux x86_64)");
+  await testProfiles(browser, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
   console.log("Verified pending apply, presets, custom profiles, modified settings, independent shortcuts, restart, and missing references.");
 } finally {
   await browser.close();
