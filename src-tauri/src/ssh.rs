@@ -1,5 +1,6 @@
 pub(crate) mod profiles;
 mod session;
+mod standard_rename;
 mod sudo;
 mod terminal;
 #[cfg(test)]
@@ -308,22 +309,26 @@ impl Drop for AuthenticatedRoute {
     }
 }
 
+async fn sftp_channel(client: &AuthenticatedRoute) -> Result<russh::Channel<client::Msg>> {
+    let mut channel = client.channel_open_session().await.map_err(message)?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(message)?;
+    loop {
+        match channel.wait().await {
+            Some(ChannelMsg::Success) => return Ok(channel),
+            Some(ChannelMsg::Failure | ChannelMsg::Close | ChannelMsg::Eof) | None => {
+                return Err("The SSH server did not start SFTP.".to_owned())
+            }
+            _ => {}
+        }
+    }
+}
+
 fn open_sftp(client: AuthenticatedRoute) -> Result<Session> {
     let sftp = client.1.wait(async {
-        let mut channel = client.channel_open_session().await.map_err(message)?;
-        channel
-            .request_subsystem(true, "sftp")
-            .await
-            .map_err(message)?;
-        loop {
-            match channel.wait().await {
-                Some(ChannelMsg::Success) => break,
-                Some(ChannelMsg::Failure | ChannelMsg::Close | ChannelMsg::Eof) | None => {
-                    return Err("The SSH server did not start SFTP.".to_owned())
-                }
-                _ => {}
-            }
-        }
+        let channel = sftp_channel(&client).await?;
         let (reader, writer) = tokio::io::split(channel.into_stream());
         Sftp::new(writer, reader, Default::default())
             .await
@@ -383,6 +388,7 @@ impl Connection {
             .map(|session| {
                 session
                     .with_download_timestamps(self.profile.environment.preserve_download_timestamps)
+                    .with_recycle(self.profile.environment.recycle_bin.clone(), false)
             })
             .map_err(|error| route_error(&self.profile.destination.settings.endpoint, None, error))
     }
@@ -895,8 +901,17 @@ pub async fn delete_ssh(
     id: u32,
     segments: Vec<String>,
     recursive: bool,
+    recycle: Option<bool>,
     state: State<'_, SshState>,
 ) -> Result<()> {
     let connection = state.connection(id)?;
-    blocking(move || connection.open()?.remove(&segments, recursive)).await
+    blocking(move || {
+        let mut session = connection.open()?;
+        if recycle.unwrap_or(false) {
+            session.recycle(&segments)
+        } else {
+            session.remove(&segments, recursive)
+        }
+    })
+    .await
 }

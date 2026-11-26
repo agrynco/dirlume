@@ -149,6 +149,11 @@ type ActionModal = (
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[]; relativePaths?: string[][]; searchSide?: Side }
 ) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace };
 
+type RemoteDeletionProgress = {
+  signal: AbortSignal;
+  completed: (count: number) => void;
+};
+
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
@@ -440,7 +445,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
-  const permanentDelete = Boolean(fileServer || smbHost(local));
+  const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
+  const permanentDelete = Boolean(fileServer && !remoteTrash || smbHost(local));
   const canTransfer = Boolean(currentItem);
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
@@ -2007,10 +2013,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     requestAnimationFrame(() => focus(side));
   }
 
-  async function batch(items: string[], action: (name: string) => Promise<void>) {
+  async function batch(items: string[], action: (name: string, index: number) => Promise<void>, progress?: RemoteDeletionProgress) {
     for (const [index, name] of items.entries()) {
+      if (progress?.signal.aborted) break;
       try {
-        await action(name);
+        await action(name, index);
+        progress?.completed(index + 1);
       } catch (error) {
         throw new Error(`${name} · ${errorText(describeError(error))}${index > 0 ? ` (${t("{0} of {1} completed", index, items.length)})` : ""}`, { cause: error });
       }
@@ -2098,7 +2106,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const remote = place.kind === "ftp" || place.kind === "ssh" ? place : undefined;
     const archive = place.kind === "archive" ? place : undefined;
     setModal({
-      kind: remote || archive || smbHost(place) ? "delete" : command,
+      kind: remote && !remote.environment?.recycleBin?.keepDeleted || archive || smbHost(place) ? "delete" : command,
       path: placePath(place), remote, archive, names: entries.map(({ name }) => name),
       directories: entries.filter(({ directory, link }) => directory && !link).map(({ name }) => name),
       relativePaths: searchSide ? entries.map(({ name }) => name.split("/")) :
@@ -3252,7 +3260,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ...(windowsClient ? [menuCommand("lockingProcesses", !!previewSide || !filesAvailable || currentItem?.place.kind !== "local" || busy)] : []),
       menuCommand("copyClipboard", !filesAvailable || currentItem?.place.kind !== "local"),
       menuCommand("pasteClipboard", !filesAvailable || !local || !!pane.search),
-      ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local || !!pane.search && !localSearchRoot(pane) || !current || busy)]),
+      ...(permanentDelete || archive ? [] : [menuCommand("delete", !filesAvailable || !local && !remoteTrash ||
+        !!pane.search && !localSearchRoot(pane) || !current || busy)]),
     ] },
     { label: "Commands", items: [
       { ...commandWithIcon(ScanEye, "quickView", !canToggleQuickView), checked: quickViewSource !== null },
@@ -3827,6 +3836,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
+            {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
+            </>}
             {item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               void copyClipboard(side, entry, !!entry && state.marked.includes(entry.name));
@@ -3931,7 +3944,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
-          hasNonemptyFolders={modal.remote && "names" in modal ? async () => {
+          hasNonemptyFolders={modal.remote && modal.kind === "delete" ? async () => {
             const remote = modal.remote!;
             const list = remote.kind === "ssh" ? api.listSsh : api.listFtp;
             for (const name of modal.directories ?? []) {
@@ -3940,7 +3953,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             }
             return false;
           } : undefined}
-          onSubmit={async (operation, recursive) => {
+          onSubmit={async (operation, recursive, progress) => {
           const remote = modal.remote;
           if ("names" in modal && modal.archive) {
             const archive = modal.archive;
@@ -3948,17 +3961,45 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             refresh("left");
             refresh("right");
           } else if ("names" in modal && remote) {
+            const completed: string[][] = [];
             try {
               const remove = remote.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
-              await batch(modal.names, (name) => remove(remote.id, [...remote.segments, name], recursive && (modal.directories?.includes(name) ?? false)));
+              await batch(modal.names, async (name, index) => {
+                const segments = [...remote.segments, ...(modal.relativePaths?.[index] ?? [name])];
+                await remove(remote.id, segments, recursive && (modal.directories?.includes(name) ?? false), modal.kind === "recycle");
+                completed.push(segments);
+              }, progress);
+              if (progress?.signal.aborted) {
+                setStatus({ text: t("{0} of {1} completed", completed.length, modal.names.length) });
+              } else if (modal.kind === "recycle") {
+                setStatus({ text: t("Moved {0} to the remote recycle bin.", countText(completed.length, "item")) });
+              }
             } catch (error) {
               setStatus({ text: describeError(error), error: true });
               setModal(null);
               return;
             } finally {
               invalidateDirectories({ kind: remote.kind, id: remote.profileId });
-              refresh("left");
-              refresh("right");
+              for (const side of ["left", "right"] as const) {
+                const place = latest.current[side].place;
+                if (!isFileServer(place) || place.kind !== remote.kind || place.profileId !== remote.profileId) {
+                  refresh(side);
+                  continue;
+                }
+                const removed = completed.find((segments) => segments.every((segment, index) => place.segments[index] === segment));
+                if (removed) {
+                  await load(side, { ...place, segments: removed.slice(0, -1) }, "push");
+                  continue;
+                }
+                const names = new Set(completed.flatMap((segments) =>
+                  segments.length === place.segments.length + 1 && place.segments.every((segment, index) => segments[index] === segment)
+                    ? [segments[segments.length - 1]] : []));
+                if (names.size) updatePane(side, (current) => current.place === place
+                  ? applyListing(current, place, { entries: current.entries.filter(({ name }) => !names.has(name)), omitted: current.omitted }, "refresh")
+                  : current);
+                // Supersede stale work and avoid opening both FTP data channels at once.
+                await load(side, place, "refresh");
+              }
             }
           } else if ("names" in modal) {
             setModal({ kind: "deletion", searchSide: modal.searchSide, deletion: { directory: modal.path, names: modal.names,
@@ -4057,7 +4098,7 @@ function CommandHistory({ commands, onChoose, onClose }: {
 function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   modal: ActionModal;
   onClose: () => void;
-  onSubmit: (operation: Operation | undefined, recursive: boolean) => Promise<void>;
+  onSubmit: (operation: Operation | undefined, recursive: boolean, progress?: RemoteDeletionProgress) => Promise<void>;
   hasNonemptyFolders?: () => Promise<boolean>;
 }) {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
@@ -4066,10 +4107,14 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
+  const [completed, setCompleted] = useState(0);
+  const [cancelingRemote, setCancelingRemote] = useState(false);
+  const cancelRemote = useRef<AbortController>(null);
   const archiveChange = useArchiveChange();
   const renameInArchive = modal.kind === "rename" && modal.archive;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
-  const title = t(titles[modal.kind]);
+  const remoteRecycle = modal.kind === "recycle" && !!modal.remote;
+  const title = t(remoteRecycle ? "Move to remote recycle bin" : titles[modal.kind]);
   const removing = "names" in modal;
   const permanent = modal.kind === "delete";
 
@@ -4078,6 +4123,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     if (waiting) return;
     setWaiting(true);
     setError("");
+    const controller = remoteRecycle ? new AbortController() : null;
+    cancelRemote.current = controller;
+    setCancelingRemote(false);
+    setCompleted(0);
     try {
       if (hasNonemptyFolders && !recursive && await hasNonemptyFolders()) {
         setRecursive(true);
@@ -4087,17 +4136,23 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
       }
       await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
-        modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive);
+        modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive,
+        controller ? { signal: controller.signal, completed: setCompleted } : undefined);
     } catch (error) {
       setError(describeError(error));
     } finally {
       setWaiting(false);
+      cancelRemote.current = null;
     }
   }
 
   function close() {
     if (!waiting) onClose();
     else if (renameInArchive) archiveChange.cancel();
+    else if (cancelRemote.current) {
+      cancelRemote.current.abort();
+      setCancelingRemote(true);
+    }
   }
 
   return (
@@ -4112,11 +4167,12 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
               <div>
                 <p>{recursive ? t(modal.remote?.kind === "ssh" ? "Permanently delete the selected SSH folders and all their contents?" :
                   "Permanently delete the selected FTP folders and all their contents?") :
-                  <Message text={permanent ? "Permanently delete {0}?" : "Move {0} to Trash?"}>
+                  <Message text={permanent ? "Permanently delete {0}?" : remoteRecycle ? "Move {0} to the remote recycle bin?" : "Move {0} to Trash?"}>
                     <strong>{modal.names.length === 1 ? modal.names[0] : countText(modal.names.length, "item")}</strong>
                   </Message>}</p>
                 {permanent && <p className="permanent-delete-note">{t(modal.archive ?
                   "These items will be permanently deleted from the archive." : "This action cannot be undone.")}</p>}
+                {remoteRecycle && <p dir="auto">{modal.remote?.environment?.recycleBin?.folder}</p>}
               </div>
             </div>
             : <label className="field">{t("Name")}
@@ -4131,6 +4187,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
           </label>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {renameInArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
+          {remoteRecycle && removing && waiting && <>
+            <progress aria-label={t("Moving to the remote recycle bin")} max={modal.names.length} value={completed} />
+            <p role="status">{t("{0} of {1} completed", completed, modal.names.length)}</p>
+          </>}
           {!modal.remote && !modal.archive && windowsClient && isPermissionError(error) &&
             <ElevationButton directory={modal.path} selected={modal.kind === "rename" ? modal.name : undefined} />}
           {!modal.remote && !modal.archive && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
@@ -4139,7 +4199,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={close}
-            disabled={waiting && (!renameInArchive || archiveChange.canceling)}>{t(archiveChange.canceling ? "Canceling…" : "Cancel")}</Button>
+            disabled={waiting && (remoteRecycle ? cancelingRemote : !renameInArchive || archiveChange.canceling)}>
+            {t(archiveChange.canceling || cancelingRemote ? "Canceling…" : "Cancel")}
+          </Button>
           <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
             disabled={waiting || (!removing && (!name || name === modal.name && modal.kind === "rename"))}>
             {waiting ? t("Working…") : recursive ? t("Delete contents") : modal.kind === "newFile" ? t("Create") : title}

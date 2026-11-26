@@ -65,7 +65,8 @@ impl Access {
             connection.authenticated_client_with_cancel(stop)?,
             password,
             read_only,
-        )?;
+        )?
+        .with_recycle(connection.profile.environment.recycle_bin.clone(), true);
         let result = operation(&mut session)?;
         session.set_cancel(None);
         let start_timer = state.is_none();
