@@ -1095,7 +1095,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   grid-template-columns: fit-content(42%) minmax(0, 1fr) fit-content(38%) auto;
   align-items: center;
 }
-.document-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.document-path { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
 .document-path h2 { display: flex; }
 .document-directory, .document-filename { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .document-filename { flex-shrink: 0; max-width: 100%; }
