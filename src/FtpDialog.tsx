@@ -9,6 +9,7 @@ import { defaultDirectoryPreferences } from "./netboxDirectories";
 import { defaultEnvironmentPreferences, NetBoxEnvironmentPage } from "./NetBoxEnvironmentPage";
 import { defaultConnectionPreferences, NetBoxConnectionPage } from "./NetBoxConnectionPage";
 import { defaultFtpOptions, NetBoxFtpPage } from "./NetBoxFtpPage";
+import { NetBoxProxyPage, proxyDraft, proxyInput } from "./NetBoxProxyPage";
 
 export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, bindings, onSave, onClose }: {
   profile: FtpProfile | null;
@@ -34,6 +35,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
   const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
   const [environment, setEnvironment] = useState(profile?.environment ?? draft?.environment ?? defaultEnvironmentPreferences);
   const [connectionOptions, setConnectionOptions] = useState(profile?.connectionOptions ?? draft?.connectionOptions ?? defaultConnectionPreferences);
+  const [proxy, setProxy] = useState(() => draft?.proxy ?? proxyDraft(profile?.proxy));
   const [working, setWorking] = useState<"save" | "test">();
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
@@ -57,6 +59,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
         directories: { ...directories, resolveLinks: false },
         environment,
         connectionOptions,
+        proxy: proxyInput(proxy),
       };
       if (action === "save") await onSave(input);
       else {
@@ -99,10 +102,12 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
       onChange={(settings) => { setDirectories(settings); change(); }} />,
       ftp: <NetBoxFtpPage value={ftpOptions} onChange={(settings) => { setFtpOptions(settings); change(); }} />,
       connection: <NetBoxConnectionPage value={connectionOptions} ftp
-        onChange={(settings) => { setConnectionOptions(settings); change(); }} /> }}
+        onChange={(settings) => { setConnectionOptions(settings); change(); }} />,
+      proxy: <NetBoxProxyPage value={proxy} saved={profile?.proxy} activeFtp={ftpOptions.activeMode}
+        onChange={(settings) => { setProxy(settings); change(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t(encryption === "plain" ? "FTP connection successful." : "FTPS connection successful.")}</p> : undefined}
-    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions, ftpEncryption: encryption, ftpOptions }))}>
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions, proxy, ftpEncryption: encryption, ftpOptions }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
           <label className="field">{t("Encryption")}
             <select aria-label={t("Encryption")} value={encryption} onChange={({ target }) => {

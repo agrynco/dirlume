@@ -50,12 +50,17 @@ impl Drop for Fixture {
 
 fn route(input: Value, approved: &[HostVerification], pins: &[HostKey]) -> Result<RouteHandshake> {
     let input: ProfileInput = serde_json::from_value(input).expect("decode profile");
-    let mut hosts = input.test_route(&Config::default())?;
+    let config = Config::default();
+    let proxy = input.proxy_route(&config)?;
+    let mut hosts = input.test_route(&config)?;
     open_route(
         hosts.iter_mut().map(RouteHost::Draft).collect(),
         |endpoint| stored_key(pins, endpoint),
         approved,
-        RouteOptions::default(),
+        RouteOptions {
+            proxy,
+            ..RouteOptions::default()
+        },
     )
 }
 
@@ -211,6 +216,10 @@ fn opens_a_two_hop_sftp_route() {
     let mut input = hosts[2].clone();
     input["label"] = json!("Production");
     input["jumpHosts"] = json!([hosts[0], hosts[1]]);
+    let proxy = proxy::fixture::Proxy::start(proxy::Mode::Socks5);
+    input["proxy"] = proxy.draft();
+    input["proxy"]["username"] = json!("");
+    input["proxy"].as_object_mut().unwrap().remove("password");
 
     let mut approvals = Vec::new();
     for host in hosts {
@@ -227,6 +236,11 @@ fn opens_a_two_hop_sftp_route() {
         approvals.push(challenge);
     }
     fixture.wait_for_idle();
+    assert!(proxy
+        .requests()
+        .iter()
+        .all(|(_, port)| u64::from(*port) == hosts[0]["port"].as_u64().unwrap()));
+    assert!(!proxy.requests().is_empty());
 
     let (client, keys) = route(input.clone(), &approvals, &[])
         .expect("verify the entire route")

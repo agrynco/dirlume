@@ -5,6 +5,7 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { HistoryField } from "./HistoryField";
 import { t } from "./i18n";
+import type { ProxyDraft } from "./NetBoxProxyPage";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 
 export type ConnectionDraft = {
@@ -13,6 +14,7 @@ export type ConnectionDraft = {
   connectionOptions?: ConnectionPreferences;
   ftpEncryption?: FtpEncryption;
   ftpOptions?: FtpOptions;
+  proxy?: ProxyDraft;
 };
 
 const pageLabels = {
