@@ -40,7 +40,7 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
       await waitFor("the refresh tooltip", () => document.getElementById("dirlume-tooltip")?.textContent === expected);
     } else {
       await new Promise((resolve) => setTimeout(resolve, 525));
-      if (document.getElementById("dirlume-tooltip")) throw new Error("The visible SSH label and shortcut showed a redundant tooltip.");
+      if (document.getElementById("dirlume-tooltip")) throw new Error("The visible NetBox label and shortcut showed a redundant tooltip.");
     }
     pointer("pointerout");
   }
@@ -312,9 +312,9 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
       await checkTooltip(refresh, "Refresh folder");
       const locations = document.querySelector("#left-pane .location-trigger");
       locations.click();
-      const ssh = await waitFor("the SSH location shortcut", () => [...document.querySelectorAll("#left-pane .location-source-group button")]
-        .find((button) => button.dataset.tooltipShortcut === "5" && button.dataset.tooltipAction === "SSH"));
-      await checkTooltip(ssh);
+      const netbox = await waitFor("the NetBox location shortcut", () => [...document.querySelectorAll("#left-pane .location-source-group button")]
+        .find((button) => button.dataset.tooltipShortcut === "2" && button.dataset.tooltipAction === "NetBox"));
+      await checkTooltip(netbox);
       locations.click();
       await checkHeaderMenus();
       await checkPanelModes();
