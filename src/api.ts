@@ -175,6 +175,13 @@ export interface EnvironmentPreferences {
   serverOffsetMinutes: number;
   daylightSaving: "atTimestamp" | "currentOffset";
   preserveDownloadTimestamps: boolean;
+  recycleBin?: RemoteRecyclePreferences;
+}
+
+export interface RemoteRecyclePreferences {
+  folder: string;
+  keepDeleted: boolean;
+  keepOverwritten: boolean;
 }
 
 export interface FtpProfile {
@@ -604,10 +611,11 @@ export const api = {
   listSsh: (id: number, segments: string[], sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal) =>
     netBoxRequest(signal, (request) =>
       invoke<Listing & { elevated: boolean; segments?: string[] }>("list_ssh", { id, segments, sudoPassword, reuseSudo, request })),
-  deleteSsh: (id: number, segments: string[], recursive: boolean) => invoke<void>("delete_ssh", { id, segments, recursive }),
+  deleteSsh: (id: number, segments: string[], recursive: boolean, recycle = false) =>
+    invoke<void>("delete_ssh", { id, segments, recursive, recycle }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
-  deleteFtp: (id: number, segments: string[], recursive: boolean) =>
-    invoke<void>("delete_ftp", { id, segments, recursive }),
+  deleteFtp: (id: number, segments: string[], recursive: boolean, recycle = false) =>
+    invoke<void>("delete_ftp", { id, segments, recursive, recycle }),
   readFtpText: (id: number, segments: string[]) => invoke<TextDocument>("read_ftp_text", { id, segments }),
   readFtpBytes: (id: number, segments: string[], offset: number) =>
     invoke<BytePage>("read_ftp_bytes", { id, segments, offset }),

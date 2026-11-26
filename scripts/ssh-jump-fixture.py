@@ -148,7 +148,31 @@ class Files(paramiko.SFTPServerInterface):
             return paramiko.SFTPServer.convert_errno(error.errno)
         return paramiko.SFTP_OK
 
-    rename = posix_rename
+    def rename(self, old, new):
+        source, target = self.path(old), self.path(new)
+        if source.name.startswith(".dirlume-") and source.suffix == ".part":
+            if target.name == "restore-on-failure.txt":
+                return paramiko.SFTP_FAILURE
+            if target.name == "concurrent-arrival.txt":
+                target.write_bytes(b"concurrent arrival")
+                return paramiko.SFTP_FAILURE
+        if target.exists() or target.is_symlink():
+            return paramiko.SFTP_FAILURE
+        return self.posix_rename(old, new)
+
+    def mkdir(self, path, attributes):
+        try:
+            self.path(path).mkdir(mode=attributes.st_mode or 0o700)
+        except OSError as error:
+            return paramiko.SFTPServer.convert_errno(error.errno)
+        return paramiko.SFTP_OK
+
+    def rmdir(self, path):
+        try:
+            self.path(path).rmdir()
+        except OSError as error:
+            return paramiko.SFTPServer.convert_errno(error.errno)
+        return paramiko.SFTP_OK
 
     def remove(self, path):
         try:

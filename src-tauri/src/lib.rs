@@ -51,6 +51,8 @@ mod portable;
 mod processes;
 mod protocol;
 #[cfg(feature = "desktop")]
+mod remote_recycle;
+#[cfg(feature = "desktop")]
 mod remote_transfer;
 #[cfg(feature = "desktop")]
 mod screen_color;

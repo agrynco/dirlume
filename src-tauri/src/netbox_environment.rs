@@ -6,7 +6,7 @@ use jiff::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::desktop::Result;
+use crate::{desktop::Result, remote_recycle::RecyclePreferences};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +41,8 @@ pub(crate) struct EnvironmentPreferences {
     server_offset_minutes: i16,
     daylight_saving: DaylightSaving,
     pub(crate) preserve_download_timestamps: bool,
+    #[serde(skip_serializing_if = "RecyclePreferences::is_default")]
+    pub(crate) recycle_bin: RecyclePreferences,
 }
 
 impl Default for EnvironmentPreferences {
@@ -51,6 +53,7 @@ impl Default for EnvironmentPreferences {
             server_offset_minutes: 0,
             daylight_saving: DaylightSaving::AtTimestamp,
             preserve_download_timestamps: true,
+            recycle_bin: RecyclePreferences::default(),
         }
     }
 }
@@ -60,10 +63,11 @@ impl EnvironmentPreferences {
         self == &Self::default()
     }
 
-    pub(crate) fn validated(self) -> Result<Self> {
+    pub(crate) fn validated(mut self) -> Result<Self> {
         if !(-1439..=1439).contains(&self.server_offset_minutes) {
             return Err("Enter a server time offset between −1439 and 1439 minutes.".to_owned());
         }
+        self.recycle_bin = self.recycle_bin.normalized()?;
         Ok(self)
     }
 

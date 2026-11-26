@@ -9,6 +9,7 @@ use std::{
 use serde_json::{json, Value};
 
 use super::*;
+use crate::remote_recycle::RecyclePreferences;
 use crate::remote_transfer::{DownloadSession, UploadSession};
 
 struct Fixture {
@@ -56,6 +57,99 @@ fn route(input: Value, approved: &[HostVerification], pins: &[HostKey]) -> Resul
         approved,
         RouteOptions::default(),
     )
+}
+
+fn recovery_versions(root: &std::path::Path, path: &str) -> Vec<String> {
+    let mut files: Vec<_> = fs::read_dir(root.join("recycle"))
+        .unwrap()
+        .filter_map(|entry| fs::read_to_string(entry.unwrap().path().join(path)).ok())
+        .collect();
+    files.sort();
+    files
+}
+
+fn verify_recycle_bin(session: Session, root: &std::path::Path) {
+    fs::create_dir(root.join("recycle")).unwrap();
+    let mut session = session.with_recycle(
+        RecyclePreferences {
+            folder: "/recycle".to_owned(),
+            keep_deleted: true,
+            keep_overwritten: true,
+        },
+        false,
+    );
+    for contents in ["first", "second"] {
+        fs::write(root.join("deleted.txt"), contents).unwrap();
+        session.recycle(&["deleted.txt".to_owned()]).unwrap();
+        assert!(!root.join("deleted.txt").exists());
+    }
+    assert_eq!(recovery_versions(root, "deleted.txt"), ["first", "second"]);
+    fs::create_dir(root.join("nested")).unwrap();
+    fs::write(root.join("nested/report.txt"), "folder contents").unwrap();
+    session.recycle(&["nested".to_owned()]).unwrap();
+    assert!(!root.join("nested").exists());
+    assert_eq!(
+        recovery_versions(root, "nested/report.txt"),
+        ["folder contents"]
+    );
+    assert!(session.recycle(&["recycle".to_owned()]).is_err());
+
+    for name in [
+        "overwrite.txt",
+        "restore-on-failure.txt",
+        "concurrent-arrival.txt",
+        "canceled.txt",
+    ] {
+        let target = [name.to_owned()];
+        fs::write(root.join(name), "previous version").unwrap();
+        let stage = session
+            .upload_to_stage(&target, &mut Cursor::new(b"new version"), |_| Ok(()))
+            .unwrap();
+        if name == "canceled.txt" {
+            let stop = CancellationToken::new();
+            stop.cancel();
+            session.set_cancel(Some(stop));
+        }
+        let result = session.rename_stage(&stage, &target, true);
+        session.set_cancel(None);
+        session.remove_stage(&stage);
+        let contents = fs::read_to_string(root.join(name)).unwrap();
+        match name {
+            "overwrite.txt" => {
+                result.unwrap();
+                assert_eq!(contents, "new version");
+                assert_eq!(recovery_versions(root, name), ["previous version"]);
+            }
+            "restore-on-failure.txt" => {
+                assert!(result.unwrap_err().contains("previous file was restored"));
+                assert_eq!(contents, "previous version");
+                assert!(recovery_versions(root, name).is_empty());
+            }
+            "concurrent-arrival.txt" => {
+                assert!(result.unwrap_err().contains("/recycle/"));
+                assert_eq!(contents, "concurrent arrival");
+                assert_eq!(recovery_versions(root, name), ["previous version"]);
+            }
+            _ => {
+                assert!(result.is_err());
+                assert_eq!(contents, "previous version");
+                assert!(recovery_versions(root, name).is_empty());
+            }
+        }
+    }
+    let mut session = session.with_recycle(
+        RecyclePreferences {
+            folder: "/missing-bin".to_owned(),
+            keep_deleted: true,
+            keep_overwritten: true,
+        },
+        false,
+    );
+    assert!(session.recycle(&["canceled.txt".to_owned()]).is_err());
+    assert_eq!(
+        fs::read_to_string(root.join("canceled.txt")).unwrap(),
+        "previous version"
+    );
 }
 
 #[test]
@@ -138,6 +232,31 @@ fn opens_a_two_hop_sftp_route() {
         .expect("verify the entire route")
         .ok()
         .expect("accept all three explicit approvals");
+    fs::write(root.join("rename-from.txt"), "source").unwrap();
+    fs::write(root.join("rename-taken.txt"), "unrelated").unwrap();
+    assert!(client
+        .1
+        .wait(standard_rename::run(
+            &client,
+            "/rename-from.txt",
+            "/rename-taken.txt"
+        ))
+        .is_err());
+    assert_eq!(
+        fs::read(root.join("rename-taken.txt")).unwrap(),
+        b"unrelated"
+    );
+    client
+        .1
+        .wait(standard_rename::run(
+            &client,
+            "/rename-from.txt",
+            "/rename-to.txt",
+        ))
+        .unwrap();
+    assert_eq!(fs::read(root.join("rename-to.txt")).unwrap(), b"source");
+    fs::remove_file(root.join("rename-taken.txt")).unwrap();
+    fs::remove_file(root.join("rename-to.txt")).unwrap();
     let mut session = open_sftp(client).expect("open SFTP over the route");
     let directory = session
         .initial_directory()
@@ -164,7 +283,7 @@ fn opens_a_two_hop_sftp_route() {
         b"upload through the route"
     );
     crate::desktop::verify_ssh_moves(&mut session, temp.path(), &root);
-    drop(session);
+    verify_recycle_bin(session, &root);
 
     let (client, _) = route(input.clone(), &[], &keys)
         .expect("reopen the pinned route")

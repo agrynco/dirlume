@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { EnvironmentPreferences } from "./api";
+import type { EnvironmentPreferences, RemoteRecyclePreferences } from "./api";
 import { t } from "./i18n";
 
 export const defaultEnvironmentPreferences: EnvironmentPreferences = {
@@ -13,8 +13,12 @@ export function NetBoxEnvironmentPage({ value, onChange, ftpEncoding }: {
   ftpEncoding?: ReactNode;
 }) {
   const [offset, setOffset] = useState(String(value.serverOffsetMinutes));
+  const recycleBin = value.recycleBin ?? { folder: "", keepDeleted: false, keepOverwritten: false };
   function change(update: Partial<EnvironmentPreferences>) {
     onChange({ ...value, ...update });
+  }
+  function changeRecycle(update: Partial<RemoteRecyclePreferences>) {
+    change({ recycleBin: { ...recycleBin, ...update } });
   }
 
   return <>
@@ -57,5 +61,23 @@ export function NetBoxEnvironmentPage({ value, onChange, ftpEncoding }: {
       <input type="checkbox" checked={value.preserveDownloadTimestamps}
         onChange={(event) => change({ preserveDownloadTimestamps: event.target.checked })} />
     </label>
+    <fieldset className="view-font-group">
+      <legend>{t("Remote recycle bin")}</legend>
+      <label className="field">{t("Recycle-bin folder")}
+        <input type="text" placeholder="/recycle" value={recycleBin.folder}
+          required={recycleBin.keepDeleted || (!ftpEncoding && recycleBin.keepOverwritten)}
+          onChange={({ target }) => changeRecycle({ folder: target.value })} />
+      </label>
+      <label className="field-checkbox">
+        <span>{t("Move deleted items to the remote recycle bin")}</span>
+        <input type="checkbox" checked={recycleBin.keepDeleted}
+          onChange={({ target }) => changeRecycle({ keepDeleted: target.checked })} />
+      </label>
+      {!ftpEncoding && <label className="field-checkbox">
+        <span>{t("Keep previous versions of overwritten SFTP files")}</span>
+        <input type="checkbox" checked={recycleBin.keepOverwritten}
+          onChange={({ target }) => changeRecycle({ keepOverwritten: target.checked })} />
+      </label>}
+    </fieldset>
   </>;
 }

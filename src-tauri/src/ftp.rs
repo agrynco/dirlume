@@ -36,6 +36,7 @@ use crate::{
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     netbox_environment::EnvironmentPreferences,
     protocol::{file_server_origin, RemoteListing},
+    remote_recycle::{protect_path, RecoveryPath},
 };
 
 const TIMEOUT: Duration = Duration::from_secs(12);
@@ -282,6 +283,8 @@ impl ProfileInput {
         }
         let mut directories = self.directories.clone().unwrap_or_default().normalized()?;
         directories.resolve_links = false;
+        let mut environment = self.environment.clone().unwrap_or_default();
+        environment.recycle_bin.keep_overwritten = false;
         Ok(Profile {
             id: self.id.unwrap_or_else(Uuid::new_v4),
             label,
@@ -292,7 +295,7 @@ impl ProfileInput {
             encryption: self.encryption.unwrap_or_default(),
             ftp_options: self.ftp_options.clone().unwrap_or_default().validated()?,
             directories,
-            environment: self.environment.clone().unwrap_or_default().validated()?,
+            environment: environment.validated()?,
             connection_options: self.connection_options.unwrap_or_default().validated()?,
         })
     }
@@ -986,6 +989,45 @@ fn start_directory_error(error: FtpError) -> InitialListingError {
 }
 
 impl Session {
+    fn canonical_directory(&mut self, segments: &[String]) -> Result<Vec<String>> {
+        self.limits
+            .call(self.stream.cwd(absolute(segments)?))
+            .map_err(message)?;
+        parse_path(&self.pwd().map_err(message)?)
+    }
+
+    fn recycle(&mut self, source: &[String]) -> Result<()> {
+        let settings = &self.environment.recycle_bin;
+        if !settings.keep_deleted {
+            return Err("The remote recycle bin is disabled for this profile.".to_owned());
+        }
+        let bin = settings.segments()?;
+        protect_path(&bin, source)?;
+        let (name, parent) = source.split_last().ok_or("Choose a remote item.")?;
+        let resolved_source = child(&self.canonical_directory(parent)?, name);
+        for length in 1..=bin.len() {
+            if self
+                .stat(&bin[..length])?
+                .is_some_and(|entry| entry.is_symlink())
+            {
+                return Err("Choose a recycle-bin folder without FTP symbolic links.".to_owned());
+            }
+        }
+        let resolved_bin = self
+            .canonical_directory(&bin)
+            .map_err(|error| format!("Could not open the remote recycle bin. {error}"))?;
+        let target = RecoveryPath::new(&resolved_bin, &resolved_source)?;
+        for folder in target.directories() {
+            self.mkdir(folder)
+                .map_err(|error| format!("Could not prepare the remote recycle bin. {error}"))?;
+        }
+        let before = absolute(&resolved_source)?;
+        let after = absolute(&target.destination)?;
+        self.limits
+            .call(self.stream.rename(&before, &after))
+            .map_err(|error| format!("Could not confirm the move to {after}. {error}"))
+    }
+
     fn decode(&self, bytes: &[u8]) -> String {
         match self.encoding {
             Some(encoding) => encoding.decode_without_bom_handling(bytes).0.into_owned(),
@@ -1533,10 +1575,19 @@ pub async fn delete_ftp(
     id: u32,
     segments: Vec<String>,
     recursive: bool,
+    recycle: Option<bool>,
     state: State<'_, FtpState>,
 ) -> Result<()> {
     let connection = state.connection(id)?;
-    blocking(move || connection.open()?.remove(&segments, recursive)).await
+    blocking(move || {
+        let mut session = connection.open()?;
+        if recycle.unwrap_or(false) {
+            session.recycle(&segments)
+        } else {
+            session.remove(&segments, recursive)
+        }
+    })
+    .await
 }
 
 #[cfg(test)]

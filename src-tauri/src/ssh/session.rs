@@ -1,7 +1,7 @@
 use std::{
     io::{Read, SeekFrom, Write},
     sync::Arc,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use futures_util::StreamExt;
@@ -21,6 +21,7 @@ use crate::{
     local,
     netbox_connection::{self, WaitError},
     protocol::RemoteListing,
+    remote_recycle::{protect_path, RecoveryPath, RecyclePreferences},
     remote_transfer::{self, DownloadSession as _, Entry as _, Session as _, UploadSession as _},
 };
 
@@ -32,6 +33,8 @@ pub struct Session {
     client: Arc<AuthenticatedRoute>,
     stop: Option<CancellationToken>,
     preserve_download_timestamps: bool,
+    recycle_bin: RecyclePreferences,
+    elevated: bool,
 }
 
 #[derive(Debug)]
@@ -193,12 +196,149 @@ impl Session {
             client: Arc::new(client),
             sftp,
             preserve_download_timestamps: true,
+            recycle_bin: RecyclePreferences::default(),
+            elevated: false,
         }
     }
 
     pub(super) fn with_download_timestamps(mut self, preserve: bool) -> Self {
         self.preserve_download_timestamps = preserve;
         self
+    }
+
+    pub(super) fn with_recycle(mut self, options: RecyclePreferences, elevated: bool) -> Self {
+        self.recycle_bin = options;
+        self.elevated = elevated;
+        self
+    }
+
+    fn prepare_recovery(&mut self, source: &[String]) -> Result<(String, String)> {
+        let bin = self.recycle_bin.segments()?;
+        protect_path(&bin, source)?;
+        let (name, parent) = source.split_last().ok_or("Choose a remote item.")?;
+        let parent = self.wait(self.sftp.fs().canonicalize(Self::absolute(parent)?))?;
+        let parent = Self::parse_path(
+            parent
+                .to_str()
+                .ok_or("The SSH server returned an invalid folder path.")?,
+        )?;
+        let source = remote_transfer::child(&parent, name);
+        let bin = self
+            .wait(self.sftp.fs().canonicalize(Self::absolute(&bin)?))
+            .map_err(|error| {
+                format!(
+                    "Could not open the remote recycle bin. {}",
+                    String::from(error)
+                )
+            })?;
+        let bin = Self::parse_path(
+            bin.to_str()
+                .ok_or("The SSH server returned an invalid recycle-bin path.")?,
+        )?;
+        let path = RecoveryPath::new(&bin, &source)?;
+        for folder in path.directories() {
+            self.wait(
+                self.sftp
+                    .fs()
+                    .dir_builder()
+                    .permissions(Permissions::from(0o700))
+                    .create(Self::absolute(folder)?),
+            )
+            .map_err(|error| {
+                format!(
+                    "Could not prepare the remote recycle bin. {}",
+                    String::from(error)
+                )
+            })?;
+        }
+        Ok((Self::absolute(&source)?, Self::absolute(&path.destination)?))
+    }
+
+    pub(super) fn recycle(&mut self, segments: &[String]) -> Result<()> {
+        if !self.recycle_bin.keep_deleted {
+            return Err("The remote recycle bin is disabled for this profile.".to_owned());
+        }
+        let (source, recovery) = self.prepare_recovery(segments)?;
+        self.wait(self.sftp.fs().rename(source, &recovery))
+            .map_err(|error| {
+                format!(
+                    "Could not confirm the move to {recovery}. {}",
+                    String::from(error)
+                )
+            })
+    }
+
+    fn critical<T>(&self, operation: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+        let deadline = self.client.1.timeout().unwrap_or(Duration::from_secs(15));
+        tauri::async_runtime::block_on(netbox_connection::wait(Some(deadline), None, operation))
+            .map_err(|error| message(std::io::Error::from(error)))?
+    }
+
+    fn can_preserve_overwrite(&self) -> Result<()> {
+        if self.elevated && self.sftp.support_posix_rename() && !self.sftp.support_hardlink() {
+            return Err("This elevated SSH session cannot safely restore a file without replacing an existing item.".to_owned());
+        }
+        Ok(())
+    }
+
+    fn publish_without_replacing(&self, from: &str, to: &str) -> Result<()> {
+        if !self.sftp.support_posix_rename() {
+            return self.critical(async { self.sftp.fs().rename(from, to).await.map_err(message) });
+        }
+        if self.sftp.support_hardlink() {
+            self.critical(async { self.sftp.fs().hard_link(from, to).await.map_err(message) })?;
+            let _ = tauri::async_runtime::block_on(netbox_connection::wait(
+                Some(Duration::from_millis(500)),
+                None,
+                self.sftp.fs().remove_file(from),
+            ));
+            return Ok(());
+        }
+        self.critical(super::standard_rename::run(&self.client, from, to))
+    }
+
+    fn publish_preserving_original(&mut self, stage: &str, target: &[String]) -> Result<()> {
+        self.can_preserve_overwrite()?;
+        let (target, recovery) = self.prepare_recovery(target)?;
+        if self
+            .stop
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err("The connection operation was canceled.".to_owned());
+        }
+        // Once the original can move, finish publication or recovery even if the user
+        // stops the batch. Never replace an item that arrived at the destination meanwhile.
+        self.critical(async {
+            self.sftp
+                .fs()
+                .rename(&target, &recovery)
+                .await
+                .map_err(message)
+        })
+        .map_err(|error| {
+            format!(
+                "Could not confirm preservation of the previous file. Check {recovery}. {error}"
+            )
+        })?;
+        let publish = if self
+            .stop
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            Err("The connection operation was canceled.".to_owned())
+        } else {
+            self.publish_without_replacing(stage, &target)
+        };
+        if let Err(error) = publish {
+            return match self.publish_without_replacing(&recovery, &target) {
+                Ok(()) => Err(format!("Could not publish the replacement. The previous file was restored. {error}")),
+                Err(restore) => Err(format!(
+                    "Could not publish the replacement or restore the previous file. Check {recovery} for the previous file. {error} {restore}"
+                )),
+            };
+        }
+        Ok(())
     }
 
     pub(super) fn completion_client(&self) -> Arc<AuthenticatedRoute> {
@@ -367,9 +507,7 @@ impl Session {
                 "Edit this SSH file on the server to preserve its special permissions.".into(),
             );
         }
-        if !self.sftp.support_posix_rename() {
-            return Err("This SSH server does not support safe file replacement.".into());
-        }
+        self.check_publication(true)?;
         // Confirm write access to the original file without truncating it.
         let writable = self.wait(self.sftp.options().write(true).open(&target))?;
         self.wait(writable.close())?;
@@ -499,6 +637,9 @@ impl remote_transfer::UploadSession for Session {
     }
 
     fn check_publication(&self, overwrite: bool) -> Result<()> {
+        if overwrite && self.recycle_bin.keep_overwritten {
+            return self.can_preserve_overwrite();
+        }
         publish_with_link(
             overwrite,
             self.sftp.support_posix_rename(),
@@ -521,7 +662,11 @@ impl remote_transfer::UploadSession for Session {
             .map_err(Into::into)
     }
     fn remove_stage(&mut self, stage: &str) {
-        let _ = self.wait(self.sftp.fs().remove_file(stage));
+        let _ = tauri::async_runtime::block_on(netbox_connection::wait(
+            Some(Duration::from_millis(500)),
+            None,
+            self.sftp.fs().remove_file(stage),
+        ));
     }
 
     fn rename_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> Result<()> {
@@ -573,6 +718,11 @@ impl Session {
     }
 
     fn publish_stage(&mut self, stage: &str, target: &[String], overwrite: bool) -> SftpResult<()> {
+        if overwrite && self.recycle_bin.keep_overwritten {
+            return self
+                .publish_preserving_original(stage, target)
+                .map_err(Into::into);
+        }
         let target = Self::absolute(target)?;
         if publish_with_link(
             overwrite,
