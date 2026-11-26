@@ -105,6 +105,7 @@ try {
   await invokeDocumentMenu("File", "Open in Editor");
   await documentShortcuts.getByRole("button", { name: /Save/ }).waitFor({ state: "visible" });
   await closeDocument();
+  await exactButton(page.getByRole("navigation", { name: "Open documents", exact: true }), "View guide.md").click();
   await verifyReadingArea(documentWindow.locator(".source-surface:not([hidden])"));
   await invokeDocumentMenu("File", "Close");
   await page.setViewportSize({ width: 1100, height: 770 });
