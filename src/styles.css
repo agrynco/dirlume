@@ -756,7 +756,6 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .file-name, .file-size, .file-date, .file-time { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .file-protocol, .file-host { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ftp-fields > h3 { margin: 0; font-weight: 600; }
 .file-name { display: flex; align-items: center; gap: 8px; padding-left: 4px; }
 .file-tree-indent, .file-tree-spacer { display: inline-block; flex: none; }
 .file-tree-spacer { width: 16px; }
@@ -1461,6 +1460,27 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .quick-search span { color: var(--muted); }
 .ftp-fields { display: grid; gap: 10px; }
 .ftp-fields input { min-width: 0; }
+.netbox-page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.netbox-tabs {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding: 2px;
+}
+.netbox-tabs button { flex: none; white-space: nowrap; }
+.netbox-tabs button[aria-selected="true"] { border-color: var(--accent); background: var(--hover); font-weight: 600; }
+.netbox-page-arrows { display: flex; flex: none; gap: 4px; margin-block-start: 2px; }
+.netbox-page[hidden] { display: none; }
+.netbox-feedback { margin-block-start: 10px; }
 .ftp-host-row, .ftp-encoding-row { display: grid; gap: 8px; align-items: end; }
 .ftp-host-row { grid-template-columns: minmax(0, 1fr) 90px; }
 .ftp-encoding-row { grid-template-columns: minmax(0, 1fr) auto; }

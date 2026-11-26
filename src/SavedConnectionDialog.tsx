@@ -7,7 +7,7 @@ import { FtpProfileDialog } from "./FtpDialog";
 import { HistoryField } from "./HistoryField";
 import { errorText, t } from "./i18n";
 import { Message } from "./Message";
-import type { Provider } from "./preferences";
+import type { Bindings, Provider } from "./preferences";
 import { removeSavedConnection, saveRemoteConnection, saveSmbLocation } from "./savedConnections";
 import { SshProfileDialog } from "./SshDialog";
 
@@ -17,11 +17,12 @@ export const connectionCommands = {
   remote: ["addRemoteProfile", "editRemoteProfile"],
 } as const;
 
-export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeDirectory, onSaved, onClose }: {
+export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeDirectory, bindings, onSaved, onClose }: {
   source: ConnectionSource;
   profile?: SavedConnection;
   remoteProvider: Provider;
   bridgeDirectory: string;
+  bindings: Bindings;
   onSaved: (kind: SavedConnection["kind"], id: string) => void;
   onClose: () => void;
 }) {
@@ -39,10 +40,12 @@ export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeD
     const changeProtocol = !profile;
     return kind === "ftp" ? (
       <FtpProfileDialog profile={profile?.kind === "ftp" ? profile : null} draft={selection.draft} windowsCodePage={codePage}
+        bindings={bindings}
         onClose={onClose} onSave={async (input) => onSaved("ftp", await api.saveFtpProfile(input))}
         onUseSftp={changeProtocol ? (draft) => setSelection({ kind: "ssh", draft: { ...draft, port: draft.portEdited ? draft.port : "22" } }) : undefined} />
     ) : (
       <SshProfileDialog profile={profile?.kind === "ssh" ? profile : null} draft={selection.draft}
+        bindings={bindings}
         onClose={onClose} onSave={async (input) => onSaved("ssh", (await api.saveSshProfile(input)).id)}
         onUseFtp={changeProtocol ? (draft) => setSelection({ kind: "ftp", draft: { ...draft, port: draft.portEdited ? draft.port : "21" } }) : undefined} />
     );

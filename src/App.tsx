@@ -3856,6 +3856,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
         onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setModal(null)} />}
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
+        bindings={shortcuts}
         remoteProvider="server" bridgeDirectory={preferences.kswitcher}
         onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
         onClose={() => connectionDialogsClosed(modal.side)} />}

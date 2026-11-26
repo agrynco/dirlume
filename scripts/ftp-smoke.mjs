@@ -141,7 +141,11 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await add.getByLabel("Port").fill(String(ftpPort));
     await add.getByLabel("Username").fill("dirlume");
     await add.getByLabel("Password", { exact: true }).fill(password);
-    if (process.env.DIRLUME_FTP_LEGACY) await add.getByLabel("Filename code page").fill("1251");
+    if (process.env.DIRLUME_FTP_LEGACY) {
+      await add.getByRole("tab", { name: "Environment", exact: true }).click();
+      await add.getByLabel("Filename code page").fill("1251");
+      await add.getByRole("tab", { name: "Session", exact: true }).click();
+    }
     await button(add, "Test connection").click();
     await add.getByText("FTP connection successful.", { exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("ftp_profiles")), []);

@@ -3,12 +3,14 @@ import { api, describeError, type FtpProfile } from "./api";
 import { Button } from "./Button";
 import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { errorText, t } from "./i18n";
+import type { Bindings } from "./preferences";
 
-export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, onSave, onClose }: {
+export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, bindings, onSave, onClose }: {
   profile: FtpProfile | null;
   draft?: ConnectionDraft;
   onUseSftp?: (draft: ConnectionDraft) => void;
   windowsCodePage: number | null;
+  bindings: Bindings;
   onSave: (profile: Parameters<typeof api.saveFtpProfile>[0]) => Promise<void>;
   onClose: () => void;
 }) {
@@ -61,7 +63,18 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, o
 
   const port = Number(connection.port);
   const canTest = !!label.trim() && !!connection.host.trim() && Number.isInteger(port) && port >= 1 && port <= 65535;
-  return <NetBoxSession editing={!!profile} protocol="ftp" working={working} onSave={save} onClose={onClose}
+  const encoding = <div className="ftp-encoding-row">
+    <label className="field">{t("Filename code page")}
+      <input type="number" min={1} max={65535} placeholder="UTF-8" value={codePage}
+        onChange={(event) => { setCodePage(event.target.value); change(); }} />
+    </label>
+    {windowsCodePage && windowsCodePage !== 65001 && <Button type="button" onClick={() => { setCodePage(String(windowsCodePage)); change(); }}>
+      {t("Use Windows code page")}
+    </Button>}
+  </div>;
+  return <NetBoxSession editing={!!profile} protocol="ftp" working={working} bindings={bindings} onSave={save} onClose={onClose}
+    pages={{ environment: encoding }} feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
+      verified ? <p role="status">{t("FTP connection successful.")}</p> : undefined}
     onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
           <ConnectionHostFields protocol="ftp" connection={connection} onChange={(update) => {
@@ -76,18 +89,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, o
             <span>{t("Clear saved password")}</span>
             <input type="checkbox" checked={clearPassword} onChange={(event) => { setClearPassword(event.target.checked); change(); }} />
           </label>}
-          <div className="ftp-encoding-row">
-            <label className="field">{t("Filename code page")}
-              <input type="number" min={1} max={65535} placeholder="UTF-8" value={codePage}
-                onChange={(event) => { setCodePage(event.target.value); change(); }} />
-            </label>
-            {windowsCodePage && windowsCodePage !== 65001 && <Button type="button" onClick={() => { setCodePage(String(windowsCodePage)); change(); }}>
-              {t("Use Windows code page")}
-            </Button>}
-          </div>
           <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>
-          {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          {verified && <p role="status">{t("FTP connection successful.")}</p>}
           <div className="dialog-actions">
             <Button type="button" disabled={!!working || !canTest} onClick={() => { void submit("test"); }}>
               {t(working === "test" ? "Testing…" : "Test connection")}

@@ -1,12 +1,21 @@
-import { useId, type FormEvent, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { HistoryField } from "./HistoryField";
 import { t } from "./i18n";
+import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 
 export type ConnectionDraft = { label: string; host: string; port: string; username: string; portEdited: boolean };
 
-export function NetBoxSession({ editing, protocol, onChangeProtocol, working, saveDisabled, onSave, onClose, children }: {
+const pageLabels = {
+  session: "Session", environment: "Environment", directories: "Directories",
+  sftp: "SFTP", shell: "Shell", ftp: "FTP(S)", connection: "Connection", proxy: "Proxy",
+} as const;
+type Page = keyof typeof pageLabels;
+type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+export function NetBoxSession({ editing, protocol, onChangeProtocol, working, saveDisabled, onSave, onClose, children, pages, feedback, bindings }: {
   editing: boolean;
   protocol: "ftp" | "sftp";
   onChangeProtocol?: () => void;
@@ -15,19 +24,110 @@ export function NetBoxSession({ editing, protocol, onChangeProtocol, working, sa
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   onClose: () => void;
   children: ReactNode;
+  pages?: Partial<Record<Exclude<Page, "session">, ReactNode>>;
+  feedback?: ReactNode;
+  bindings: Bindings;
 }) {
-  const heading = useId();
+  const id = useId();
+  const [page, setPage] = useState<Page>("session");
+  const available = (Object.keys(pageLabels) as Page[]).filter((key) => key === "session" ||
+    pages?.[key] != null && (key === "ftp" ? protocol === "ftp" : key === "sftp" || key === "shell" ? protocol === "sftp" : true));
+  const selected = available.includes(page) ? page : "session";
+  const index = available.indexOf(selected);
+  const activeTab = useRef<HTMLButtonElement>(null);
+  const focusTab = useRef(false);
+  const invalidControl = useRef<FormControl>(null);
+  const reportingValidity = useRef(false);
+  const previous = bindings.netboxPreviousPage;
+  const next = bindings.netboxNextPage;
+
+  useLayoutEffect(() => {
+    if (page !== selected) setPage(selected);
+    activeTab.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (focusTab.current) {
+      focusTab.current = false;
+      activeTab.current?.focus({ preventScroll: true });
+    }
+  }, [page, selected]);
+
+  function showPage(target?: Page, bringFocus = false) {
+    if (!target || target === selected || working) return;
+    focusTab.current = bringFocus;
+    setPage(target);
+  }
+
+  function pageKeys(event: KeyboardEvent) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.getModifierState("AltGraph")) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("select, [aria-expanded=true]")) return;
+    const shortcut = eventShortcut(event);
+    const direction = bindingMatches(previous, shortcut) ? -1 : bindingMatches(next, shortcut) ? 1 : 0;
+    if (!direction || target.closest("input, textarea, [contenteditable]") &&
+        (!event.ctrlKey || event.key !== "PageUp" && event.key !== "PageDown")) return;
+    event.preventDefault();
+    showPage(available[index + direction], true);
+  }
+
+  function invalid(event: FormEvent<HTMLFormElement>) {
+    if (reportingValidity.current) return;
+    const control = event.target as FormControl;
+    const owner = control.closest<HTMLElement>("[data-netbox-page]")?.dataset.netboxPage as Page | undefined;
+    if (!owner) return;
+    event.preventDefault();
+    if (invalidControl.current) return;
+    invalidControl.current = control;
+    showPage(owner);
+    requestAnimationFrame(() => {
+      invalidControl.current = null;
+      if (!control.isConnected) return;
+      control.focus();
+      reportingValidity.current = true;
+      try { control.reportValidity(); }
+      finally { reportingValidity.current = false; }
+    });
+  }
+
   return <Dialog title={t(editing ? "Edit NetBox connection" : "Add NetBox connection")} onClose={() => { if (!working) onClose(); }}>
-    <form className="dialog-form" onSubmit={onSave} autoComplete="off">
-      <div className="dialog-body ftp-fields" role="group" aria-labelledby={heading} inert={!!working}>
-        <h3 id={heading}>{t("Session")}</h3>
-        <label className="field">{t("Protocol")}
-          <select aria-label={t("Protocol")} value={protocol} disabled={!onChangeProtocol} onChange={onChangeProtocol}>
-            <option value="ftp">FTP</option>
-            <option value="sftp">SFTP (SSH)</option>
-          </select>
-        </label>
-        {children}
+    <form className="dialog-form" onSubmit={onSave} onInvalidCapture={invalid} onKeyDown={pageKeys} autoComplete="off">
+      <div className="netbox-page-header" inert={!!working}>
+        <div className="netbox-tabs" role="tablist" aria-label={t("NetBox settings pages")} onKeyDown={(event) => {
+          if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+          const target = event.key === "ArrowLeft" ? available[index - 1] : event.key === "ArrowRight" ? available[index + 1] :
+            event.key === "Home" ? available[0] : event.key === "End" ? available.at(-1) : undefined;
+          if (!target) return;
+          event.preventDefault();
+          showPage(target, true);
+        }}>
+          {available.map((key) => <Button key={key} ref={key === selected ? activeTab : undefined}
+            id={`${id}-tab-${key}`} type="button" role="tab" aria-controls={`${id}-page-${key}`}
+            aria-selected={key === selected} tabIndex={key === selected ? 0 : -1}
+            onClick={() => showPage(key)}>{t(pageLabels[key])}</Button>)}
+        </div>
+        <div className="netbox-page-arrows">
+          <Button className="icon-button" type="button" aria-label={t("Previous settings page")}
+            shortcut={showShortcut(previous[0])} disabled={index === 0} onClick={() => showPage(available[index - 1], true)}>
+            <ChevronLeft />
+          </Button>
+          <Button className="icon-button" type="button" aria-label={t("Next settings page")}
+            shortcut={showShortcut(next[0])} disabled={index === available.length - 1} onClick={() => showPage(available[index + 1], true)}>
+            <ChevronRight />
+          </Button>
+        </div>
+      </div>
+      <div className="dialog-body" inert={!!working}>
+        {available.map((key) => <div className="netbox-page ftp-fields" key={key} role="tabpanel"
+          id={`${id}-page-${key}`} aria-labelledby={`${id}-tab-${key}`} data-netbox-page={key} hidden={key !== selected}>
+          {key === "session" ? <>
+            <label className="field">{t("Protocol")}
+              <select aria-label={t("Protocol")} value={protocol} disabled={!onChangeProtocol} onChange={onChangeProtocol}>
+                <option value="ftp">FTP</option>
+                <option value="sftp">SFTP (SSH)</option>
+              </select>
+            </label>
+            {children}
+          </> : pages?.[key]}
+        </div>)}
+        {feedback && <div className="netbox-feedback">{feedback}</div>}
       </div>
       <footer className="dialog-footer">
         <Button type="button" disabled={!!working} onClick={onClose}>{t("Cancel")}</Button>
