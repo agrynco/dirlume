@@ -1,8 +1,9 @@
 use std::{
     collections::HashMap,
     fs,
+    future::Future,
     io::{self, Read, Write},
-    net::{Shutdown, SocketAddr, TcpStream},
+    net::SocketAddr,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
@@ -16,10 +17,15 @@ use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use suppaftp::{
     list::{File, ListParser},
+    tokio::{AsyncRustlsConnector, AsyncRustlsFtpStream, AsyncRustlsStream, AsyncTlsConnector},
     types::FileType,
-    FtpError, FtpStream, Mode, Status,
+    FtpError, FtpResult, Mode, Status,
 };
 use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::TcpStream,
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -35,6 +41,21 @@ use crate::{
 const TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_DEPTH: usize = 128;
 
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum Encryption {
+    #[default]
+    Plain,
+    ExplicitTls,
+    ImplicitTls,
+}
+
+impl Encryption {
+    fn is_plain(&self) -> bool {
+        *self == Self::Plain
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -44,6 +65,8 @@ pub struct Profile {
     port: u16,
     username: String,
     code_page: Option<u16>,
+    #[serde(default, skip_serializing_if = "Encryption::is_plain")]
+    encryption: Encryption,
     #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
     directories: DirectoryPreferences,
     #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
@@ -69,6 +92,7 @@ pub struct ProfileInput {
     username: String,
     password: Option<String>,
     code_page: Option<u16>,
+    encryption: Option<Encryption>,
     directories: Option<DirectoryPreferences>,
     environment: Option<EnvironmentPreferences>,
     connection_options: Option<ConnectionPreferences>,
@@ -221,6 +245,7 @@ impl ProfileInput {
             port: self.port,
             username,
             code_page: self.code_page.filter(|&page| page != 65001),
+            encryption: self.encryption.unwrap_or_default(),
             directories,
             environment: self.environment.clone().unwrap_or_default().validated()?,
             connection_options: self.connection_options.unwrap_or_default().validated()?,
@@ -244,6 +269,9 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
         let index = input.id.map(|id| saved.iter().position(|item| item.profile.id == id)
             .ok_or_else(|| "This FTP profile was removed.".to_owned())).transpose()?;
         let previous = index.map(|index| &saved[index]);
+        if input.encryption.is_none() {
+            profile.encryption = previous.map(|old| old.profile.encryption).unwrap_or_default();
+        }
         if input.directories.is_none() {
             profile.directories = previous.map(|old| old.profile.directories.clone()).unwrap_or_default();
         }
@@ -330,7 +358,11 @@ pub async fn test_ftp_connection(
         let mut profile = input.profile()?;
         let saved = input
             .id
-            .filter(|_| input.password.is_none() || input.connection_options.is_none())
+            .filter(|_| {
+                input.password.is_none()
+                    || input.connection_options.is_none()
+                    || input.encryption.is_none()
+            })
             .map(|id| {
                 let _lock = lock_profiles(&path)?;
                 load_profiles(&path)?
@@ -339,11 +371,13 @@ pub async fn test_ftp_connection(
                     .ok_or_else(|| "This FTP profile was removed.".to_owned())
             })
             .transpose()?;
-        if let Some(saved) = saved
-            .as_ref()
-            .filter(|_| input.connection_options.is_none())
-        {
-            profile.connection_options = saved.profile.connection_options;
+        if let Some(saved) = saved.as_ref() {
+            if input.connection_options.is_none() {
+                profile.connection_options = saved.profile.connection_options;
+            }
+            if input.encryption.is_none() {
+                profile.encryption = saved.profile.encryption;
+            }
         }
         let password = match input.password {
             Some(password) => password,
@@ -355,7 +389,7 @@ pub async fn test_ftp_connection(
             )?,
         };
         let mut session = Connection { profile, password }.open_with_cancel(stop)?;
-        let directory = parse_path(&session.stream.pwd().map_err(message)?)?;
+        let directory = parse_path(&session.limits.call(session.stream.pwd()).map_err(message)?)?;
         session.list(&directory)?;
         Ok(())
     })
@@ -382,22 +416,12 @@ impl suppaftp::Encoding for LegacyEncoding {
     }
 }
 
-fn dial(
-    address: SocketAddr,
+fn configure_socket(
+    stream: &TcpStream,
     options: ConnectionPreferences,
-    stop: Option<&CancellationToken>,
     data: bool,
-) -> io::Result<TcpStream> {
-    let timeout = options.response_timeout(TIMEOUT);
-    let stream = tauri::async_runtime::block_on(async {
-        netbox_connection::wait(timeout, stop, tokio::net::TcpStream::connect(address))
-            .await??
-            .into_std()
-    })?;
-    stream.set_nonblocking(false)?;
-    stream.set_read_timeout(timeout)?;
-    stream.set_write_timeout(timeout)?;
-    let socket = SockRef::from(&stream);
+) -> io::Result<()> {
+    let socket = SockRef::from(stream);
     if let Some(interval) = options.keepalive_interval(None) {
         socket.set_tcp_keepalive(
             &TcpKeepalive::new()
@@ -414,37 +438,125 @@ fn dial(
             socket.set_send_buffer_size(BUFFER_SIZE)?;
         }
     }
-    Ok(stream)
+    Ok(())
 }
 
-struct AbortSockets {
-    data: Arc<Mutex<Option<TcpStream>>>,
-    task: tauri::async_runtime::JoinHandle<()>,
+async fn dial(
+    address: SocketAddr,
+    options: ConnectionPreferences,
+    data: bool,
+) -> FtpResult<TcpStream> {
+    let socket = TcpStream::connect(address)
+        .await
+        .map_err(FtpError::ConnectionError)?;
+    configure_socket(&socket, options, data).map_err(FtpError::ConnectionError)?;
+    Ok(socket)
 }
 
-impl AbortSockets {
-    fn new(control: &TcpStream, stop: &CancellationToken) -> io::Result<Self> {
-        let control = control.try_clone()?;
-        let data = Arc::new(Mutex::new(None::<TcpStream>));
-        let active_data = Arc::clone(&data);
-        let stop = stop.clone();
-        let task = tauri::async_runtime::spawn(async move {
-            stop.cancelled().await;
-            let _ = control.shutdown(Shutdown::Both);
-            if let Ok(mut active_data) = active_data.lock() {
-                if let Some(socket) = active_data.take() {
-                    let _ = socket.shutdown(Shutdown::Both);
-                }
-            }
-        });
-        Ok(Self { data, task })
+struct OperationLimits {
+    timeout: Option<Duration>,
+    stop: Option<CancellationToken>,
+}
+
+impl OperationLimits {
+    fn call<T>(&self, operation: impl Future<Output = FtpResult<T>>) -> FtpResult<T> {
+        tauri::async_runtime::block_on(netbox_connection::wait(
+            self.timeout,
+            self.stop.as_ref(),
+            operation,
+        ))
+        .map_err(|error| FtpError::ConnectionError(error.into()))?
+    }
+
+    fn io<T>(&self, operation: impl Future<Output = io::Result<T>>) -> io::Result<T> {
+        tauri::async_runtime::block_on(netbox_connection::wait(
+            self.timeout,
+            self.stop.as_ref(),
+            operation,
+        ))?
     }
 }
 
-impl Drop for AbortSockets {
-    fn drop(&mut self) {
-        self.task.abort();
+#[derive(Debug)]
+struct TlsConnector {
+    connector: AsyncRustlsConnector,
+    implicit_control: AtomicBool,
+    options: ConnectionPreferences,
+}
+
+#[async_trait::async_trait]
+impl AsyncTlsConnector for TlsConnector {
+    type Stream = AsyncRustlsStream;
+
+    async fn connect(&self, name: &str, socket: TcpStream) -> FtpResult<Self::Stream> {
+        if self.implicit_control.swap(false, Ordering::Relaxed) {
+            configure_socket(&socket, self.options, false).map_err(FtpError::ConnectionError)?;
+        }
+        self.connector.connect(name, socket).await
     }
+}
+
+fn tls_config() -> Result<Arc<rustls::ClientConfig>> {
+    let native = rustls_native_certs::load_native_certs();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add_parsable_certificates(native.certs);
+    if roots.is_empty() {
+        return Err("No trusted certificates are available for FTPS.".to_owned());
+    }
+    client_tls_config(roots)
+}
+
+fn client_tls_config(roots: rustls::RootCertStore) -> Result<Arc<rustls::ClientConfig>> {
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(message)?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    // A session's control and data sockets share this config and its TLS resumption cache.
+    Ok(Arc::new(config))
+}
+
+fn tls_name(host: &str) -> Result<String> {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return Ok(ip.to_string());
+    }
+    url::Host::parse(host)
+        .map(|host| host.to_string())
+        .map_err(|_| "Enter a valid server name for FTPS.".to_owned())
+}
+
+async fn open_control(
+    address: SocketAddr,
+    options: ConnectionPreferences,
+    encryption: Encryption,
+    tls: Option<&Arc<rustls::ClientConfig>>,
+    name: &str,
+) -> FtpResult<AsyncRustlsFtpStream> {
+    if encryption == Encryption::Plain {
+        let stream = dial(address, options, false).await?;
+        return AsyncRustlsFtpStream::connect_with_stream(stream).await;
+    }
+    let config =
+        tls.ok_or_else(|| FtpError::SecureError("FTPS TLS configuration is missing.".to_owned()))?;
+    let connector = TlsConnector {
+        connector: AsyncRustlsConnector::from(suppaftp::tokio_rustls::TlsConnector::from(
+            Arc::clone(config),
+        )),
+        implicit_control: AtomicBool::new(encryption == Encryption::ImplicitTls),
+        options,
+    };
+    if encryption == Encryption::ImplicitTls {
+        return AsyncRustlsFtpStream::connect_secure_implicit(address, connector, name).await;
+    }
+    let stream =
+        AsyncRustlsFtpStream::connect_with_stream(dial(address, options, false).await?).await?;
+    stream.into_secure(connector, name).await.map_err(|error| {
+        FtpError::SecureError(format!(
+            "Could not negotiate explicit TLS or protected data connections. {error}"
+        ))
+    })
 }
 
 impl Connection {
@@ -453,59 +565,63 @@ impl Connection {
     }
 
     pub(crate) fn open_with_cancel(&self, stop: Option<CancellationToken>) -> Result<Session> {
+        let tls = (!self.profile.encryption.is_plain())
+            .then(tls_config)
+            .transpose()?;
+        self.open_session(stop, tls)
+    }
+
+    fn open_session(
+        &self,
+        stop: Option<CancellationToken>,
+        tls: Option<Arc<rustls::ClientConfig>>,
+    ) -> Result<Session> {
         let options = self.profile.connection_options;
-        let addresses = tauri::async_runtime::block_on(netbox_connection::wait(
-            options.response_timeout(TIMEOUT),
-            stop.as_ref(),
-            options
+        let limits = OperationLimits {
+            timeout: options.response_timeout(TIMEOUT),
+            stop,
+        };
+        let addresses = limits
+            .io(options
                 .address_family
-                .resolve(&self.profile.host, self.profile.port),
-        ))
-        .map_err(|error| message(io::Error::from(error)))?
-        .map_err(message)?;
+                .resolve(&self.profile.host, self.profile.port))
+            .map_err(message)?;
+        let encryption = self.profile.encryption;
+        let name = if encryption.is_plain() {
+            String::new()
+        } else {
+            tls_name(&self.profile.host)?
+        };
+        let mut control = None;
         let mut last = io::Error::new(
             io::ErrorKind::AddrNotAvailable,
             "Could not reach the FTP server.",
         );
-        let mut control = None;
         for address in addresses {
-            match dial(address, options, stop.as_ref(), false) {
+            match limits.call(open_control(
+                address,
+                options,
+                encryption,
+                tls.as_ref(),
+                &name,
+            )) {
                 Ok(stream) => {
-                    control = Some(stream);
+                    control = Some((stream, address.ip()));
                     break;
                 }
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                    return Err(message(error))
+                Err(FtpError::ConnectionError(error))
+                    if error.kind() != io::ErrorKind::Interrupted =>
+                {
+                    last = error;
                 }
-                Err(error) => last = error,
+                Err(error) => return Err(message(error)),
             }
         }
-        let control = control.ok_or_else(|| message(options.address_family.connect_error(last)))?;
-        let peer = control.peer_addr().map_err(message)?.ip();
-        let abort = stop
-            .as_ref()
-            .map(|stop| AbortSockets::new(&control, stop))
-            .transpose()
-            .map_err(message)?;
-        let data = abort.as_ref().map(|abort| abort.data.clone());
-        let mut stream = FtpStream::connect_with_stream(control)
-            .map_err(message)?
-            .passive_stream_builder(move |addr| {
-                let data_socket = |stop: Option<&CancellationToken>| {
-                    let socket = dial(SocketAddr::new(peer, addr.port()), options, stop, true)?;
-                    if let (Some(data), Some(stop)) = (&data, stop) {
-                        let mut active = data
-                            .lock()
-                            .map_err(|error| io::Error::other(message(error)))?;
-                        if stop.is_cancelled() {
-                            return Err(netbox_connection::WaitError::Canceled.into());
-                        }
-                        *active = Some(socket.try_clone()?);
-                    }
-                    Ok(socket)
-                };
-                data_socket(stop.as_ref()).map_err(FtpError::ConnectionError)
-            });
+        let (stream, peer) =
+            control.ok_or_else(|| message(options.address_family.connect_error(last)))?;
+        let mut stream = stream.passive_stream_builder(move |address| {
+            Box::pin(dial(SocketAddr::new(peer, address.port()), options, true))
+        });
         if peer.is_ipv6() {
             stream.set_mode(Mode::ExtendedPassive);
         }
@@ -514,23 +630,42 @@ impl Connection {
         } else {
             &self.profile.username
         };
-        stream
-            .login(user, &self.password)
-            .map_err(|_| "FTP login failed. Check the username and password.".to_owned())?;
-        if let Some(page) = self.profile.code_page {
-            let encoding = codepage::to_encoding_no_replacement(page)
-                .ok_or("The FTP name encoding is unavailable.")?;
-            stream.set_encoding(LegacyEncoding(encoding));
-            let _ = stream.opts("UTF8", Some("OFF"));
-        } else {
-            let _ = stream.opts("UTF8", Some("ON"));
+        limits
+            .call(stream.login(user, &self.password))
+            .map_err(|error| {
+                format!("FTP login failed. Check the username and password. {error}")
+            })?;
+        if encryption == Encryption::ImplicitTls {
+            for command in ["PBSZ 0", "PROT P"] {
+                limits
+                    .call(stream.custom_command(command, &[Status::CommandOk]))
+                    .map_err(|error| {
+                        format!("Could not negotiate protected FTPS data connections. {error}")
+                    })?;
+            }
         }
-        stream.transfer_type(FileType::Binary).map_err(message)?;
+        let encoding = self
+            .profile
+            .code_page
+            .map(|page| {
+                codepage::to_encoding_no_replacement(page)
+                    .ok_or("The FTP name encoding is unavailable.")
+            })
+            .transpose()?;
+        if let Some(encoding) = encoding {
+            tauri::async_runtime::block_on(stream.set_encoding(LegacyEncoding(encoding)));
+        }
+        let _ =
+            limits.call(stream.opts("UTF8", Some(if encoding.is_some() { "OFF" } else { "ON" })));
+        limits
+            .call(stream.transfer_type(FileType::Binary))
+            .map_err(message)?;
         Ok(Session {
             stream,
+            limits,
+            encoding,
             use_mlsd: true,
             environment: self.profile.environment.clone(),
-            abort,
         })
     }
 }
@@ -581,16 +716,16 @@ pub async fn connect_ftp(
                     Some(candidate) => candidate.to_vec(),
                     None => parse_path(
                         &session
-                            .stream
-                            .pwd()
+                            .limits
+                            .call(session.stream.pwd())
                             .map_err(|error| InitialListingError::Other(message(error)))?,
                     )
                     .map_err(InitialListingError::Other)?,
                 };
                 let absolute = absolute(&path).map_err(InitialListingError::Other)?;
                 session
-                    .stream
-                    .cwd(absolute)
+                    .limits
+                    .call(session.stream.cwd(absolute))
                     .map_err(start_directory_error)?;
                 let listing = session
                     .list_current()
@@ -605,7 +740,17 @@ pub async fn connect_ftp(
     let address = connection.profile.label.clone();
     let directories = connection.profile.directories.clone();
     let environment = connection.profile.environment.clone();
-    let origin = file_server_origin("ftp", &connection.profile.host, connection.profile.port, 21);
+    let (scheme, default_port) = match connection.profile.encryption {
+        Encryption::Plain => ("ftp", 21),
+        Encryption::ExplicitTls => ("ftps", 21),
+        Encryption::ImplicitTls => ("ftps", 990),
+    };
+    let origin = file_server_origin(
+        scheme,
+        &connection.profile.host,
+        connection.profile.port,
+        default_port,
+    );
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
         .connections
@@ -631,10 +776,11 @@ pub fn disconnect_ftp(id: u32, state: State<'_, FtpState>) -> Result<()> {
 }
 
 pub struct Session {
-    stream: FtpStream,
+    stream: AsyncRustlsFtpStream,
     use_mlsd: bool,
     pub(crate) environment: EnvironmentPreferences,
-    abort: Option<AbortSockets>,
+    limits: OperationLimits,
+    encoding: Option<&'static encoding_rs::Encoding>,
 }
 
 pub struct FtpEntry {
@@ -743,22 +889,53 @@ fn start_directory_error(error: FtpError) -> InitialListingError {
 
 impl Session {
     pub fn list(&mut self, segments: &[String]) -> Result<Entries> {
-        self.stream.cwd(absolute(segments)?).map_err(message)?;
+        self.limits
+            .call(self.stream.cwd(absolute(segments)?))
+            .map_err(message)?;
         self.list_current().map_err(message)
+    }
+
+    fn listing_lines(&mut self, command: &str) -> FtpResult<Vec<String>> {
+        let (_, data) = self.limits.call(
+            self.stream
+                .custom_data_command(command, &[Status::AboutToSend, Status::AlreadyOpen]),
+        )?;
+        let mut reader = BufReader::new(data);
+        let mut lines = Vec::new();
+        let mut buffer = Vec::new();
+        while self
+            .limits
+            .io(reader.read_until(b'\n', &mut buffer))
+            .map_err(FtpError::ConnectionError)?
+            != 0
+        {
+            let bytes = buffer.strip_suffix(b"\n").unwrap_or(&buffer);
+            let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+            if !bytes.is_empty() {
+                let line = match self.encoding {
+                    Some(encoding) => encoding.decode_without_bom_handling(bytes).0.into_owned(),
+                    None => String::from_utf8_lossy(bytes).into_owned(),
+                };
+                lines.push(line);
+            }
+            buffer.clear();
+        }
+        self.limits.call(reader.into_inner().finish())?;
+        Ok(lines)
     }
 
     fn list_current(&mut self) -> std::result::Result<Entries, FtpError> {
         let lines = if self.use_mlsd {
-            match self.stream.mlsd(None) {
+            match self.listing_lines("MLSD") {
                 Ok(lines) => lines,
                 Err(error) if unsupported(&error) => {
                     self.use_mlsd = false;
-                    self.stream.list(None)?
+                    self.listing_lines("LIST")?
                 }
                 Err(error) => return Err(error),
             }
         } else {
-            self.stream.list(None)?
+            self.listing_lines("LIST")?
         };
         let mut result = Entries {
             files: Vec::new(),
@@ -818,7 +995,7 @@ impl Session {
         if self.use_mlsd {
             // MLST may use an absolute name where the directory listing uses a bare name.
             let path = absolute(segments)?;
-            if let Ok(reply) = self.stream.mlst(Some(&path)) {
+            if let Ok(reply) = self.limits.call(self.stream.mlst(Some(&path))) {
                 if let Some((facts, name)) = reply.split_once("; ") {
                     if (name == path || name == expected.name())
                         && ListParser::parse_mlst(&format!("{facts}; {}", expected.name()))
@@ -873,13 +1050,13 @@ impl Session {
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
         let mut stream = self
-            .stream
-            .retr_as_stream(absolute(segments)?)
+            .limits
+            .call(self.stream.retr_as_stream(absolute(segments)?))
             .map_err(message)?;
         let mut buffer = vec![0; 64 * 1024];
         let mut total = 0;
         loop {
-            let count = stream.read(&mut buffer).map_err(message)?;
+            let count = self.limits.io(stream.read(&mut buffer)).map_err(message)?;
             if count == 0 {
                 break;
             }
@@ -887,7 +1064,7 @@ impl Session {
             total += count as u64;
             progress(total)?;
         }
-        stream.finish().map_err(message)
+        self.limits.call(stream.finish()).map_err(message)
     }
 
     pub fn read_limited(
@@ -902,28 +1079,36 @@ impl Session {
             return Ok(Vec::new());
         }
         if offset > 0 {
-            self.stream
-                .resume_transfer(usize::try_from(offset).map_err(message)?)
+            self.limits
+                .call(
+                    self.stream
+                        .resume_transfer(usize::try_from(offset).map_err(message)?),
+                )
                 .map_err(message)?;
         }
         let mut bytes = Vec::new();
         let mut stream = self
-            .stream
-            .retr_as_stream(absolute(segments)?)
+            .limits
+            .call(self.stream.retr_as_stream(absolute(segments)?))
             .map_err(message)?;
-        (&mut stream)
-            .take(count)
-            .read_to_end(&mut bytes)
-            .map_err(message)?;
-        if offset + count == length {
-            let mut extra = [0];
-            if stream.read(&mut extra).map_err(message)? > 0 {
+        let mut buffer = [0; 64 * 1024];
+        while bytes.len() as u64 != count {
+            let available = (count - bytes.len() as u64).min(buffer.len() as u64) as usize;
+            let chunk = self
+                .limits
+                .io(stream.read(&mut buffer[..available]))
+                .map_err(message)?;
+            if chunk == 0 {
                 return Err("The FTP file changed during the read.".to_owned());
             }
-            stream.finish().map_err(message)?;
+            bytes.extend_from_slice(&buffer[..chunk]);
         }
-        if bytes.len() as u64 != count {
-            return Err("The FTP file changed during the read.".to_owned());
+        if offset + count == length {
+            let mut extra = [0];
+            if self.limits.io(stream.read(&mut extra)).map_err(message)? > 0 {
+                return Err("The FTP file changed during the read.".to_owned());
+            }
+            self.limits.call(stream.finish()).map_err(message)?;
         }
         Ok(bytes)
     }
@@ -939,7 +1124,10 @@ impl Session {
             .ok_or("Choose an FTP destination file.")?;
         let stage = absolute(&child(parent, &format!(".dirlume-{}.part", Uuid::new_v4())))?;
         let result = (|| {
-            let mut stream = self.stream.put_with_stream(&stage).map_err(message)?;
+            let mut stream = self
+                .limits
+                .call(self.stream.put_with_stream(&stage))
+                .map_err(message)?;
             let mut buffer = vec![0; 64 * 1024];
             let mut total = 0;
             loop {
@@ -947,15 +1135,13 @@ impl Session {
                 if count == 0 {
                     break;
                 }
-                stream.write_all(&buffer[..count]).map_err(message)?;
+                self.limits
+                    .io(stream.write_all(&buffer[..count]))
+                    .map_err(message)?;
                 total += count as u64;
                 progress(total)?;
             }
-            // The final FTP response follows EOF on the data socket.
-            if let Some(abort) = &self.abort {
-                abort.data.lock().map_err(message)?.take();
-            }
-            stream.finish().map_err(message)
+            self.limits.call(stream.finish()).map_err(message)
         })();
         if let Err(error) = result {
             self.remove_stage(&stage);
@@ -965,16 +1151,24 @@ impl Session {
     }
 
     pub fn remove_stage(&mut self, stage: &str) {
-        let _ = self.stream.rm(stage);
+        let limits = OperationLimits {
+            timeout: Some(Duration::from_millis(500)),
+            stop: None,
+        };
+        let _ = limits.call(self.stream.rm(stage));
     }
 
     pub fn rename_stage(&mut self, stage: &str, target: &[String]) -> Result<()> {
         let target = absolute(target)?;
-        self.stream.rename(stage, &target).map_err(message)
+        self.limits
+            .call(self.stream.rename(stage, &target))
+            .map_err(message)
     }
 
     pub fn mkdir(&mut self, segments: &[String]) -> Result<()> {
-        self.stream.mkdir(absolute(segments)?).map_err(message)
+        self.limits
+            .call(self.stream.mkdir(absolute(segments)?))
+            .map_err(message)
     }
 
     fn remove(&mut self, segments: &[String], recursive: bool) -> Result<()> {
@@ -988,9 +1182,9 @@ impl Session {
                     self.remove(&child(segments, entry.name()), true)?;
                 }
             }
-            self.stream.rmdir(path).map_err(message)
+            self.limits.call(self.stream.rmdir(path)).map_err(message)
         } else {
-            self.stream.rm(path).map_err(message)
+            self.limits.call(self.stream.rm(path)).map_err(message)
         }
     }
 }
@@ -1059,7 +1253,7 @@ pub async fn search_ftp(
     let result = blocking(move || {
         let mut session = connection.open_with_cancel(Some(stop.clone()))?;
         let search = search_session(&mut session, request, &stop, &output);
-        let _ = session.stream.quit();
+        let _ = session.limits.call(session.stream.quit());
         search
     })
     .await;
@@ -1190,8 +1384,12 @@ pub async fn rename_ftp(
             return Err("An item with that name already exists.".to_owned());
         }
         session
-            .stream
-            .rename(absolute(&segments)?, absolute(&target)?)
+            .limits
+            .call(
+                session
+                    .stream
+                    .rename(absolute(&segments)?, absolute(&target)?),
+            )
             .map_err(message)
     })
     .await
@@ -1209,17 +1407,21 @@ pub async fn delete_ftp(
 }
 
 #[cfg(test)]
+mod tls_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::net::TcpListener;
 
-    #[test]
-    fn data_and_control_sockets_inherit_the_profile_settings() {
+    #[tokio::test]
+    async fn data_and_control_sockets_inherit_the_profile_settings() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();
-        let default = dial(address, ConnectionPreferences::default(), None, false).unwrap();
+        let default = dial(address, ConnectionPreferences::default(), false)
+            .await
+            .unwrap();
         let default = SockRef::from(&default);
-        assert_eq!(default.read_timeout().unwrap(), Some(TIMEOUT));
         assert!(!default.keepalive().unwrap());
 
         let options = serde_json::from_str::<ConnectionPreferences>(
@@ -1228,12 +1430,10 @@ mod tests {
         .unwrap()
         .validated()
         .unwrap();
-        let control = dial(address, options, None, false).unwrap();
-        let data = dial(address, options, None, true).unwrap();
+        let control = dial(address, options, false).await.unwrap();
+        let data = dial(address, options, true).await.unwrap();
         let control = SockRef::from(&control);
         let data = SockRef::from(&data);
-        assert_eq!(control.read_timeout().unwrap(), None);
-        assert_eq!(data.write_timeout().unwrap(), None);
         assert!(control.keepalive().unwrap() && data.keepalive().unwrap());
         assert!(data.recv_buffer_size().unwrap() >= control.recv_buffer_size().unwrap());
         assert!(data.send_buffer_size().unwrap() >= control.send_buffer_size().unwrap());

@@ -184,10 +184,13 @@ export interface FtpProfile {
   port: number;
   username: string;
   codePage: number | null;
+  encryption?: FtpEncryption;
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
 }
+
+export type FtpEncryption = "plain" | "explicitTls" | "implicitTls";
 
 export type ConnectionTiming = { mode: "default" | "disabled" } | { mode: "custom"; seconds: number };
 export interface ConnectionPreferences {

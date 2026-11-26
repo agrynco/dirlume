@@ -250,6 +250,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
     onChangeProtocol={onUseFtp && (() => onUseFtp({
       label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited, directories, environment,
       connectionOptions,
+      ftpEncryption: draft?.ftpEncryption,
     }))} onSave={(event) => { void save(event); }} onClose={onClose}>
         <ConnectionNameField protocol="ssh" label={label} onChange={setLabel} />
         <SshHostFields connection={connection} saved={profile} onChange={(update) => {
