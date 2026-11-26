@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
@@ -62,6 +62,12 @@ if (process.env.CI) {
   await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
+const build = resolve(`src-tauri/target/${profile}`);
+const executable = join(temp, "Dirlume.exe");
+await copyFile(join(build, "dirlume.exe"), executable);
+await cp(join(build, "archive-tools"), join(temp, "archive-tools"), { recursive: true }).catch((error) => {
+  if (error.code !== "ENOENT") throw error;
+});
 const dockerCompletionFixture = await makeDockerFixture(temp);
 const src = join(temp, "from");
 const dst = join(temp, "to");
@@ -111,7 +117,7 @@ let lockedBy;
 
 async function startDesktop() {
   const debuggingPort = await port();
-  child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
+  child = spawn(executable, [], {
     windowsHide: true,
     env: {
       ...process.env,

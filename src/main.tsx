@@ -9,7 +9,7 @@ import { installDiagnosticListeners, reportReactError } from "./diagnostics";
 import { setLanguage } from "./i18n";
 import { readDiagramWindow } from "./diagramWindow";
 import { isFeaturePage } from "./featureOptions";
-import { normalizePreferences, readPreferences, restorePortablePreferences, trackControlKeys } from "./preferences";
+import { acceptWindowsPreferences, normalizePreferences, readPreferences, restoreWindowsPreferences, trackControlKeys } from "./preferences";
 import { installTooltips } from "./tooltips";
 import "./styles.css";
 
@@ -26,8 +26,11 @@ const optionsPage = tool.__dirlumeOptionsPage;
 const diagram = readDiagramWindow();
 const windowsStartup = windowsClient && isTauri() && !diagram ? api.windowsStartup().catch(() => null) : Promise.resolve(null);
 void windowsStartup.then(async (startup) => {
-  const portable = diagram ? undefined : await restorePortablePreferences(label === "main", startup?.handoff);
-  const preferences = startup?.workspace ? normalizePreferences(startup.workspace.preferences) : readPreferences();
+  const settings = await restoreWindowsPreferences(label === "main" && !diagram, startup?.administrator ?? true,
+    startup?.workspace?.preferences);
+  const preferences = settings?.preferences ? readPreferences(settings.preferences) :
+    startup?.workspace ? normalizePreferences(startup.workspace.preferences) : readPreferences();
+  acceptWindowsPreferences(preferences, Boolean(settings?.preferences || startup?.workspace));
   setLanguage(preferences.language);
   createRoot(document.getElementById("root")!, {
     onCaughtError: reportReactError,
@@ -36,7 +39,7 @@ void windowsStartup.then(async (startup) => {
   }).render(<>
     {label === "options" || comparison || diagram ? <ToolWindow initialPreferences={preferences} comparison={comparison} diagram={diagram}
       optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
-      <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError}
+      <App initialPreferences={preferences} portableUpdateError={settings?.updateError} windowsSettingsError={settings?.settingsError}
         administrator={startup?.administrator} administratorWorkspace={startup?.workspace} administratorWorkspaceUnavailable={startup?.workspaceUnavailable} />}
     {label !== "options" && !diagram && isTauri() && <NativeAppearancePicker />}
   </>);

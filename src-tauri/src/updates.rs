@@ -252,41 +252,53 @@ pub struct UpdateProgress {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PortableState {
+pub struct WindowsSettings {
     preferences: Option<serde_json::Value>,
     settings_error: Option<&'static str>,
     update_error: Option<String>,
 }
 
 #[tauri::command]
-pub async fn read_portable_state() -> Option<PortableState> {
+pub async fn read_windows_settings() -> Option<WindowsSettings> {
     #[cfg(windows)]
-    if let Some(directory) = crate::portable::root() {
-        let (preferences, settings_error) = match crate::portable::read_settings(directory) {
+    {
+        let result = crate::portable::settings_directory()
+            .and_then(|directory| crate::portable::read_settings(&directory));
+        let (preferences, settings_error) = match result {
             Ok(preferences) => (preferences, None),
             Err(_) => (
                 None,
-                Some("Could not read dirlume-settings.json in this portable folder."),
+                Some("Could not read dirlume-settings.json beside Dirlume.exe."),
             ),
         };
-        return Some(PortableState {
+        Some(WindowsSettings {
             preferences,
             settings_error,
-            update_error: crate::portable::take_failure(directory),
-        });
+            update_error: crate::portable::root().and_then(crate::portable::take_failure),
+        })
     }
+    #[cfg(not(windows))]
     None
 }
 
 #[tauri::command]
-pub async fn save_portable_preferences(preferences: serde_json::Value) -> Result<(), &'static str> {
+pub async fn save_windows_preferences(
+    preferences: serde_json::Value,
+    only_if_missing: bool,
+) -> Result<bool, &'static str> {
     #[cfg(windows)]
-    if let Some(directory) = crate::portable::root() {
-        return crate::portable::save_settings(directory, &preferences)
-            .map_err(|_| "Could not save dirlume-settings.json in this portable folder.");
+    {
+        crate::portable::settings_directory()
+            .and_then(|directory| {
+                crate::portable::save_settings(&directory, &preferences, only_if_missing)
+            })
+            .map_err(|_| "Could not save dirlume-settings.json beside Dirlume.exe.")
     }
-    let _ = preferences;
-    Ok(())
+    #[cfg(not(windows))]
+    {
+        let _ = (preferences, only_if_missing);
+        Ok(false)
+    }
 }
 
 impl PendingUpdate {

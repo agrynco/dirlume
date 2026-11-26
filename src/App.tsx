@@ -85,7 +85,7 @@ import {
   updateSearchMatches, visibleEntries, type DeniedSshListing, type FilePaneView, type ListingAction, type PaneState, type SearchMatch,
   type SearchQuery, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
+import { acceptWindowsPreferences, commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushWindowsPreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import type { TerminalCompletionContext } from "./api";
@@ -232,11 +232,11 @@ function swapSides<T>(panes: Record<Side, T>): Record<Side, T> {
   return { left: panes.right, right: panes.left };
 }
 
-export default function App({ initialPreferences, portableUpdateError, portableSettingsError, administrator,
+export default function App({ initialPreferences, portableUpdateError, windowsSettingsError, administrator,
   administratorWorkspace, administratorWorkspaceUnavailable }: {
   initialPreferences: Preferences;
   portableUpdateError?: string | null;
-  portableSettingsError?: string | null;
+  windowsSettingsError?: string | null;
   administrator?: boolean;
   administratorWorkspace?: AdministratorWorkspace | null;
   administratorWorkspaceUnavailable?: boolean;
@@ -341,7 +341,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const commandLineHistory = useMemo(() => historyItems.filter(({ source }) => source !== "ssh").map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
-  const startupError = (administratorWorkspaceUnavailable ? t("Could not restore the administrator workspace.") : undefined) ?? portableUpdateError ?? portableSettingsError;
+  const startupError = (administratorWorkspaceUnavailable ? t("Could not restore the administrator workspace.") : undefined) ?? portableUpdateError ??
+    (windowsSettingsError ? errorText(windowsSettingsError) : undefined);
   const [status, setStatus] = useState<WorkspaceStatus>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
@@ -889,21 +890,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, [leftRemote, rightRemote, load, leftAnalyzing, rightAnalyzing, showingGit, leftEnvironment, rightEnvironment, recentPanes]);
 
   useEffect(() => {
-    persistPreferences(preferences);
+    void persistPreferences(preferences).catch((error: unknown) => {
+      setStatus({ text: errorText(describeError(error)), error: true });
+    });
   }, [preferences]);
-
-  useEffect(() => {
-    function onError(event: Event) {
-      setStatus({ text: (event as CustomEvent<string>).detail, error: true });
-    }
-    window.addEventListener("dirlume-portable-settings-error", onError);
-    return () => window.removeEventListener("dirlume-portable-settings-error", onError);
-  }, []);
 
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key !== preferenceKey) return;
       const next = readPreferences();
+      acceptWindowsPreferences(next);
       setLanguage(next.language);
       setPreferences(next);
     };
@@ -1051,7 +1047,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setModal({ kind: "installUpdate", version: update.version });
     const progress = new Channel<UpdateProgress>();
     progress.onmessage = setUpdateProgress;
-    void flushPortablePreferences().then(() => api.installUpdate(update.version, progress)).catch((error: unknown) => {
+    void flushWindowsPreferences().then(() => api.installUpdate(update.version, progress)).catch((error: unknown) => {
       installingUpdate.current = false;
       setModal(null);
       setStatus({ text: describeError(error), error: true });
@@ -2083,9 +2079,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const other = opposite(side);
     const otherPlace = visiblePanes.current[other].place;
     const otherAnalyzer = analysisPanes[other]?.root;
-    return api.openElevated({ directory, side, selected, split, preferences: preferenceSnapshot(preferences),
+    return flushWindowsPreferences().then(() => api.openElevated({ directory, side, selected, split, preferences: preferenceSnapshot(preferences),
       otherFolder: otherPlace?.kind === "local" ? otherPlace.path : undefined,
-      otherAnalyzer: otherAnalyzer?.kind === "local" ? otherAnalyzer.path : undefined });
+      otherAnalyzer: otherAnalyzer?.kind === "local" ? otherAnalyzer.path : undefined }));
   }
 
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
@@ -3732,7 +3728,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {!resizeInDocuments && !resizeInFileActions && <WindowResizeMarker />}
       </>}
       {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences}
-        onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={(next) => {
+        onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={async (next) => {
+        await persistPreferences(next);
         setLanguage(next.language);
         setPreferences(next);
         return next;
@@ -4092,7 +4089,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           updatePane(side, (pane) => ({ ...pane, marked: names, selected: names[0] ?? pane.selected }));
           setActive(side);
         },
-        setPreferences: (next) => { persistPreferences(next); setPreferences(next); },
+        setPreferences: async (next) => { await persistPreferences(next); setPreferences(next); },
         setShortcuts: (next) => { persistFolderShortcuts(next); setFolderShortcuts(next); },
       }} />
     </div>
