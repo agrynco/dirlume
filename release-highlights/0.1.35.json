@@ -1,0 +1,8 @@
+{
+  "version": "0.1.35",
+  "highlights": [
+    "Wide Mermaid diagrams fit the Markdown reading width by default. Use Fit horizontally beside any diagram to show its full width again.",
+    "Scroll an enlarged diagram horizontally with a control that stays within reach while you read tall diagrams.",
+    "See the active file path beside the Viewer or Editor menu and copy the full path with one button."
+  ]
+}
