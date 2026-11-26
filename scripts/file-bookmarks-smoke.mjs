@@ -19,7 +19,10 @@ try {
     entries.push({ name: "other", directory: true, link: false, hidden: false, size: null, modified: null, readOnly: true });
     window.bookmarkFixture = {
       "service.log": Array.from({ length: 160 }, (_, i) => "Noise " + (i + 1)).join("\n"),
-      "reader.md": "# Heading\n\nBookmarks work in Source.",
+      "reader.md": "# Heading\n\nBookmarks work in Source.\n\n" +
+        "First copy before [linked text](https://example.invalid) and `formatted code` first copy after.\n\n" +
+        Array.from({ length: 55 }, (_, i) => `Filler paragraph ${i}.\n\n`).join("") +
+        "Second copy before [linked text](https://example.invalid) and `formatted code` second copy after.",
     };
     window.bookmarkWrites = 0;
     window.__TAURI_INTERNALS__ = {
@@ -131,6 +134,41 @@ try {
   await closeViewer();
 
   await show("reader.md");
+  const markdown = viewer.locator(".markdown");
+  const quote = "linked text and formatted code";
+  const storedPreview = () => page.waitForFunction((quote) => {
+    const bookmarks = JSON.parse(localStorage.getItem("dirlume.file-bookmarks.v1"));
+    return bookmarks.filter((bookmark) => bookmark.anchor?.quote === quote).length === 1;
+  }, quote);
+  const selectPassage = () => markdown.evaluate((surface) => {
+    const paragraph = Array.from(surface.querySelectorAll("p")).find((item) => item.textContent.startsWith("Second copy before"));
+    const link = paragraph.querySelector("a").firstChild;
+    const code = paragraph.querySelector("code").firstChild;
+    paragraph.scrollIntoView({ block: "center" });
+    const range = document.createRange();
+    range.setStart(link, 0);
+    range.setEnd(code, code.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await markdown.getByText(/Second copy before/).waitFor();
+  await selectPassage();
+  await markdown.press(addKey);
+  await storedPreview();
+  await selectPassage();
+  const documentNav = viewer.getByRole("menubar", { name: "Document menu" });
+  await documentNav.getByRole("menuitem", { name: "Navigate", exact: true }).click();
+  await viewer.getByRole("menuitem", { name: "Bookmark selection", exact: true }).click();
+  await storedPreview();
+  await button(viewer, "File bookmarks").click();
+  const previewBookmark = options.getByRole("option").filter({ has: page.getByText("Preview", { exact: true }) });
+  await previewBookmark.getByText(quote, { exact: true }).waitFor();
+  await button(list, "Rename").click();
+  await rename.getByRole("textbox", { name: "Bookmark name", exact: true }).fill("Second passage");
+  await button(rename, "Save").click();
+  await previewBookmark.getByText("Second passage", { exact: true }).waitFor();
+  await button(list, "Close").click();
   await button(viewer, "Source").click();
   await viewer.locator(".cm-file-bookmarks .cm-gutterElement").nth(2).click();
   await closeViewer();
@@ -148,6 +186,28 @@ try {
   await options.press("Enter");
   await awaitLine("Bookmarks work in Source.");
   await markers.first().waitFor();
+  await closeViewer();
+
+  await page.evaluate(() => { window.bookmarkFixture["reader.md"] = "A paragraph inserted above.\n\n" + window.bookmarkFixture["reader.md"]; });
+  await page.setViewportSize({ width: 840, height: 620 });
+  await commands();
+  await previewBookmark.getByText("Second passage", { exact: true }).click();
+  await options.press("Enter");
+  await page.waitForFunction((quote) => {
+    const surface = document.querySelector(".text-window:not([hidden]) .markdown");
+    const range = [...(CSS.highlights?.get("markdown-bookmark") ?? [])][0] ?? window.getSelection()?.getRangeAt(0);
+    if (!surface || !range || range.toString() !== quote) return false;
+    const marker = range.startContainer.parentElement.closest("p");
+    const position = range.getBoundingClientRect();
+    const viewport = surface.getBoundingClientRect();
+    return marker.textContent.startsWith("Second copy before") && position.top >= viewport.top && position.bottom <= viewport.bottom;
+  }, quote);
+  await closeViewer();
+  await page.evaluate(() => { window.bookmarkFixture["reader.md"] = "# A different passage"; });
+  await commands();
+  await previewBookmark.getByText("Second passage", { exact: true }).click();
+  await options.press("Enter");
+  await viewer.getByText("Could not locate the bookmarked passage.", { exact: true }).waitFor();
   await closeViewer();
 
   await page.evaluate(() => { window.bookmarkFixture["service.log"] += "\nAppended"; });

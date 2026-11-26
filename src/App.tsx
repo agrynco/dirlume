@@ -39,7 +39,7 @@ import { SudoDialog } from "./SudoDialog";
 import { FileContextMenu } from "./FileContextMenu";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { FileBookmarksDialog } from "./FileBookmarksDialog";
-import { bookmarkFile, bookmarkKey, lineFingerprint, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
+import { bookmarkFile, fileBookmarkKey, readFileBookmarks, saveFileBookmarks, type BookmarkJump, type FileBookmark } from "./fileBookmarks";
 import { persistFolderShortcuts, readFolderShortcuts, shortcutFromPlace, type FolderGroup, type FolderShortcut } from "./folderShortcuts";
 import type { HelpTopic } from "./helpTopics";
 import { TerminalShortcutHint } from "./TerminalShortcutHint";
@@ -1241,26 +1241,26 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   function updateFileBookmark(bookmark: FileBookmark, change: (current: FileBookmark) => FileBookmark | null) {
-    const key = bookmarkKey(bookmark.path, bookmark.line);
+    const key = fileBookmarkKey(bookmark);
     setFileBookmarks((items) => items.flatMap((item) => {
-      if (bookmarkKey(item.path, item.line) !== key) return [item];
+      if (fileBookmarkKey(item) !== key) return [item];
       const next = change(item);
       return next ? [next] : [];
     }));
   }
 
-  function addFileBookmark(path: string, line: number, text: string) {
-    const key = bookmarkKey(path, line);
-    setFileBookmarks((items) => items.some((item) => bookmarkKey(item.path, item.line) === key) ? items :
-      [...items, { path, line, fingerprint: lineFingerprint(text) }]);
+  function addFileBookmark(bookmark: FileBookmark) {
+    const key = fileBookmarkKey(bookmark);
+    setFileBookmarks((items) => items.some((item) => fileBookmarkKey(item) === key) ? items : [...items, bookmark]);
   }
 
   function openFileBookmark(bookmark: FileBookmark) {
     const file = bookmarkFile(bookmark.path);
     if (!file) return;
     setModal(null);
-    openDocument(file, false, undefined, undefined, undefined,
-      { line: bookmark.line, fingerprint: bookmark.fingerprint, request: ++bookmarkRequest.current });
+    const request = ++bookmarkRequest.current;
+    openDocument(file, false, undefined, undefined, undefined, "anchor" in bookmark
+      ? { anchor: bookmark.anchor, request } : { line: bookmark.line, fingerprint: bookmark.fingerprint, request });
   }
 
   function followMarkdownLink(id: number, from: NamedFile, file: NamedFile, position: MarkdownPosition, scrollTop: number) {
@@ -2549,6 +2549,21 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? { place: item.place, name: item.entry.name } : null;
   }
 
+  function adjacentQuickViewFile(direction: -1 | 1) {
+    if (quickViewSource === null || !filesAvailable) return undefined;
+    const rows = entries[quickViewSource];
+    for (let index = paneCursorIndex(pane, rows) + direction; index >= 0 && index < rows.length; index += direction) {
+      if (fileFor(quickViewSource, rows[index])) return rows[index];
+    }
+  }
+
+  function navigateQuickView(entry: Entry | undefined) {
+    if (entry === undefined || quickViewSource === null) return;
+    selectionAnchor.current[quickViewSource] = entry.name;
+    updatePane(quickViewSource, (source) => ({ ...source, selected: entry.name }));
+    focus(quickViewSource);
+  }
+
   function imagesInPane(side: Side, file: NamedFile) {
     const source = panes[side];
     const place = source.place;
@@ -3046,6 +3061,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "quickViewPrevious" || command === "quickViewNext") {
+      if (quickViewSource !== null && !inField && !target.closest("[role=menu]") &&
+          (onFiles?.id === quickViewSource + "-files" || target.closest(".quick-view"))) {
+        event.preventDefault();
+        navigateQuickView(command === "quickViewPrevious" ? previousPreview : nextPreview);
+      }
+      return;
+    }
     if (command === "clearMarks" && (!onFiles || inField || !filesAvailable || catalog || event.repeat)) return;
     if (command === "openInSystem" && (!onFiles || inField || !canOpenInSystem || event.repeat)) return;
     if (command?.startsWith("sort") && (inField || target.closest("[role=menu]") || !canSelectPanelMode(active))) return;
@@ -3119,6 +3142,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
     (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
   const previewFile = previewSide && filesAvailable ? currentFile : null;
+  const previousPreview = adjacentQuickViewFile(-1);
+  const nextPreview = adjacentQuickViewFile(1);
   const previewName = currentItem?.entry.name ?? current?.name;
   const previewKey = previewFile ? JSON.stringify([
     previewFile.place.kind, "id" in previewFile.place ? previewFile.place.id : null, placePath(previewFile.place),
@@ -3408,7 +3433,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </section>}>
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
             message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} markdownSize={preferences.viewFontSizes.markdown}
-            shortcuts={shortcuts} onFocusFiles={() => focus(active)} />
+            shortcuts={shortcuts} onFocusFiles={() => focus(active)}
+            onPrevious={previousPreview && (() => navigateQuickView(previousPreview))}
+            onNext={nextPreview && (() => navigateQuickView(nextPreview))}
+            previousShortcut={keyLabel("quickViewPrevious")} nextShortcut={keyLabel("quickViewNext")} />
         </Suspense>}
         {sourceMenu && paneCovered(sourceMenu.side) && paneSources(sourceMenu.side, true)}
         {terminalVisible && !panelsHidden && <div className="terminal-divider" role="separator" data-help-topic="workspace"
@@ -3487,7 +3515,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <TextWindow key={documentKey}
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             diagnosticLog={diagnosticLog}
-            fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmarkLine={addFileBookmark}
+            fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmark={addFileBookmark}
             onFileBookmarks={(path) => setModal({ kind: "fileBookmarks", path })}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             colors={scheme?.colors}

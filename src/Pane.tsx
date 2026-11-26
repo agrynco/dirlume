@@ -149,7 +149,7 @@ function InlineRenameField({ name, onSave, onCancel }: NonNullable<PaneProps["re
 }
 
 export function Pane({ side, active, covered, preserveScroll, layout, modeId, mode, sortAvailable, sortPending, onGroupLayout, onPage, showHidden, addressPlace,
-  rightClickSelection, pane, entries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
+  rightClickSelection, pane, entries: availableEntries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
@@ -162,9 +162,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const list = useRef<HTMLDivElement>(null);
   const markedSet = new Set(pane.marked);
-  const rightClick = useRightClickSelection({ list, entries, marked: markedSet, scope: path,
+  const rightClick = useRightClickSelection({ list, entries: availableEntries, marked: markedSet, scope: path,
     enabled: rightClickSelection && !catalog && !processView && !covered && !pane.loading,
     onMark: onRightClickMark, onContext: (x, y, entry) => onContext(x, y, entry, true) });
+  const { entries } = rightClick;
   const savedScroll = useRef<{ top: number; left: number } | null>(null);
   const columnHeader = useRef<HTMLDivElement>(null);
   const [modeVisibility, setModeVisibility] = useState(() => ({
@@ -342,7 +343,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       setViewport((before) => before.top === element.scrollTop ? before : { ...before, top: element.scrollTop });
       return;
     }
-    if (!active || selected < 0 || paged) return;
+    if (!active || selected < 0 || paged || rightClick.selecting) return;
     if (virtual) {
       const top = (selected % rowsPerGroup) * viewport.rowHeight;
       const bottom = top + viewport.rowHeight + 8;
@@ -352,7 +353,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     } else {
       element.querySelector("[data-current='true']")?.scrollIntoView({ block: "nearest" });
     }
-  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll, paged]);
+  }, [selected, path, active, virtual, matches, viewport.rowHeight, rowsPerGroup, processView, preserveScroll, paged, rightClick.selecting]);
   useEffect(() => {
     const target = document.getElementById(`${side}-pane`);
     const show = () => {

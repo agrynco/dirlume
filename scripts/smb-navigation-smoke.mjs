@@ -468,6 +468,8 @@ export async function testSmbNavigation() {
     await menu("right").waitFor();
     await page.keyboard.press("Control+Shift+x");
     await pathIs("right", "C:\\");
+    await menu("right").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "right-files");
     const address = await editPaneAddress(page, "right");
     await address.fill("C:\\");
     await address.press("End");

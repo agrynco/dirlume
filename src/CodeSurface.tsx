@@ -7,7 +7,7 @@ import { EditorView, gutter, GutterMarker, highlightActiveLine, keymap, lineNumb
 import { tags } from "@lezer/highlight";
 import type { NamedFile } from "./api";
 import { detectLanguage, languageChoices } from "./syntaxCatalog";
-import { lineFingerprint, type BookmarkJump, type BookmarkResult } from "./fileBookmarks";
+import { lineFingerprint, type LineBookmarkJump, type BookmarkResult } from "./fileBookmarks";
 
 const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.comment, tags.docComment], class: "syntax-comment" },
@@ -66,7 +66,7 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
   onSourceStatus?: (status: SourceStatus) => void;
   bookmarkLines?: ReadonlySet<number>;
   onBookmarkLine?: (line: number, text: string) => void;
-  bookmarkJump?: BookmarkJump;
+  bookmarkJump?: LineBookmarkJump;
   onBookmarkResult?: (result: BookmarkResult) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);

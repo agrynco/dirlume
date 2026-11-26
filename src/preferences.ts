@@ -88,6 +88,8 @@ export const commands = {
   processContextMenu: { label: "Open process context menu", key: "Shift+F10" },
   view: { label: "View text or measure folder", key: "F3" },
   quickView: { label: "Quick View", key: "Ctrl+Q" },
+  quickViewPrevious: { label: "Quick View: Previous File", key: "Alt+PageUp" },
+  quickViewNext: { label: "Quick View: Next File", key: "Alt+PageDown" },
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
   environmentVariables: { label: "Environment variables", key: "" },
   analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
