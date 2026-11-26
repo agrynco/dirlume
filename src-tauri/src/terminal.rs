@@ -32,11 +32,66 @@ function global:Send-DirlumeCommand([string]$line) {
         [Console]::Title = '{0}:command:{1}:{2}' -f $env:DIRLUME_PROMPT_TOKEN, $global:DirlumeCommandCount, $global:DirlumeLatestCommand
     }
 }
+function global:Invoke-DirlumeDnsFlush([string]$program, [string]$option) {
+    if ($program -notmatch '\Aipconfig(?:\.exe)?\z' -or $option -notmatch '\A/flushdns\z') {
+        throw 'The command is not supported for elevation.'
+    }
+    $systemIpConfig = [IO.Path]::Combine([Environment]::SystemDirectory, 'ipconfig.exe')
+    $resolved = Microsoft.PowerShell.Core\Get-Command -Name $program -ErrorAction SilentlyContinue
+    $location = Microsoft.PowerShell.Management\Get-Location
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $elevated = [Security.Principal.WindowsPrincipal]::new($identity).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+    } finally {
+        $identity.Dispose()
+    }
+    if ($elevated -or !$resolved -or $resolved.CommandType -ne 'Application' -or $resolved.Path -ine $systemIpConfig -or
+        $location.Provider.Name -ne 'FileSystem') {
+        & $program $option
+        return
+    }
+    $output = @(& $systemIpConfig $option 2>&1)
+    $exitCode = $LASTEXITCODE
+    $lines = @($output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    $requiresElevation = [ComponentModel.Win32Exception]::new(740).Message.TrimEnd([char[]]'.。')
+    # ipconfig returns 1 for this error. Match the entire result of the resolved system command.
+    if ($exitCode -ne 1 -or $lines.Count -ne 1 -or $lines[0].TrimEnd([char[]]'.。') -ne $requiresElevation) {
+        $output
+        return
+    }
+    $launch = @{
+        FilePath = $systemIpConfig; ArgumentList = $option; WorkingDirectory = $location.ProviderPath
+        Verb = 'RunAs'; WindowStyle = 'Hidden'; Wait = $true; PassThru = $true; ErrorAction = 'Stop'
+    }
+    try {
+        $result = Microsoft.PowerShell.Management\Start-Process @launch
+        $global:LASTEXITCODE = $result.ExitCode
+        if ($result.ExitCode -eq 0) {
+            [ComponentModel.Win32Exception]::new(0).Message
+        } else {
+            Write-Error ("ipconfig exited with code {0}." -f $result.ExitCode)
+        }
+    } catch {
+        $cause = $_.Exception
+        while ($cause.InnerException) { $cause = $cause.InnerException }
+        if ($cause -is [ComponentModel.Win32Exception] -and $cause.NativeErrorCode -eq 1223) {
+            $cause.Message
+        } else {
+            throw
+        }
+    }
+}
 if ($dirlumeReadLine) {
     $global:DirlumeOriginalReadLine = $dirlumeReadLine.ScriptBlock
     function global:PSConsoleHostReadLine {
         $line = & $global:DirlumeOriginalReadLine
-        if ($line -is [string]) { Send-DirlumeCommand $line }
+        if ($line -is [string]) {
+            Send-DirlumeCommand $line
+            if ($line -match '\A[ \t]*(ipconfig(?:\.exe)?)[ \t]+(/flushdns)[ \t]*\z') {
+                return "Invoke-DirlumeDnsFlush '$($Matches[1])' '$($Matches[2])'"
+            }
+        }
         $line
     }
 }

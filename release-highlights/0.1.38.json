@@ -6,8 +6,8 @@
     "Choose a custom SFTP server command, legacy timestamp handling, and the SSH terminal shell in NetBox.",
     "Checkboxes are consistently placed to the left of their labels in dialogs.",
     "Use the color scheme’s selection text color for current and marked file names, including hidden and system entries.",
-    "Access the refreshed main menu directly from the title bar, with an option to show it only when invoked by a shortcut.",
+    "Access the refreshed main menu in the title bar beside Dirlume’s two-pane app icon.",
     "Switch from Tree to List even when the selected item’s parent folder cannot be opened.",
-    "Show Dirlume’s two-pane app icon in the title bar."
+    "Request Windows administrator consent when the system denies a directly submitted ipconfig /flushdns command."
   ]
 }
