@@ -126,7 +126,7 @@ try {
 
     await fileRow(page, "left", "Local folder").dblclick();
     await waitPath(page, "left", local);
-    const providers = [["FTP", "Saved FTP"], ["SSH", "Saved SFTP"], ["Remote machine", "Saved Server"]];
+    const providers = [["NetBox", "Saved FTP"], ["NetBox", "Saved SFTP"], ["Remote machine", "Saved Server"]];
     for (const [name, profile] of providers) {
       await openSource(page, "left", name);
       await fileRow(page, "left", profile).dblclick();
