@@ -1945,7 +1945,16 @@ button.color-swatch {
 .syntax-property { color: var(--document-syntax-property, var(--syntax-property)); }
 .syntax-invalid { color: var(--danger); }
 .mermaid-figure { margin: 16px 0; }
-.mermaid-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-block-end: 6px; }
+.mermaid-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  width: fit-content; max-width: 100%; margin-block-end: 6px; padding: 4px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--raised) 20%, transparent);
+  color: color-mix(in srgb, var(--ink) 65%, var(--muted));
+}
+.mermaid-tools:is(:hover, :focus-within) {
+  background: color-mix(in srgb, var(--raised) 96%, transparent);
+  color: var(--ink);
+}
 .mermaid-pan {
   position: sticky; top: 0; z-index: 1;
   display: flex; align-items: center; gap: 8px; padding: 3px 6px;
