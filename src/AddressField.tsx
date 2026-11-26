@@ -160,6 +160,7 @@ export function AddressField({ side, place: shown, trail, showHidden, onNavigate
   const [overflow, setOverflow] = useState<"parents" | "previous" | null>(null);
   const parentButton = useRef<HTMLButtonElement>(null);
   const previousButton = useRef<HTMLButtonElement>(null);
+  const restoreOverflowFocus = useRef<typeof overflow>(null);
   const [hoverX, setHoverX] = useState<number>();
   const [draft, setDraft] = useState(path);
   const forward = previousPath(shown, trail);
@@ -203,6 +204,13 @@ export function AddressField({ side, place: shown, trail, showHidden, onNavigate
   useLayoutEffect(() => {
     if (editing) root.current?.querySelector("input")?.focus({ preventScroll: true });
   }, [editing]);
+
+  useLayoutEffect(() => {
+    if (overflow || !restoreOverflowFocus.current) return;
+    const trigger = restoreOverflowFocus.current === "parents" ? parentButton : previousButton;
+    restoreOverflowFocus.current = null;
+    trigger.current?.focus({ preventScroll: true });
+  }, [overflow]);
 
   function goTo(folder: FileLocation) {
     setOverflow(null);
@@ -259,8 +267,8 @@ export function AddressField({ side, place: shown, trail, showHidden, onNavigate
         if (event.key !== "Escape" || !overflow) return;
         event.stopPropagation();
         event.preventDefault();
+        restoreOverflowFocus.current = overflow;
         setOverflow(null);
-        (overflow === "parents" ? parentButton : previousButton).current?.focus();
       }}>
         {source && place && <div className="address-ancestor address-source">
           <Button type="button" aria-label={t("Open {0} connection list", sourceName)} onClick={() => {
