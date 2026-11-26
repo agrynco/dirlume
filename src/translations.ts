@@ -781,6 +781,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Open as administrator": ["Відкрити від імені адміністратора", "Открыть от имени администратора"],
   "Administrator": ["Адміністратор", "Администратор"],
   "Could not restore the administrator workspace.": ["Не вдалося відновити робочу область адміністратора.", "Не удалось восстановить рабочую область администратора."],
+  "Could not read dirlume-settings.json beside Dirlume.exe.": ["Не вдалося прочитати dirlume-settings.json поруч із Dirlume.exe.", "Не удалось прочитать dirlume-settings.json рядом с Dirlume.exe."],
+  "Could not save dirlume-settings.json beside Dirlume.exe.": ["Не вдалося зберегти dirlume-settings.json поруч із Dirlume.exe.", "Не удалось сохранить dirlume-settings.json рядом с Dirlume.exe."],
   "Locking processes": ["Процеси, які блокують файли", "Процессы, блокирующие файлы"],
   "End processes": ["Завершити процеси", "Завершить процессы"],
   "Ending processes may cause unsaved work to be lost.": ["Завершення процесів може призвести до втрати незбереженої роботи.", "Завершение процессов может привести к потере несохранённой работы."],

@@ -2968,8 +2968,8 @@ pub fn run() {
         crate::updates::check_for_update,
         crate::updates::highlights::installed_release,
         crate::updates::highlights::acknowledge_release,
-        crate::updates::read_portable_state,
-        crate::updates::save_portable_preferences,
+        crate::updates::read_windows_settings,
+        crate::updates::save_windows_preferences,
         crate::updates::install_update,
         #[cfg(feature = "ui-automation")]
         crate::updates::fixture::updater_fixture_result,

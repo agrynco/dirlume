@@ -23,7 +23,7 @@ export interface McpContext {
   remote: (side: Side, place: RemotePlace, listing: Listing) => void;
   selection: (side: Side, names: string[]) => void;
   refresh: (side: Side) => void;
-  setPreferences: (preferences: Preferences) => void;
+  setPreferences: (preferences: Preferences) => Promise<void>;
   setShortcuts: (shortcuts: FolderShortcuts) => void;
 }
 
@@ -230,7 +230,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
         if (!allowedColors.has(key) || typeof color !== "string" || !isHexColor(color)) throw new Error("Use valid color keys and six-digit hex colors.");
       }
       const scheme = { id: crypto.randomUUID(), name: title, base, colors: colors as Palette, fonts: {} };
-      context.setPreferences({ ...context.preferences, schemes: [...context.preferences.schemes, scheme] });
+      await context.setPreferences({ ...context.preferences, schemes: [...context.preferences.schemes, scheme] });
       return scheme;
     }
     case "list_processes": return api.listProcesses();

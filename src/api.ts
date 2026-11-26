@@ -526,8 +526,9 @@ export const api = {
   buildVersion: () => invoke<string>("build_version"),
   readSettingsArchive: (title: string) => invoke<string | null>("read_settings_archive", { title }),
   writeSettingsArchive: (title: string, contents: string) => invoke<boolean>("write_settings_archive", { title, contents }),
-  readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
-  savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
+  readWindowsSettings: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_windows_settings"),
+  saveWindowsPreferences: (preferences: object, onlyIfMissing = false) =>
+    invoke<boolean>("save_windows_preferences", { preferences, onlyIfMissing }),
   errorLog: () => invoke<string | null>("error_log"),
   clearErrorLog: () => invoke<void>("clear_error_log"),
   checkForUpdate: (trigger: "automatic" | "manual") => invoke<AppUpdate | null>("check_for_update", { trigger }),
