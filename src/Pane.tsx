@@ -193,7 +193,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return false;
   }, [pane.backgroundSizes]);
   const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
-  const tracks = netbox ? "minmax(0, 2fr) minmax(0, 7ch) minmax(0, 3fr)" : panelColumnTracks(columns, fitMeasuredFolders);
+  const tlsProfiles = netbox && pane.entries.some(({ connection }) =>
+    connection?.kind === "ftp" && connection.encryption && connection.encryption !== "plain");
+  const tracks = netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = paneCursorIndex(pane, entries);
@@ -597,7 +599,8 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             const entry = entries[index];
             const connection = entry.connection;
             const profile = netbox && (connection?.kind === "ftp" || connection?.kind === "ssh") ? connection : undefined;
-            const protocol = profile?.kind === "ssh" ? "SFTP" : "FTP";
+            const protocol = profile?.kind === "ssh" ? "SFTP" : profile?.encryption === "explicitTls" ? t("FTPS (explicit)") :
+              profile?.encryption === "implicitTls" ? t("FTPS (implicit)") : "FTP";
             const icon = icons.get(byName.get(entry.name) ?? "");
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
             const marked = markedSet.has(entry.name);
@@ -629,7 +632,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 onDoubleClick={() => onOpen(entry)}>
                 {profile ? <>
                   <span className="file-name"><Server aria-hidden="true" /><span className="file-name-text">{entry.name}</span></span>
-                  <span className="file-metadata file-protocol">{protocol}</span>
+                  <span className="file-metadata file-protocol" data-tooltip={protocol}>{protocol}</span>
                   <span className="file-metadata file-host" dir="auto" data-tooltip={profile.host}>{profile.host}</span>
                 </> : group.map(({ field }, slot) => isNameField(field) ?
                   <span key={slot} className="file-name">

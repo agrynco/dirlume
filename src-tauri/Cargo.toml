@@ -19,7 +19,7 @@ required-features = ["server"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:axum", "dep:axum-server", "dep:block2", "dep:cap-std", "dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:gio", "dep:image", "dep:jiff", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:ntfs-mft", "dep:objc2-app-kit", "dep:png", "dep:portable-pty", "dep:rcgen", "dep:reqwest", "dep:ring", "dep:rustls", "dep:semver", "dep:socket2", "dep:subtle", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows", "dep:futures-util", "dep:openssh-sftp-client", "dep:russh", "dep:x11rb", "dep:zbus", "dep:zeroize", "dep:zip"]
+desktop = ["dep:async-trait", "dep:axum", "dep:axum-server", "dep:block2", "dep:cap-std", "dep:clipboard-rs", "dep:codepage", "dep:encoding_rs", "dep:font-kit", "dep:gio", "dep:image", "dep:jiff", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:ntfs-mft", "dep:objc2-app-kit", "dep:png", "dep:portable-pty", "dep:rcgen", "dep:reqwest", "dep:ring", "dep:rustls", "dep:rustls-native-certs", "dep:semver", "dep:socket2", "dep:subtle", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows", "dep:futures-util", "dep:openssh-sftp-client", "dep:russh", "dep:x11rb", "dep:zbus", "dep:zeroize", "dep:zip"]
 ui-automation = ["desktop", "tauri/devtools"]
 server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util"]
 
@@ -34,6 +34,7 @@ debug = "line-tables-only"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+async-trait = { version = "0.1", optional = true }
 axum = { version = "0.8", optional = true }
 axum-server = { version = "0.9", features = ["tls-rustls-ring"], optional = true }
 base64 = "0.22"
@@ -57,13 +58,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 ring = { version = "0.17", optional = true }
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 same-file = "1"
 semver = { version = "1", optional = true }
 socket2 = { version = "0.6", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 subtle = { version = "2", optional = true }
-suppaftp = { version = "13", optional = true }
+suppaftp = { version = "13", features = ["tokio-rustls-ring", "deprecated"], optional = true }
 sysinfo = { version = "0.40", default-features = false, features = ["system"], optional = true }
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-dialog = { version = "2", optional = true }

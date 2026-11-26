@@ -135,6 +135,15 @@ try {
     await tab("Session").click();
     const protocol = add.getByLabel("Protocol", { exact: true });
     await protocol.selectOption("ftp");
+    const encryption = add.getByLabel("Encryption", { exact: true });
+    const ftpPort = add.getByLabel("Port", { exact: true });
+    assert.equal(await encryption.inputValue(), "plain");
+    assert.equal(await ftpPort.inputValue(), "21");
+    await encryption.selectOption("implicitTls");
+    assert.equal(await ftpPort.inputValue(), "990");
+    await encryption.selectOption("explicitTls");
+    assert.equal(await ftpPort.inputValue(), "21");
+    await encryption.selectOption("plain");
     await add.evaluate((element) => { element.style.width = "194px"; });
     await tab("Session").focus();
     if (/Linux/.test(platform)) {

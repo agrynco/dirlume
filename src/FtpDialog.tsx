@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, type FtpProfile } from "./api";
+import { api, describeError, type FtpEncryption, type FtpProfile } from "./api";
 import { Button } from "./Button";
 import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { errorText, t } from "./i18n";
@@ -19,11 +19,12 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
   onClose: () => void;
 }) {
   const [label, setLabel] = useState(profile?.label ?? draft?.label ?? "");
+  const [encryption, setEncryption] = useState<FtpEncryption>(profile?.encryption ?? draft?.ftpEncryption ?? "plain");
   const [connection, setConnection] = useState(() => ({
     host: profile?.host ?? draft?.host ?? "",
-    port: draft?.port ?? String(profile?.port ?? 21),
+    port: draft?.portEdited ? draft.port : String(profile?.port ?? (encryption === "implicitTls" ? 990 : 21)),
     username: profile?.username ?? draft?.username ?? "",
-    portEdited: draft?.portEdited ?? false,
+    portEdited: profile ? profile.port !== (encryption === "implicitTls" ? 990 : 21) : draft?.portEdited ?? false,
   }));
   const [password, setPassword] = useState("");
   const [clearPassword, setClearPassword] = useState(false);
@@ -49,6 +50,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
         id: profile?.id, label: label.trim(), host: connection.host, port: Number(connection.port), username: connection.username,
         password: clearPassword ? "" : password || undefined,
         codePage: codePage && Number(codePage) !== 65001 ? Number(codePage) : null,
+        encryption,
         directories: { ...directories, resolveLinks: false },
         environment,
         connectionOptions,
@@ -95,9 +97,21 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
       connection: <NetBoxConnectionPage value={connectionOptions} ftp
         onChange={(settings) => { setConnectionOptions(settings); change(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
-      verified ? <p role="status">{t("FTP connection successful.")}</p> : undefined}
-    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions }))}>
+      verified ? <p role="status">{t(encryption === "plain" ? "FTP connection successful." : "FTPS connection successful.")}</p> : undefined}
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories, environment, connectionOptions, ftpEncryption: encryption }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
+          <label className="field">{t("Encryption")}
+            <select aria-label={t("Encryption")} value={encryption} onChange={({ target }) => {
+              const mode = target.value === "explicitTls" || target.value === "implicitTls" ? target.value : "plain";
+              setEncryption(mode);
+              setConnection((current) => current.portEdited ? current : { ...current, port: mode === "implicitTls" ? "990" : "21" });
+              change();
+            }}>
+              <option value="plain">{t("No encryption")}</option>
+              <option value="explicitTls">{t("Explicit TLS")}</option>
+              <option value="implicitTls">{t("Implicit TLS")}</option>
+            </select>
+          </label>
           <ConnectionHostFields protocol="ftp" connection={connection} onChange={(update) => {
             setConnection((current) => ({ ...current, ...update }));
             change();
@@ -110,7 +124,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
             <span>{t("Clear saved password")}</span>
             <input type="checkbox" checked={clearPassword} onChange={(event) => { setClearPassword(event.target.checked); change(); }} />
           </label>}
-          <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>
+          {encryption === "plain" && <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>}
           <div className="dialog-actions">
             <Button type="button" disabled={!!working || !canTest} onClick={({ currentTarget }) => {
               if (currentTarget.form?.reportValidity()) void submit("test");
