@@ -51,6 +51,11 @@ try {
   const markers = viewer.locator(".cm-file-bookmarks .cm-line-bookmarked");
   const list = page.getByRole("dialog", { name: "File bookmarks", exact: true });
   const options = list.getByRole("listbox");
+  const openSelected = async () => {
+    await options.press("Enter");
+    assert.ok(await list.isVisible(), "Opening a bookmark leaves the window open.");
+    await button(list, "Close").click();
+  };
   const bookmark = (line) => options.getByRole("option").filter({ has: page.getByText("Line " + line, { exact: true }) });
   const commands = async () => {
     const menu = await openMainMenu(page, "Commands");
@@ -114,18 +119,27 @@ try {
   await button(rename, "Save").click();
   await bookmark(2).getByText("First timeout").waitFor();
   if (process.env.DIRLUME_BOOKMARKS_SCREENSHOT) await list.screenshot({ path: process.env.DIRLUME_BOOKMARKS_SCREENSHOT });
+  const title = list.getByRole("heading", { name: "File bookmarks", exact: true });
+  const beforeDrag = await title.boundingBox();
+  await page.mouse.move(beforeDrag.x + 24, beforeDrag.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(beforeDrag.x - 28, beforeDrag.y + 72, { steps: 5 });
+  await page.mouse.up();
+  const afterDrag = await title.boundingBox();
+  assert.ok(afterDrag.x < beforeDrag.x && afterDrag.y > beforeDrag.y);
   await options.press("End");
   await options.press("Enter");
   await awaitLine("Noise " + visible);
   assert.equal(await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "View service.log", exact: true }).count(), 1);
 
   await mainFiles();
+  assert.ok(await pane.isVisible() && await list.isVisible());
   await show("service.log", "F4");
   await editor.getByRole("textbox", { name: "Edit service.log", exact: true }).fill("Unsaved editor draft");
   await mainFiles();
   await commands();
   await bookmark(2).click();
-  await options.press("Enter");
+  await openSelected();
   await awaitLine("Noise 2");
   await page.getByRole("navigation", { name: "Open documents" }).getByRole("button", { name: "Edit service.log", exact: true }).click();
   await editor.getByText("Unsaved editor draft", { exact: true }).waitFor();
@@ -134,6 +148,10 @@ try {
   await closeViewer();
 
   await show("reader.md");
+  await viewer.press(defaultModifier + "+Shift+b");
+  await options.getByRole("group", { name: /service\.log/ }).waitFor();
+  assert.equal(await options.getByRole("group").count(), 1);
+  await button(list, "Close").click();
   const markdown = viewer.locator(".markdown");
   const quote = "linked text and formatted code";
   const storedPreview = () => page.waitForFunction((quote) => {
@@ -162,6 +180,7 @@ try {
   await viewer.getByRole("menuitem", { name: "Bookmark selection", exact: true }).click();
   await storedPreview();
   await button(viewer, "File bookmarks").click();
+  assert.equal(await options.getByRole("group").count(), 2);
   const previewBookmark = options.getByRole("option").filter({ has: page.getByText("Preview", { exact: true }) });
   await previewBookmark.getByText(quote, { exact: true }).waitFor();
   await button(list, "Rename").click();
@@ -183,7 +202,7 @@ try {
   await page.waitForFunction((path) => document.getElementById("left-path")?.dataset.path === path, other);
   await commands();
   await bookmark(3).click();
-  await options.press("Enter");
+  await openSelected();
   await awaitLine("Bookmarks work in Source.");
   await markers.first().waitFor();
   await closeViewer();
@@ -192,7 +211,7 @@ try {
   await page.setViewportSize({ width: 840, height: 620 });
   await commands();
   await previewBookmark.getByText("Second passage", { exact: true }).click();
-  await options.press("Enter");
+  await openSelected();
   await page.waitForFunction((quote) => {
     const surface = document.querySelector(".text-window:not([hidden]) .markdown");
     const range = [...(CSS.highlights?.get("markdown-bookmark") ?? [])][0] ?? window.getSelection()?.getRangeAt(0);
@@ -206,14 +225,14 @@ try {
   await page.evaluate(() => { window.bookmarkFixture["reader.md"] = "# A different passage"; });
   await commands();
   await previewBookmark.getByText("Second passage", { exact: true }).click();
-  await options.press("Enter");
+  await openSelected();
   await viewer.getByText("Could not locate the bookmarked passage.", { exact: true }).waitFor();
   await closeViewer();
 
   await page.evaluate(() => { window.bookmarkFixture["service.log"] += "\nAppended"; });
   await commands();
   await bookmark(visible).click();
-  await options.press("Enter");
+  await openSelected();
   await awaitLine("Noise " + visible);
   assert.equal(await viewer.getByText(/since it was bookmarked|past the end of the file/).count(), 0);
   await closeViewer();
@@ -221,19 +240,19 @@ try {
   await page.evaluate(() => { window.bookmarkFixture["service.log"] = "Noise 1\nUpdated second line"; });
   await commands();
   await bookmark(2).click();
-  await options.press("Enter");
+  await openSelected();
   await viewer.getByText("Line 2 has changed since it was bookmarked.", { exact: true }).waitFor();
   await closeViewer();
   await commands();
   await bookmark(visible).click();
-  await options.press("Enter");
+  await openSelected();
   await viewer.getByText("Bookmark line " + visible + " is past the end of the file. Showing line 2.", { exact: true }).waitFor();
   await closeViewer();
 
   await page.evaluate(() => { delete window.bookmarkFixture["service.log"]; });
   await commands();
   await bookmark(visible).click();
-  await options.press("Enter");
+  await openSelected();
   await viewer.getByRole("alert").getByText(/The fixture file was moved/).waitFor();
   await viewer.getByRole("heading", { name: /service\.log/ }).waitFor();
   await closeViewer();

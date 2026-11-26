@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { editPaneAddress } from "./pane-address-smoke.mjs";
 
 const button = (scope, name) => scope.getByRole("button", { name, exact: true });
 const row = (scope, name) => scope.locator(".space-tree-row").filter({ has: scope.page().getByText(name, { exact: true }) });
@@ -13,9 +14,9 @@ async function finished(analyzer) {
 
 async function assertBreadcrumbs(analyzer, names) {
   const bar = analyzer.locator(".space-target .address-breadcrumbs");
-  assert.deepEqual(await bar.locator(".address-ancestor > button, .address-current").allTextContents(), names);
-  assert.equal(await bar.locator(".address-ancestor > svg").count(), names.length - 1);
-  assert.equal(await bar.locator(".address-ancestor > button").count(), names.length - 1);
+  await button(bar, "Show parent folders").waitFor({ state: "hidden" });
+  assert.deepEqual(await bar.locator(".address-ancestor:not([hidden]) > button, .address-source > span, .address-current").allTextContents(), names);
+  assert.equal(await bar.locator(".address-ancestor:not([hidden]) > svg").count(), names.length - 1);
 }
 
 async function fixture(browser, layout, source = "local", diskBinding) {
@@ -31,8 +32,8 @@ async function fixture(browser, layout, source = "local", diskBinding) {
   await page.addInitScript(({ windows, layout, source, diskBinding }) => {
     const joiner = windows ? "\\" : "/";
     const base = source === "unc" ? "\\\\fixture\\storage" : source === "long" ?
-      "C:\\A long directory with many characters\\Another long directory with many characters" :
-      windows ? "C:\\fixture\\mount" : source === "mac" ? "/Users/fixture" : "/mnt/samba";
+      "C:\\A long directory with many characters\\Demo\\Reports\\Archive" :
+      windows ? "C:\\fixture\\mount" : source === "mac" ? "/Users/fixture" : source === "deep-mounted" ? "/mnt/samba/demo/reports/archive" : "/mnt/samba";
     const folder = base + joiner + "open";
     const other = windows ? "D:\\other" : "/other";
     const gib = 1024 ** 3;
@@ -251,7 +252,7 @@ try {
   assert.equal(await analyzer.locator(".space-map-heading > span").textContent(), "branch");
   await analyzer.getByRole("button", { name: /^sub,/ }).click();
   await analyzer.getByRole("button", { name: /^payload.dat,/ }).click();
-  await assertBreadcrumbs(analyzer, ["mount", "open", "branch", "sub"]);
+  await assertBreadcrumbs(analyzer, ["C:", "fixture", "mount", "open", "branch", "sub"]);
   await button(analyzer, "Show in other pane").click();
   await pane(local, "right").getByRole("option", { name: /^payload.dat/, selected: true }).waitFor();
   await button(analyzer, "Close").click();
@@ -447,18 +448,41 @@ try {
   }
 
   for (const [source, names] of [["mounted", ["/", "mnt", "samba", "open"]], ["mac", ["/", "Users", "fixture", "open"]],
-    ["long", ["C:", "A long directory with many characters", "Another long directory with many characters", "open"]]]) {
+    ["deep-mounted", ["/", "mnt", "samba", "demo", "reports", "archive", "open"]],
+    ["long", ["C:", "A long directory with many characters", "Demo", "Reports", "Archive", "open"]]]) {
     const page = await fixture(browser, "standard", source);
+    await page.setViewportSize({ width: 2000, height: 760 });
+    if (source === "long" || source === "deep-mounted") {
+      const path = await page.locator("#left-path").getAttribute("data-path");
+      const address = await editPaneAddress(page, "right");
+      await address.fill(path);
+      await address.press("Enter");
+      for (const side of ["left", "right"]) {
+        const bar = page.locator(`#${side}-path .address-breadcrumbs`);
+        await bar.getByText("open", { exact: true }).waitFor();
+        await button(bar, "Show parent folders").waitFor({ state: "hidden" });
+        assert.deepEqual(await bar.locator(".address-ancestor:not([hidden]) > button, .address-current").allTextContents(), names);
+      }
+    }
     await button(pane(page, "left"), "Analyze space").click();
     const target = page.getByRole("region", { name: "Space Analyzer", exact: true });
     await finished(target);
-    await assertBreadcrumbs(target, names);
-    if (source === "long") {
-      await page.setViewportSize({ width: 600, height: 500 });
-      await button(target, "Show parent folders").waitFor();
-      assert.equal(await target.locator(".address-current").evaluate((current) =>
-        current.getBoundingClientRect().right <= current.closest(".address-crumb-clip").getBoundingClientRect().right + 1), true);
-      assert.equal(await target.locator(".address-breadcrumbs").getAttribute("title"), names.join("\\"));
+    for (const view of ["Tree", "Treemap", "Sunburst"]) {
+      await button(target, view).click();
+      await assertBreadcrumbs(target, names);
+    }
+    if (source === "long" || source === "deep-mounted") {
+      const bar = target.locator(".space-target .address-breadcrumbs");
+      await bar.evaluate((node) => { node.style.width = "240px"; });
+      const hidden = button(bar, "Show parent folders");
+      await hidden.press("Enter");
+      const menu = bar.locator(".address-parents");
+      await menu.getByRole("button", { name: names[0], exact: true }).waitFor();
+      assert.equal(await bar.locator(".address-current").textContent(), "open");
+      await hidden.press("Escape");
+      assert.ok(await target.isVisible() && await hidden.evaluate((node) => document.activeElement === node));
+      await bar.evaluate((node) => { node.style.width = ""; });
+      await assertBreadcrumbs(target, names);
     }
     await page.close();
   }
@@ -488,7 +512,7 @@ try {
       await remote.getByRole("button", { name: /^nested, 1\.2\d* KiB$/ }).hover();
       await page.locator(".app-tooltip").getByText(/^nested, 1\.2\d* KiB$/).waitFor();
       await button(remote, "Tree").click();
-      await assertBreadcrumbs(remote, ["fixture", "open"]);
+      await assertBreadcrumbs(remote, ["NetBox", "fixture", "open"]);
       await page.evaluate(() => { window.spaceFailure = "Connection reset by peer"; });
       await button(remote, "Rescan").click();
       await remote.getByRole("alert").filter({ hasText: "Reconnect and rescan." }).waitFor();
@@ -497,7 +521,7 @@ try {
       await button(remote, "Rescan").click();
       await remote.getByRole("alert").waitFor({ state: "hidden" });
       await finished(remote);
-      await assertBreadcrumbs(remote, ["fixture", "open"]);
+      await assertBreadcrumbs(remote, ["NetBox", "fixture", "open"]);
     }
     await row(remote, "nested").dblclick();
     await row(remote, "remote.dat").click();

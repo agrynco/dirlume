@@ -22,7 +22,7 @@ export function saveDialogSize(key: string, size: Dimensions) {
 }
 
 export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownCapture,
-  wide = false, resizeKey, dismissOnOutside = false, standalone = false, suspended = false, tone, font, fontZoom, helpTopic, contextHelp = false }: {
+  wide = false, resizeKey, dismissOnOutside = false, standalone = false, modeless = false, suspended = false, tone, font, fontZoom, helpTopic, contextHelp = false }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -32,6 +32,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   wide?: boolean;
   resizeKey?: string;
   standalone?: boolean;
+  modeless?: boolean;
   suspended?: boolean;
   dismissOnOutside?: boolean;
   tone?: "warning";
@@ -44,6 +45,8 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   const heading = useId();
   const [size, setSize] = useState(() => readDialogSize(resizeKey));
   const drag = useRef<(Dimensions & { x: number; y: number; horizontal: number; vertical: number }) | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number }>();
+  const moving = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const dialog = ref.current;
     const focused = document.activeElement;
@@ -73,10 +76,30 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
     if (!dialog) return;
     if (suspended) dialog.close();
     else if (!dialog.open) {
-      dialog.showModal();
+      if (modeless) dialog.show();
+      else dialog.showModal();
       dialog.querySelector<HTMLElement>("[data-initial-focus]")?.focus();
     }
-  }, [suspended]);
+  }, [suspended, modeless]);
+
+  useLayoutEffect(() => {
+    const dialog = ref.current;
+    if (!modeless || !dialog) return;
+    const keepOnScreen = () => {
+      const { width, height } = dialog.getBoundingClientRect();
+      setPosition((current) => current && {
+        left: Math.max(0, Math.min(current.left, innerWidth - width)),
+        top: Math.max(0, Math.min(current.top, innerHeight - height)),
+      });
+    };
+    window.addEventListener("resize", keepOnScreen);
+    const observer = new ResizeObserver(keepOnScreen);
+    observer.observe(dialog);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", keepOnScreen);
+    };
+  }, [modeless]);
 
   function resize(width: number, height: number, persist = false) {
     const next = {
@@ -95,10 +118,15 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   }
 
   return (
-    <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "")}
-      style={size} data-tone={tone} data-font={font} data-font-zoom={fontZoom ?? font ?? "dialog"}
+    <dialog ref={ref} className={"dialog" + (wide ? " dialog-wide" : "") + (resizeKey ? " dialog-resizable" : "") + (standalone ? " dialog-window" : "") + (modeless ? " dialog-modeless" : "")}
+      style={{ ...size, ...position }} data-tone={tone} data-font={font} data-font-zoom={fontZoom ?? font ?? "dialog"}
       data-help-topic={helpTopic} data-context-help={contextHelp || undefined} aria-labelledby={heading} onKeyDown={(event) => {
-        if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDown?.(event);
+        if ((event.target as HTMLElement).closest("dialog") !== event.currentTarget) return;
+        onKeyDown?.(event);
+        if (modeless && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          onClose?.();
+        }
       }}
       onKeyDownCapture={(event) => {
         if ((event.target as HTMLElement).closest("dialog") === event.currentTarget) onKeyDownCapture?.(event);
@@ -112,7 +140,15 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
             onClose?.();
           }
         }
-        if (!resizeKey || event.button !== 0 || !(event.target instanceof HTMLElement)) return;
+        if (event.button !== 0 || !(event.target instanceof HTMLElement)) return;
+        if (modeless && event.target.closest(".dialog-heading") && !event.target.closest("button")) {
+          event.preventDefault();
+          const { left, top } = event.currentTarget.getBoundingClientRect();
+          moving.current = { x: event.clientX, y: event.clientY, left, top };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          return;
+        }
+        if (!resizeKey) return;
         const handle = event.target.closest<HTMLElement>("[data-resize-edge]");
         if (handle?.closest("dialog") !== event.currentTarget) return;
         event.preventDefault();
@@ -126,13 +162,23 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        const move = moving.current;
+        if (move) {
+          const { width, height } = event.currentTarget.getBoundingClientRect();
+          setPosition({
+            left: Math.max(0, Math.min(innerWidth - width, move.left + event.clientX - move.x)),
+            top: Math.max(0, Math.min(innerHeight - height, move.top + event.clientY - move.y)),
+          });
+          return;
+        }
         const start = drag.current;
-        if (!start || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        if (!start) return;
         // The dialog stays centered, so each edge moves by half of its size change.
         resize(start.width + 2 * start.horizontal * (event.clientX - start.x),
           start.height + 2 * start.vertical * (event.clientY - start.y));
       }}
-      onLostPointerCapture={finishResize}
+      onLostPointerCapture={() => { moving.current = null; finishResize(); }}
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose?.(); }}>
       <header className="dialog-heading">
         <h2 id={heading}>{title}</h2>

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
-const wide = ["sequenceDiagram", ...Array.from({ length: 12 }, (_, i) => `participant P${i} as Participant ${i}`), "P0->>P11: Wide diagram"];
+const wide = ["sequenceDiagram",
+  ...Array.from({ length: 12 }, (_, i) => `participant P${i} as Participant ${i}`),
+  ...Array.from({ length: 32 }, (_, i) => `P0->>P11: Wide diagram message ${i + 1}`),
+];
 const tall = ["flowchart TD", ...Array.from({ length: 24 }, (_, i) => `N${i}[Step ${i}] --> N${i + 1}`)];
 const mermaid = (lines) => ["```mermaid", ...lines, "```", ""].join("\n");
 export const diagramFixture = ["# Diagram zoom", "", mermaid(wide), mermaid(tall), mermaid(["Not a Mermaid diagram"])].join("\n");
@@ -23,17 +26,46 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
     font: parseFloat(getComputedStyle(element).fontSize),
     diagrams: Array.from(element.querySelectorAll("img.mermaid-diagram"), (image) => {
       const { width, height } = image.getBoundingClientRect();
-      return { width, height, originalWidth: Number(image.getAttribute("width")), originalHeight: Number(image.getAttribute("height")) };
+      return { width, height, availableWidth: image.parentElement.clientWidth,
+        originalWidth: Number(image.getAttribute("width")), originalHeight: Number(image.getAttribute("height")) };
     }),
   }));
   const initial = await measure();
-  for (const { width, height, originalWidth, originalHeight } of initial.diagrams) {
-    near(width, originalWidth);
-    near(height, originalHeight);
+  assert.ok(initial.diagrams[0].originalWidth > initial.diagrams[0].availableWidth);
+  for (const { width, height, availableWidth, originalWidth, originalHeight } of initial.diagrams) {
+    near(width, Math.min(availableWidth, originalWidth));
+    near(height, originalHeight * width / originalWidth);
   }
   assert.equal(await images.first().evaluate((image) => image.src.startsWith("data:image/svg+xml")), true);
+  const slider = surface.getByRole("slider", { name: "Horizontal scroll", exact: true }).first();
+  const inlineIn = button(tools.first(), "Zoom in");
+  const inlineOut = button(tools.first(), "Zoom out");
+  const inlineReset = button(tools.first(), "Reset diagram zoom");
+  const inlineFit = button(tools.first(), "Fit horizontally");
+  const setFigureWidth = (width) => images.first().evaluate((image, width) => { image.closest("figure").style.width = width; }, width);
+  await setFigureWidth("75%");
+  await page.waitForFunction((width) => {
+    const image = document.querySelector(".text-window:not([hidden]) img.mermaid-diagram");
+    return image.width < width && Math.abs(image.width - image.parentElement.clientWidth) <= 1;
+  }, initial.diagrams[0].width);
+  await setFigureWidth("");
+  await page.waitForFunction((width) =>
+    Math.abs(document.querySelector(".text-window:not([hidden]) img.mermaid-diagram").width - width) <= 1, initial.diagrams[0].width);
+  await slider.waitFor({ state: "hidden" });
+  await inlineIn.press("Enter");
+  await slider.waitFor();
+  const verticalPosition = await images.first().evaluate((image) => {
+    const surface = image.closest(".markdown");
+    surface.scrollTop += image.getBoundingClientRect().top - surface.getBoundingClientRect().top + image.clientHeight / 2;
+    return surface.scrollTop;
+  });
+  assert.ok(await slider.evaluate((input) => {
+    const { top, bottom } = input.getBoundingClientRect();
+    const surface = input.closest(".markdown").getBoundingClientRect();
+    return top >= surface.top && bottom <= surface.bottom;
+  }), "Horizontal scrolling remains visible midway through a tall diagram.");
+  await slider.press("End");
   const rightEdge = await images.first().locator("..").evaluate((element) => {
-    element.scrollLeft = element.scrollWidth;
     return {
       scrollLeft: element.scrollLeft,
       imageRight: element.querySelector("img").getBoundingClientRect().right,
@@ -41,6 +73,13 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
     };
   });
   assert.ok(rightEdge.scrollLeft > 0 && rightEdge.imageRight <= rightEdge.visibleRight + 1, JSON.stringify(rightEdge));
+  await slider.press("Home");
+  assert.equal(await images.first().locator("..").evaluate((element) => element.scrollLeft), 0);
+  assert.equal(await surface.evaluate((element) => element.scrollTop), verticalPosition);
+  await inlineFit.press("Enter");
+  await slider.waitFor({ state: "hidden" });
+  assert.deepEqual(await measure(), initial);
+  await inlineReset.press("Enter");
   assert.ok(await images.nth(1).evaluate((image) => {
     const surface = image.closest(".markdown");
     surface.scrollTop = surface.scrollHeight;
@@ -53,17 +92,20 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
     if (reopen) await reopen();
     await images.nth(1).waitFor();
     const larger = await measure();
-    near(larger.diagrams[0].width, initial.diagrams[0].width * 1.5);
-    near(larger.diagrams[1].height, initial.diagrams[1].height * 1.5);
+    near(larger.diagrams[0].width, initial.diagrams[0].originalWidth * 1.5);
+    near(larger.diagrams[1].height, initial.diagrams[1].originalHeight * 1.5);
     assert.equal(larger.font, initial.font);
+    await inlineFit.click();
+    const fitted = await measure();
+    near(fitted.diagrams[0].width, initial.diagrams[0].width);
+    near(fitted.diagrams[1].height, larger.diagrams[1].height);
+    await inlineReset.press("Enter");
+    near((await measure()).diagrams[0].width, larger.diagrams[0].width);
     await setDefaultScale("");
     const reset = await measure();
     near(reset.diagrams[0].width, initial.diagrams[0].width);
   }
 
-  const inlineIn = button(tools.first(), "Zoom in");
-  const inlineOut = button(tools.first(), "Zoom out");
-  const inlineReset = button(tools.first(), "Reset diagram zoom");
   await inlineOut.press("Enter");
   near((await measure()).diagrams[0].width, initial.diagrams[0].width / 1.25);
   await inlineIn.press("Enter");
@@ -103,7 +145,7 @@ export async function verifyMermaidZoom(page, { setWheelBinding, setDefaultScale
   const first = await openDiagram(0, () => open.first().press("Enter"));
   near((await first.image.boundingBox()).width, reset.diagrams[0].width);
   await inlineIn.press("Enter");
-  assert.equal(await first.status.innerText(), `${Math.round(sharedScale * 100)}%`);
+  assert.equal(await first.status.innerText(), `${Math.round(reset.diagrams[0].width / reset.diagrams[0].originalWidth * 100)}%`);
   const firstZoom = await first.status.innerText();
   const next = await openDiagram(1, () => open.nth(1).click());
   near((await next.image.boundingBox()).height, reset.diagrams[1].height);
@@ -220,7 +262,7 @@ async function browserSmoke() {
       } finally { await context.close(); }
     }
   } finally { await browser.close(); }
-  console.log("Verified intrinsic size, persistent default scale, inline and shared zoom, independent windows, pan, fit, and wheel rebinding.");
+    console.log("Verified horizontal fit and scrolling, persistent default scale, inline and shared zoom, independent windows, pan, and wheel rebinding.");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) await browserSmoke();

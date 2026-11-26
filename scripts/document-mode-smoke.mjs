@@ -20,9 +20,22 @@ export async function testDocumentMode(page, root) {
   const viewer = page.locator(`.text-window[data-editing="false"][aria-label="${name}"]`);
   const editor = page.locator(`.text-window[data-editing="true"][aria-label="${name}"]`);
   const source = editor.locator(".cm-content");
+  const verifyCopyPath = async (window, method) => {
+    const heading = window.locator(".document-heading");
+    const path = heading.locator("h2");
+    const copy = heading.getByRole("button", { name: "Copy file path", exact: true });
+    assert.equal(await path.textContent(), file);
+    assert.equal(await path.getAttribute("data-tooltip"), file);
+    if (method === "keyboard") await copy.press("Enter");
+    else await copy.click();
+    await page.waitForFunction(async (expected) =>
+      await window.__TAURI_INTERNALS__.invoke("clipboard_text") === expected, file);
+  };
   await viewer.getByText("Saved text", { exact: true }).waitFor();
+  await verifyCopyPath(viewer, "keyboard");
   await viewer.press("F6");
   await source.fill("Still a draft");
+  await verifyCopyPath(editor, "mouse");
   await editor.getByText("Modified", { exact: true }).waitFor();
   await source.press("F6");
   await viewer.getByText("Saved text", { exact: true }).waitFor();

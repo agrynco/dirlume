@@ -171,7 +171,6 @@ type Modal =
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
   | { kind: "attributes"; item: NonNullable<ReturnType<typeof paneItem>> }
   | { kind: "folderShortcuts"; side: Side; screen: FolderShortcutScreen }
-  | { kind: "fileBookmarks"; path?: string }
   | { kind: "sortMenu"; side: Side }
   | { kind: "sortCriteria"; side: Side; mode: SortMode }
   | { kind: "about" | "commandHistory" | "mcp" }
@@ -302,6 +301,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const installingUpdate = useRef(false);
   const [documents, setDocuments] = useState<DocumentTab[]>(startup?.documents ?? []);
   const [fileBookmarks, setFileBookmarks] = useState(readFileBookmarks);
+  const [fileBookmarksOpen, setFileBookmarksOpen] = useState(false);
   const bookmarkRequest = useRef(0);
   const [activeDocument, setActiveDocument] = useState<number | null>(startup?.activeDocument ?? null);
   const nextDocument = useRef(Math.max(0, ...(startup?.documents ?? []).map(({ id }) => id)));
@@ -1289,10 +1289,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setFileBookmarks((items) => items.some((item) => fileBookmarkKey(item) === key) ? items : [...items, bookmark]);
   }
 
+  function showFileBookmarks() {
+    setFileBookmarksOpen(true);
+    if (fileBookmarksOpen) {
+      const window = document.querySelector('dialog[data-help-topic="fileBookmarks"]');
+      (window?.querySelector<HTMLElement>('[role="listbox"]') ?? window?.querySelector("button"))?.focus();
+    }
+  }
+
   function openFileBookmark(bookmark: FileBookmark) {
     const file = bookmarkFile(bookmark.path);
     if (!file) return;
-    setModal(null);
     const request = ++bookmarkRequest.current;
     openDocument(file, false, undefined, undefined, undefined, "anchor" in bookmark
       ? { anchor: bookmark.anchor, request } : { line: bookmark.line, fingerprint: bookmark.fingerprint, request });
@@ -2591,7 +2598,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function copyPath(path: string) {
     void api.copyText(path).then(() => setStatus({ text: "Path copied to the clipboard." }),
-      (error: unknown) => setStatus({ text: describeError(error), error: true }));
+      (error: unknown) => setStatus({ text: t("Could not copy the path. {0}", errorText(describeError(error))), error: true }));
   }
 
   function copyItemNames() {
@@ -2753,7 +2760,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function perform(command: Command) {
     if (command === "fileBookmarks") {
-      if (activeDocument === null) setModal({ kind: "fileBookmarks" });
+      showFileBookmarks();
       return;
     }
     if (command === "leftLocations" || command === "rightLocations") {
@@ -3288,7 +3295,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       { ...commandWithIcon(GitBranch, "gitView", !canToggleGitView), checked: showingGit },
       { ...commandWithIcon(Braces, "environmentVariables", !panesAvailable || !!gitView || showingAnalysis), checked: environmentActive },
       commandWithIcon(FolderTree, "analyzeSpace", !analysis && (!filesAvailable || showingEnvironment || !canAnalyze(pane.place))),
-      commandWithIcon(Bookmark, "fileBookmarks", activeDocument !== null),
+      commandWithIcon(Bookmark, "fileBookmarks"),
       commandWithIcon(Search, "search", !filesAvailable || !pane.place || pane.place.kind === "smbRoot"),
       commandWithIcon(FileDiff, "compare", !filesAvailable || comparison === null),
       commandWithIcon(ClipboardCopy, "copyFullPath", currentFullPath === null),
@@ -3587,13 +3594,14 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             file={file} editing={editing} active={activeDocument === id} theme={theme}
             diagnosticLog={diagnosticLog}
             fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmark={addFileBookmark}
-            onFileBookmarks={(path) => setModal({ kind: "fileBookmarks", path })}
+            onFileBookmarks={showFileBookmarks}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
             mermaidScale={preferences.mermaidScale}
             colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
+            onCopyPath={copyPath}
             onSwitchMode={() => openDocument(file, !editing)}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
             onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}
@@ -3922,9 +3930,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           void openFolderShortcut(modal.side, entry);
         }}
         onClose={() => closeFolderShortcuts(modal.side)} />}
-      {modal?.kind === "fileBookmarks" && <FileBookmarksDialog bookmarks={fileBookmarks} path={modal.path} addKey={keyLabel("bookmarkLine")}
+      {fileBookmarksOpen && <FileBookmarksDialog bookmarks={fileBookmarks} addKey={keyLabel("bookmarkLine")}
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
-        onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setModal(null)} />}
+        onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setFileBookmarksOpen(false)} />}
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
         bindings={shortcuts}
         remoteProvider="server" bridgeDirectory={preferences.kswitcher}
