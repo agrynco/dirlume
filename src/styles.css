@@ -755,6 +755,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   color: var(--panel-selected-ink);
 }
 .file-name, .file-size, .file-date, .file-time { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.file-protocol, .file-host { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ftp-fields > h3 { margin: 0; font-weight: 600; }
 .file-name { display: flex; align-items: center; gap: 8px; padding-left: 4px; }
 .file-tree-indent, .file-tree-spacer { display: inline-block; flex: none; }
 .file-tree-spacer { width: 16px; }

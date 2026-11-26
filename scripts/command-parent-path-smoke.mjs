@@ -31,6 +31,7 @@ async function fixture(browser, userAgent, directory, parent, bindings) {
       invoke: async (command, args) => {
         if (command === "locations") return [{ label: "Home", path: directory }, { label: "Downloads", path: directory }];
         if (command === "list_directory") return { path: args.path, parent: args.path === directory ? parent : null, entries, omitted: 0 };
+        if (command === "ftp_profiles") return [];
         if (command === "ssh_profiles") return [{ id: "ssh", label: "Remote fixture", host: "fixture", port: 22 }];
         if (command === "connect_ssh") return { kind: "connected", id: 2, address: "fixture", origin: "sftp://fixture",
           segments: ["Remote space", "child"], listing: { entries, omitted: 0, elevated: false } };
@@ -135,7 +136,7 @@ try {
   assert.equal(await page.evaluate(() => window.fixtureOpens.length), 1);
   const left = pane(page, "left");
   await left.getByRole("button", { name: "Locations for left pane", exact: true }).click();
-  await left.getByRole("button", { name: "SSH", exact: true }).click();
+  await left.getByRole("button", { name: "NetBox", exact: true }).click();
   await left.getByRole("option", { name: /^Remote fixture/ }).dblclick();
   await expectPath(page, "left", "..", "Control+Shift+p", "'/Remote space/child'", "/Remote space/child");
   await row(page, "left", "subfolder").click();

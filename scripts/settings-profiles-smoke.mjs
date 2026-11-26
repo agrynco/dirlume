@@ -28,6 +28,7 @@ async function testProfiles(browser, userAgent) {
           if (command === "list_directory") return { path: args.path, parent: null, entries, omitted: 0 };
           if (command === "file_icons" || command === "installed_fonts") return [];
           if (command === "read_text") return { text: "draft", encoding: "utf8" };
+          if (command === "ftp_profiles") return [];
           if (command === "ssh_profiles") return [{ id: "ssh", label: "Profile fixture", host: "fixture", port: 22 }];
           if (command === "connect_ssh") return { kind: "connected", id: 5, address: "SFTP fixture", origin: "sftp://fixture",
             segments: ["remote"], listing: { entries, omitted: 0, elevated: false } };
@@ -65,7 +66,7 @@ async function testProfiles(browser, userAgent) {
     assert.equal(initial.activeSettingsProfile, null);
 
     await button(rightPane, "Locations for right pane").click();
-    await button(rightPane, "SSH").click();
+    await button(rightPane, "NetBox").click();
     await rightPane.getByRole("option", { name: /^Profile fixture/ }).dblclick();
     await page.waitForFunction(() => document.querySelector("#right-path")?.dataset.path === "/remote");
     const leftLocation = await path("left");

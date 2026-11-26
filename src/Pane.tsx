@@ -5,7 +5,7 @@ import { AddressField } from "./AddressField";
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
-  ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
 import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
@@ -84,6 +84,7 @@ interface PaneProps {
   onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
   onOpenConnections: (source: ConnectionSource) => void;
+  onAddNetBoxConnection: () => void;
   onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
   onParent?: () => void;
@@ -154,10 +155,11 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onOpenConnections, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
+  onPathAncestor, onOpenConnections, onAddNetBoxConnection, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   const path = pane.place ? placePath(pane.place) : "";
   const catalog = pane.place?.kind === "connections";
+  const netbox = pane.place?.kind === "connections" && pane.place.source === "netbox";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const list = useRef<HTMLDivElement>(null);
@@ -177,7 +179,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const layoutMode = catalog ? "full" : modeId;
   const visibility = modeVisibility[layoutMode];
   const definition = catalog ? defaultPanelModes.full : mode;
-  const tree = fileView === "tree";
+  const tree = !catalog && fileView === "tree";
   const columnsInMode = definition.list.filter(({ field }) => isNameField(field) || visibility[fieldClass[field]] !== false);
   const modeGroups = panelColumnGroups(columnsInMode);
   const groups = (tree ? modeGroups.slice(0, 1) : modeGroups).map((group) =>
@@ -191,7 +193,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return false;
   }, [pane.backgroundSizes]);
   const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
-  const tracks = panelColumnTracks(columns, fitMeasuredFolders);
+  const tracks = netbox ? "minmax(0, 2fr) minmax(0, 7ch) minmax(0, 3fr)" : panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = paneCursorIndex(pane, entries);
@@ -543,13 +545,23 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <Button className="icon-button" aria-label={t("Close filter")} onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
-      <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples}
+      {netbox ? <div className="file-columns" ref={columnHeader}>
+        <div className="file-column-grid" style={{ gridTemplateColumns: tracks }}>
+          <div className="file-column col-name">
+            <Button type="button" onClick={() => onSort("name")} tooltip={t("Sort by {0}", t("Name").toLocaleLowerCase())}>
+              <span>{t("Name")}</span>{sortAvailable && pane.sort.column === "name" && (pane.sort.asc ? <ArrowUp /> : <ArrowDown />)}
+            </Button>
+          </div>
+          <div className="file-column"><span className="file-column-label">{t("Protocol")}</span></div>
+          <div className="file-column"><span className="file-column-label">{t("Host")}</span></div>
+        </div>
+      </div> : <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples}
         visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
         onVisibility={(column, visible) => {
           const next = { ...visibility, [column]: visible };
           setModeVisibility((before) => ({ ...before, [layoutMode]: next }));
           saveColumnLayout(side, layoutMode, next);
-        }} />
+        }} />}
       {rightClick.spinner && createPortal(<span className="right-selection-hold" role="status"
         aria-label={t("Release to open the context menu")} style={{
           left: Math.min(window.innerWidth - 22, rightClick.spinner.x + 12),
@@ -579,10 +591,13 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         {virtual && <div ref={rowProbe} className="file-row-probe" aria-hidden="true" />}
         {entries.length > 0 && <div className="file-list-grid" style={{ gridTemplateColumns: tracks }} role="presentation">
           {renderedGroups.map(({ group, first, last, indices }, groupIndex) => <div key={groupIndex} className="file-row-group"
-            style={columnGroupTrack(groups, groupIndex)} role="presentation">
+            style={netbox ? { gridColumn: "1 / -1" } : columnGroupTrack(groups, groupIndex)} role="presentation">
           {indices.map((index, offset) => {
             const gap = index - (indices[offset - 1] ?? first - 1) - 1;
             const entry = entries[index];
+            const connection = entry.connection;
+            const profile = netbox && (connection?.kind === "ftp" || connection?.kind === "ssh") ? connection : undefined;
+            const protocol = profile?.kind === "ssh" ? "SFTP" : "FTP";
             const icon = icons.get(byName.get(entry.name) ?? "");
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
             const marked = markedSet.has(entry.name);
@@ -596,7 +611,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-posinset={virtual && !tree ? index + 1 : undefined}
                 aria-level={entry.tree?.segments.length}
                 aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
-                aria-label={group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
+                aria-label={profile ? [entry.name, protocol, profile.host].join(" ") : group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
                 aria-description={branchError}
                 data-file-color={appearance.tone}
                 style={appearance.color || appearance.family ? { "--entry-color": appearance.color,
@@ -612,7 +627,11 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 onPointerDown={(event) => { if (entry.name !== ".." && rename?.rowKey !== entry.name) onStartDrag(entry, event); }}
                 onDragStart={(event) => event.preventDefault()}
                 onDoubleClick={() => onOpen(entry)}>
-                {group.map(({ field }, slot) => isNameField(field) ?
+                {profile ? <>
+                  <span className="file-name"><Server aria-hidden="true" /><span className="file-name-text">{entry.name}</span></span>
+                  <span className="file-metadata file-protocol">{protocol}</span>
+                  <span className="file-metadata file-host" dir="auto" data-tooltip={profile.host}>{profile.host}</span>
+                </> : group.map(({ field }, slot) => isNameField(field) ?
                   <span key={slot} className="file-name">
                     {tree && <span className="file-tree-indent" style={{ width: Math.min(12, (entry.tree?.segments.length ?? 1) - 1) * 12 }} aria-hidden="true" />}
                     {tree && (entry.tree && entry.directory && !entry.link
@@ -648,7 +667,10 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         </div>}
         {!entries.length && (
           <div className="pane-empty">
-            {pane.loading ? t("Loading…") : pane.error ? t("Open another location to continue.") :
+            {netbox && !pane.loading && !pane.error && !pane.filter ? <>
+              <p>{t("No saved connections.")}</p>
+              <Button type="button" onClick={onAddNetBoxConnection}>{t("Add connection")}</Button>
+            </> : pane.loading ? t("Loading…") : pane.error ? (netbox ? null : t("Open another location to continue.")) :
               pane.filter ? t("No items match the filter.") : search ? t("No visible matches.") : pane.place ? t("This folder is empty.") : t("Choose a location.")}
           </div>
         )}
@@ -660,6 +682,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
       {pane.error && <div className="pane-error" data-help-topic="paneStatus">
         <span role="alert">{errorText(pane.error)}</span>
+        {netbox && !pane.loading && <Button type="button" onClick={onRefresh}>{t("Refresh connections")}</Button>}
         {pane.deniedSshListing && !pane.loading &&
           <Button type="button" onClick={onRetryWithSudo}>{t("Open with sudo…")}</Button>}
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>

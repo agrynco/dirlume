@@ -225,7 +225,7 @@ async function checkCatalog(page, side, path, name, home, { key = "Enter", root,
   await checkSourceRoot(page, side, name);
   await clickCrumb(address, folders.at(-1));
   await waitPath(page, side, path);
-  const unrelated = name === "FTP" ? "SSH" : "FTP";
+  const unrelated = name === "Remote machine" ? "NetBox" : "Remote machine";
   await button(pane(page, side), `Locations for ${side} pane`).click();
   await button(pane(page, side), unrelated).click();
   await waitPath(page, side, unrelated);
@@ -345,13 +345,13 @@ try {
     const side = index === 1 ? "left" : "right";
     const other = side === "left" ? "right" : "left";
     await checkArchive(page, side, home);
-    for (const [source, saved, connectionName] of [["FTP", "Saved FTP", "FTP fixture"],
-      ["FTP", "Saved SFTP", "SFTP fixture"], ["SSH", "Saved SFTP", "SFTP fixture"]]) {
+    for (const [source, saved, connectionName] of [["NetBox", "Saved FTP", "FTP fixture"],
+      ["NetBox", "Saved SFTP", "SFTP fixture"]]) {
       await enterFromCatalog(page, side, source, saved);
       await checkCatalog(page, side, deep, source, home, { key: "Space", root: "/", connectionName });
     }
-    await enterFromCatalog(page, other, "SSH", "Saved SFTP");
-    await checkCatalog(page, other, deep, "SSH", home, { root: "/", connectionName: "SFTP fixture" });
+    await enterFromCatalog(page, other, "NetBox", "Saved SFTP");
+    await checkCatalog(page, other, deep, "NetBox", home, { root: "/", connectionName: "SFTP fixture" });
     await enterFromCatalog(page, other, "Remote machine", "Saved Dirlume Server");
     for (const name of folders) await row(page, other, name).dblclick();
     await checkCatalog(page, other, deep, "Remote machine", home, { root: "/", connectionName: "Server fixture" });
@@ -371,26 +371,26 @@ try {
       for (const name of ["C:", ...folders]) await row(page, other, name).dblclick();
       await checkCatalog(page, other, bridgeDeep, "Remote machine", home, { root: "", connectionName: "Saved KSwitcher" });
     }
-    await enterFromCatalog(page, side, "FTP", "Saved FTP");
+    await enterFromCatalog(page, side, "NetBox", "Saved FTP");
     await waitPath(page, side, deep);
     await page.evaluate(() => { window.connectionFixture.failProfiles = true; });
-    const ftp = button(crumbs(page, side), "Open FTP connection list");
+    const ftp = button(crumbs(page, side), "Open NetBox connection list");
     await ftp.click();
     await pane(page, side).getByRole("alert").filter({ hasText: "Could not read FTP profiles." }).waitFor();
-    await waitPath(page, side, deep);
+    await waitPath(page, side, "NetBox");
     await page.evaluate(() => Object.assign(window.connectionFixture, { failProfiles: false, offline: true, attempts: 0 }));
-    await ftp.click();
-    await waitPath(page, side, "FTP");
+    await button(pane(page, side), "Refresh connections").click();
+    await waitPath(page, side, "NetBox");
     assert.equal(await page.evaluate(() => window.connectionFixture.attempts), 0);
     await page.evaluate(() => { window.connectionFixture.offline = false; });
-    await enterFromCatalog(page, other, "SSH", "Saved SFTP");
+    await enterFromCatalog(page, other, "NetBox", "Saved SFTP");
     await waitPath(page, other, deep);
     await page.evaluate(() => { window.connectionFixture.emptySsh = true; });
-    await button(crumbs(page, other), "Open SSH connection list").click();
-    await waitPath(page, other, "SSH");
-    await checkSourceRoot(page, other, "SSH");
+    await button(crumbs(page, other), "Open NetBox connection list").click();
+    await waitPath(page, other, "NetBox");
+    await checkSourceRoot(page, other, "NetBox");
     await list(page, other).press("Shift+F4");
-    await page.getByRole("dialog", { name: "Add SSH connection", exact: true }).waitFor();
+    await page.getByRole("dialog", { name: "Add NetBox connection", exact: true }).waitFor();
     await page.close();
   }
   console.log("Verified retained local, archive, and remote trails, overflow folders, and catalog Back and Forward navigation.");

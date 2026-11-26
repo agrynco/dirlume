@@ -29,6 +29,7 @@ export async function testSyntaxMenu() {
           if (command === "list_directory") return { path, parent: null, entries: [entry, site, { ...site, name: "vhost.conf" }], omitted: 0 };
           if (command === "file_icons") return args.items.map(() => null);
           if (command === "read_text") return { text: args.name === entry.name ? "fn main() { let ready = true; }" : siteText, encoding: "utf8" };
+          if (command === "ftp_profiles") return [];
           if (command === "ssh_profiles") return [{ id: "ssh", label: "SSH fixture", host: "fixture", port: 22 }];
           if (command === "connect_ssh") return { kind: "connected", id: 1, address: "fixture", origin: "sftp://fixture",
             segments: ["etc", "nginx", "sites-enabled"], listing: { entries: [site], omitted: 0, elevated: false } };
@@ -123,7 +124,7 @@ export async function testSyntaxMenu() {
 
     const right = page.getByRole("listbox", { name: "right files", exact: true });
     await right.press("Alt+F2");
-    await page.locator("#right-pane .location-popup").getByRole("button", { name: "SSH", exact: true }).click();
+    await page.locator("#right-pane .location-popup").getByRole("button", { name: "NetBox", exact: true }).click();
     await right.getByRole("option", { name: /^SSH fixture/ }).click();
     await right.press("Enter");
     await right.getByRole("option", { name: /^example\.com/ }).click();

@@ -122,6 +122,7 @@ const OTHER_OPERATIONS: &[&str] = &[
     "windows_item_menu",
     "disconnect_server",
     "ftp_profiles",
+    "test_ftp_connection",
     "ftp_windows_code_page",
     "disconnect_ftp",
     "read_ftp_bytes",

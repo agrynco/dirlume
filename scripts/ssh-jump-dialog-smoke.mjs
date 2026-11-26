@@ -8,10 +8,17 @@ const pane = (page, side) => page.getByRole("region", { name: `${side} pane`, ex
 const hostnames = ["first.example.test", "second.example.test", "production.example.test"];
 const routeText = (...hosts) => ["This computer", ...hosts].join(" → ");
 
-async function chooseSource(page, side, source) {
+async function chooseSource(page, side, shortcut) {
   const panel = pane(page, side);
   await button(panel, `Locations for ${side} pane`).click();
-  await button(panel, source).click();
+  const netbox = button(panel, "NetBox");
+  if (shortcut) {
+    assert.equal(await netbox.locator("kbd").innerText(), shortcut);
+    await page.keyboard.press(shortcut);
+  } else {
+    assert.equal(await netbox.locator("kbd").count(), 0);
+    await netbox.click();
+  }
   const files = panel.getByRole("listbox", { name: `${side} files`, exact: true });
   await files.focus();
   await page.waitForFunction((side) => document.getElementById(`${side}-files`)?.getAttribute("aria-busy") === "false", side);
@@ -41,15 +48,23 @@ async function verifyHosts(page, action) {
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {
-  for (const [platform, leftSource] of [["Windows NT 10.0; Win64; x64", "SSH"], ["X11; Linux x86_64", "FTP"],
-    ["Macintosh; Intel Mac OS X 10_15_7", "SSH"]]) {
+  for (const [platform, ftpSources, sshSources, expectedShortcut] of [
+    ["Windows NT 10.0; Win64; x64", ["7"], ["8"], "7"],
+    ["X11; Linux x86_64", ["2"], ["8"], "8"],
+    ["Macintosh; Intel Mac OS X 10_15_7", [], ["8"], null],
+  ]) {
     const page = await browser.newPage({ userAgent: `Mozilla/5.0 (${platform})`, viewport: { width: 960, height: 620 }, locale: "en-US" });
     page.setDefaultTimeout(8000);
     await page.route("http://dirlume.test/**", (route) => {
       const path = new URL(route.request().url()).pathname;
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
-    await page.addInitScript((hostnames) => {
+    await page.addInitScript(({ hostnames, ftpSources, sshSources }) => {
+      if (!localStorage.getItem("dirlume.preferences.v1")) {
+        localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
+          bindingDefaults: 10, shortcuts: { ftpSources, sshSources },
+        }));
+      }
       const root = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
       const verification = (host, index) => ({ host, port: index === 1 ? 2202 : 22, fingerprint: `SHA256:fixture-${index}` });
       const listing = { omitted: 0, elevated: false, entries: [
@@ -90,12 +105,13 @@ try {
           return null;
         },
       };
-    }, hostnames);
+    }, { hostnames, ftpSources, sshSources });
     await page.goto("http://dirlume.test/");
-    const left = await chooseSource(page, "left", leftSource);
-    await left.press("Shift+F4");
-    if (leftSource === "FTP") await dialog(page, "Add FTP connection").getByLabel("Protocol", { exact: true }).selectOption("sftp");
-    const add = dialog(page, leftSource === "FTP" ? "Add SFTP connection" : "Add SSH connection");
+    const left = await chooseSource(page, "left", expectedShortcut);
+    await left.getByText("No saved connections.", { exact: true }).waitFor();
+    await button(left, "Add connection").click();
+    const add = dialog(page, "Add NetBox connection");
+    assert.equal(await add.getByLabel("Protocol", { exact: true }).inputValue(), "sftp");
     await add.getByLabel("Connection name", { exact: true }).fill("Production");
     await hostDetails(add, hostnames[2], "destination", "test-password");
     const route = add.getByLabel("Route", { exact: true });
@@ -124,11 +140,13 @@ try {
     await add.waitFor({ state: "hidden" });
 
     await page.reload();
-    const right = await chooseSource(page, "right", leftSource === "FTP" ? "SSH" : "FTP");
+    const right = await chooseSource(page, "right", expectedShortcut);
     const production = right.getByRole("option", { name: /^Production/ });
+    assert.equal(await production.locator(".file-protocol").textContent(), "SFTP");
+    assert.equal(await production.locator(".file-host").textContent(), hostnames[2]);
     await production.click();
     await right.press("F4");
-    const edit = dialog(page, leftSource === "FTP" ? "Edit SSH connection" : "Edit SFTP connection");
+    const edit = dialog(page, "Edit NetBox connection");
     assert.equal(await edit.getByLabel("Route", { exact: true }).textContent(), routeText(hostnames[0], second, hostnames[2]));
     await button(edit, "Edit jump host 2").click();
     const reopened = edit.getByRole("group", { name: "Edit jump host", exact: true });

@@ -57,6 +57,7 @@ async function browserSmoke() {
           if (command === "locations") return [{ label: "Home", path: home }];
           if (command === "list_directory") return { path: args.path, entries, parent: null, omitted: 0 };
           if (command === "read_text") return { text: files[args.name], encoding: "utf8" };
+          if (command === "ftp_profiles") return [];
           if (command === "ssh_profiles") return [{ id: "ssh", label: "Hex fixture", host: "fixture", port: 22 }];
           if (command === "connect_ssh") return { kind: "connected", id: 5, address: "Hex fixture", origin: "sftp://fixture",
             segments: ["remote"], listing: { entries, omitted: 0, elevated: false } };
@@ -119,7 +120,7 @@ async function browserSmoke() {
 
     const right = page.getByRole("region", { name: "right pane", exact: true });
     await button(right, "Locations for right pane").click();
-    await button(right, "SSH").click();
+    await button(right, "NetBox").click();
     await right.getByRole("option", { name: /^Hex fixture/ }).dblclick();
     await page.waitForFunction(() => document.querySelector("#right-path")?.dataset.path === "/remote");
     await open("417.txt", page.locator("#right-files"));

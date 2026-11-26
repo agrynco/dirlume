@@ -1,9 +1,7 @@
 import { useState, type FormEvent } from "react";
-import { describeError, type api, type FtpProfile } from "./api";
+import { api, describeError, type FtpProfile } from "./api";
 import { Button } from "./Button";
-import { ConnectionProtocol, type ConnectionDraft } from "./ConnectionProtocol";
-import { Dialog } from "./Dialog";
-import { HistoryField } from "./HistoryField";
+import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { errorText, t } from "./i18n";
 
 export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, onSave, onClose }: {
@@ -15,79 +13,85 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, o
   onClose: () => void;
 }) {
   const [label, setLabel] = useState(profile?.label ?? draft?.label ?? "");
-  const [host, setHost] = useState(profile?.host ?? draft?.host ?? "");
-  const [port, setPort] = useState(draft?.port ?? String(profile?.port ?? 21));
-  const [username, setUsername] = useState(profile?.username ?? draft?.username ?? "");
+  const [connection, setConnection] = useState(() => ({
+    host: profile?.host ?? draft?.host ?? "",
+    port: draft?.port ?? String(profile?.port ?? 21),
+    username: profile?.username ?? draft?.username ?? "",
+    portEdited: draft?.portEdited ?? false,
+  }));
   const [password, setPassword] = useState("");
   const [clearPassword, setClearPassword] = useState(false);
   const [codePage, setCodePage] = useState(profile?.codePage?.toString() ?? "");
-  const [working, setWorking] = useState(false);
+  const [working, setWorking] = useState<"save" | "test">();
   const [error, setError] = useState("");
+  const [verified, setVerified] = useState(false);
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
+  async function submit(action: "save" | "test") {
     if (working) return;
-    setWorking(true);
+    setWorking(action);
     setError("");
+    setVerified(false);
     try {
-      await onSave({
-        id: profile?.id, label: label.trim(), host: host.trim().replace(/^\[(.*)\]$/, "$1"), port: Number(port), username: username.trim(),
+      const input: Parameters<typeof api.saveFtpProfile>[0] = {
+        id: profile?.id, label: label.trim(), host: connection.host, port: Number(connection.port), username: connection.username,
         password: clearPassword ? "" : password || undefined,
         codePage: codePage && Number(codePage) !== 65001 ? Number(codePage) : null,
-      });
+      };
+      if (action === "save") await onSave(input);
+      else {
+        await api.testFtpConnection(input);
+        setVerified(true);
+      }
     } catch (failure) {
       setError(describeError(failure));
     } finally {
-      setWorking(false);
+      setWorking(undefined);
     }
   }
 
-  return (
-    <Dialog title={profile ? t("Edit FTP connection") : t("Add FTP connection")} onClose={() => { if (!working) onClose(); }}>
-      <form className="dialog-form" onSubmit={(event) => { void save(event); }} autoComplete="off">
-        <div className="dialog-body ftp-fields" inert={working}>
-          {onUseSftp && <ConnectionProtocol value="ftp" onChange={() => onUseSftp({ label, host, port, username })} />}
-          <label className="field">{t("Connection name")}
-            <HistoryField historyKey="ftp-name" aria-label={t("Connection name")} data-initial-focus required value={label} onValueChange={setLabel} />
-          </label>
-          <div className="ftp-host-row">
-            <label className="field">{t("Server")}
-              <HistoryField historyKey="ftp-host" aria-label={t("Server")} required spellCheck={false}
-                placeholder="ftp.example.com" value={host} onValueChange={setHost} />
-            </label>
-            <label className="field">{t("Port")}
-              <input required type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} />
-            </label>
-          </div>
-          <label className="field">{t("Username")}
-            <HistoryField historyKey="ftp-username" aria-label={t("Username")} placeholder={t("Anonymous")}
-              value={username} onValueChange={setUsername} spellCheck={false} />
-          </label>
+  function change() {
+    setVerified(false);
+    setError("");
+  }
+
+  function save(event: FormEvent) {
+    event.preventDefault();
+    void submit("save");
+  }
+
+  const port = Number(connection.port);
+  const canTest = !!label.trim() && !!connection.host.trim() && Number.isInteger(port) && port >= 1 && port <= 65535;
+  return <NetBoxSession editing={!!profile} protocol="ftp" working={working} onSave={save} onClose={onClose}
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection }))}>
+          <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
+          <ConnectionHostFields protocol="ftp" connection={connection} onChange={(update) => {
+            setConnection((current) => ({ ...current, ...update }));
+            change();
+          }} />
           <label className="field">{t("Password")}
             <input type="password" autoComplete="new-password" placeholder={profile ? t("Keep saved password") : undefined}
-              value={password} disabled={clearPassword} onChange={(event) => setPassword(event.target.value)} />
+              value={password} disabled={clearPassword} onChange={(event) => { setPassword(event.target.value); change(); }} />
           </label>
           {profile && <label className="field-checkbox">
             <span>{t("Clear saved password")}</span>
-            <input type="checkbox" checked={clearPassword} onChange={(event) => setClearPassword(event.target.checked)} />
+            <input type="checkbox" checked={clearPassword} onChange={(event) => { setClearPassword(event.target.checked); change(); }} />
           </label>}
           <div className="ftp-encoding-row">
             <label className="field">{t("Filename code page")}
               <input type="number" min={1} max={65535} placeholder="UTF-8" value={codePage}
-                onChange={(event) => setCodePage(event.target.value)} />
+                onChange={(event) => { setCodePage(event.target.value); change(); }} />
             </label>
-            {windowsCodePage && windowsCodePage !== 65001 && <Button type="button" onClick={() => setCodePage(String(windowsCodePage))}>
+            {windowsCodePage && windowsCodePage !== 65001 && <Button type="button" onClick={() => { setCodePage(String(windowsCodePage)); change(); }}>
               {t("Use Windows code page")}
             </Button>}
           </div>
           <p className="search-hint">{t("Plain FTP sends credentials and files without encryption.")}</p>
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-        </div>
-        <footer className="dialog-footer">
-          <Button type="button" disabled={working} onClick={onClose}>{t("Cancel")}</Button>
-          <Button type="submit" className="primary" disabled={working}>{working ? t("Saving…") : t("Save connection")}</Button>
-        </footer>
-      </form>
-    </Dialog>
-  );
+          {verified && <p role="status">{t("FTP connection successful.")}</p>}
+          <div className="dialog-actions">
+            <Button type="button" disabled={!!working || !canTest} onClick={() => { void submit("test"); }}>
+              {t(working === "test" ? "Testing…" : "Test connection")}
+            </Button>
+          </div>
+  </NetBoxSession>;
 }

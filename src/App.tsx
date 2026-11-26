@@ -611,7 +611,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     dropTerminal("ssh:" + current[0].place.id);
     setStatus({ text: "SSH connection lost. Select a saved connection to reconnect." });
     for (const { side, place } of current) {
-      const catalog = { kind: "connections", source: place.catalogSource ?? "ssh", from: null } as const;
+      const catalog = { kind: "connections", source: "netbox", from: null } as const;
       const restoreFocus = focusedTerminal && document.getElementById(side + "-pane")?.classList.contains("active");
       void openCatalog(side, catalog).then((opened) => {
         if (!opened) return;
@@ -656,6 +656,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         if (background && pane.error !== pane.kswitcherAvailabilityError) {
           Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         }
+        const source = openedPlace.kind === "connections" && openedPlace.source === "netbox" ? openedPlace.from : null;
+        if (action === "push" && isFileServer(source)) {
+          const profile = listing.entries.find(({ connection }) => connection?.kind === source.kind && connection.id === source.profileId);
+          if (profile) listing.selected = profile.name;
+        }
         return found && reveal !== undefined ? { ...listing, selected: reveal, revealedHidden: revealed?.hidden ? reveal : undefined, filter: "", marked: [] } : listing;
       });
       if (action === "push" || typeof action === "number") rememberRecentLocation(openedPlace);
@@ -681,6 +686,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         updatePane(side, (pane) => {
           if (background && (pane.place !== place || pane.error === text ||
             pane.error && pane.error !== pane.kswitcherAvailabilityError)) return pane;
+          if (place.kind === "connections" && place.source === "netbox" &&
+            (action === "push" || typeof action === "number")) {
+            return { ...applyListing(pane, place, { entries: [], omitted: 0 }, action, addressFrom), error: text };
+          }
           return {
             ...pane, loading: false, loadingPath: undefined, error: text,
             kswitcherAvailabilityError: pane.place === place && error instanceof KSwitcherUnavailableError ? text : undefined,
@@ -1569,7 +1578,6 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
     const { approvals = [], segments, fromRecent } = options;
-    const location = panes[side].place;
     const { ticket } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
     function complete(place: Place, listing: Listing) {
@@ -1599,8 +1607,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             setModal(verification);
           } else {
             const { id, address, origin, segments, listing } = result;
-            const catalogSource = location?.kind === "connections" && location.source === "ftp" ? "ftp" : undefined;
-            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, catalogSource }, listing);
+            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments }, listing);
           }
           break;
         }
@@ -1680,7 +1687,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   async function editRecentConnection(side: Side, location: RecentLocation) {
     if (!("profileId" in location)) return;
-    const source = location.kind === "server" ? "remote" : location.kind;
+    const source = location.kind === "server" ? "remote" : "netbox";
     const stillOpen = () => document.getElementById(side + "-recent") && !activeModal.current;
     try {
       const entries = await connectionEntries(source);
@@ -3358,6 +3365,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else void load(side, place);
             }}
             onOpenConnections={(source) => openConnections(side, source)}
+            onAddNetBoxConnection={() => editConnection(side, "netbox")}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={parentAction(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {

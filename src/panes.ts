@@ -237,8 +237,8 @@ export function placeKey(place: FileLocation) {
 
 export function connectionSource(place: FileLocation | null): ConnectionSource | undefined {
   switch (place?.kind) {
-    case "ftp": return "ftp";
-    case "ssh": return place.catalogSource ?? "ssh";
+    case "ftp":
+    case "ssh": return "netbox";
     case "server":
     case "kswitcher": return "remote";
     case "local":

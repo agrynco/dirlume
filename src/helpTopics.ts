@@ -43,7 +43,7 @@ export const helpTopics = {
   terminal: { title: terminal.label, keys: ["toggleTerminal", "expandTerminal", "collapseTerminal", "terminal", "commandPath", "commandName", "previousCommand", "commandHistory"] },
   terminalShortcuts: { title: "File shortcuts in the terminal", keys: [] },
   compare: { title: "Compare files", keys: ["compare", "previousChange", "nextChange"] },
-  remote: { title: "Remote connection", keys: ["leftLocations", "rightLocations", "ftpSources", "addFtpProfile", "editFtpProfile", "sshSources", "addSshProfile", "editSshProfile", "remoteSources"] },
+  remote: { title: "Remote connection", keys: ["leftLocations", "rightLocations", "netboxSources", "addNetBoxProfile", "editNetBoxProfile", "remoteSources"] },
   processes: { title: "Processes", keys: ["leftLocations", "rightLocations"] },
   general: { title: "General", keys: ["settings"] },
   profiles: { title: "Profiles", keys: [] },

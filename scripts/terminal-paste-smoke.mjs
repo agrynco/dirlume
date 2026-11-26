@@ -114,6 +114,7 @@ export async function testTerminalPaste() {
             if (command === "locations") return [{ label: "Home", path }];
             if (command === "list_directory") return { path, parent: null, entries: [file], omitted: 0 };
             if (command === "file_icons") return args.items.map(() => null);
+            if (command === "ftp_profiles") return [];
             if (command === "ssh_profiles") return [{ id: "ssh", label: "SSH fixture", host: "fixture", port: 22 }];
             if (command === "connect_ssh") return { kind: "connected", id: 17, address: "fixture", origin: "sftp://fixture",
               segments: ["home"], listing: { entries: [file], omitted: 0, elevated: false } };
@@ -142,7 +143,7 @@ export async function testTerminalPaste() {
         const sources = page.locator("#left-pane .location-popup");
         const home = sources.getByRole("button", { name: "Home", exact: true });
         assert.equal(await home.locator("kbd").count(), 0);
-        await sources.getByRole("button", { name: "SSH", exact: true }).waitFor();
+        await sources.getByRole("button", { name: "NetBox", exact: true }).waitFor();
         await home.click();
         await sources.waitFor({ state: "hidden" });
       }
@@ -266,7 +267,7 @@ export async function testTerminalPaste() {
       }
       const right = page.getByRole("listbox", { name: "right files", exact: true });
       await right.press("Alt+F2");
-      await page.locator("#right-pane .location-popup").getByRole("button", { name: "SSH", exact: true }).click();
+      await page.locator("#right-pane .location-popup").getByRole("button", { name: "NetBox", exact: true }).click();
       await right.getByRole("option", { name: /SSH fixture/ }).dblclick();
       await right.getByRole("option", { name: /^fixture\.txt/ }).waitFor();
       await page.getByRole("button", { name: "Toggle terminal", exact: true }).click();

@@ -3017,6 +3017,7 @@ pub fn run() {
         disconnect_server,
         ftp::ftp_profiles,
         ftp::ftp_windows_code_page,
+        ftp::test_ftp_connection,
         ftp::save_ftp_profile,
         ftp::remove_ftp_profile,
         ftp::connect_ftp,

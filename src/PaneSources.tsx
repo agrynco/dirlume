@@ -76,8 +76,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
 
   const sources = [
     { label: t("Processes"), bindings: shortcuts.processSources, Icon: Activity, value: "processes" },
-    { label: "FTP", bindings: shortcuts.ftpSources, Icon: Server, value: "ftp" },
-    { label: "SSH", bindings: shortcuts.sshSources, Icon: Server, value: "ssh" },
+    { label: "NetBox", bindings: shortcuts.netboxSources, Icon: Server, value: "netbox" },
     ...(windowsClient ? [{ label: "SMB", bindings: shortcuts.smbSources, Icon: Server, value: "smb" as const }] : []),
     { label: t("Remote machine"), bindings: shortcuts.remoteSources, Icon: Server, value: "remote" },
   ] as const;
