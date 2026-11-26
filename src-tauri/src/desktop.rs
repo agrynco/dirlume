@@ -754,7 +754,7 @@ impl TransferSession {
     ) -> io::Result<local_transfer::Decision> {
         let index = conflict
             .allow_remember
-            .then_some(usize::from(conflict.directory));
+            .then_some(usize::from(conflict.confirm_read_only));
         if let Some(index) = index {
             if let Some(decision) = self
                 .remembered
@@ -793,13 +793,63 @@ impl TransferSession {
             .map_err(message)?
             .take()
             .ok_or("There is no pending conflict.")?;
-        if !pending.replaceable && matches!(decision, local_transfer::Decision::Overwrite) {
+        if !pending.replaceable && !matches!(decision, local_transfer::Decision::Skip) {
             return Err("The destination cannot be replaced.".to_owned());
         }
-        if let Some(index) = pending.remember_index.filter(|_| remember) {
+        if matches!(decision, local_transfer::Decision::OverwriteAll) {
+            self.remembered
+                .lock()
+                .map_err(message)?
+                .fill(Some(local_transfer::Decision::Overwrite));
+        } else if let Some(index) = pending.remember_index.filter(|_| remember) {
             self.remembered.lock().map_err(message)?[index] = Some(decision);
         }
         pending.reply.send(decision).map_err(message)
+    }
+}
+
+#[cfg(test)]
+mod transfer_conflict_tests {
+    use super::*;
+    use local_transfer::Decision;
+
+    #[test]
+    fn read_only_choices_are_independent_until_overwrite_all() {
+        fn reply(session: &TransferSession, index: usize, decision: Decision, remember: bool) {
+            let (reply, answer) = mpsc::sync_channel(1);
+            *session.pending.lock().unwrap() = Some(PendingConflict {
+                reply,
+                remember_index: Some(index),
+                replaceable: true,
+            });
+            session.answer(decision, remember).unwrap();
+            answer.recv().unwrap();
+        }
+
+        let transfer = TransferSession::default();
+        reply(&transfer, 0, Decision::Overwrite, true);
+        assert!(matches!(
+            *transfer.remembered.lock().unwrap(),
+            [Some(Decision::Overwrite), None]
+        ));
+        reply(&transfer, 1, Decision::Skip, false);
+        assert!(transfer.remembered.lock().unwrap()[1].is_none());
+        reply(&transfer, 1, Decision::Skip, true);
+        assert!(matches!(
+            *transfer.remembered.lock().unwrap(),
+            [Some(Decision::Overwrite), Some(Decision::Skip)]
+        ));
+        reply(&transfer, 1, Decision::OverwriteAll, false);
+        assert!(matches!(
+            *transfer.remembered.lock().unwrap(),
+            [Some(Decision::Overwrite), Some(Decision::Overwrite)]
+        ));
+        assert!(TransferSession::default()
+            .remembered
+            .lock()
+            .unwrap()
+            .iter()
+            .all(Option::is_none));
     }
 }
 

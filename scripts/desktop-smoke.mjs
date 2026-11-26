@@ -975,15 +975,14 @@ try {
   const conflict = page.getByRole("dialog", { name: "File already exists" });
   await conflict.waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Previous version\n");
-  await conflict.getByRole("button", { name: "Overwrite" }).click();
+  await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
   await waitForCompletedTransfer();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
-  const folderConflict = page.getByRole("dialog", { name: "Folder already exists" });
   await navigate("left", src);
   await left.getByRole("option", { name: /^overlap/ }).click();
   await page.keyboard.press("F5");
   await startTransfer("Copy");
-  await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
+  assert.equal(await page.getByRole("dialog", { name: "Folder already exists" }).count(), 0);
   await conflict.getByText("Incoming", { exact: true }).waitFor();
   await conflict.getByText("2 B", { exact: true }).waitFor();
   assert.equal(await conflict.getByRole("button", { name: "Skip", exact: true }).evaluate((button) => document.activeElement === button), true);

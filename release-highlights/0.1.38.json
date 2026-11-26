@@ -7,7 +7,7 @@
     "Checkboxes are consistently placed to the left of their labels in dialogs.",
     "Use the color scheme’s selection text color for current and marked file names, including hidden and system entries.",
     "Use the refreshed main menu, two-pane app icon, and high-contrast Windows Administrator badge in the title bar.",
-    "Switch from Tree to List even when the selected item’s parent folder cannot be opened.",
+    "Switch from Tree to List when a folder lookup fails, and merge matching folders during Copy and Move with file-level overwrite choices.",
     "Share the settings file beside Dirlume.exe between ordinary and administrator launches of the same Windows copy."
   ]
 }

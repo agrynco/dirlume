@@ -460,7 +460,7 @@ export type TransferSource =
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
 export type TransferEntryDetails = { size: number; modified: number | null; directory: boolean };
 export type TransferConflict = {
-  path: string; directory: boolean; readOnly: boolean; replaceable: boolean; allowRemember: boolean;
+  path: string; directory: boolean; readOnly: boolean; confirmReadOnly: boolean; replaceable: boolean; allowRemember: boolean;
   incoming: TransferEntryDetails | null; existing: TransferEntryDetails;
 };
 export type TransferOutcome = { kind: "completed" | "skipped" }
@@ -722,7 +722,7 @@ export const api = {
     invoke<void>("resolve_deletion", { id, token, decision }),
   cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
   finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
-  resolveTransfer: (id: number, decision: "overwrite" | "skip", remember: boolean) =>
+  resolveTransfer: (id: number, decision: "overwrite" | "overwrite_all" | "skip", remember: boolean) =>
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; multiple: boolean; moving: boolean;
