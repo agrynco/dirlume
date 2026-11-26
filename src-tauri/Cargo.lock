@@ -1530,6 +1530,7 @@ dependencies = [
  "futures-util",
  "gio",
  "image",
+ "jiff 0.2.46",
  "junction",
  "keyring",
  "libc",

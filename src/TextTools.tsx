@@ -21,7 +21,7 @@ import { captureMarkdownAnchor, locateMarkdownAnchor, markdownSelection } from "
 import { bindingMatches, eventShortcut, showShortcut, type Bindings, type Command } from "./preferences";
 import { isLightTheme, type BaseTheme, type Palette } from "./appearance";
 import { viewFontStyle, type ViewFontSizes } from "./viewFonts";
-import { normalized, restoreLineEndings } from "./textFormat";
+import { normalized, preferredLineEnding, restoreLineEndings } from "./textFormat";
 import type { CompareRequest, DiffBlock, DiffLine, DiffResult } from "./compare.worker";
 import { SplitDivider } from "./SplitDivider";
 import { PathField } from "./PathField";
@@ -297,7 +297,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
 
   async function save(sudoPassword?: string) {
     if (!document || !dirty) return;
-    await write(restoreLineEndings(document.text, text), sudoPassword);
+    await write(restoreLineEndings(document.text, text, preferredLineEnding(file)), sudoPassword);
   }
 
   function toggleTask({ start, end }: TaskMarker, checked: boolean) {
@@ -763,7 +763,7 @@ export function CompareDialog({ left, right, previousShortcut, nextShortcut, swa
     try {
       for (const side of dirty) {
         const original = originals[side];
-        const text = restoreLineEndings(original.text, documents[side]);
+        const text = restoreLineEndings(original.text, documents[side], preferredLineEnding(files[side]));
         const destination = destinations[side];
         let saved: TextDocument;
         if (destination === null) saved = await savePlaceText(files[side], original, text);

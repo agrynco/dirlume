@@ -1631,8 +1631,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             activeModal.current = verification;
             setModal(verification);
           } else {
-            const { id, address, origin, segments, listing, directories, unavailableFolders } = result;
-            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, directories }, listing, unavailableFolders);
+            const { id, address, origin, segments, listing, directories, environment, unavailableFolders } = result;
+            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, directories, environment }, listing, unavailableFolders);
           }
           break;
         }

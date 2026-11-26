@@ -41,6 +41,7 @@ const MAX_DEPTH: usize = 128;
 pub struct Session {
     sftp: Sftp,
     client: Arc<AuthenticatedRoute>,
+    preserve_download_timestamps: bool,
 }
 
 #[derive(Debug)]
@@ -176,7 +177,13 @@ impl Session {
         Self {
             client: Arc::new(client),
             sftp,
+            preserve_download_timestamps: true,
         }
+    }
+
+    pub(super) fn with_download_timestamps(mut self, preserve: bool) -> Self {
+        self.preserve_download_timestamps = preserve;
+        self
     }
 
     pub(super) fn completion_client(&self) -> Arc<AuthenticatedRoute> {
@@ -414,6 +421,9 @@ impl Session {
 }
 
 impl remote_transfer::DownloadSession for Session {
+    fn preserve_download_timestamps(&self) -> bool {
+        self.preserve_download_timestamps
+    }
     fn children(&mut self, segments: &[String]) -> Result<Vec<Entry>> {
         let (entries, omitted) = self.entries(segments)?;
         if omitted != 0 {

@@ -3,12 +3,13 @@ use std::{
     fs,
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
+    ops::Deref,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,7 @@ use crate::{
     desktop::{blocking, message, Result},
     local,
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
+    netbox_environment::EnvironmentPreferences,
     protocol::{file_server_origin, RemoteListing},
 };
 
@@ -41,6 +43,8 @@ pub struct Profile {
     code_page: Option<u16>,
     #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
     directories: DirectoryPreferences,
+    #[serde(default, skip_serializing_if = "EnvironmentPreferences::is_default")]
+    environment: EnvironmentPreferences,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -61,6 +65,7 @@ pub struct ProfileInput {
     password: Option<String>,
     code_page: Option<u16>,
     directories: Option<DirectoryPreferences>,
+    environment: Option<EnvironmentPreferences>,
 }
 
 #[derive(Default)]
@@ -211,6 +216,7 @@ impl ProfileInput {
             username,
             code_page: self.code_page.filter(|&page| page != 65001),
             directories,
+            environment: self.environment.clone().unwrap_or_default().validated()?,
         })
     }
 }
@@ -233,6 +239,9 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
         let previous = index.map(|index| &saved[index]);
         if input.directories.is_none() {
             profile.directories = previous.map(|old| old.profile.directories.clone()).unwrap_or_default();
+        }
+        if input.environment.is_none() {
+            profile.environment = previous.map(|old| old.profile.environment.clone()).unwrap_or_default();
         }
         let mut key = previous.filter(|old| old.profile.same_login(&profile)).and_then(|old| old.credential.clone());
         let updated_key = if let Some(password) = input.password {
@@ -392,6 +401,7 @@ impl Connection {
         Ok(Session {
             stream,
             use_mlsd: true,
+            environment: self.profile.environment.clone(),
         })
     }
 }
@@ -405,6 +415,7 @@ pub struct Connected {
     segments: Vec<String>,
     listing: RemoteListing,
     directories: DirectoryPreferences,
+    environment: EnvironmentPreferences,
     unavailable_folders: Vec<String>,
 }
 
@@ -461,6 +472,7 @@ pub async fn connect_ftp(
     .await?;
     let address = connection.profile.label.clone();
     let directories = connection.profile.directories.clone();
+    let environment = connection.profile.environment.clone();
     let origin = file_server_origin("ftp", &connection.profile.host, connection.profile.port, 21);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
@@ -475,6 +487,7 @@ pub async fn connect_ftp(
         segments: start.segments,
         listing: start.listing,
         directories,
+        environment,
         unavailable_folders: start.unavailable,
     })
 }
@@ -488,10 +501,30 @@ pub fn disconnect_ftp(id: u32, state: State<'_, FtpState>) -> Result<()> {
 pub struct Session {
     stream: FtpStream,
     use_mlsd: bool,
+    pub(crate) environment: EnvironmentPreferences,
+}
+
+pub struct FtpEntry {
+    raw: File,
+    pub(crate) corrected: SystemTime,
+}
+
+impl PartialEq for FtpEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl Deref for FtpEntry {
+    type Target = File;
+
+    fn deref(&self) -> &File {
+        &self.raw
+    }
 }
 
 pub struct Entries {
-    pub files: Vec<File>,
+    pub files: Vec<FtpEntry>,
     omitted: usize,
 }
 
@@ -503,7 +536,7 @@ impl Entries {
         }
     }
 
-    pub fn complete(self) -> Result<Vec<File>> {
+    pub fn complete(self) -> Result<Vec<FtpEntry>> {
         if self.omitted > 0 {
             return Err(
                 "The FTP server returned items whose names or attributes could not be read."
@@ -514,14 +547,14 @@ impl Entries {
     }
 }
 
-fn listing_entry(file: File) -> local::Entry {
+fn listing_entry(file: FtpEntry) -> local::Entry {
     let mut entry = local::Entry::new(
         file.name().to_owned(),
         file.is_directory(),
         file.is_symlink(),
         local::EntryAttributes::default(),
         file.is_file().then_some(file.size() as u64),
-        (file.modified() != std::time::UNIX_EPOCH).then_some(file.modified()),
+        (file.modified() != UNIX_EPOCH).then_some(file.corrected),
     );
     entry.owner = file.uid().map(|uid| uid.to_string());
     entry
@@ -598,6 +631,7 @@ impl Session {
             files: Vec::new(),
             omitted: 0,
         };
+        let corrected_time = self.environment.ftp_clock(self.use_mlsd);
         for line in lines {
             if line.is_empty() || (!self.use_mlsd && line.starts_with("total ")) {
                 continue;
@@ -618,7 +652,13 @@ impl Session {
                 line.parse()
             };
             match parsed {
-                Ok(file) if valid_name(file.name()) => result.files.push(file),
+                Ok(file) if valid_name(file.name()) => {
+                    let corrected = corrected_time(file.modified());
+                    result.files.push(FtpEntry {
+                        raw: file,
+                        corrected,
+                    });
+                }
                 Ok(file) if matches!(file.name(), "." | "..") => {}
                 _ => result.omitted += 1,
             }
@@ -626,7 +666,7 @@ impl Session {
         Ok(result)
     }
 
-    pub fn stat(&mut self, segments: &[String]) -> Result<Option<File>> {
+    pub fn stat(&mut self, segments: &[String]) -> Result<Option<FtpEntry>> {
         let (name, parent) = segments
             .split_last()
             .ok_or("Choose an FTP file or folder.")?;
@@ -641,7 +681,7 @@ impl Session {
         Ok(found)
     }
 
-    pub fn matches_file(&mut self, segments: &[String], expected: &File) -> Result<bool> {
+    pub fn matches_file(&mut self, segments: &[String], expected: &FtpEntry) -> Result<bool> {
         if self.use_mlsd {
             // MLST may use an absolute name where the directory listing uses a bare name.
             let path = absolute(segments)?;
@@ -649,7 +689,7 @@ impl Session {
                 if let Some((facts, name)) = reply.split_once("; ") {
                     if (name == path || name == expected.name())
                         && ListParser::parse_mlst(&format!("{facts}; {}", expected.name()))
-                            .is_ok_and(|file| file == *expected)
+                            .is_ok_and(|file| file == expected.raw)
                     {
                         return Ok(true);
                     }
@@ -657,7 +697,9 @@ impl Session {
             }
         }
         // Legacy servers and replies with different facts use the listing check.
-        Ok(self.stat(segments)?.as_ref() == Some(expected))
+        Ok(self
+            .stat(segments)?
+            .is_some_and(|entry| entry.raw == expected.raw))
     }
 
     pub fn folder_size(&mut self, segments: &[String], stop: &AtomicBool) -> Option<(u64, bool)> {
@@ -685,7 +727,7 @@ impl Session {
         Some((bytes, incomplete))
     }
 
-    pub fn regular(&mut self, segments: &[String]) -> Result<File> {
+    pub fn regular(&mut self, segments: &[String]) -> Result<FtpEntry> {
         self.stat(segments)?
             .filter(|file| file.is_file())
             .ok_or_else(|| "Choose a regular FTP file.".to_owned())

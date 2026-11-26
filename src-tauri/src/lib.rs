@@ -41,6 +41,8 @@ mod local_transfer;
 mod mcp;
 #[cfg(feature = "desktop")]
 mod netbox_directories;
+#[cfg(feature = "desktop")]
+mod netbox_environment;
 #[cfg(all(feature = "desktop", windows))]
 mod portable;
 #[cfg(feature = "desktop")]

@@ -80,6 +80,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
   await writeFile(join(remoteCopy, "existing.txt"), "remote original");
   await writeFile(join(downloadedFolder, "existing.txt"), "local original");
   await writeFile(join(remoteFolder, "guide.md"), "# FTP Markdown\n\n- [ ] FTP task\n\n[Remote details](saved-folder/details.md)\n");
+  await writeFile(join(remoteFolder, "one-line.txt"), "First");
   await writeFile(join(remoteFolder, "bytes.bin"), Buffer.alloc(2050, 0x42));
   await writeFile(join(lastFolder, "restored.txt"), "Restored FTP folder");
   await writeFile(join(lastFolder, "details.md"), "# Remote details\n");
@@ -141,11 +142,10 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await add.getByLabel("Port").fill(String(ftpPort));
     await add.getByLabel("Username").fill("dirlume");
     await add.getByLabel("Password", { exact: true }).fill(password);
-    if (process.env.DIRLUME_FTP_LEGACY) {
-      await add.getByRole("tab", { name: "Environment", exact: true }).click();
-      await add.getByLabel("Filename code page").fill("1251");
-      await add.getByRole("tab", { name: "Session", exact: true }).click();
-    }
+    await add.getByRole("tab", { name: "Environment", exact: true }).click();
+    await add.getByLabel("Line endings for files without line breaks").selectOption("crlf");
+    if (process.env.DIRLUME_FTP_LEGACY) await add.getByLabel("Filename code page").fill("1251");
+    await add.getByRole("tab", { name: "Session", exact: true }).click();
     await button(add, "Test connection").click();
     await add.getByText("FTP connection successful.", { exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("ftp_profiles")), []);
@@ -253,6 +253,15 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     assert.equal(await readFile(join(remoteFolder, "guide.md"), "utf8"), "# Changed externally\n");
     await page.keyboard.press("Escape");
     await button(page.getByRole("dialog", { name: "Unsaved changes" }), "Discard changes").click();
+
+    await remoteRow("one-line.txt").click();
+    await page.keyboard.press("F4");
+    const firstEdit = page.getByRole("textbox", { name: "Edit one-line.txt", exact: true });
+    await firstEdit.fill("First\nSecond\n");
+    await page.keyboard.press("F2");
+    await page.locator(".text-window:not([hidden]) .document-modified").waitFor({ state: "hidden" });
+    assert.equal(await readFile(join(remoteFolder, "one-line.txt"), "utf8"), "First\r\nSecond\r\n");
+    await page.keyboard.press("Escape");
 
     await left.getByRole("option", { name: /^ftp-copy/ }).click();
     await page.keyboard.press("F5");
