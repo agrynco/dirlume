@@ -7,6 +7,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod writes;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GitError {
@@ -158,7 +160,11 @@ fn run(git: &Path, path: &Path, args: &[&str]) -> Result<Output> {
 }
 
 fn bounded(git: &Path, path: &Path, args: &[&str], limit: u64) -> Result<Option<Vec<u8>>> {
-    let mut child = command(git, path, args)
+    bounded_command(command(git, path, args), limit)
+}
+
+fn bounded_command(mut command: Command, limit: u64) -> Result<Option<Vec<u8>>> {
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -429,7 +435,7 @@ pub enum ChangeGroup {
     Untracked,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkingChange {
     group: ChangeGroup,
