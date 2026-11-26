@@ -34,7 +34,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, colors, diagnosticLog,
+export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
   onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
   fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks }: {
   file: NamedFile;
@@ -45,6 +45,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   fontSizes: ViewFontSizes;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
+  mermaidScale?: number;
   colors?: Palette;
   diagnosticLog?: boolean;
   onOptions: () => void;
@@ -528,7 +529,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         {preview && !hex && (
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
           <MarkdownPreview file={file} source={markdownSource} active={active} position={position} light={light} colors={colors}
-            scroll={markdownScroll} onContent={setMarkdownContent} fontSize={fontSizes.markdown} shortcuts={shortcuts}
+            scroll={markdownScroll} onContent={setMarkdownContent} fontSize={fontSizes.markdown} mermaidScale={mermaidScale}
             writable={writable} saving={saving} htmlFormatting={htmlFormatting} onToggleTask={toggleTask}
             onOpenDocument={(target, newTab, next) => onOpenDocument(target, newTab, next, markdownScroll.current?.scrollTop ?? 0)} onError={setError} />
           </Suspense>

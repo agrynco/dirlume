@@ -1908,19 +1908,18 @@ button.color-swatch {
 .syntax-property { color: var(--document-syntax-property, var(--syntax-property)); }
 .syntax-invalid { color: var(--danger); }
 .mermaid-figure { margin: 16px 0; }
-.mermaid-figure > figcaption { margin-block-end: 6px; }
+.mermaid-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-block-end: 6px; }
 .mermaid-scroll { overflow-x: auto; }
 .mermaid-scroll:focus-visible { outline-offset: -2px; }
 .mermaid-diagram {
   display: block;
-  max-width: min(100%, 960px);
-  max-height: min(70vh, 640px);
+  max-width: none;
   object-fit: contain;
   height: auto;
   margin-inline: auto;
 }
-.dialog:has(> .diagram-toolbar) { width: min(960px, calc(100vw - 36px)); height: min(700px, calc(100vh - 42px)); max-height: calc(100vh - 42px); }
 .diagram-toolbar { flex-wrap: wrap; }
+.diagram-close { margin-inline-start: auto; }
 .diagram-toolbar + .quick-view-image-canvas { background: var(--markdown-bg); }
 .diagram-error { white-space: pre-wrap; padding: 10px; background: var(--danger-bg); color: var(--danger); }
 .footer-message { margin-right: auto; color: var(--muted); }

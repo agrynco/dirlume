@@ -3469,7 +3469,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         </section>}>
           <QuickView side={previewSide} file={previewFile} fileKey={previewKey} name={previewName}
             message={previewMessage} source={quickViewSourceText} light={isLightTheme(theme)} markdownSize={preferences.viewFontSizes.markdown}
-            shortcuts={shortcuts} onFocusFiles={() => focus(active)}
+            mermaidScale={preferences.mermaidScale} onFocusFiles={() => focus(active)}
             onPrevious={previousPreview && (() => navigateQuickView(previousPreview))}
             onNext={nextPreview && (() => navigateQuickView(nextPreview))}
             previousShortcut={keyLabel("quickViewPrevious")} nextShortcut={keyLabel("quickViewNext")} />
@@ -3554,6 +3554,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             fileBookmarks={fileBookmarks} bookmarkJump={bookmarkJump} onBookmark={addFileBookmark}
             onFileBookmarks={(path) => setModal({ kind: "fileBookmarks", path })}
             viewerContentWidth={preferences.viewerContentWidth} viewerMarkdownContentWidth={preferences.viewerMarkdownContentWidth}
+            mermaidScale={preferences.mermaidScale}
             colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes}

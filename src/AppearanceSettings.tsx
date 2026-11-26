@@ -10,7 +10,7 @@ import {
   maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, systemTheme, useSystemTheme, viewerColors,
   type Color, type FileTypeGroup, type Font, type FontGroup, type Palette, type Scheme, type Surface,
 } from "./appearance";
-import { maxViewerContentWidth, minViewerContentWidth, type Preferences } from "./preferences";
+import { maxMermaidScale, maxViewerContentWidth, minMermaidScale, minViewerContentWidth, type Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { ColorPicker } from "./ColorPicker";
 import { Dialog } from "./Dialog";
@@ -301,6 +301,11 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
         </fieldset>
         <fieldset className="view-font-group">
           <legend><SettingSearchLabel label="Mermaid diagrams" /></legend>
+          <label className="setting"><SettingSearchLabel label="Default diagram scale (%)" />
+            <OptionalNumberInput label={t("Default diagram scale (%)")} size={preferences.mermaidScale} fallback="100"
+              min={minMermaidScale} max={maxMermaidScale}
+              onChange={(mermaidScale) => onChange({ ...preferences, mermaidScale })} />
+          </label>
           {colorFields(Object.keys(mermaidColors) as Color[])}
         </fieldset>
       </>}

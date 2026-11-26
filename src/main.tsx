@@ -7,6 +7,7 @@ import { NativeAppearancePicker } from "./AppearancePicker";
 import { api, type NamedFile, windowsClient } from "./api";
 import { installDiagnosticListeners, reportReactError } from "./diagnostics";
 import { setLanguage } from "./i18n";
+import { readDiagramWindow } from "./diagramWindow";
 import { isFeaturePage } from "./featureOptions";
 import { normalizePreferences, readPreferences, restorePortablePreferences, trackControlKeys } from "./preferences";
 import { installTooltips } from "./tooltips";
@@ -22,9 +23,10 @@ const tool = window as Window & {
 };
 const comparison = tool.__dirlumeComparison;
 const optionsPage = tool.__dirlumeOptionsPage;
-const windowsStartup = windowsClient && isTauri() ? api.windowsStartup().catch(() => null) : Promise.resolve(null);
+const diagram = readDiagramWindow();
+const windowsStartup = windowsClient && isTauri() && !diagram ? api.windowsStartup().catch(() => null) : Promise.resolve(null);
 void windowsStartup.then(async (startup) => {
-  const portable = await restorePortablePreferences(label === "main", startup?.handoff);
+  const portable = diagram ? undefined : await restorePortablePreferences(label === "main", startup?.handoff);
   const preferences = startup?.workspace ? normalizePreferences(startup.workspace.preferences) : readPreferences();
   setLanguage(preferences.language);
   createRoot(document.getElementById("root")!, {
@@ -32,10 +34,10 @@ void windowsStartup.then(async (startup) => {
     onRecoverableError: reportReactError,
     onUncaughtError: reportReactError,
   }).render(<>
-    {label === "options" || comparison ? <ToolWindow initialPreferences={preferences} comparison={comparison}
+    {label === "options" || comparison || diagram ? <ToolWindow initialPreferences={preferences} comparison={comparison} diagram={diagram}
       optionsPage={optionsPage && isFeaturePage(optionsPage) ? optionsPage : undefined} /> :
       <App initialPreferences={preferences} portableUpdateError={portable?.updateError} portableSettingsError={portable?.settingsError}
         administrator={startup?.administrator} administratorWorkspace={startup?.workspace} administratorWorkspaceUnavailable={startup?.workspaceUnavailable} />}
-    {label !== "options" && isTauri() && <NativeAppearancePicker />}
+    {label !== "options" && !diagram && isTauri() && <NativeAppearancePicker />}
   </>);
 });

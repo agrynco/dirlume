@@ -35,11 +35,11 @@ type Size = { width: number; height: number };
 type Point = { x: number; y: number };
 const inset = 8;
 
-export function useImageViewport(wheel: readonly string[] = []) {
+export function useImageViewport(wheel: readonly string[] = [], initialScale: number | null = null) {
   const [natural, setNatural] = useState<Size>();
   const [viewport, setViewport] = useState<Size>({ width: 1, height: 1 });
   const [turns, setTurns] = useState(0);
-  const [zoom, setZoom] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(initialScale);
   const [failed, setFailed] = useState(false);
   const canvas = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
@@ -69,7 +69,9 @@ export function useImageViewport(wheel: readonly string[] = []) {
         x: (cursor.x - bounds.left) / bounds.width, y: (cursor.y - bounds.top) / bounds.height,
       } };
     } else anchor.current = null;
-    const changed = next === null ? null : Math.max(Math.min(1 / 16, fit), Math.min(16, next));
+    const minimum = Math.min(1 / 16, fit, (initialScale ?? 1) / 4);
+    const maximum = Math.max(16, (initialScale ?? 1) * 4);
+    const changed = next === null ? null : Math.max(minimum, Math.min(maximum, next));
     if (changed === zoom) anchor.current = null;
     setZoom(changed);
   }
