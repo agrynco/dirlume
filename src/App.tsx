@@ -1,4 +1,5 @@
 import { workspaceResources, type Resource } from "./workspaceResources";
+import appIcon from "../src-tauri/icons/128x128.png";
 import { Button } from "./Button";
 import { WindowControls } from "./WindowControls";
 import { WindowResizeMarker } from "./ResizeGrip";
@@ -3356,7 +3357,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"} data-help-topic="workspace"
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
         <div className="brand">
-          <span className="brand-icon"><FolderTree /></span><h1 aria-label={administratorTitle}>Dirlume</h1>
+          <img className="brand-icon" src={appIcon} alt="" /><h1 aria-label={administratorTitle}>Dirlume</h1>
           {administrator && <span className="administrator-label" aria-hidden="true">{t("Administrator")}</span>}
         </div>
         <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault={!preferences.showMainMenu} />
