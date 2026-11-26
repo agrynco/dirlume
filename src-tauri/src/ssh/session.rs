@@ -218,12 +218,49 @@ impl Session {
     }
 
     pub(super) fn listing(&self, segments: &[String]) -> SftpResult<RemoteListing> {
+        self.listing_with_links(segments, false)
+    }
+
+    pub(super) fn list_profile_directory(
+        &self,
+        segments: &[String],
+        resolve_links: bool,
+    ) -> SftpResult<(Vec<String>, RemoteListing)> {
+        let canonical = if resolve_links {
+            let path = wait(self.sftp.fs().canonicalize(Self::absolute(segments)?))?;
+            Self::parse_path(
+                path.to_str()
+                    .ok_or("The SSH server returned an invalid directory path.")?,
+            )?
+        } else {
+            segments.to_vec()
+        };
+        let listing = self.listing_with_links(&canonical, resolve_links)?;
+        Ok((canonical, listing))
+    }
+
+    fn listing_with_links(
+        &self,
+        segments: &[String],
+        resolve_links: bool,
+    ) -> SftpResult<RemoteListing> {
         let (entries, omitted) = self.entries(segments)?;
         let entries = entries
             .into_iter()
             .map(|entry| {
-                let directory = entry.is_directory();
+                let mut directory = entry.is_directory();
                 let link = entry.kind.is_some_and(|kind| kind.is_symlink());
+                if resolve_links && link {
+                    let path = Self::absolute(&remote_transfer::child(segments, &entry.name))?;
+                    match wait(self.sftp.fs().metadata(path)) {
+                        Ok(metadata) => {
+                            directory = metadata.file_type().is_some_and(|kind| kind.is_dir())
+                        }
+                        Err(error @ SftpFailure::ConnectionLost(_)) => return Err(error),
+                        // A dangling, cyclic, or inaccessible target remains a link without folder navigation.
+                        Err(_) => {}
+                    }
+                }
                 let mut result = local::Entry::new(
                     entry.name,
                     directory,
@@ -234,9 +271,9 @@ impl Session {
                 );
                 result.owner = entry.uid.map(|uid| uid.to_string());
                 result.accessed = entry.accessed;
-                result
+                Ok(result)
             })
-            .collect();
+            .collect::<SftpResult<_>>()?;
         Ok(RemoteListing { entries, omitted })
     }
 

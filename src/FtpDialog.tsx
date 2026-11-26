@@ -4,6 +4,8 @@ import { Button } from "./Button";
 import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { errorText, t } from "./i18n";
 import type { Bindings } from "./preferences";
+import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
+import { defaultDirectoryPreferences } from "./netboxDirectories";
 
 export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, bindings, onSave, onClose }: {
   profile: FtpProfile | null;
@@ -24,6 +26,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
   const [password, setPassword] = useState("");
   const [clearPassword, setClearPassword] = useState(false);
   const [codePage, setCodePage] = useState(profile?.codePage?.toString() ?? "");
+  const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
   const [working, setWorking] = useState<"save" | "test">();
   const [error, setError] = useState("");
   const [verified, setVerified] = useState(false);
@@ -38,6 +41,7 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
         id: profile?.id, label: label.trim(), host: connection.host, port: Number(connection.port), username: connection.username,
         password: clearPassword ? "" : password || undefined,
         codePage: codePage && Number(codePage) !== 65001 ? Number(codePage) : null,
+        directories: { ...directories, resolveLinks: false },
       };
       if (action === "save") await onSave(input);
       else {
@@ -73,9 +77,11 @@ export function FtpProfileDialog({ profile, draft, onUseSftp, windowsCodePage, b
     </Button>}
   </div>;
   return <NetBoxSession editing={!!profile} protocol="ftp" working={working} bindings={bindings} onSave={save} onClose={onClose}
-    pages={{ environment: encoding }} feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
+    pages={{ environment: encoding, directories: <NetBoxDirectoriesPage value={directories} symbolicLinks={false}
+      onChange={(settings) => { setDirectories(settings); change(); }} /> }}
+    feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t("FTP connection successful.")}</p> : undefined}
-    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection }))}>
+    onChangeProtocol={onUseSftp && (() => onUseSftp({ label, ...connection, directories }))}>
           <ConnectionNameField protocol="ftp" label={label} onChange={(value) => { setLabel(value); change(); }} />
           <ConnectionHostFields protocol="ftp" connection={connection} onChange={(update) => {
             setConnection((current) => ({ ...current, ...update }));

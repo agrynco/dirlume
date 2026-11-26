@@ -10,7 +10,10 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::desktop::{blocking, message, Result};
+use crate::{
+    desktop::{blocking, message, Result},
+    netbox_directories::DirectoryPreferences,
+};
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -63,6 +66,8 @@ pub(super) struct SavedProfile {
     pub destination: SavedHost,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     jump_hosts: Vec<SavedJumpHost>,
+    #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
+    pub(super) directories: DirectoryPreferences,
 }
 
 impl SavedProfile {
@@ -181,6 +186,7 @@ pub struct ProfileSummary {
     #[serde(flatten)]
     destination: HostSummary,
     jump_hosts: Vec<JumpHostSummary>,
+    directories: DirectoryPreferences,
 }
 
 impl From<SavedProfile> for ProfileSummary {
@@ -188,6 +194,7 @@ impl From<SavedProfile> for ProfileSummary {
         Self {
             id: item.id,
             label: item.label,
+            directories: item.directories,
             destination: item.destination.into(),
             jump_hosts: item
                 .jump_hosts
@@ -210,6 +217,7 @@ pub struct ProfileInput {
     destination: HostInput,
     #[serde(default)]
     jump_hosts: Vec<JumpHostInput>,
+    directories: Option<DirectoryPreferences>,
 }
 
 #[derive(Deserialize)]
@@ -470,11 +478,18 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             .into_iter()
             .flat_map(SavedProfile::credentials)
             .collect::<Vec<_>>();
+        let directories = input
+            .directories
+            .clone()
+            .or_else(|| previous.map(|profile| profile.directories.clone()))
+            .unwrap_or_default()
+            .normalized()?;
         let draft = input.prepare(previous)?;
         let mut new_credentials = NewCredentials::default();
         let item = SavedProfile {
             id,
             label,
+            directories,
             destination: new_credentials.save(draft.destination)?,
             jump_hosts: draft
                 .jump_hosts

@@ -1,12 +1,15 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import type { DirectoryPreferences } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { HistoryField } from "./HistoryField";
 import { t } from "./i18n";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 
-export type ConnectionDraft = { label: string; host: string; port: string; username: string; portEdited: boolean };
+export type ConnectionDraft = {
+  label: string; host: string; port: string; username: string; portEdited: boolean; directories?: DirectoryPreferences;
+};
 
 const pageLabels = {
   session: "Session", environment: "Environment", directories: "Directories",

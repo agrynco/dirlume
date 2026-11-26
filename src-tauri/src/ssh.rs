@@ -29,6 +29,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     desktop::{blocking, message, Result},
+    netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     protocol::{file_server_origin, RemoteListing},
 };
 use profiles::{
@@ -58,6 +59,7 @@ fn wait<T, E: std::fmt::Display>(
 #[derive(Debug, PartialEq)]
 pub(crate) enum SftpFailure {
     PermissionDenied,
+    PathUnavailable(String),
     ConnectionLost(String),
     Other(String),
 }
@@ -69,6 +71,10 @@ impl From<openssh_sftp_client::Error> for SftpFailure {
                 openssh_sftp_client::error::SftpErrorKind::PermDenied,
                 _,
             ) => Self::PermissionDenied,
+            openssh_sftp_client::Error::SftpError(
+                openssh_sftp_client::error::SftpErrorKind::NoSuchFile,
+                _,
+            ) => Self::PathUnavailable(message(error)),
             openssh_sftp_client::Error::BackgroundTaskFailure(_) => {
                 Self::ConnectionLost(message(error))
             }
@@ -108,7 +114,9 @@ impl From<SftpFailure> for String {
     fn from(error: SftpFailure) -> Self {
         match error {
             SftpFailure::PermissionDenied => "SSH permission denied.".to_owned(),
-            SftpFailure::ConnectionLost(detail) | SftpFailure::Other(detail) => detail,
+            SftpFailure::ConnectionLost(detail)
+            | SftpFailure::Other(detail)
+            | SftpFailure::PathUnavailable(detail) => detail,
         }
     }
 }
@@ -368,16 +376,17 @@ impl Connection {
         .map_err(Into::into)
     }
 
-    fn list(&self, segments: &[String]) -> SftpResult<RemoteListing> {
+    fn list(&self, segments: &[String]) -> SftpResult<(Vec<String>, RemoteListing)> {
+        let resolve_links = self.profile.directories.resolve_links;
         let mut session = self.listing.lock().map_err(message)?;
         if !session.is_closed() {
-            match session.listing(segments) {
+            match session.list_profile_directory(segments, resolve_links) {
                 Err(SftpFailure::ConnectionLost(_)) => {}
                 result => return result,
             }
         }
         *session = self.open().map_err(SftpFailure::ConnectionLost)?;
-        session.listing(segments)
+        session.list_profile_directory(segments, resolve_links)
     }
 }
 
@@ -610,6 +619,9 @@ pub enum ConnectOutcome {
         origin: String,
         segments: Vec<String>,
         listing: RemoteListing,
+        directories: DirectoryPreferences,
+        #[serde(rename = "unavailableFolders")]
+        unavailable_folders: Vec<String>,
     },
 }
 
@@ -619,6 +631,7 @@ pub async fn connect_ssh(
     approval: Option<HostVerification>,
     approvals: Option<Vec<HostVerification>>,
     segments: Option<Vec<String>>,
+    remembered: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, SshState>,
 ) -> Result<ConnectOutcome> {
@@ -642,13 +655,26 @@ pub async fn connect_ssh(
         };
         let explain = |error: String| route_error(endpoint, None, error);
         let session = open_sftp(client).map_err(&explain)?;
-        let segments = match segments {
-            Some(segments) => segments,
-            None => session.initial_directory().map_err(&explain)?,
-        };
-        let listing = session
-            .listing(&segments)
-            .map_err(|error| explain(error.into()))?;
+        let start = list_initial(&profile.directories, segments, remembered, |candidate| {
+            let path = match candidate {
+                Some(candidate) => candidate.to_vec(),
+                None => session
+                    .initial_directory()
+                    .map_err(|error| InitialListingError::Other(explain(error)))?,
+            };
+            session
+                .list_profile_directory(&path, profile.directories.resolve_links)
+                .map_err(|error| {
+                    if matches!(
+                        error,
+                        SftpFailure::PathUnavailable(_) | SftpFailure::PermissionDenied
+                    ) {
+                        InitialListingError::Unavailable(explain(error.into()))
+                    } else {
+                        InitialListingError::Other(explain(error.into()))
+                    }
+                })
+        })?;
         {
             let _lock = profiles::lock(&path)?;
             let mut config = Config::load(&path)?;
@@ -664,16 +690,16 @@ pub async fn connect_ssh(
                 listing: Mutex::new(session),
                 sudo: sudo::Access::default(),
             },
-            segments,
-            listing,
+            start,
         )))
     })
     .await?;
-    let (connection, segments, listing) = match result {
+    let (connection, start) = match result {
         Ok(connected) => connected,
         Err(verification) => return Ok(ConnectOutcome::VerifyHost { verification }),
     };
     let address = connection.profile.label.clone();
+    let directories = connection.profile.directories.clone();
     let endpoint = &connection.profile.destination.settings.endpoint;
     let origin = file_server_origin("sftp", &endpoint.host, endpoint.port, 22);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
@@ -686,8 +712,10 @@ pub async fn connect_ssh(
         id,
         address,
         origin,
-        segments,
-        listing,
+        segments: start.segments,
+        listing: start.listing,
+        directories,
+        unavailable_folders: start.unavailable,
     })
 }
 
@@ -713,10 +741,17 @@ pub async fn list_ssh(
             reuse_sudo.unwrap_or(false),
             true,
             || connection.list(&segments),
-            |session| session.listing(&segments),
+            |session| {
+                session
+                    .list_profile_directory(&segments, connection.profile.directories.resolve_links)
+            },
         );
         Ok(result
-            .map(|(listing, elevated)| SshListing { listing, elevated })
+            .map(|((segments, listing), elevated)| SshListing {
+                listing,
+                elevated,
+                segments,
+            })
             .map_err(SshListingError::from))
     })
     .await?
@@ -756,6 +791,7 @@ pub struct SshListing {
     #[serde(flatten)]
     listing: RemoteListing,
     elevated: bool,
+    segments: Vec<String>,
 }
 
 #[tauri::command]

@@ -1,6 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import {
-  api, connectFtpLocation, placePath, readPlaceText, savePlaceText, textEncodingLabels, windowsClient,
+  api, connectFtpLocation, isFileServer, placePath, readPlaceText, savePlaceText, textEncodingLabels, windowsClient,
   type Entry, type FileLocation, type Listing, type NamedFile, type Place, type RemotePlace, type TextDocument, type TextEncoding, type TransferEvent,
 } from "./api";
 import { baseThemes, builtInThemes, colorLabels, isHexColor, maxSchemeNameLength, type Palette } from "./appearance";
@@ -9,6 +9,7 @@ import { filesystemPlace, readPlace, type PaneState, type Side } from "./panes";
 import type { Preferences } from "./preferences";
 import { findFiles } from "./SearchDialog";
 import { itemSource, nextTransferId } from "./TransferDialog";
+import { invalidateDirectories, rememberedDirectory } from "./netboxDirectories";
 
 export type McpAction = { id: string; tool: string; arguments: Record<string, unknown> };
 export type McpApproval = { id: string; action: "permanent" | "trash" | "terminate"; targets: string[] };
@@ -153,6 +154,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
       const file = textFile(place, lookup(await entries(place), name));
       if (!previous || !sameFile(file, previous.file)) throw new Error("Read the current file before saving it.");
       await savePlaceText(file, previous.contents, string("text"));
+      if (isFileServer(file.place)) invalidateDirectories({ kind: file.place.kind, id: file.place.profileId });
       revisions.delete(revision);
       return directoryChanged();
     }
@@ -169,7 +171,10 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
       const place = requirePlace();
       const replacement = string("newName");
       if (place.kind === "local") await api.operate(place.path, { kind: "rename", name, new_name: replacement });
-      else if (place.kind === "ftp") await api.renameFtp(place.id, [...place.segments, name], replacement);
+      else if (place.kind === "ftp") {
+        await api.renameFtp(place.id, [...place.segments, name], replacement);
+        invalidateDirectories({ kind: place.kind, id: place.profileId });
+      }
       else throw new Error("This source does not support rename.");
       return directoryChanged();
     }
@@ -179,14 +184,20 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
       if (!destination) throw new Error("Open the destination pane.");
       const available = await entries(source);
       try { return await transfer(source, [...new Set(names)].map((name) => lookup(available, name)), destination, args.operation === "move"); }
-      finally { directoryChanged(); }
+      finally {
+        if (isFileServer(destination)) invalidateDirectories({ kind: destination.kind, id: destination.profileId });
+        directoryChanged();
+      }
     }
     case "list_ftp_profiles":
       return (await api.ftpProfiles()).map(({ id, label }) => ({ id, label }));
     case "connect_ftp_profile": {
-      const { place, listing } = await connectFtpLocation(string("profileId"));
+      const id = string("profileId");
+      const profile = (await api.ftpProfiles()).find((item) => item.id === id);
+      const remembered = profile && rememberedDirectory({ ...profile, kind: "ftp" });
+      const { place, listing, unavailableFolders } = await connectFtpLocation(id, undefined, remembered);
       context.remote(side, place, listing);
-      return { path: placePath(place) };
+      return { path: placePath(place), ...(unavailableFolders?.length ? { unavailableFolders } : {}) };
     }
     case "connect_dirlume_server": {
       const { listing, ...location } = await api.connect(string("invitation"));
