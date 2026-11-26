@@ -62,7 +62,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   fileBookmarks: readonly FileBookmark[];
   bookmarkJump?: BookmarkJump;
   onBookmark: (bookmark: FileBookmark) => void;
-  onFileBookmarks: (path: string) => void;
+  onFileBookmarks: () => void;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
@@ -372,9 +372,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     if (anchor) onBookmark({ path: localBookmarkPath, anchor });
     setHasBookmarkSelection(Boolean(markdownSelection(markdownContent)));
   }, !hasBookmarkSelection);
-  const bookmarksAction = action("File bookmarks", "fileBookmarks", () => {
-    if (localBookmarkPath) onFileBookmarks(localBookmarkPath);
-  });
+  const bookmarksAction = action("File bookmarks", "fileBookmarks", onFileBookmarks);
   const switchMode = action(editing ? "Open in Viewer" : "Open in Editor", "switchDocumentMode", onSwitchMode,
     saving || sudoAction !== null || (!editing && (!writable || !document)));
   const fileActions = [...(editing ? [saveAction] : []), switchMode, closeAction];
@@ -390,8 +388,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     action("Go to start", "documentStart", () => sourceActions.current?.goToStart()),
     action("Go to end", "documentEnd", () => sourceActions.current?.goToEnd()),
   ] : []), ...(localBookmarkPath && document ? [
-    ...(markdownViewer ? [bookmarkSelection] : sourceVisible ? [bookmarkAction] : []), bookmarksAction,
-  ] : [])];
+    ...(markdownViewer ? [bookmarkSelection] : sourceVisible ? [bookmarkAction] : []),
+  ] : []), ...(!editing ? [bookmarksAction] : [])];
   const menuGroups: MenuGroup[] = [
     { label: "File", items: fileActions },
     { label: editing ? "Edit" : "Selection", items: selectionActions },
@@ -500,7 +498,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           </Button>
         )}
         {!editing && <Button shortcut={hexAction.shortcut} aria-pressed={hex} onClick={hexAction.run}>{t(hexAction.label)}</Button>}
-        {localBookmarkPath && document && <Button type="button" shortcut={bookmarksAction.shortcut} onClick={bookmarksAction.run}>
+        {!editing && <Button type="button" shortcut={bookmarksAction.shortcut} onClick={bookmarksAction.run}>
           <Bookmark aria-hidden="true" /> {t(bookmarksAction.label)}
         </Button>}
       </div>
