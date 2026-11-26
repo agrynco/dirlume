@@ -3361,7 +3361,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           <span className="brand-icon"><FolderTree /></span><h1 aria-label={administratorTitle}>Dirlume</h1>
           {administrator && <span className="administrator-label" aria-hidden="true">{t("Administrator")}</span>}
         </div>
-        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
+        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault={!preferences.showMainMenu} />
         <div className="top-actions">
           <Button type="button" className="icon-button donation-button titlebar-donation" aria-label={t("Donate via monobank")}
             data-tauri-drag-region="false" onClick={() => {

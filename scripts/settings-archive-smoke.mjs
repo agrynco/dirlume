@@ -24,7 +24,7 @@ try {
   await page.addInitScript(({ local, evening }) => {
     const key = "dirlume.preferences.v1";
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({
-      layout: "standard", mainMenuAlignment: "right", schemes: [local, evening], activeScheme: null,
+      layout: "standard", mainMenuAlignment: "right", showMainMenu: false, schemes: [local, evening], activeScheme: null,
       kswitcher: "Fixture installation folder",
       viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150,
       activeShortcutScheme: "custom-keys", bindingDefaults: 7,
@@ -164,6 +164,7 @@ try {
   await exportDialog.waitFor({ state: "hidden" });
   const fullFile = await exported();
   assert.equal(Object.keys(fullFile.groups).length, groupCount);
+  assert.equal(fullFile.groups.appearance.showMainMenu, false);
   assert.deepEqual(fullFile.schemes.map(({ id }) => id), [local.id, evening.id]);
 
   await settingsArchiveAction(options, "Export settings");
@@ -291,9 +292,10 @@ try {
   assert.equal(current.layout, "classic");
   assert.equal(current.mainMenuAlignment, "left");
   assert.equal(current.activeShortcutScheme, "my-shortcuts");
-  await startImport(archive({ appearance: { viewFontSizes: { viewer: 23 } } }, []));
+  await startImport(archive({ appearance: { showMainMenu: true, viewFontSizes: { viewer: 23 } } }, []));
   await button(importDialog, "Import").click();
   await importDialog.waitFor({ state: "hidden" });
+  assert.equal((await readPreferences()).showMainMenu, true);
   assert.deepEqual((await readPreferences()).viewFontSizes, { viewer: 23, hex: 23 });
 
   await page.evaluate(() => localStorage.removeItem("dirlume.preferences.v1"));

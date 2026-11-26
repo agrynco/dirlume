@@ -352,13 +352,22 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .window-controls button { width: 34px; border-radius: 0; }
 .window-controls button:focus-visible { outline-offset: -2px; }
 .window-controls .window-close:hover { background: var(--danger-bg); color: var(--danger); }
-.main-menu { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; min-width: 0; gap: 2px; }
+.main-menu { display: flex; align-items: center; justify-content: center; min-width: 0; }
+.main-menu-strip { display: flex; align-items: center; justify-content: inherit; flex-wrap: wrap; min-width: 0; gap: 2px; }
 .main-menu[hidden] { visibility: hidden; }
 .topbar[data-menu-position="left"] .main-menu { justify-content: flex-start; }
 .topbar[data-menu-position="right"] .main-menu { justify-content: flex-end; }
 .main-menu-group { position: relative; }
 .main-menu-group > button { padding-inline: 7px; }
 .main-menu-group > button[aria-expanded="true"] { background: var(--hover); color: var(--accent); }
+.topbar .main-menu-strip {
+  padding: 2px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--raised);
+}
+.topbar .main-menu-group > button {
+  min-height: 25px; padding-inline: 10px; border-radius: max(2px, calc(var(--radius) - 3px));
+}
+.topbar .main-menu-group > button[aria-expanded="true"] { background: var(--accent-fill); color: var(--on-accent); }
 .main-menu-dropdown {
   position: absolute;
   z-index: 25;
@@ -380,6 +389,15 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .main-menu-dropdown kbd { flex: none; white-space: nowrap; }
 .main-menu-dropdown button:focus-visible { outline-offset: -2px; }
 .main-menu-dropdown button[aria-disabled="true"] { color: var(--muted); opacity: .6; cursor: default; }
+.topbar .main-menu-dropdown {
+  min-width: min(215px, calc(100vw - 16px)); top: calc(100% + 6px);
+  background: var(--dialog-bg); box-shadow: var(--card-shadow, 0 8px 24px #0002);
+}
+.topbar .main-menu-dropdown button { min-height: 29px; color: var(--dialog-ink); }
+.topbar .main-menu-dropdown button:not([aria-disabled="true"]):is(:hover, :focus-visible) { background-color: var(--hover); }
+.topbar .main-menu-dropdown button[aria-checked="true"] { color: var(--accent); }
+.topbar .main-menu-dropdown button[aria-disabled="true"] { color: var(--dialog-muted); }
+.topbar .main-menu-dropdown kbd { padding: 1px 4px; border-radius: 4px; background: var(--chip); }
 .main-menu-dropdown[data-action-icons] {
   --menu-command-columns: 10px 15px 12px minmax(0, 1fr) max-content 25px 10px;
   grid-template-columns: var(--menu-command-columns);
