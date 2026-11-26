@@ -422,16 +422,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--raised); color: var(--ink); font-size: .9em; font-weight: 600; white-space: nowrap;
 }
-.brand-icon {
-  display: grid;
-  place-items: center;
-  width: 29px;
-  height: 29px;
-  border-radius: 8px;
-  background: var(--active-row);
-  color: var(--accent);
-}
-.brand-icon svg { width: 17px; height: 17px; }
+.brand-icon { flex: none; width: 29px; height: 29px; }
 .top-actions { gap: 4px; }
 .window-titlebar .top-actions { margin-inline-end: 20px; }
 .top-actions .toolbar-button { border: 1px solid var(--line); background: var(--raised); }
@@ -2654,11 +2645,7 @@ button.color-swatch {
 [data-look="modern"] .document-bar-row { background: transparent; }
 [data-look="modern"] .topbar { min-height: 46px; }
 [data-look="modern"] .brand h1 { font-size: 1.32em; font-weight: 700; }
-[data-look="modern"] .brand-icon {
-  width: 32px; height: 32px; border-radius: 9px; color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-alt, var(--accent-fill)));
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--glow, var(--accent)) 38%, transparent);
-}
+[data-look="modern"] .brand-icon { width: 32px; height: 32px; }
 [data-look="modern"] .top-actions .toolbar-button {
   min-height: 32px; padding-inline: 14px; border-radius: 10px;
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: var(--chip); color: var(--ink);
