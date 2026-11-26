@@ -2591,7 +2591,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function copyPath(path: string) {
     void api.copyText(path).then(() => setStatus({ text: "Path copied to the clipboard." }),
-      (error: unknown) => setStatus({ text: describeError(error), error: true }));
+      (error: unknown) => setStatus({ text: t("Could not copy the path. {0}", errorText(describeError(error))), error: true }));
   }
 
   function copyItemNames() {
@@ -3594,6 +3594,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
+            onCopyPath={copyPath}
             onSwitchMode={() => openDocument(file, !editing)}
             position={position} canGoBack={!!back?.length} canGoForward={!!forward?.length}
             onNavigate={(direction, scrollTop) => navigateMarkdown(id, direction, scrollTop)}

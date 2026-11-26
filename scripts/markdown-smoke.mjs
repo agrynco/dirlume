@@ -179,7 +179,7 @@ export async function testMarkdown(page, source, wheelFont) {
   }
 
   await openCatalogue();
-  assert.equal(await catalogueViewer.locator(".document-heading h2").innerText(), catalogue);
+  assert.equal(await catalogueViewer.locator(".document-heading h2").textContent(), catalogue);
   assert.ok(await toolbarButton(catalogueViewer, "Back").isDisabled());
   assert.ok(await toolbarButton(catalogueViewer, "Forward").isDisabled());
   const diagram = catalogueViewer.getByRole("img", { name: "Mermaid diagram" });
