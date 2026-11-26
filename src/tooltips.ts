@@ -121,6 +121,14 @@ export function installTooltips() {
     return () => { if (pointerTooltip === hover) hide(); };
   };
 
+  function viewportChanged() {
+    if (!pointerTooltip && trigger && trigger === document.activeElement && trigger.dataset.tooltipOnFocus) {
+      const bounds = trigger.getBoundingClientRect();
+      pointerX = bounds.left + bounds.width / 2;
+      if (tooltip.isConnected) position(trigger);
+    } else hide();
+  }
+
   document.addEventListener("pointerover", (event) => {
     if (event.pointerType === "touch" || event.buttons) return;
     const anchor = tooltipTarget(event.target);
@@ -142,8 +150,8 @@ export function installTooltips() {
     if (trigger?.dataset.tooltipOnFocus && event.target === trigger) hide();
   });
   document.addEventListener("pointerdown", hide, true);
-  document.addEventListener("scroll", hide, true);
+  document.addEventListener("scroll", viewportChanged, true);
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") hide(); }, true);
   window.addEventListener("blur", hide);
-  window.addEventListener("resize", hide);
+  window.addEventListener("resize", viewportChanged);
 }
