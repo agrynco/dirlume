@@ -1474,6 +1474,8 @@ try {
   await page.keyboard.press("F2");
   await page.locator(".text-window:not([hidden]) .document-modified").waitFor({ state: "hidden" });
   await page.keyboard.press("Escape");
+  await page.getByRole("navigation", { name: "Open documents", exact: true })
+    .getByRole("button", { name: "View guide.md", exact: true }).click();
   await diagram.waitFor();
   await page.keyboard.press("Escape");
   await left.getByRole("option", { name: /^control.bin/ }).click();
