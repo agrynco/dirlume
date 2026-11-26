@@ -343,6 +343,19 @@ export interface GitDetails {
 
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
+export interface GitIndexSnapshot {
+  headRef: string | null;
+  head: string | null;
+  gitDir: string;
+  index: string;
+}
+export interface GitWorkingIndex {
+  snapshot: GitIndexSnapshot;
+  writeBlocked: boolean;
+  submodules: string[];
+  changes: GitWorkingChange[];
+}
+export type GitIndexAction = "stage" | "unstage";
 export interface GitWorkingDiff {
   workingPath: string | null;
   workingText: boolean;
@@ -512,7 +525,11 @@ export const api = {
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
-  gitWorkingChanges: (root: string) => invoke<GitWorkingChange[]>("git_working_changes", { root }),
+  gitIndexState: (root: string) => invoke<GitWorkingIndex>("git_index_state", { root }),
+  gitUpdateIndex: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange, action: GitIndexAction, replace: boolean) =>
+    invoke<void>("git_update_index", { root, expected, change, action, replace }),
+  gitCommitChanges: (root: string, expected: GitIndexSnapshot, message: string) =>
+    invoke<string>("git_commit_changes", { root, expected, message }),
   gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),

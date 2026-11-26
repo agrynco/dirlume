@@ -978,6 +978,13 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 }
 .git-repository > span, .git-ref { color: var(--panel-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-ref { flex: 0 1 auto; max-width: 48%; }
+.git-index-summary {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.git-index-summary > span:first-child { flex: 1 1 7em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-index-summary button { margin-inline-start: auto; }
+.git-write-feedback { margin: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .git-filter { min-width: 0; margin: 6px 7px; }
 .git-scroll { flex: 1; min-height: 0; overflow: auto; padding-block: 2px; }
 .git-branch-group { margin-block-end: 5px; }
@@ -1013,6 +1020,12 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-change-summary strong { overflow-wrap: anywhere; }
 .git-change-summary > span { color: var(--panel-muted); }
 .git-change-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.git-change-actions:empty { display: none; }
+.git-commit-context { display: grid; gap: 4px; overflow-wrap: anywhere; }
+.git-commit-paths { display: grid; gap: 3px; max-height: 11em; overflow: auto; list-style: none; padding: 3px; }
+.git-commit-paths button { width: 100%; justify-content: start; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.git-commit-paths button[aria-pressed="true"] { color: var(--panel-selected-ink); background: var(--panel-selection); }
+.git-commit-diff { display: flex; flex-direction: column; max-height: 14em; margin-bottom: 8px; border: 1px solid var(--line); }
 .git-patch { flex: 1; min-height: 0; margin: 0; padding: 6px 8px; overflow: auto; font-family: var(--text-font); }
 .git-patch span { display: block; width: max-content; min-width: 100%; }
 .git-patch [data-diff="added"] { background: var(--compare-added, var(--added)); }

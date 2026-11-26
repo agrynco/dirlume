@@ -106,6 +106,7 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
   const [selectedChange, setSelectedChange] = useState("");
+  const [draft, setDraft] = useState<{ root: string; message: string }>();
   const filterField = useRef<HTMLInputElement>(null);
   const branches = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (!changes) filterField.current?.focus(); }, [changes]);
@@ -167,7 +168,9 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   </div>;
   if (changes && repository && !error) return <GitChanges key={repository.root} root={repository.root}
     side={side} refresh={refresh} selected={selectedChange} onSelect={setSelectedChange} header={header}
-    repository={location} onOpen={onOpen} canEdit={canEdit} />;
+    repository={location} onOpen={onOpen} canEdit={canEdit} onRefresh={onRefresh}
+    draft={draft?.root === repository.root ? draft.message : ""}
+    onDraft={(message) => setDraft({ root: repository.root, message })} />;
 
   return <>
     <section className={"pane git-pane git-pane-" + side} aria-label={t(changes ? "Changes" : "Branches")} data-help-topic="gitView" data-pane-side={side}>

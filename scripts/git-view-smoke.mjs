@@ -21,6 +21,13 @@ try {
       subject, hash: hash(value), shortHash: value.repeat(7), author: "Fixture Author", date: "2026-11-21T01:00:00Z",
     });
     window.gitEvents = [];
+    let indexVersion = 0;
+    let rows = [
+      { group: "staged", status: "M", path: "note.txt", previousPath: null },
+      { group: "unstaged", status: "M", path: "note.txt", previousPath: null },
+      { group: "unstaged", status: "D", path: "removed.txt", previousPath: null },
+      { group: "untracked", status: "?", path: "new ł.txt", previousPath: null },
+    ];
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1,
       invoke: async (command, args = {}) => {
@@ -48,15 +55,38 @@ try {
           case "git_details": return { message: "Merge feature\n\nFull commit body", merge: true, changes: [
             { status: "A", path: "new ł.txt" }, { status: "D", path: "removed.txt" },
           ] };
-          case "git_working_changes":
+          case "git_index_state":
             assertRoot(args.root);
             if (window.workingError) throw "unreadable";
-            return window.workingClean ? [] : [
-              { group: "staged", status: "M", path: "note.txt", previousPath: null },
-              { group: "unstaged", status: "M", path: "note.txt", previousPath: null },
-              { group: "unstaged", status: "D", path: "removed.txt", previousPath: null },
-              { group: "untracked", status: "?", path: "new ł.txt", previousPath: null },
-            ];
+            return { snapshot: { headRef: window.gitDetached ? null : "refs/heads/main",
+              head: window.gitEmpty ? null : hash("a"), index: String(indexVersion), gitDir: root + "/.git" },
+            writeBlocked: false, submodules: [], changes: window.workingClean ? [] : rows };
+          case "git_update_index": {
+            assertRoot(args.root);
+            if (args.expected.index !== String(indexVersion)) throw { kind: "stale" };
+            const { path, group } = args.change;
+            if (args.action === "stage" && rows.some((row) => row.path === path && row.group === "staged") && !args.replace) {
+              throw { kind: "confirmReplacement" };
+            }
+            rows = rows.filter((row) => row.path !== path || (args.action === "unstage" && row.group !== "staged"));
+            if (args.action === "stage") rows.unshift({ ...args.change, group: "staged" });
+            else if (!rows.some((row) => row.path === path)) rows.unshift({ ...args.change, group: "unstaged" });
+            indexVersion++;
+            window.gitLastAction = { path, group, action: args.action };
+            return null;
+          }
+          case "git_commit_changes":
+            assertRoot(args.root);
+            if (window.gitExternalChange || args.expected.index !== String(indexVersion)) {
+              window.gitExternalChange = false;
+              indexVersion++;
+              throw { kind: "stale" };
+            }
+            window.gitCommitted = { message: args.message, ref: args.expected.headRef,
+              paths: rows.filter((row) => row.group === "staged").map((row) => row.path).sort() };
+            rows = rows.filter((row) => row.group !== "staged");
+            indexVersion++;
+            return "abcdef0";
           case "git_working_diff": {
             assertRoot(args.root);
             const { group, path } = args.change;
@@ -155,6 +185,48 @@ try {
   assert.equal(await button(preview, "Open in Editor").count(), 0);
   await changeFilter.fill("nothing");
   await changes.getByText("No matching changed paths.").waitFor();
+  await changes.getByText("Staged files: 1", { exact: true }).waitFor();
+  await changeFilter.fill("");
+  await edited.click();
+  await button(preview, "Stage").click();
+  const replace = page.getByRole("dialog", { name: "Replace staged changes?" });
+  await button(replace, "Cancel").click();
+  assert.equal(await page.evaluate(() => window.gitLastAction), undefined);
+  await button(preview, "Stage").click();
+  await button(replace, "Replace and stage").click();
+  const staged = changes.getByRole("group", { name: "Staged", exact: true });
+  await staged.getByRole("option", { name: /note\.txt/, selected: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitLastAction.action), "stage");
+  await button(preview, "Unstage").press("Enter");
+  await edited.waitFor();
+  assert.equal(await page.evaluate(() => window.gitLastAction.action), "unstage");
+  await button(preview, "Stage").click();
+  await staged.getByRole("option", { name: /note\.txt/ }).waitFor();
+  await changes.getByRole("option", { name: /new ł\.txt/ }).click();
+  await button(preview, "Stage").click();
+  await changes.getByText("Staged files: 2", { exact: true }).waitFor();
+  await changeFilter.fill("removed.txt");
+  await button(changes, "Commit…").click();
+  const commitDialog = page.getByRole("dialog", { name: "Commit staged changes" });
+  const message = commitDialog.getByRole("textbox", { name: "Commit message" });
+  assert.equal(await button(commitDialog, "Commit").isDisabled(), true);
+  await commitDialog.getByText("Branch main", { exact: true }).waitFor();
+  await button(commitDialog, "note.txt").click();
+  await commitDialog.getByText("+staged", { exact: true }).waitFor();
+  await button(commitDialog, "new ł.txt").waitFor();
+  await message.fill("Review two files");
+  await button(commitDialog, "Cancel").click();
+  await button(changes, "Commit…").click();
+  assert.equal(await message.inputValue(), "Review two files");
+  await page.evaluate(() => { window.gitExternalChange = true; });
+  await button(commitDialog, "Commit").click();
+  await changes.getByRole("alert").getByText(/checked-out branch or staged changes changed/).waitFor();
+  await button(changes, "Commit…").click();
+  assert.equal(await message.inputValue(), "Review two files");
+  await button(commitDialog, "Commit").click();
+  await changes.getByRole("status").getByText("Created commit abcdef0.").waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitCommitted),
+    { message: "Review two files", ref: "refs/heads/main", paths: ["new ł.txt", "note.txt"] });
   await changeFilter.fill("");
   await page.evaluate(() => { window.workingClean = true; });
   await button(changes, "Refresh").click();

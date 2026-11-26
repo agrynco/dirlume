@@ -85,7 +85,7 @@ export async function invokeWithDiagnostics<T>(command: string, args?: InvokeArg
       "sshCause" in failure && failure.sshCause === "connection_lost" && "message" in failure && typeof failure.message === "string"
       ? failure.message : undefined;
     const error = connectionLost !== undefined ? new SshConnectionLostError(connectionLost) :
-      failure instanceof Error ? failure : new Error(reportedMessage ?? String(failure));
+      failure instanceof Error ? failure : new Error(reportedMessage ?? String(failure), { cause: failure });
     // The resident service uses one response for an offline peer and unavailable file browsing.
     const unavailable = command === "list_kswitcher" ? kswitcherAvailabilityMessages.get(error.message) : undefined;
     if (unavailable) {
