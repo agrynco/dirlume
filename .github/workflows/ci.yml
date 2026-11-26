@@ -202,7 +202,8 @@ jobs:
         if: github.event.action != 'closed'
         run: node scripts/ssh-jump-dialog-smoke.mjs
       - name: Verify remote connection breadcrumbs and history
-        if: github.event.action != 'closed'
+        # The browser fixture simulates all three platforms on each host.
+        if: github.event.action != 'closed' && runner.os != 'macOS'
         run: node scripts/connection-breadcrumbs-smoke.mjs
       - name: Verify file pane stability when the window regains focus
         if: github.event.action != 'closed'
