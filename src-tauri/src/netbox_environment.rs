@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn distinguishes_historical_dst_from_current_offset() {
-        let zone = TimeZone::get("America/New_York").unwrap();
+        let zone = TimeZone::posix("EST5EDT,M3.2.0/2,M11.1.0/2").unwrap();
         let now = "2025-07-15T12:00:00Z".parse().unwrap();
         let winter = wall("2025-01-15T12:00:00Z");
         let summer = wall("2025-07-15T12:00:00Z");
