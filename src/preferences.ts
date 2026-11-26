@@ -81,7 +81,7 @@ export const commands = {
   refresh: { label: "Refresh", key: "Ctrl+R" },
   filter: { label: "Filter folder", key: "" },
   attributes: { label: "File attributes", key: "Ctrl+A" },
-  quickSearch: { label: "Quick search by name prefix", key: "Alt+Letter" },
+  quickSearch: { label: "Quick search by name", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },

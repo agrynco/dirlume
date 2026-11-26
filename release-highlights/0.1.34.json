@@ -5,6 +5,7 @@
     "Open FTP, FTPS, and SFTP profiles through NetBox and configure per-profile starting folders, navigation caches, and connection timeouts.",
     "Use explicit or implicit FTPS and choose active or passive data connections, keepalive, and listing compatibility settings.",
     "Move remote items to a server-side recycle bin and keep previous versions of overwritten SFTP files.",
-    "Customize remote filename encoding, line endings, and timestamp handling for directory listings and downloads."
+    "Customize remote filename encoding, line endings, and timestamp handling for directory listings and downloads.",
+    "Quick search matches anywhere in visible file and folder names and opens a ranked results table from the match count."
   ]
 }

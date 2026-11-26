@@ -1458,6 +1458,11 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 }
 .quick-search input { min-width: 0; }
 .quick-search span { color: var(--muted); }
+.quick-search-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.quick-search-results { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.quick-search-results th { padding: 4px 8px; text-align: start; }
+.quick-search-results td { padding: 1px; border-top: 1px solid var(--line); }
+.quick-search-results button { width: 100%; justify-content: flex-start; overflow-wrap: anywhere; white-space: normal; text-align: start; }
 .ftp-fields { display: grid; gap: 10px; }
 .ftp-fields input { min-width: 0; }
 .netbox-page-header {

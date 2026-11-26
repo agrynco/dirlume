@@ -170,7 +170,7 @@ Select **Changes** to review staged, unstaged, and untracked files across the re
 
 ### Environment variables
 
-Choose **Commands → Environment variables** in either pane, then open **User variables**, **System variables**, or the read-only **Dirlume process environment**. The list shows variable names and definition sources in aligned columns. With the list focused, press **Alt+Letter** or **Alt+0–9** to start Quick search by name prefix. On macOS, use **Option** for Alt. Use **Up** or **Down** to cycle through matches, **Enter** to inspect the current match, and **Escape** to return to the list. Quick search works within the rows shown by **Filter variables** and uses the **Quick search by name prefix** binding in Options.
+Choose **Commands → Environment variables** in either pane, then open **User variables**, **System variables**, or the read-only **Dirlume process environment**. The list shows variable names and definition sources in aligned columns. With the list focused, press **Alt+Letter** or **Alt+0–9** to start Quick search by name prefix. On macOS, use **Option** for Alt. Use **Up** or **Down** to cycle through matches, **Enter** to inspect the current match, and **Escape** to return to the list. Quick search works within the rows shown by **Filter variables** and uses the **Quick search by name** binding in Options.
 
 Press **Enter** or **F3** to inspect a value, **F4** to edit, and **Shift+F4** to create a variable. Use **F5** to review and copy selected or marked variables to an opposite pane showing the other writable scope. **Ctrl+R** reloads the scope. **Back to files** restores the file pane.
 
