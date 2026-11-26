@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::{
     desktop::{blocking, message, Result},
     local,
+    netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     protocol::{file_server_origin, RemoteListing},
 };
 
@@ -38,6 +39,8 @@ pub struct Profile {
     port: u16,
     username: String,
     code_page: Option<u16>,
+    #[serde(default, skip_serializing_if = "DirectoryPreferences::is_default")]
+    directories: DirectoryPreferences,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -57,6 +60,7 @@ pub struct ProfileInput {
     username: String,
     password: Option<String>,
     code_page: Option<u16>,
+    directories: Option<DirectoryPreferences>,
 }
 
 #[derive(Default)]
@@ -197,6 +201,8 @@ impl ProfileInput {
         {
             return Err("Enter a supported Windows code page or use UTF-8.".to_owned());
         }
+        let mut directories = self.directories.clone().unwrap_or_default().normalized()?;
+        directories.resolve_links = false;
         Ok(Profile {
             id: self.id.unwrap_or_else(Uuid::new_v4),
             label,
@@ -204,6 +210,7 @@ impl ProfileInput {
             port: self.port,
             username,
             code_page: self.code_page.filter(|&page| page != 65001),
+            directories,
         })
     }
 }
@@ -218,12 +225,15 @@ impl Profile {
 pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uuid> {
     let path = profiles_path(&app)?;
     blocking(move || {
-        let profile = input.profile()?;
+        let mut profile = input.profile()?;
         let _lock = lock_profiles(&path)?;
         let mut saved = load_profiles(&path)?;
         let index = input.id.map(|id| saved.iter().position(|item| item.profile.id == id)
             .ok_or_else(|| "This FTP profile was removed.".to_owned())).transpose()?;
         let previous = index.map(|index| &saved[index]);
+        if input.directories.is_none() {
+            profile.directories = previous.map(|old| old.profile.directories.clone()).unwrap_or_default();
+        }
         let mut key = previous.filter(|old| old.profile.same_login(&profile)).and_then(|old| old.credential.clone());
         let updated_key = if let Some(password) = input.password {
             key = None;
@@ -394,17 +404,20 @@ pub struct Connected {
     origin: String,
     segments: Vec<String>,
     listing: RemoteListing,
+    directories: DirectoryPreferences,
+    unavailable_folders: Vec<String>,
 }
 
 #[tauri::command]
 pub async fn connect_ftp(
     id: Uuid,
     segments: Option<Vec<String>>,
+    remembered: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, FtpState>,
 ) -> Result<Connected> {
     let path = profiles_path(&app)?;
-    let (connection, segments, listing) = blocking(move || {
+    let (connection, start) = blocking(move || {
         let (profile, password) = {
             let _lock = lock_profiles(&path)?;
             let item = load_profiles(&path)?
@@ -416,15 +429,38 @@ pub async fn connect_ftp(
         };
         let connection = Arc::new(Connection { profile, password });
         let mut session = connection.open()?;
-        let segments = match segments {
-            Some(segments) => segments,
-            None => parse_path(&session.stream.pwd().map_err(message)?)?,
-        };
-        let listing = session.list(&segments)?.into_listing();
-        Ok((connection, segments, listing))
+        let start = list_initial(
+            &connection.profile.directories,
+            segments,
+            remembered,
+            |candidate| {
+                let path = match candidate {
+                    Some(candidate) => candidate.to_vec(),
+                    None => parse_path(
+                        &session
+                            .stream
+                            .pwd()
+                            .map_err(|error| InitialListingError::Other(message(error)))?,
+                    )
+                    .map_err(InitialListingError::Other)?,
+                };
+                let absolute = absolute(&path).map_err(InitialListingError::Other)?;
+                session
+                    .stream
+                    .cwd(absolute)
+                    .map_err(start_directory_error)?;
+                let listing = session
+                    .list_current()
+                    .map_err(start_directory_error)?
+                    .into_listing();
+                Ok((path, listing))
+            },
+        )?;
+        Ok((connection, start))
     })
     .await?;
     let address = connection.profile.label.clone();
+    let directories = connection.profile.directories.clone();
     let origin = file_server_origin("ftp", &connection.profile.host, connection.profile.port, 21);
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     state
@@ -436,8 +472,10 @@ pub async fn connect_ftp(
         id,
         address,
         origin,
-        segments,
-        listing,
+        segments: start.segments,
+        listing: start.listing,
+        directories,
+        unavailable_folders: start.unavailable,
     })
 }
 
@@ -528,20 +566,33 @@ fn unsupported(error: &FtpError) -> bool {
         Status::BadCommand | Status::BadArguments | Status::NotImplemented | Status::NotImplementedParameter))
 }
 
+fn start_directory_error(error: FtpError) -> InitialListingError {
+    if matches!(&error, FtpError::UnexpectedResponse(response) if response.status == Status::FileUnavailable)
+    {
+        InitialListingError::Unavailable(message(error))
+    } else {
+        InitialListingError::Other(message(error))
+    }
+}
+
 impl Session {
     pub fn list(&mut self, segments: &[String]) -> Result<Entries> {
         self.stream.cwd(absolute(segments)?).map_err(message)?;
+        self.list_current().map_err(message)
+    }
+
+    fn list_current(&mut self) -> std::result::Result<Entries, FtpError> {
         let lines = if self.use_mlsd {
             match self.stream.mlsd(None) {
                 Ok(lines) => lines,
                 Err(error) if unsupported(&error) => {
                     self.use_mlsd = false;
-                    self.stream.list(None).map_err(message)?
+                    self.stream.list(None)?
                 }
-                Err(error) => return Err(message(error)),
+                Err(error) => return Err(error),
             }
         } else {
-            self.stream.list(None).map_err(message)?
+            self.stream.list(None)?
         };
         let mut result = Entries {
             files: Vec::new(),

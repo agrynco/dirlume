@@ -1481,6 +1481,7 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .netbox-page-arrows { display: flex; flex: none; gap: 4px; margin-block-start: 2px; }
 .netbox-page[hidden] { display: none; }
 .netbox-feedback { margin-block-start: 10px; }
+.pane-status-note { padding: 4px 8px; color: var(--panel-muted); border-block-start: 1px solid var(--line); }
 .ftp-host-row, .ftp-encoding-row { display: grid; gap: 8px; align-items: end; }
 .ftp-host-row { grid-template-columns: minmax(0, 1fr) 90px; }
 .ftp-encoding-row { grid-template-columns: minmax(0, 1fr) auto; }

@@ -54,6 +54,7 @@ export interface PaneState {
   elevationPath?: string;
   deniedSshListing?: DeniedSshListing;
   sudoListing?: boolean;
+  cachedListing?: boolean;
   search: SearchResults | null;
   sort: FileSort;
 }
@@ -302,8 +303,10 @@ export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?:
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments) };
   if (place.kind === "ssh") {
-    const { elevated, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo);
-    return { place, listing, elevated };
+    const { elevated, segments, ...listing } = await api.listSsh(place.id, place.segments, sudoPassword, reuseSudo);
+    const canonical = segments && JSON.stringify(segments) !== JSON.stringify(place.segments)
+      ? { ...place, segments } : place;
+    return { place: canonical, listing, elevated };
   }
   if (place.kind === "server") return { place, listing: await api.listServer(place.id, place.segments) };
   if (place.kind === "kswitcher") {
@@ -382,6 +385,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
     elevationPath: undefined,
     deniedSshListing: undefined,
     sudoListing: undefined,
+    cachedListing: undefined,
   };
 }
 

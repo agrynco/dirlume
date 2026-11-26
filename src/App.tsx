@@ -51,6 +51,8 @@ import { PaneSources, type PaneSource } from "./PaneSources";
 import { RecentLocationsPane } from "./RecentLocationsPane";
 import { persistRecentLocations, readRecentLocations, recentLocation, recentLocationKey, recentLocationLimit, type RecentLocation } from "./recentLocations";
 import { connectionEntries, readRemoteProfiles } from "./savedConnections";
+import { cacheDirectory, directoryCacheRevision, forgetDirectoryProfile, invalidateDirectories, readCachedDirectory, registerDirectorySession, rememberDirectory,
+  rememberedDirectory } from "./netboxDirectories";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } from "./ArchiveDialog";
 import { findFiles, SearchDialog } from "./SearchDialog";
@@ -109,7 +111,7 @@ function waitForListing<T>(listing: Promise<T>, signal: AbortSignal): Promise<T 
 
 type NetworkPlace = Extract<RemotePlace, { kind: "server" | "ftp" | "ssh" }>;
 type SshPaneTarget = { side: Side; place: SshPlace; revision: number };
-type SavedConnectionTarget = Exclude<SavedConnection, { kind: "ftp" | "ssh" }> |
+type SavedConnectionTarget = SavedConnection |
   { kind: "ftp" | "ssh"; id: string; label: string };
 type ConnectionOpenOptions = {
   approvals?: readonly SshHostVerification[];
@@ -530,6 +532,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, []);
 
   const rememberRecentLocation = useCallback((place: Place) => {
+    if (isFileServer(place)) rememberDirectory(place);
     const entry = recentLocation(place);
     if (!entry) return;
     const key = recentLocationKey(entry);
@@ -644,7 +647,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       kswitcherAvailabilityError: undefined,
       deniedSshListing: elevated ? pane.deniedSshListing : undefined,
     }));
-    const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean) => {
+    const complete = (openedPlace: Place, openedListing: Listing, sudoListing?: boolean, cachedListing = false) => {
       if (ticket !== request.current[side]) return false;
       if (action === "push" || typeof action === "number") delete failedFtp.current[side];
       const revealed = reveal !== undefined ? openedListing.entries.find((entry) => entry.name === reveal) : undefined;
@@ -652,7 +655,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (reveal !== undefined && reveal !== ".." && !found) setStatus({ text: t("Item no longer found: {0}", reveal), error: true });
       updatePane(side, (pane) => {
         if (background && pane.place !== place) return pane;
-        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action, addressFrom), sudoListing };
+        const listing = { ...applyListing(pane, openedPlace, openedListing, action === "startup" ? "push" : action, addressFrom), sudoListing, cachedListing };
         if (background && pane.error !== pane.kswitcherAvailabilityError) {
           Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         }
@@ -667,7 +670,19 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       return true;
     };
     try {
+      if (isFileServer(place)) {
+        if (action === "refresh") invalidateDirectories({ kind: place.kind, id: place.profileId });
+        if (!elevated && !latest.current[side].sudoListing && (action === "push" && place.directories?.cacheChanges ||
+          typeof action === "number" && place.directories?.cacheListings)) {
+          const cached = readCachedDirectory(place);
+          if (cached) return complete({ ...place, segments: cached.segments }, cached.listing, false, true);
+        }
+      }
+      const cacheRevision = isFileServer(place) ? directoryCacheRevision(place) : undefined;
       const result = await waitForListing(readPlace(place, sudoPassword, !background), signal);
+      if (result && ticket === request.current[side] && isFileServer(place) && isFileServer(result.place) && !result.elevated) {
+        cacheDirectory(place, result.place, result.listing, cacheRevision);
+      }
       return result ? complete(result.place, result.listing, result.elevated) : false;
     } catch (error) {
       if (ticket === request.current[side]) {
@@ -757,6 +772,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
                 return;
               }
               connected.current[side] = place;
+              registerDirectorySession(place);
+              cacheDirectory(place, place, listing);
               updatePane(side, (pane) => applyListing(pane, place, listing, "push"));
               return;
             } catch (error) {
@@ -1374,6 +1391,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       if (previous.kind === "ssh") dropTerminal("ssh:" + previous.id);
     }
     connected.current[side] = place.kind === "server" || isFileServer(place) ? place : null;
+    if (isFileServer(place)) {
+      registerDirectorySession(place);
+      cacheDirectory(place, place, listing);
+    }
     rememberRecentLocation(place);
     setActive(side);
     updatePane(side, (pane) => {
@@ -1578,14 +1599,18 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
     const { approvals = [], segments, fromRecent } = options;
+    const remembered = segments === undefined && "host" in profile ? rememberedDirectory(profile) : undefined;
     const { ticket } = beginListing(side);
     updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: profile.label, error: "" }));
-    function complete(place: Place, listing: Listing) {
+    function complete(place: Place, listing: Listing, unavailable?: string[]) {
       if (request.current[side] !== ticket) {
         if (place.kind === "server" || isFileServer(place)) disconnect(place);
         return false;
       }
       routeLocation(side, place, listing);
+      if (unavailable?.length && isFileServer(place)) {
+        setStatus({ text: t("Could not open {0}. Opened {1} instead.", unavailable.join(", "), placePath(place)) });
+      }
       if (fromRecent) closeRecent(side, false);
       else requestAnimationFrame(() => focus(side));
       return true;
@@ -1593,12 +1618,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     try {
       switch (profile.kind) {
         case "ftp": {
-          const { place, listing } = await connectFtpLocation(profile.id, segments);
-          complete(place, listing);
+          const { place, listing, unavailableFolders } = await connectFtpLocation(profile.id, segments, remembered);
+          complete(place, listing, unavailableFolders);
           break;
         }
         case "ssh": {
-          const result = await api.connectSsh(profile.id, approvals, segments);
+          const result = await api.connectSsh(profile.id, approvals, segments, remembered);
           if (result.kind === "verifyHost") {
             if (request.current[side] !== ticket) break;
             if (activeModal.current) throw new Error(t("Open this connection again to verify its host key."));
@@ -1606,8 +1631,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             activeModal.current = verification;
             setModal(verification);
           } else {
-            const { id, address, origin, segments, listing } = result;
-            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments }, listing);
+            const { id, address, origin, segments, listing, directories, unavailableFolders } = result;
+            complete({ kind: "ssh", profileId: profile.id, id, address, origin, segments, directories }, listing, unavailableFolders);
           }
           break;
         }
@@ -2291,7 +2316,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }
 
   async function renameItem(place: RenameLocation, name: string, newName: string) {
-    if (place.kind === "ftp") await api.renameFtp(place.id, [...place.segments, name], newName);
+    if (place.kind === "ftp") {
+      await api.renameFtp(place.id, [...place.segments, name], newName);
+      invalidateDirectories({ kind: place.kind, id: place.profileId });
+    }
     else await api.operate(place.path, { kind: "rename", name, new_name: newName });
   }
 
@@ -3543,6 +3571,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               else dirtyDocuments.current.delete(id);
             }}
             onSaved={() => {
+              if (isFileServer(file.place)) invalidateDirectories({ kind: file.place.kind, id: file.place.profileId });
               if (gitView) setGitRefresh((revision) => revision + 1);
               if (editing && file.place.kind !== "local") {
                 // A remote Viewer reloads after a save because it has no local directory watch.
@@ -3726,6 +3755,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               removeSearchMatches(modal.side, (match) => removed.has(match.relativePath));
             }
             const destination = modal.transfer.remoteDestination;
+            if (destination) invalidateDirectories({ kind: destination.kind, id: destination.profileId });
             if (destination?.kind === "ssh") {
               setSshUploadRefresh(destination.id);
               if (modal.transfer.kind === "move") refresh(modal.side);
@@ -3858,10 +3888,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
         bindings={shortcuts}
         remoteProvider="server" bridgeDirectory={preferences.kswitcher}
-        onSaved={(kind, id) => reloadConnectionLists(modal.side, { kind, id })}
+        onSaved={(kind, id) => {
+          if (kind === "ftp" || kind === "ssh") invalidateDirectories({ kind, id }, true);
+          reloadConnectionLists(modal.side, { kind, id });
+        }}
         onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
-        onRemoved={() => reloadConnectionLists(modal.side)} onClose={() => connectionDialogsClosed(modal.side)} />}
+        onRemoved={() => {
+          const { kind, id } = modal.profile;
+          if (kind === "ftp" || kind === "ssh") forgetDirectoryProfile({ kind, id });
+          reloadConnectionLists(modal.side);
+        }} onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}
         onCancel={() => connectionDialogsClosed(modal.side)} onApprove={() => {
           connectionDialogsClosed(modal.side);
@@ -3918,6 +3955,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               setModal(null);
               return;
             } finally {
+              invalidateDirectories({ kind: remote.kind, id: remote.profileId });
               refresh("left");
               refresh("right");
             }

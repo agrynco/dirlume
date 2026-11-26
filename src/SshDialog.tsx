@@ -7,6 +7,8 @@ import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type Connecti
 import { Dialog } from "./Dialog";
 import { errorText, t } from "./i18n";
 import type { Bindings } from "./preferences";
+import { NetBoxDirectoriesPage } from "./NetBoxDirectoriesPage";
+import { defaultDirectoryPreferences } from "./netboxDirectories";
 
 export function VerifyHostDialog({ verification, testing, onCancel, onApprove }: {
   verification: SshHostVerification;
@@ -135,6 +137,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
 }) {
   const [label, setLabel] = useState(profile?.label ?? draft?.label ?? "");
   const [connection, setConnection] = useState(() => hostDraft(profile, draft));
+  const [directories, setDirectories] = useState(profile?.directories ?? draft?.directories ?? defaultDirectoryPreferences);
   const [jumps, setJumps] = useState<JumpDraft[]>(() =>
     (profile?.jumpHosts ?? []).map((host) => ({ ...hostDraft(host), id: host.id })));
   const [editor, setEditor] = useState<JumpDraft>();
@@ -151,6 +154,7 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   const input: Parameters<typeof api.saveSshProfile>[0] = {
     ...hostInput(connection), id: profile?.id, label,
     jumpHosts: jumps.map((host) => ({ ...hostInput(host), id: savedJump(host.id)?.id })),
+    directories,
   };
 
   const editingId = editor?.id;
@@ -223,10 +227,12 @@ export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, o
   }
 
   return <><NetBoxSession editing={!!profile} protocol="sftp" working={working} bindings={bindings} saveDisabled={!!editor}
+    pages={{ directories: <NetBoxDirectoriesPage value={directories} symbolicLinks
+      onChange={(settings) => { setDirectories(settings); changed(); }} /> }}
     feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
       verified ? <p role="status">{t("SFTP connection successful.")}</p> : undefined}
     onChangeProtocol={onUseFtp && (() => onUseFtp({
-      label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited,
+      label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited, directories,
     }))} onSave={(event) => { void save(event); }} onClose={onClose}>
         <ConnectionNameField protocol="ssh" label={label} onChange={setLabel} />
         <SshHostFields connection={connection} saved={profile} onChange={(update) => {

@@ -116,9 +116,9 @@ export type FileLocation =
   | { kind: "local"; path: string; parent: string | null }
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
-  | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[] }
+  | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[]; directories?: DirectoryPreferences }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; canAdd: boolean; address: string }
-  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[] }
+  | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[]; directories?: DirectoryPreferences }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
 
 export const connectionSourceNames = { netbox: "NetBox", smb: "SMB", remote: "Remote machine" } as const;
@@ -137,7 +137,7 @@ export type SmbPlace = Extract<Place, { kind: "local" | "smbRoot" }>;
 export type FilePlace = Exclude<FileLocation, { kind: "smbRoot" }>;
 export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
-type FileServerPlace = FtpPlace | SshPlace;
+export type FileServerPlace = FtpPlace | SshPlace;
 export type FileServer = Pick<FileServerPlace, "kind" | "id">;
 export function isFileServer(place: Place | null | undefined): place is FileServerPlace {
   return place?.kind === "ftp" || place?.kind === "ssh";
@@ -158,6 +158,15 @@ export type CreateArchive = Omit<ArchiveSettings, "encrypted"> & {
   deleteSources: boolean; overwrite: boolean;
 };
 
+export interface DirectoryPreferences {
+  startingFolder: string;
+  rememberLast: boolean;
+  cacheListings: boolean;
+  cacheChanges: boolean;
+  persistentCache: boolean;
+  resolveLinks: boolean;
+}
+
 export interface FtpProfile {
   id: string;
   label: string;
@@ -165,6 +174,7 @@ export interface FtpProfile {
   port: number;
   username: string;
   codePage: number | null;
+  directories?: DirectoryPreferences;
 }
 
 export interface SshHostSettings {
@@ -184,6 +194,7 @@ export interface SshProfile extends SshHostSettings {
   label: string;
   hasSecret: boolean;
   jumpHosts?: SshJumpHost[];
+  directories?: DirectoryPreferences;
 }
 
 export interface SshHostVerification {
@@ -193,9 +204,10 @@ export interface SshHostVerification {
 }
 
 type SshVerificationRequired = { kind: "verifyHost"; verification: SshHostVerification };
-type SshConnection = ({ kind: "connected" } & Connection & { segments: string[] }) | SshVerificationRequired;
+type ConnectedFileServer = Connection & { segments: string[]; directories?: DirectoryPreferences; unavailableFolders?: string[] };
+type SshConnection = ({ kind: "connected" } & ConnectedFileServer) | SshVerificationRequired;
 export type SshHostInput = SshHostSettings & { secret?: string; clearSecret?: boolean };
-type SshProfileInput = SshHostInput & { id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[] };
+type SshProfileInput = SshHostInput & { id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences };
 
 export interface NamedFile {
   place: TextPlace;
@@ -510,8 +522,8 @@ export const api = {
   testFtpConnection: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
     invoke<void>("test_ftp_connection", { input }),
   removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
-  connectFtp: (id: string, segments?: string[]) =>
-    invoke<Connection & { segments: string[] }>("connect_ftp", { id, segments }),
+  connectFtp: (id: string, segments?: string[], remembered?: string[]) =>
+    invoke<ConnectedFileServer>("connect_ftp", { id, segments, remembered }),
   disconnectFtp: (id: number) => invoke<void>("disconnect_ftp", { id }),
   listFtp: (id: number, segments: string[]) => invoke<Listing>("list_ftp", { id, segments }),
   searchFtp: (id: number, request: { connection: number; segments: string[]; mask: string; showHidden: boolean },
@@ -525,11 +537,11 @@ export const api = {
       input, approval: approvals[0], approvals,
     }),
   removeSshProfile: (id: string) => invoke<void>("remove_ssh_profile", { id }),
-  connectSsh: (id: string, approvals?: readonly SshHostVerification[], segments?: string[]) =>
-    invoke<SshConnection>("connect_ssh", { id, approval: approvals?.[0], approvals, segments }),
+  connectSsh: (id: string, approvals?: readonly SshHostVerification[], segments?: string[], remembered?: string[]) =>
+    invoke<SshConnection>("connect_ssh", { id, approval: approvals?.[0], approvals, segments, remembered }),
   disconnectSsh: (id: number) => invoke<void>("disconnect_ssh", { id }),
   listSsh: (id: number, segments: string[], sudoPassword?: string, reuseSudo?: boolean) =>
-    invoke<Listing & { elevated: boolean }>("list_ssh", { id, segments, sudoPassword, reuseSudo }),
+    invoke<Listing & { elevated: boolean; segments?: string[] }>("list_ssh", { id, segments, sudoPassword, reuseSudo }),
   deleteSsh: (id: number, segments: string[], recursive: boolean) => invoke<void>("delete_ssh", { id, segments, recursive }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
   deleteFtp: (id: number, segments: string[], recursive: boolean) =>
@@ -634,10 +646,10 @@ export function smbLocation(result: Exclude<SmbConnection, { kind: "credentials_
   return { place: { kind: "smbRoot", path: result.server }, listing: { entries, omitted: 0 } };
 }
 
-export async function connectFtpLocation(profileId: string, segments?: string[]) {
-  const { listing, ...location } = await api.connectFtp(profileId, segments);
+export async function connectFtpLocation(profileId: string, segments?: string[], remembered?: string[]) {
+  const { listing, unavailableFolders, ...location } = await api.connectFtp(profileId, segments, remembered);
   const place: FtpPlace = { kind: "ftp", profileId, ...location };
-  return { place, listing };
+  return { place, listing, unavailableFolders };
 }
 
 type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp";

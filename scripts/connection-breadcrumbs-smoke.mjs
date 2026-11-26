@@ -33,7 +33,8 @@ async function fixture(browser, platform, nestedLocal = false) {
     const folder = (name) => ({ name, directory: true, hidden: false, link: false, size: null, modified: null });
     const entries = (depth) => depth < folders.length ? [folder(folders[depth])] : [];
     const listing = (depth) => ({ entries: entries(depth), omitted: 0, elevated: false });
-    const state = window.connectionFixture = { attempts: 0, offline: false, failProfiles: false, emptySsh: false };
+    const state = window.connectionFixture = { attempts: 0, offline: false, failProfiles: false, emptySsh: false,
+      directorySettings: JSON.parse(localStorage.getItem("fixture.directory-settings") ?? "null") ?? undefined };
     if (nestedLocal) {
       const place = { kind: "local", path, parent: path.slice(0, path.lastIndexOf(separator)) };
       localStorage.setItem("dirlume.workspace.v1", JSON.stringify({
@@ -62,11 +63,15 @@ async function fixture(browser, platform, nestedLocal = false) {
         if (command === "file_icons") return args.items.map(() => null);
         if (command === "ftp_profiles") {
           if (state.failProfiles) throw new Error("Could not read FTP profiles.");
-          return [{ id: "ftp", label: "Saved FTP", host: "fixture", port: 21 }];
+          return [{ id: "ftp", label: "Saved FTP", host: "fixture", port: 21, directories: state.directorySettings }];
         }
         if (command === "ssh_profiles") return state.emptySsh ? [] : [{ id: "ssh", label: "Saved SFTP", host: "fixture", port: 22 }];
-        if (command === "connect_ftp") return remote({ id: 4, address: "FTP fixture", origin: "ftp://fixture",
-          segments: args.segments ?? folders, listing: listing(folders.length) });
+        if (command === "connect_ftp") {
+          state.requestedStart = args.remembered;
+          const segments = args.segments ?? (state.directorySettings ? args.remembered ?? [] : folders);
+          return remote({ id: 4, address: "FTP fixture", origin: "ftp://fixture",
+            segments, listing: listing(segments.length), directories: state.directorySettings });
+        }
         if (command === "connect_ssh") return remote({ kind: "connected", id: 5, address: "SFTP fixture", origin: "sftp://fixture",
           segments: folders, listing: listing(folders.length) });
         if (command === "list_saved_computer_drives") return [{ name: "Files", type: 3, total: null, available: null }];
@@ -106,6 +111,54 @@ async function enterFromCatalog(page, side, name, saved) {
   await button(pane(page, side), `Locations for ${side} pane`).click();
   await button(pane(page, side), name).click();
   await row(page, side, saved).dblclick();
+}
+
+async function checkDirectoryCache(page) {
+  const side = "left";
+  const target = pane(page, side);
+  const cached = target.getByText("Showing a cached directory listing.", { exact: true });
+  await page.evaluate(() => {
+    window.connectionFixture.directorySettings = {
+      startingFolder: "", rememberLast: true, cacheListings: true, cacheChanges: true,
+      persistentCache: true, resolveLinks: false,
+    };
+    localStorage.setItem("fixture.directory-settings", JSON.stringify(window.connectionFixture.directorySettings));
+  });
+  await enterFromCatalog(page, side, "NetBox", "Saved FTP");
+  await waitPath(page, side, "/");
+  await row(page, side, folders[0]).dblclick();
+  await waitPath(page, side, "/" + folders[0]);
+  const attempts = await page.evaluate(() => window.connectionFixture.attempts);
+  await button(target, "Back").click();
+  await waitPath(page, side, "/");
+  await cached.waitFor();
+  await page.evaluate(() => { window.connectionFixture.offline = true; });
+  await button(target, "Forward").click();
+  await waitPath(page, side, "/" + folders[0]);
+  await cached.waitFor();
+  assert.equal(await page.evaluate(() => window.connectionFixture.attempts), attempts);
+  await page.reload();
+  await waitPath(page, side, "/" + folders[0]);
+  const afterRestart = await page.evaluate(() => window.connectionFixture.attempts);
+  await button(target, "Parent folder").click();
+  await waitPath(page, side, "/");
+  await cached.waitFor();
+  assert.equal(await page.evaluate(() => window.connectionFixture.attempts), afterRestart);
+  await button(target, "Back").click();
+  await waitPath(page, side, "/" + folders[0]);
+  await page.evaluate(() => { window.connectionFixture.offline = true; });
+  await button(target, "Refresh folder").click();
+  await target.getByRole("alert").filter({ hasText: "Remote fixture is offline." }).waitFor();
+  await cached.waitFor();
+  assert.equal(await page.evaluate(() => window.connectionFixture.attempts), afterRestart + 1);
+  await page.evaluate(() => { window.connectionFixture.offline = false; });
+  await button(target, "Refresh folder").click();
+  await cached.waitFor({ state: "hidden" });
+  await button(crumbs(page, side), "Open NetBox connection list").click();
+  await waitPath(page, side, "NetBox");
+  await list(page, side).press("Enter");
+  await waitPath(page, side, "/" + folders[0]);
+  assert.deepEqual(await page.evaluate(() => window.connectionFixture.requestedStart), [folders[0]]);
 }
 
 async function checkOverflowMenu(address, kind) {
@@ -394,6 +447,12 @@ try {
     await page.close();
   }
   console.log("Verified retained local, archive, and remote trails, overflow folders, and catalog Back and Forward navigation.");
+  for (const platform of platforms.slice(0, 2)) {
+    const { page } = await fixture(browser, platform);
+    await checkDirectoryCache(page);
+    await page.close();
+  }
+  console.log("Verified NetBox cached Back and Forward, manual refresh, and the remembered path on reconnect.");
 } finally {
   await browser.close();
 }

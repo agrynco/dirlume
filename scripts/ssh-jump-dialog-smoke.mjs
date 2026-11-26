@@ -124,7 +124,10 @@ try {
     const next = button(add, "Next settings page");
     assert.equal(await selected("Session"), "true");
     assert.equal(await previous.isDisabled(), true);
+    await next.click();
+    assert.equal(await selected("Directories"), "true");
     assert.equal(await next.isDisabled(), true);
+    await previous.click();
     const protocol = add.getByLabel("Protocol", { exact: true });
     await protocol.selectOption("ftp");
     await add.evaluate((element) => { element.style.width = "194px"; });
@@ -135,7 +138,6 @@ try {
       await page.keyboard.press("Control+Alt+n");
     } else await page.keyboard.press("Control+PageDown");
     assert.equal(await selected("Environment"), "true", platform);
-    assert.equal(await next.isDisabled(), true);
     assert.equal(await tabs.evaluate((element) => element.scrollLeft > 0), true);
     assert.equal(await previous.isVisible(), true);
     await add.getByLabel("Filename code page").fill("1251");
@@ -162,11 +164,26 @@ try {
     await codePage.waitFor();
     await page.waitForFunction(() => document.activeElement?.closest('[data-netbox-page="environment"]') !== null &&
       document.activeElement instanceof HTMLInputElement && document.activeElement.value === "70000");
+    await next.click();
+    const directories = add.getByRole("tabpanel", { name: "Directories" });
+    assert.equal(await next.isDisabled(), true);
+    assert.equal(await directories.getByLabel("Resolve directory symbolic links").isDisabled(), true);
+    assert.equal(await directories.getByLabel("Keep directory cache after closing Dirlume").isDisabled(), true);
+    await directories.getByLabel("Starting folder").fill("/configured");
+    await directories.getByLabel("Cache directory changes").check();
+    await directories.getByLabel("Remember last used directory").check();
+    await directories.getByLabel("Keep directory cache after closing Dirlume").check();
     await tab("Session").click();
     await add.evaluate((element) => { element.style.removeProperty("width"); });
     await protocol.selectOption("sftp");
     assert.equal(await tab("Environment").count(), 0);
     assert.equal(await add.getByLabel("Connection name", { exact: true }).inputValue(), "Production");
+    await tab("Directories").click();
+    assert.equal(await directories.getByLabel("Starting folder").inputValue(), "/configured");
+    assert.equal(await directories.getByLabel("Remember last used directory").isChecked(), true);
+    assert.equal(await directories.getByLabel("Keep directory cache after closing Dirlume").isChecked(), true);
+    await directories.getByLabel("Resolve directory symbolic links").check();
+    await tab("Session").click();
     await hostDetails(add, hostnames[2], "destination", "test-password");
     const route = add.getByLabel("Route", { exact: true });
     assert.equal(await route.textContent(), routeText(hostnames[2]));
