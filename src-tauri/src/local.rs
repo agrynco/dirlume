@@ -27,7 +27,7 @@ pub struct Entry {
     #[serde(default)]
     system: bool,
     size: Option<u64>,
-    modified: Option<u64>,
+    modified: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,11 +91,15 @@ impl Entry {
             changed: None,
             allocated: None,
             allocation_id: None,
-            modified: modified.and_then(|value| {
-                value
-                    .duration_since(UNIX_EPOCH)
-                    .ok()
-                    .map(|time| time.as_secs())
+            modified: modified.and_then(|value| match value.duration_since(UNIX_EPOCH) {
+                Ok(time) => i64::try_from(time.as_secs()).ok(),
+                Err(error) => {
+                    let elapsed = error.duration();
+                    i64::try_from(elapsed.as_secs())
+                        .ok()?
+                        .checked_neg()?
+                        .checked_sub(i64::from(elapsed.subsec_nanos() != 0))
+                }
             }),
         }
     }

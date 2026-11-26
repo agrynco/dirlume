@@ -10,6 +10,8 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+use super::compatibility::Compatibility;
+
 use crate::{
     desktop::{blocking, message, Result},
     netbox_connection::ConnectionPreferences,
@@ -77,6 +79,8 @@ pub(super) struct SavedProfile {
     pub(super) connection_options: ConnectionPreferences,
     #[serde(default, skip_serializing_if = "proxy::Stored::is_default")]
     pub(super) proxy: proxy::Stored,
+    #[serde(default, skip_serializing_if = "Compatibility::is_default")]
+    pub(super) compatibility: Compatibility,
 }
 
 impl SavedProfile {
@@ -207,6 +211,7 @@ pub struct ProfileSummary {
     environment: EnvironmentPreferences,
     connection_options: ConnectionPreferences,
     proxy: proxy::Summary,
+    compatibility: Compatibility,
 }
 
 impl From<SavedProfile> for ProfileSummary {
@@ -218,6 +223,7 @@ impl From<SavedProfile> for ProfileSummary {
             environment: item.environment,
             connection_options: item.connection_options,
             proxy: item.proxy.summary(),
+            compatibility: item.compatibility,
             destination: item.destination.into(),
             jump_hosts: item
                 .jump_hosts
@@ -244,6 +250,7 @@ pub struct ProfileInput {
     environment: Option<EnvironmentPreferences>,
     connection_options: Option<ConnectionPreferences>,
     proxy: Option<proxy::Input>,
+    compatibility: Option<Compatibility>,
 }
 
 #[derive(Deserialize)]
@@ -352,6 +359,14 @@ struct DraftProfile {
 }
 
 impl ProfileInput {
+    pub(super) fn compatibility(&self, config: &Config) -> Result<Compatibility> {
+        let previous = self.id.map(|id| config.profile(id)).transpose()?;
+        self.compatibility
+            .clone()
+            .or_else(|| previous.map(|profile| profile.compatibility.clone()))
+            .unwrap_or_default()
+            .validated()
+    }
     pub(super) fn proxy_route(&self, config: &Config) -> Result<Option<proxy::Route>> {
         let empty = proxy::Stored::default();
         let previous = self
@@ -546,6 +561,7 @@ pub async fn save_ssh_profile(mut input: ProfileInput, app: AppHandle) -> Result
             .unwrap_or_default()
             .validated()?;
         let previous_proxy = previous.map(|old| old.proxy.clone()).unwrap_or_default();
+        let compatibility = input.compatibility(&config)?;
         let proxy_save = input
             .proxy
             .take()
@@ -564,6 +580,7 @@ pub async fn save_ssh_profile(mut input: ProfileInput, app: AppHandle) -> Result
             environment,
             connection_options,
             proxy,
+            compatibility,
             destination: new_credentials.save(draft.destination)?,
             jump_hosts: draft
                 .jump_hosts

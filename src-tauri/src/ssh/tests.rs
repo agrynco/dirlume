@@ -52,6 +52,7 @@ fn route(input: Value, approved: &[HostVerification], pins: &[HostKey]) -> Resul
     let input: ProfileInput = serde_json::from_value(input).expect("decode profile");
     let config = Config::default();
     let proxy = input.proxy_route(&config)?;
+    let compatibility = input.compatibility(&config)?;
     let mut hosts = input.test_route(&config)?;
     open_route(
         hosts.iter_mut().map(RouteHost::Draft).collect(),
@@ -59,6 +60,7 @@ fn route(input: Value, approved: &[HostVerification], pins: &[HostKey]) -> Resul
         approved,
         RouteOptions {
             proxy,
+            compatibility,
             ..RouteOptions::default()
         },
     )
@@ -241,6 +243,16 @@ fn opens_a_two_hop_sftp_route() {
         .iter()
         .all(|(_, port)| u64::from(*port) == hosts[0]["port"].as_u64().unwrap()));
     assert!(!proxy.requests().is_empty());
+    let (default_route, _) = route(input.clone(), &approvals, &[]).unwrap().ok().unwrap();
+    assert!(open_sftp(default_route).is_ok());
+    let mut unsupported = input.clone();
+    unsupported["compatibility"] = json!({ "sftpCommand": "unsupported-sftp" });
+    let (unsupported, _) = route(unsupported, &approvals, &[]).unwrap().ok().unwrap();
+    assert_eq!(
+        open_sftp(unsupported).err().as_deref(),
+        Some("The SSH server rejected the custom SFTP command.")
+    );
+    input["compatibility"] = json!({ "sftpCommand": "fixture-sftp", "signedTimestamps": true });
 
     let (client, keys) = route(input.clone(), &approvals, &[])
         .expect("verify the entire route")
@@ -325,6 +337,14 @@ fn opens_a_two_hop_sftp_route() {
         .expect("download over both hops");
     drop(output);
     assert_eq!(fs::read(&destination).unwrap(), b"download from SSH");
+    fs::write(root.join("signed-date.txt"), "Legacy date").unwrap();
+    let listing = session.listing(&[]).unwrap();
+    let dated = listing
+        .entries
+        .iter()
+        .find(|entry| entry.name == "signed-date.txt")
+        .unwrap();
+    assert_eq!(serde_json::to_value(dated).unwrap()["modified"], -1);
     drop(session);
     fixture.wait_for_idle();
 

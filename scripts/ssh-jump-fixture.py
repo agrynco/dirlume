@@ -86,8 +86,12 @@ class Server(paramiko.ServerInterface):
     def check_channel_pty_request(self, _channel, _term, _width, _height, _pixel_width, _pixel_height, _modes):
         return self.stage == 2
 
-    def check_channel_exec_request(self, channel, _command):
+    def check_channel_exec_request(self, channel, command):
         if self.stage != 2:
+            return False
+        if command == b"fixture-sftp":
+            return self.check_channel_subsystem_request(channel, "sftp")
+        if command == b"unsupported-sftp":
             return False
 
         def respond():
@@ -110,18 +114,25 @@ class Files(paramiko.SFTPServerInterface):
             raise PermissionError(errno.EACCES, "Path is outside the fixture.")
         return root.joinpath(*parts)
 
+    @staticmethod
+    def attributes(file):
+        attributes = paramiko.SFTPAttributes.from_stat(file.stat(), filename=file.name)
+        if file.name == "signed-date.txt":
+            attributes.st_mtime = 0xFFFFFFFF
+        return attributes
+
     def list_folder(self, path):
         entries = []
         try:
             for file in self.path(path).iterdir():
-                entries.append(paramiko.SFTPAttributes.from_stat(file.stat(), filename=file.name))
+                entries.append(self.attributes(file))
         except OSError as error:
             return paramiko.SFTPServer.convert_errno(error.errno)
         return entries
 
     def stat(self, path):
         try:
-            return paramiko.SFTPAttributes.from_stat(self.path(path).stat())
+            return self.attributes(self.path(path))
         except OSError as error:
             return paramiko.SFTPServer.convert_errno(error.errno)
 

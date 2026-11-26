@@ -67,12 +67,14 @@ impl Entry {
         )
     }
 
-    fn new(name: String, metadata: MetaData) -> Self {
+    fn new(name: String, metadata: MetaData, compatibility: &super::Compatibility) -> Self {
         Self {
             name,
             kind: metadata.file_type(),
             size: metadata.len(),
-            modified: metadata.modified().map(|time| time.as_system_time()),
+            modified: metadata
+                .modified()
+                .map(|time| compatibility.timestamp(time.as_system_time())),
             accessed: metadata.accessed().and_then(|time| {
                 time.as_system_time()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -366,9 +368,11 @@ impl Session {
             while let Some(entry) = self.wait(async { stream.next().await.transpose() })? {
                 match entry.filename().as_os_str().to_str() {
                     Some("." | "..") => {}
-                    Some(name) if valid_name(name) => {
-                        entries.push(Entry::new(name.to_owned(), entry.metadata()))
-                    }
+                    Some(name) if valid_name(name) => entries.push(Entry::new(
+                        name.to_owned(),
+                        entry.metadata(),
+                        &self.client.1.compatibility,
+                    )),
                     _ => omitted += 1,
                 }
             }
@@ -568,7 +572,11 @@ impl Session {
         let path = Self::absolute(segments)?;
         self.wait(async {
             match self.sftp.fs().symlink_metadata(path).await {
-                Ok(metadata) => Ok(Some(Entry::new(name.clone(), metadata))),
+                Ok(metadata) => Ok(Some(Entry::new(
+                    name.clone(),
+                    metadata,
+                    &self.client.1.compatibility,
+                ))),
                 Err(Error::SftpError(SftpErrorKind::NoSuchFile, _)) => Ok(None),
                 Err(error) => Err(error),
             }

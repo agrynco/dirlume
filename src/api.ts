@@ -271,6 +271,13 @@ export interface SshProfile extends SshHostSettings {
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
   proxy?: ProxySettings;
+  compatibility?: SshCompatibility;
+}
+
+export interface SshCompatibility {
+  sftpCommand: string;
+  signedTimestamps: boolean;
+  shell: "automatic" | "bash" | "zsh" | "sh";
 }
 
 export interface SshHostVerification {
@@ -289,6 +296,7 @@ type SshProfileInput = SshHostInput & {
   id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences; environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
   proxy?: ProxyInput;
+  compatibility?: SshCompatibility;
 };
 
 export interface NamedFile {
