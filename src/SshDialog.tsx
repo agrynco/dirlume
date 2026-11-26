@@ -6,6 +6,7 @@ import { Button } from "./Button";
 import { ConnectionHostFields, ConnectionNameField, NetBoxSession, type ConnectionDraft } from "./ConnectionProtocol";
 import { Dialog } from "./Dialog";
 import { errorText, t } from "./i18n";
+import type { Bindings } from "./preferences";
 
 export function VerifyHostDialog({ verification, testing, onCancel, onApprove }: {
   verification: SshHostVerification;
@@ -124,10 +125,11 @@ function SshHostFields({ connection, saved, onChange, onError, jump = false }: {
   </>;
 }
 
-export function SshProfileDialog({ profile, draft, onUseFtp, onSave, onClose }: {
+export function SshProfileDialog({ profile, draft, onUseFtp, bindings, onSave, onClose }: {
   profile: SshProfile | null;
   draft?: ConnectionDraft;
   onUseFtp?: (draft: ConnectionDraft) => void;
+  bindings: Bindings;
   onSave: (input: Parameters<typeof api.saveSshProfile>[0]) => Promise<void>;
   onClose: () => void;
 }) {
@@ -220,7 +222,9 @@ export function SshProfileDialog({ profile, draft, onUseFtp, onSave, onClose }: 
     }
   }
 
-  return <><NetBoxSession editing={!!profile} protocol="sftp" working={working} saveDisabled={!!editor}
+  return <><NetBoxSession editing={!!profile} protocol="sftp" working={working} bindings={bindings} saveDisabled={!!editor}
+    feedback={error ? <p className="dialog-error" role="alert">{errorText(error)}</p> :
+      verified ? <p role="status">{t("SFTP connection successful.")}</p> : undefined}
     onChangeProtocol={onUseFtp && (() => onUseFtp({
       label, host: connection.host, port: connection.port, username: connection.username, portEdited: connection.portEdited,
     }))} onSave={(event) => { void save(event); }} onClose={onClose}>
@@ -271,8 +275,6 @@ export function SshProfileDialog({ profile, draft, onUseFtp, onSave, onClose }: 
             <output aria-label={t("Route")} dir="auto">{route.join(" → ")}</output>
           </div>
         </section>
-        {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-        {verified && <p role="status">{t("SFTP connection successful.")}</p>}
         <div className="dialog-actions">
           <Button type="button" disabled={!!working || !canTest}
             onClick={() => { void testConnection(); }}>{t(working === "test" ? "Testing…" : "Test connection")}</Button>

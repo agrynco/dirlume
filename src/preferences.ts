@@ -90,6 +90,8 @@ export const commands = {
   quickView: { label: "Quick View", key: "Ctrl+Q" },
   quickViewPrevious: { label: "Quick View: Previous File", key: "Alt+PageUp" },
   quickViewNext: { label: "Quick View: Next File", key: "Alt+PageDown" },
+  netboxPreviousPage: { label: "Previous NetBox settings page", key: "Ctrl+PageUp" },
+  netboxNextPage: { label: "Next NetBox settings page", key: "Ctrl+PageDown" },
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
   environmentVariables: { label: "Environment variables", key: "" },
   analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
@@ -236,6 +238,7 @@ export function commandScope(command: Command) {
   if (command === "processContextMenu") return "processPane";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addNetBoxProfile" || command === "editNetBoxProfile") return "netbox";
+  if (command === "netboxPreviousPage" || command === "netboxNextPage") return "netboxEditor";
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
@@ -355,7 +358,8 @@ export const defaultBindings = Object.fromEntries<readonly string[]>(commandName
   const key = mac && command !== "settings" && command !== "nextDocument" && command !== "previousDocument" && command !== "zoomFont" &&
     command !== "expandTerminal" && command !== "collapseTerminal" &&
     command !== "addFolderShortcut" && command !== "pasteTerminalText" && command !== "copyItemNames" && command !== "quickView" &&
-    !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker"
+    !folderGroupCommand(command) && !command.startsWith("sort") && commandScope(command) !== "folderPicker" &&
+    commandScope(command) !== "netboxEditor"
     ? commands[command].key.replace(/^Ctrl\+/, "Meta+") : commands[command].key;
   const alternate = mac && (command === "shrinkLeft" || command === "growLeft" || command === "diskInformation")
     ? commands[command].key : alternateDefaults[command]?.key;

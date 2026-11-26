@@ -59,10 +59,13 @@ try {
       const path = new URL(route.request().url()).pathname;
       return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
     });
-    await page.addInitScript(({ hostnames, ftpSources, sshSources }) => {
+    await page.addInitScript(({ hostnames, ftpSources, sshSources, nextPageKey, previousPageDisabled }) => {
       if (!localStorage.getItem("dirlume.preferences.v1")) {
         localStorage.setItem("dirlume.preferences.v1", JSON.stringify({
-          bindingDefaults: 10, shortcuts: { ftpSources, sshSources },
+          bindingDefaults: 10, shortcuts: { ftpSources, sshSources,
+            ...(nextPageKey ? { netboxNextPage: [nextPageKey] } : {}),
+            ...(previousPageDisabled ? { netboxPreviousPage: [] } : {}),
+          },
         }));
       }
       const root = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
@@ -105,7 +108,8 @@ try {
           return null;
         },
       };
-    }, { hostnames, ftpSources, sshSources });
+    }, { hostnames, ftpSources, sshSources, nextPageKey: /Linux/.test(platform) ? "Ctrl+Alt+N" : null,
+      previousPageDisabled: /Macintosh/.test(platform) });
     await page.goto("http://dirlume.test/");
     const left = await chooseSource(page, "left", expectedShortcut);
     await left.getByText("No saved connections.", { exact: true }).waitFor();
@@ -113,6 +117,56 @@ try {
     const add = dialog(page, "Add NetBox connection");
     assert.equal(await add.getByLabel("Protocol", { exact: true }).inputValue(), "sftp");
     await add.getByLabel("Connection name", { exact: true }).fill("Production");
+    const tabs = add.getByRole("tablist", { name: "NetBox settings pages", exact: true });
+    const tab = (name) => tabs.getByRole("tab", { name, exact: true });
+    const selected = (name) => tab(name).getAttribute("aria-selected");
+    const previous = button(add, "Previous settings page");
+    const next = button(add, "Next settings page");
+    assert.equal(await selected("Session"), "true");
+    assert.equal(await previous.isDisabled(), true);
+    assert.equal(await next.isDisabled(), true);
+    const protocol = add.getByLabel("Protocol", { exact: true });
+    await protocol.selectOption("ftp");
+    await add.evaluate((element) => { element.style.width = "194px"; });
+    await tab("Session").focus();
+    if (/Linux/.test(platform)) {
+      await page.keyboard.press("Control+PageDown");
+      assert.equal(await selected("Session"), "true");
+      await page.keyboard.press("Control+Alt+n");
+    } else await page.keyboard.press("Control+PageDown");
+    assert.equal(await selected("Environment"), "true", platform);
+    assert.equal(await next.isDisabled(), true);
+    assert.equal(await tabs.evaluate((element) => element.scrollLeft > 0), true);
+    assert.equal(await previous.isVisible(), true);
+    await add.getByLabel("Filename code page").fill("1251");
+    await page.keyboard.press("Control+PageUp");
+    if (/Macintosh/.test(platform)) {
+      assert.equal(await selected("Environment"), "true");
+      await previous.click();
+    }
+    assert.equal(await selected("Session"), "true");
+    await protocol.focus();
+    await page.keyboard.press(/Linux/.test(platform) ? "Control+Alt+n" : "Control+PageDown");
+    assert.equal(await selected("Session"), "true");
+    await next.click();
+    assert.equal(await add.getByLabel("Filename code page").inputValue(), "1251");
+    await button(add, "Save connection").click();
+    await add.getByRole("tabpanel", { name: "Session" }).waitFor();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Server");
+    await add.getByLabel("Server", { exact: true }).fill("ftp.example.test");
+    await tab("Environment").click();
+    await add.getByLabel("Filename code page").fill("70000");
+    await tab("Session").click();
+    await button(add, "Save connection").click();
+    const codePage = add.getByRole("tabpanel", { name: "Environment" }).getByLabel("Filename code page");
+    await codePage.waitFor();
+    await page.waitForFunction(() => document.activeElement?.closest('[data-netbox-page="environment"]') !== null &&
+      document.activeElement instanceof HTMLInputElement && document.activeElement.value === "70000");
+    await tab("Session").click();
+    await add.evaluate((element) => { element.style.removeProperty("width"); });
+    await protocol.selectOption("sftp");
+    assert.equal(await tab("Environment").count(), 0);
+    assert.equal(await add.getByLabel("Connection name", { exact: true }).inputValue(), "Production");
     await hostDetails(add, hostnames[2], "destination", "test-password");
     const route = add.getByLabel("Route", { exact: true });
     assert.equal(await route.textContent(), routeText(hostnames[2]));
@@ -162,7 +216,7 @@ try {
     await right.getByRole("option", { name: /^server.txt/ }).waitFor();
     await page.close();
   }
-  console.log("Verified ordered jump host editing, persistence, direct route preview, and per-server approvals in the SSH and SFTP profile dialogs.");
+  console.log("Verified NetBox page navigation, shortcut migration, cross-page validation, jump host editing, and per-server approvals.");
 } finally {
   await browser.close();
 }
