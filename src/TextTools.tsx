@@ -2,7 +2,7 @@ import { countText, errorText, locale, t } from "./i18n";
 import { Message } from "./Message";
 import { Button } from "./Button";
 import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Search, Settings2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Copy, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
@@ -35,7 +35,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
 }
 
 export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
-  onOptions, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
+  onOptions, onCopyPath, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
   fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks }: {
   file: NamedFile;
   editing: boolean;
@@ -49,6 +49,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   colors?: Palette;
   diagnosticLog?: boolean;
   onOptions: () => void;
+  onCopyPath: (path: string) => void;
   onSwitchMode: () => void;
   position?: MarkdownPosition;
   canGoBack: boolean;
@@ -101,6 +102,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const isMarkdown = isMarkdownFile(file.name);
   const writable = writableTextPlace(file.place);
   const path = documentPath(file);
+  const filenameStart = path.endsWith(file.name) ? path.length - file.name.length : path.lastIndexOf("/") + 1;
   const section = useRef<HTMLElement>(null);
   const sourceActions = useRef<SourceActions>(null);
   const markdownScroll = useRef<HTMLDivElement>(null);
@@ -444,12 +446,18 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       if (cancel) (searchOpen && markdownViewer ? closeSearch : close)();
       else if (action && !action.disabled && !(action === switchMode && event.repeat)) action.run();
     }}>
-      <header className="document-heading">
+      <header className="document-heading text-document-heading">
         <div className="document-menu">
           <MainMenu key={sourceVisible ? "source" : markdownViewer ? "markdown" : "other"}
             groups={menuGroups} label="Document menu" />
           <Button type="button" aria-label={t(editing ? "Editor options" : "Viewer options")} onClick={onOptions}>
             <Settings2 aria-hidden="true" /> {t("Options")}
+          </Button>
+        </div>
+        <div className="document-path">
+          <h2 data-tooltip={path}><span className="document-directory">{path.slice(0, filenameStart)}</span><span className="document-filename">{path.slice(filenameStart)}</span></h2>
+          <Button type="button" className="icon-button" aria-label={t("Copy file path")} onClick={() => onCopyPath(path)}>
+            <Copy aria-hidden="true" />
           </Button>
         </div>
         <div className="document-status">
@@ -468,7 +476,6 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         </div>
         <Button className="icon-button" type="button" aria-label={t("Close document")} shortcut={closeAction.shortcut}
           onClick={close} disabled={saving}><X /></Button>
-        <h2 data-tooltip={path}>{path}</h2>
       </header>
       <div className="text-toolbar">
         {markdownViewer && <>

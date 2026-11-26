@@ -1094,6 +1094,19 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .document-menu, .document-status { display: flex; flex-wrap: wrap; gap: 4px 7px; align-items: center; }
 .document-menu .main-menu { order: 0; }
 .document-status { justify-content: flex-end; align-self: center; min-width: 0; font-size: .88em; white-space: nowrap; }
+.text-document-heading {
+  grid-template-columns: fit-content(42%) minmax(0, 1fr) fit-content(38%) auto;
+  align-items: center;
+}
+.document-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.document-path h2 { display: flex; }
+.document-directory, .document-filename { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.document-filename { flex-shrink: 0; max-width: 100%; }
+.document-path > button { flex: none; }
+@media (max-width: 800px) {
+  .text-document-heading { grid-template-columns: fit-content(55%) minmax(0, 1fr) auto; }
+  .text-document-heading > .document-status { grid-column: 1 / -1; grid-row: 2; }
+}
 .document-modified { color: var(--accent); }
 .document-encoding { color: var(--muted); }
 .document-shortcuts { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 10px; border-top: 1px solid var(--line); }
