@@ -184,7 +184,7 @@ async function checkOverflowMenu(address, kind) {
   assert.ok(await popup.getByRole("button").first().evaluate((node) => node === document.activeElement));
   await address.page().keyboard.press("Escape");
   await popup.waitFor({ state: "hidden" });
-  assert.ok(await trigger.evaluate((node) => node === document.activeElement));
+  await trigger.and(address.locator(":focus")).waitFor();
 }
 
 async function checkParentNavigation(page, side, path, parentPath) {
