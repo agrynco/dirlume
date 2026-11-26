@@ -36,11 +36,94 @@ export function blankMenuHeaderPoint(menubar) {
   });
 }
 
+async function openMenuOptions(page) {
+  await page.getByRole("button", { name: "Options", exact: true }).click();
+  const options = page.getByRole("dialog", { name: "Options", exact: true });
+  await options.getByRole("searchbox", { name: "Search settings", exact: true }).fill("menu");
+  await options.getByRole("button", { name: "Window", exact: true }).click();
+  return options;
+}
+
+const menuPreference = (options) => options.getByRole("checkbox", { name: "Always show the main menu", exact: true });
+
+async function checkMenuPreference(page) {
+  const bar = mainMenu(page);
+  const titleMenu = page.locator(".topbar > .main-menu");
+  const list = page.getByRole("listbox", { name: "left files", exact: true });
+  await bar.waitFor();
+  await page.evaluate(() => {
+    const key = "dirlume.preferences.v1";
+    localStorage.setItem(key, JSON.stringify({ mainMenuAlignment: "center" }));
+  });
+  await page.reload();
+  await bar.waitFor();
+  assert.deepEqual(await bar.getByRole("menuitem").allTextContents(), ["Left", "Files", "Commands", "Options", "Right", "Help"]);
+  for (const shortcut of ["F9", "Alt"]) {
+    await list.focus();
+    await page.keyboard.press(shortcut);
+    assert.ok(await bar.evaluate((node) => node.contains(document.activeElement)));
+    await page.keyboard.press("ArrowDown");
+    const menu = bar.getByRole("menu");
+    await menu.waitFor();
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "hidden" });
+    assert.ok(await list.evaluate((node) => node === document.activeElement));
+    assert.ok(await bar.isVisible());
+  }
+  const dropdown = await openMainMenu(page, "Commands");
+  const { x, y } = await blankMenuHeaderPoint(bar);
+  await page.mouse.click(x, y);
+  await dropdown.waitFor({ state: "hidden" });
+  assert.ok(await bar.isVisible());
+  await testCommandIcons(page);
+  assert.ok(await bar.isVisible());
+
+  const options = await openMenuOptions(page);
+  const preference = menuPreference(options);
+  const alignment = options.getByRole("combobox", { name: "Main menu alignment", exact: true });
+  assert.equal(await preference.isChecked(), true);
+  assert.ok(await alignment.evaluate((control) => control.closest("label").nextElementSibling.querySelector('input[type="checkbox"]')?.checked));
+  for (const position of ["left", "center", "right"]) {
+    await alignment.selectOption(position);
+    await options.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.locator(`.topbar[data-menu-position="${position}"]`).waitFor();
+    const gaps = await titleMenu.evaluate((node) => {
+      const bar = node.getBoundingClientRect();
+      const strip = node.firstElementChild.getBoundingClientRect();
+      return { left: strip.left - bar.left, right: bar.right - strip.right };
+    });
+    assert.ok(Math.abs(position === "center" ? gaps.left - gaps.right : gaps[position]) <= 1, position);
+  }
+  await preference.uncheck();
+  assert.ok(await titleMenu.isVisible());
+  await options.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await bar.waitFor();
+
+  await openMenuOptions(page);
+  assert.equal(await preference.isChecked(), true);
+  await preference.uncheck();
+  await options.getByRole("button", { name: "Apply", exact: true }).click();
+  await titleMenu.waitFor({ state: "hidden" });
+  await preference.check();
+  await options.getByRole("button", { name: "Done", exact: true }).click();
+  await bar.waitFor();
+  await openMenuOptions(page);
+  await preference.uncheck();
+  await options.getByRole("button", { name: "Done", exact: true }).click();
+  await page.reload();
+  await titleMenu.waitFor({ state: "hidden" });
+}
+
 export async function testHeaderMenus(page, windows = false) {
   const bar = mainMenu(page);
   const list = page.getByRole("listbox", { name: "left files", exact: true });
   const connect = page.getByRole("button", { name: "Connect", exact: true });
   const search = page.getByRole("button", { name: "Find files", exact: true });
+  if (await bar.isVisible()) {
+    const options = await openMenuOptions(page);
+    await menuPreference(options).uncheck();
+    await options.getByRole("button", { name: "Done", exact: true }).click();
+  }
   await bar.waitFor({ state: "hidden" });
   assert.equal(await connect.count(), 0);
   assert.equal(await search.isVisible(), true);
@@ -145,13 +228,20 @@ export async function testCommandIcons(page, native = false) {
 
 async function checkMenuBindings(page) {
   const bar = mainMenu(page);
-  const focus = () => page.getByRole("listbox", { name: "left files", exact: true }).focus();
+  const list = page.getByRole("listbox", { name: "left files", exact: true });
   const button = (parent, name) => parent.getByRole("button", { name, exact: true });
   const options = page.getByRole("dialog", { name: "Options", exact: true });
   const openBindings = async () => {
     await button(page, "Options").click();
     await button(options, "Keyboard shortcuts").click();
   };
+  const setMenuVisibility = async (alwaysShow) => {
+    await openMenuOptions(page);
+    await menuPreference(options).setChecked(alwaysShow);
+    await button(options, "Done").click();
+    await bar.waitFor({ state: alwaysShow ? "visible" : "hidden" });
+  };
+  const listFocused = () => list.evaluate((node) => node === document.activeElement);
   const mac = await page.evaluate(() => /Macintosh/.test(navigator.userAgent));
   const sequences = [
     ["Open main menu", "F9", mac ? "⌃⌥F9" : "Ctrl+Alt+F9", "Control+Alt+F9"],
@@ -163,24 +253,34 @@ async function checkMenuBindings(page) {
     await options.getByRole("textbox", { name: "New shortcut to replace " + old + " for " + name, exact: true }).press(shortcut);
   }
   await button(options, "Done").click();
-  await focus();
-  for (const [, old, , shortcut] of sequences) {
-    await page.keyboard.press(old);
-    assert.equal(await bar.isVisible(), false);
-    await page.keyboard.press(shortcut);
-    await bar.waitFor();
-    await page.keyboard.press("ArrowDown");
-    await bar.getByRole("menu").waitFor();
-    await page.keyboard.press(shortcut);
-    await bar.waitFor({ state: "hidden" });
+  for (const alwaysShow of [false, true]) {
+    await setMenuVisibility(alwaysShow);
+    await list.focus();
+    for (const [, old, , shortcut] of sequences) {
+      await page.keyboard.press(old);
+      assert.ok(await listFocused());
+      assert.equal(await bar.isVisible(), alwaysShow);
+      await page.keyboard.press(shortcut);
+      await bar.waitFor();
+      await page.keyboard.press("ArrowDown");
+      await bar.getByRole("menu").waitFor();
+      await page.keyboard.press(shortcut);
+      await bar.getByRole("menu").waitFor({ state: "hidden" });
+      assert.ok(await listFocused());
+      assert.equal(await bar.isVisible(), alwaysShow);
+    }
   }
   await openBindings();
   for (const [name, , label] of sequences) await button(options, "Remove " + label + " from " + name).click();
   await button(options, "Done").click();
-  await focus();
-  for (const [, , , shortcut] of sequences) {
-    await page.keyboard.press(shortcut);
-    assert.equal(await bar.isVisible(), false);
+  for (const alwaysShow of [true, false]) {
+    await setMenuVisibility(alwaysShow);
+    await list.focus();
+    for (const [, , , shortcut] of sequences) {
+      await page.keyboard.press(shortcut);
+      assert.ok(await listFocused());
+      assert.equal(await bar.isVisible(), alwaysShow);
+    }
   }
 }
 
@@ -245,6 +345,7 @@ export async function testBrowserHeader(userAgent) {
       };
     });
     await page.goto("http://dirlume.test/");
+    await checkMenuPreference(page);
     await testHeaderMenus(page);
     await testCommandIcons(page);
     await page.setViewportSize({ width: 630, height: 600 });

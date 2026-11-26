@@ -318,6 +318,7 @@ export interface Preferences {
   actionButtonWidth: ActionButtonWidth;
   hideActionButtonIcons: boolean;
   mainMenuAlignment: MenuPosition;
+  showMainMenu: boolean;
   systemLightScheme: string;
   systemDarkScheme: string;
   showTitlebarScheme: boolean;
@@ -539,6 +540,7 @@ function customSchemeReference(value: unknown) {
 export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefinition<K> } = {
   language: { group: "general", portable: true, read: readLanguage },
   mainMenuAlignment: { group: "general", portable: true, read: (value) => readMenuAlignment(value) ?? "center" },
+  showMainMenu: { group: "appearance", portable: true, read: (value) => value !== false },
   provider: { group: "general", portable: true, read: (value) => value === "kswitcher" ? "kswitcher" : "server" },
   kswitcher: { group: "general", portable: false, read: (value) => typeof value === "string" ? value : "" },
   theme: { group: "appearance", portable: true, read: readTheme },

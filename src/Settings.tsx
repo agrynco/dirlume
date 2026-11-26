@@ -151,7 +151,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     ...(id === "window" ? ["Color scheme", "Keep current fonts", "New scheme", "Scheme name", "Base theme", "Delete scheme",
       "Manage custom color schemes", "Scheme to manage", ...preferences.schemes.map(({ name }) => name),
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar", "Show status bar",
-      "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
+      "Main menu alignment", "Always show the main menu", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const modesMatch = panelModeIds.filter((id) => matches("Panel modes", panelModeNames[id],
     panelModeName(id, preferences.panelModes), ...panelModeSettingsLabels));
   const showSortGroups = matches("Sort groups", "Use sort groups", "Filename mask", "Before unmatched items", "After unmatched items");
