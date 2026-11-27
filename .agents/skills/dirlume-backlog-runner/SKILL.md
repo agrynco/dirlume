@@ -27,6 +27,8 @@ Use the configured GitHub remote and read [AGENTS.md](../../../AGENTS.md) and th
 
 For every issue that changes the frontend, use the `$ui-ux-pro-max` skill to guide implementation and verify the result in the running interface. This also applies to frontend changes within full-stack issues.
 
+Use automated verification for every scenario it can cover. For multi-device and remote-source workflows, prefer isolated local instances, disposable servers, or protocol fixtures. Record what the checks exercised and any gaps. Manual verification is optional and does not block a task or release. Keep genuine prerequisite failures and required CI checks as blockers.
+
 1. Base an issue branch such as `codex/issue-95` on the latest `origin/prerelease`, or resume the existing branch for that issue in the current checkout. Publish a new issue branch when work starts so the project workflow can mark the issue In progress.
 2. Implement the issue, run the relevant local checks in the README, then push the branch. Create or reuse its PR into `prerelease`. Link the issue with `Refs #95` and record the checks performed. Keep issue closing keywords for the promotion PR.
 3. Confirm the issue is still open and in the selected scope, and the project card is in Ready or in the expected workflow phase for its linked branch or PR. Verify that the PR still targets `prerelease`. Squash-merge the exact checked head. Refresh `origin/prerelease` after the merge and verify that it contains the merged change. Work PRs use local checks under this workflow.
