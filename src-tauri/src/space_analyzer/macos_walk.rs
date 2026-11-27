@@ -15,6 +15,7 @@ use libc::{
     ATTR_CMN_RETURNED_ATTRS, ATTR_FILE_ALLOCSIZE, ATTR_FILE_DATALENGTH, ATTR_FILE_LINKCOUNT,
 };
 
+// Darwin's sys/attr.h defines this attribute, which libc does not export.
 const ATTR_CMN_ERROR: u32 = 0x2000_0000;
 const COMMON: u32 = ATTR_CMN_NAME
     | ATTR_CMN_DEVID
@@ -200,6 +201,7 @@ fn parse(record: &[u8]) -> Option<(&CStr, Option<(u64, Child)>)> {
             device,
             Child::File {
                 size,
+                // Darwin's st_blocks rounds the total allocation to 512-byte units.
                 allocated: allocated.div_ceil(512).checked_mul(512),
                 identity: (links > 1 && id != 0).then_some((device, u128::from(id))),
             },
