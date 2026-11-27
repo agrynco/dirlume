@@ -2258,6 +2258,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
+    if (kind === "move" && source.kind === "archive" && (!source.writable || target && target.kind !== "local")) {
+      setStatus({ text: source.writable ? "Choose a local destination for the archive move." : "The archive is read-only.", error: true });
+      return;
+    }
     if (kind === "move" && source.kind === "ssh" && target && target.kind !== "local") {
       setStatus({ text: "Choose a local destination for the SSH/SFTP move.", error: true });
       return;
@@ -2426,6 +2430,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       return;
     }
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isLanGroupPlace(source) &&
+      !(source.kind === "archive" && source.writable) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     if (kind === "move" && source.kind === "ftp") {
       const item = paneItem(state, selected);
@@ -2437,10 +2442,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
         processPanels[targetSide] || otherPane.loading) ? null :
       treeFolder(targetSide) ?? otherPane.place;
-    if (kind === "move" && target?.kind === "ftp") {
+    if (kind === "move" && target?.kind === "ftp" && source.kind !== "archive") {
       setStatus({ text: "Choose a local destination. FTP does not support moving local files." });
     }
-    openTransfer(kind, source, transferItems(side, selected), kind === "move" && target?.kind === "ftp" ? null : target, false, side);
+    openTransfer(kind, source, transferItems(side, selected),
+      kind === "move" && target?.kind === "ftp" && source.kind !== "archive" ? null : target, false, side);
   }
 
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
@@ -3500,7 +3506,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
-      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !fileServer && !lanGroupPlace && !(kswitcherWrite && kswitcherDelete)) ||
+      disabled: Boolean(collectionPanes[opposite(active)]) ||
+        (!local && !fileServer && !lanGroupPlace && !archive?.writable && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || lanGroupPlace) && current.link) || busy },
@@ -3738,14 +3745,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                     "Enter an absolute FTP path starting with /.", error: true });
                   return;
                 }
-                void load(side, { ...place, segments: path.split("/").filter(Boolean) });
+                const destination = { ...place, segments: path.split("/").filter(Boolean) };
+                if (trees[side].enabled) void navigateTree(side, destination, true);
+                else void load(side, destination);
               } else if (trees[side].enabled) void navigateTree(side, filesystemPlace(path), true);
               else void load(side, filesystemPlace(path));
             }}
             onLocalLocation={(location) => openPaneSource(side, location)}
             onPathAncestor={(place) => {
               showProcesses(side, false);
-              if (trees[side].enabled && place.kind === "local") void navigateTree(side, place, true);
+              if (trees[side].enabled && supportsFileTree(place)) void navigateTree(side, place, true);
               else void load(side, place);
             }}
             onOpenConnections={(source) => openConnections(side, source)}
@@ -4259,6 +4268,23 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             }}>{t("Rename")}</Button>}
             {item.place.kind === "ssh" && entry && !toCollection && !state.search && !state.loading && !busy &&
               <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
+            {item.place.kind === "archive" && item.place.writable && entry && !state.search && !state.loading && !busy && (() => {
+              const archive = item.place;
+              return <>
+                {!item.entry.link && !toCollection && <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  transfer("move", side, entry);
+                }}>{t("Move")}</Button>}
+                {!item.entry.link && archive.canAdd && <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  setModal({ kind: "rename", side, path: placePath(archive), name: item.entry.name, archive });
+                }}>{t("Rename")}</Button>}
+                <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  deleteSelection(side, "delete", entry);
+                }}>{t("Delete permanently")}</Button>
+              </>;
+            })()}
             {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>

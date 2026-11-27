@@ -124,6 +124,7 @@ async function fixture(browser, platform, nestedLocal = false) {
         };
         if (command === "transfer_item") {
           state.transfers.push(args.request);
+          if (args.request.source.kind === "archive" && args.request.moving) delete state.archivedFolder;
           return { kind: "completed" };
         }
         if (command === "change_kswitcher") {
@@ -564,6 +565,21 @@ async function checkTreeSources(page) {
     { kind: "rename", name: "renamed-directory", segments: [folders[0], "new-directory"] },
     [[folders[0], "renamed-directory"]],
   ]);
+  await directRow(folders[0]).click();
+  await list(page, side).press("F7");
+  await create.getByLabel("Name", { exact: true }).fill("move-directory");
+  await button(create, "Create").click();
+  await create.waitFor({ state: "hidden" });
+  await directRow(folders[0] + "/move-directory").click();
+  await list(page, side).press("F6");
+  const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  await directRow(folders[0] + "/move-directory").waitFor({ state: "detached" });
+  const [request] = await page.evaluate(() => window.connectionFixture.transfers);
+  assert.equal(request.moving, true);
+  assert.deepEqual(request.source, { kind: "archive", archive: 7, segments: [folders[0], "move-directory"] });
+  assert.equal(request.destination, "/fixture");
 }
 
 async function checkLan(page, side) {
@@ -663,7 +679,7 @@ try {
   await treeSources.page.close();
   console.log("Verified KSwitcher transfer routing across drives, revision-checked editing, rename, folder creation, and remote Trash.");
   console.log("Verified parent-row measures through KSwitcher and archived uncompressed file sizes.");
-  console.log("Verified read-only Server and archive Trees and nested archive create, rename, and delete.");
+  console.log("Verified read-only Server and archive Trees and nested archive create, rename, delete, and move to a local pane.");
 } finally {
   await browser.close();
 }

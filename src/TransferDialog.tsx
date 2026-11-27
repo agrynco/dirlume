@@ -120,7 +120,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [moving, setMoving] = useState(transfer.kind === "move");
   const archiveTarget = transfer.archiveDestination;
   const lanTarget = transfer.lanDestination;
-  const remoteMove = moving && (lanTarget || transfer.items.some(({ place }) => isLanGroupPlace(place) || place.kind === "ssh"));
+  const remoteMove = moving && (lanTarget || transfer.items.some(({ place }) =>
+    isLanGroupPlace(place) || place.kind === "ssh" || place.kind === "archive"));
   const sameLanMove = moving && lanTarget && isLanGroupPlace(transfer.source) && transfer.source.groupPeer === lanTarget.groupPeer;
   const kswitcherTarget = transfer.kswitcherDestination;
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
@@ -297,7 +298,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "source_retained") {
-          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) || item.place.kind === "ssh" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) || item.place.kind === "ssh" || item.place.kind === "archive" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
             "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
           setBlocked(item);
           return;

@@ -2397,13 +2397,23 @@ async fn transfer_item(
                 },
             };
             if let TransferSource::Archive { segments, .. } = &request.source {
-                if request.moving {
-                    return Err("Use Copy to extract an archive item.".to_owned());
-                }
                 let archive = archive.ok_or("Open the archive first.")?;
+                let mut archive = archive.lock().map_err(message)?;
+                if request.moving {
+                    use crate::archives::MoveOutcome;
+                    return archive
+                        .move_to(segments, &target, &options, progress, ask, committed)
+                        .map(|outcome| match outcome {
+                            MoveOutcome::Completed => TransferOutcome::Completed,
+                            MoveOutcome::Skipped => TransferOutcome::Skipped,
+                            MoveOutcome::SourceRetained(error) => TransferOutcome::SourceRetained {
+                                destination: display(&target),
+                                source: format!("/{}", segments.join("/")),
+                                error,
+                            },
+                        });
+                }
                 return archive
-                    .lock()
-                    .map_err(message)?
                     .copy_to(segments, &target, &options, progress, ask, committed)
                     .map(transfer_outcome);
             }
