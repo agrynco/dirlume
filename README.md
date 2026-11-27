@@ -248,7 +248,7 @@ Packaged Dirlume includes the [7-Zip command-line tools](https://www.7-zip.org/d
 
 Press **Enter** on an archive to open it in a pane. Use **F5** to extract selected members to a local folder with the normal copy conflict prompts, **F3** to view files, or the **Parent folder** button to go up. A writable archive supports editing text files with **F4** and removing selected members with **F8**. Encrypted, split, and other formats without update support open read-only. Dirlume skips unsafe member paths and refuses to extract links.
 
-With a writable, unencrypted ZIP or 7z archive open, select local files or folders in the other pane and press **F5** to copy into the displayed archive folder. The confirmation shows the archive filename and member path. Use **F7** to create an empty folder or **F2** to rename one entry in the archive. Canceling a write before replacement keeps the original archive and source files.
+With a writable, unencrypted ZIP or 7z archive open, select local files or folders in the other pane and press **F5** to copy into the displayed archive folder. The confirmation shows the archive filename and member path. Use **F7** to create a folder, **Shift+F4** to create a text file, or **F2** to rename an archive entry. In **Tree**, new entries go into the selected folder or the selected file’s parent. Expand branches to browse any open archive or server share. Canceling a write before replacement keeps the original archive and source files.
 
 ## Remote sources
 

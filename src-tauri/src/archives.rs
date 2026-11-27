@@ -935,7 +935,15 @@ mod tests {
                 use crate::local_transfer::Policy;
                 let parent = ["docs".to_owned()];
                 archive.create_folder(&parent, "empty", |_| Ok(())).unwrap();
+                archive
+                    .create_text(&parent, "created.txt", Encoding::Utf8Bom, |_| Ok(()))
+                    .unwrap();
+                let created = ["docs".to_owned(), "created.txt".to_owned()];
+                assert_eq!(extract(&archive, &created), b"\xEF\xBB\xBF");
                 let before = fs::read(&path).unwrap();
+                assert!(archive
+                    .create_text(&parent, "note.txt", Encoding::Utf8, |_| Ok(()))
+                    .is_err());
                 assert!(archive.create_folder(&parent, "empty", |_| Ok(())).is_err());
                 assert!(archive
                     .create_folder(&parent, "canceled", |percent| {

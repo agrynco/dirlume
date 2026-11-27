@@ -34,6 +34,26 @@ impl Archive {
         &mut self,
         parent: &[String],
         name: &str,
+        tick: impl FnMut(u8) -> io::Result<()>,
+    ) -> Result<()> {
+        self.create_member(parent, name, None, tick)
+    }
+
+    pub(crate) fn create_text(
+        &mut self,
+        parent: &[String],
+        name: &str,
+        encoding: Encoding,
+        tick: impl FnMut(u8) -> io::Result<()>,
+    ) -> Result<()> {
+        self.create_member(parent, name, Some(&encode_text(encoding, "")), tick)
+    }
+
+    fn create_member(
+        &mut self,
+        parent: &[String],
+        name: &str,
+        data: Option<&[u8]>,
         mut tick: impl FnMut(u8) -> io::Result<()>,
     ) -> Result<()> {
         self.require_folder(parent)?;
@@ -44,13 +64,20 @@ impl Archive {
         tick(0).map_err(message)?;
         let (workspace, staged) = self.stage_update()?;
         let root = workspace.path().join("update");
-        fs::create_dir_all(member_path(&root, &target)?).map_err(message)?;
+        let path = member_path(&root, &target)?;
+        if let Some(data) = data {
+            fs::create_dir_all(path.parent().ok_or("Choose a folder in the archive.")?)
+                .map_err(message)?;
+            fs::write(&path, data).map_err(message)?;
+        } else {
+            fs::create_dir_all(&path).map_err(message)?;
+        }
         let mut writer = ArchiveUpload::new(self, root, workspace.path());
         writer.changes.insert(
             target,
             Change {
-                directory: true,
-                size: 0,
+                directory: data.is_none(),
+                size: data.map_or(0, |bytes| bytes.len() as u64),
             },
         );
         let index = writer.add_members(&staged, &mut tick)?;

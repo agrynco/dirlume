@@ -23,7 +23,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { isLanGroupPlace, supportsFileTree, type FileServerPlace, type LanGroupPlace } from "./api";
+import { isLanGroupPlace, supportsFileTree, type LanGroupPlace, type TreePlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -232,6 +232,14 @@ function contextHelpTopic(modal: Modal["kind"] | undefined, editing: boolean | u
 
 function sameConnection(left: Place | null, right: Place) {
   return (left?.kind === "server" || isFileServer(left) || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
+}
+
+function treeRelativePath(root: Place | null, destination: FileLocation) {
+  if (root?.kind === "archive" && destination.kind === "archive") {
+    return root.id === destination.id && root.segments.every((part, index) => part === destination.segments[index])
+      ? destination.segments.slice(root.segments.length) : null;
+  }
+  return canAnalyze(root) && canAnalyze(destination) ? spaceRelativePath(root, destination) : null;
 }
 
 function sameDocumentFile(left: NamedFile, right: NamedFile) {
@@ -475,12 +483,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     return folder.kind === "local" ? { ...folder, parent: parentPath(folder.path, windowsClient) } :
       supportsFileTree(folder) ? folder : null;
   }
-  async function selectChangedRemoteItem(side: Side, directory: LanGroupPlace | FileServerPlace, name: string) {
+  async function selectChangedItem(side: Side, directory: TreePlace, name: string) {
     const pane = latest.current[side];
     const root = pane.place;
-    if (trees[side].enabled && (isLanGroupPlace(root) || isFileServer(root)) && sameConnection(root, directory) &&
-      root.segments.every((part, index) => part === directory.segments[index])) {
-      const segments = directory.segments.slice(root.segments.length);
+    const segments = trees[side].enabled && root ? treeRelativePath(root, directory) : null;
+    if (root && segments) {
       const branch = segments.length ? trees[side].lookup(pane, segments.join("/")) : null;
       if (branch?.tree && !branch.tree.expanded) trees[side].toggle(branch);
       setFileRevision((revision) => revision + 1);
@@ -503,6 +510,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const kswitcher = pane.place?.kind === "kswitcher" && pane.place.path ? pane.place : undefined;
   const kswitcherWrite = kswitcher?.capabilities?.write;
   const kswitcherDelete = kswitcher?.capabilities?.delete;
+  const actionDirectory = treeFolder(active) ?? pane.place;
+  const canCreateItem = actionDirectory?.kind === "local" || isFileServer(actionDirectory) ||
+    isLanGroupPlace(actionDirectory) && !!actionDirectory.segments.length ||
+    actionDirectory?.kind === "archive" && actionDirectory.canAdd ||
+    actionDirectory?.kind === "kswitcher" && !!actionDirectory.path;
   const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
   const permanentDelete = Boolean(fileServer && !remoteTrash || lanGroupPlace || smbHost(local));
   const canTransfer = Boolean(currentItem && (currentItem.place.kind !== "kswitcher" ||
@@ -2596,20 +2608,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   async function submitRowRename(rename: RowRename, name: string) {
     if (name !== rename.name) {
       await renameItem(rename.place, rename.name, name);
-      if (rename.place.kind === "local") setFileRevision((revision) => revision + 1);
       if (rename.treeKey) {
         const renamedKey = [...rename.treeKey.split("/").slice(0, -1), name].join("/");
         updatePane(rename.side, (pane) => ({ ...pane,
           selected: renamedKey, marked: pane.marked.map((key) => key === rename.treeKey ? renamedKey : key),
         }));
       }
-      if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
-        await load(rename.side, rename.place, "refresh", name);
+      if (rename.treeKey || sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+        await selectChangedItem(rename.side, rename.place, name);
         refresh(opposite(rename.side));
+      } else if (rename.place.kind === "local") {
+        setFileRevision((revision) => revision + 1);
       }
     }
     setRowRename((current) => current === rename ? null : current);
-    if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+    if (rename.treeKey || sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
       requestAnimationFrame(() => document.getElementById(rename.side + "-files")?.focus());
     }
   }
@@ -2684,9 +2697,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const pane = latest.current[side];
     const root = pane.place;
     const addressFrom = treeFolder(side);
-    const segments = root?.kind === "local" && destination.kind === "local" ? spaceRelativePath(root, destination) :
-      isLanGroupPlace(root) && isLanGroupPlace(destination) && sameConnection(root, destination) &&
-      root.segments.every((segment, index) => segment === destination.segments[index]) ? destination.segments.slice(root.segments.length) : null;
+    const segments = treeRelativePath(root, destination);
     const ticket = ++treeNavigation.current[side];
     const current = () => treeNavigation.current[side] === ticket && latest.current[side].place === root &&
       latest.current[side].selected === pane.selected;
@@ -3276,10 +3287,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }
         break;
       case "mkdir":
-        if (!pane.search && !busy && !pane.loading) {
-          const place = treeFolder(active) ?? local ?? fileServer ?? lanGroupPlace ??
-            (archive?.canAdd ? archive : undefined) ?? kswitcher;
-          if (place) setModal({ kind: "mkdir", side: active, place });
+        if (canCreateItem && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "mkdir", side: active, place: actionDirectory });
         }
         break;
       case "createArchive":
@@ -3298,8 +3307,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         } else if (lanGroupPlace && currentItem && isLanGroupPlace(currentItem.place) &&
           !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, lan: currentItem.place });
-        } else if (archive?.canAdd && current && !current.link && !pane.search && !busy && !pane.loading) {
-          setModal({ kind: "rename", side: active, path: placePath(archive), name: current.name, archive });
+        } else if (currentItem?.place.kind === "archive" && currentItem.place.canAdd &&
+          !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "rename", side: active, path: placePath(currentItem.place),
+            name: currentItem.entry.name, archive: currentItem.place });
         } else if (currentItem?.place.kind === "kswitcher" && currentItem.place.capabilities?.write &&
           !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "rename", side: active, path: currentItem.place.path, name: currentItem.entry.name, kswitcher: currentItem.place });
@@ -3307,12 +3318,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       }
       case "newFile": {
-        const place = treeFolder(active) ?? local ?? fileServer ?? lanGroupPlace ?? kswitcher;
-        if (place && !pane.search && !busy && !pane.loading) {
-          setModal({ kind: "newFile", side: active, path: placePath(place), name: "",
-            kswitcher: place.kind === "kswitcher" ? place : undefined,
-            lan: isLanGroupPlace(place) ? place : undefined,
-            remote: isFileServer(place) ? place : undefined });
+        if (canCreateItem && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "newFile", side: active, path: placePath(actionDirectory), name: "",
+            archive: actionDirectory.kind === "archive" ? actionDirectory : undefined,
+            kswitcher: actionDirectory.kind === "kswitcher" ? actionDirectory : undefined,
+            lan: isLanGroupPlace(actionDirectory) ? actionDirectory : undefined,
+            remote: isFileServer(actionDirectory) ? actionDirectory : undefined });
         }
         break;
       }
@@ -3493,8 +3504,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || lanGroupPlace) && current.link) || busy },
-    { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !fileServer && !lanGroupPlace && !kswitcher) || !!pane.search || busy },
-    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcher) || !!pane.search || busy },
+    { command: "newFile", label: "New file", Icon: FilePlus, disabled: !canCreateItem || !!pane.search || busy },
+    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !canCreateItem || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2,
       disabled: (!local && !fileServer && !lanGroupPlace && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
@@ -4344,8 +4355,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         remote={isFileServer(modal.place) || isLanGroupPlace(modal.place) ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
-          if (isLanGroupPlace(modal.place) || isFileServer(modal.place)) await selectChangedRemoteItem(modal.side, modal.place, name);
-          else await load(modal.side, modal.place, "refresh", name);
+          await selectChangedItem(modal.side, modal.place, name);
           refresh(opposite(modal.side));
         }} />}
       {modal?.kind === "createArchive" && <ArchiveDialog directory={modal.directory} names={modal.names}
@@ -4403,10 +4413,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 if (progress?.signal.aborted) setStatus({ text: t("{0} of {1} completed", removed, modal.names.length) });
               } else if (operation?.kind === "create_file") {
                 await api.changeLanItem(lan, [operation.name], { kind: "create_text", encoding: operation.encoding ?? "utf8" });
+                if (modal.side) await selectChangedItem(modal.side, lan, operation.name);
                 openDocument({ place: lan, name: operation.name }, true, { fromPane: modal.side });
               } else if (operation?.kind === "rename") {
                 await api.changeLanItem(lan, [operation.name], { kind: "rename", name: operation.new_name });
-                if (modal.side) await selectChangedRemoteItem(modal.side, lan, operation.new_name);
+                if (modal.side) await selectChangedItem(modal.side, lan, operation.new_name);
               }
             } finally {
               fileLocationsChanged();
@@ -4422,9 +4433,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 }, progress);
               } else if (operation?.kind === "rename") {
                 await api.changeKSwitcher(peer, kswitcherPath(modal.path, operation.name), { kind: "rename", name: operation.new_name });
+                if (modal.side) await selectChangedItem(modal.side, modal.kswitcher, operation.new_name);
               } else if (operation?.kind === "create_file") {
                 if (/[\\/]/.test(operation.name) || operation.name === "." || operation.name === "..") throw new Error(t("Enter a valid destination name."));
                 await api.changeKSwitcher(peer, kswitcherPath(modal.path, operation.name), { kind: "create_file", encoding: operation.encoding ?? "utf8" });
+                if (modal.side) await selectChangedItem(modal.side, modal.kswitcher, operation.name);
                 openDocument({ place: modal.kswitcher, name: operation.name }, true, { fromPane: modal.side });
               }
             } finally {
@@ -4432,7 +4445,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             }
           } else if ("names" in modal && modal.archive) {
             const archive = modal.archive;
-            await api.deleteArchiveEntries(archive.id, modal.names.map((name) => [...archive.segments, name]));
+            await api.deleteArchiveEntries(archive.id, modal.names.map((name, index) =>
+              [...archive.segments, ...(modal.relativePaths?.[index] ?? [name])]));
             refresh("left");
             refresh("right");
           } else if ("names" in modal && remote) {
@@ -4485,6 +4499,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               permanent: modal.kind === "delete", relativePaths: modal.relativePaths } });
             return;
           } else if (operation) {
+            if (operation.kind === "create_file" && modal.archive) {
+              if (modal.side) {
+                await selectChangedItem(modal.side, modal.archive, operation.name);
+                refresh(opposite(modal.side));
+              }
+              openDocument({ place: modal.archive, name: operation.name }, true, { fromPane: modal.side });
+              setModal(null);
+              return;
+            }
             if (operation.kind === "rename" && modal.archive) {
               const archive = modal.archive;
               const before = [...archive.segments, operation.name];
@@ -4494,7 +4517,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 if (place?.kind !== "archive" || place.path !== archive.path) continue;
                 const childRenamed = before.every((part, index) => part === place.segments[index]);
                 const destination = childRenamed ? { ...place, segments: [...after, ...place.segments.slice(before.length)] } : place;
-                void load(side, destination, "refresh", side === modal.side ? operation.new_name : undefined);
+                if (!childRenamed && side === modal.side) await selectChangedItem(side, archive, operation.new_name);
+                else {
+                  if (trees[side].enabled) setFileRevision((revision) => revision + 1);
+                  void load(side, destination, "refresh", side === modal.side ? operation.new_name : undefined);
+                }
               }
               setModal(null);
               return;
@@ -4502,13 +4529,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             if (operation.kind === "create_file" && remote) {
               await api.createRemoteTextFile(remote, operation.name, operation.encoding ?? "utf8", sudoPassword);
               invalidateDirectories({ kind: remote.kind, id: remote.profileId });
-              if (modal.side) await selectChangedRemoteItem(modal.side, remote, operation.name);
+              if (modal.side) await selectChangedItem(modal.side, remote, operation.name);
             } else if (operation.kind === "rename" && remote?.kind === "ssh") {
               await api.renameSsh(remote.id, [...remote.segments, operation.name], operation.new_name, sudoPassword);
               invalidateDirectories({ kind: remote.kind, id: remote.profileId });
-              if (modal.side) await selectChangedRemoteItem(modal.side, remote, operation.new_name);
+              if (modal.side) await selectChangedItem(modal.side, remote, operation.new_name);
             } else if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
-            else await api.operate(modal.path, operation);
+            else {
+              await api.operate(modal.path, operation);
+              if (modal.side && trees[modal.side].enabled) await selectChangedItem(modal.side, localPath(modal.path), operation.name);
+            }
             fileLocationsChanged();
             if (modal.kind === "newFile") {
               openDocument({ place: remote ?? { kind: "local", path: modal.path, parent: null }, name: operation.name }, true, { fromPane: modal.side });
@@ -4627,6 +4657,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const cancelRemote = useRef<AbortController>(null);
   const archiveChange = useArchiveChange();
   const renameInArchive = modal.kind === "rename" && modal.archive;
+  const createInArchive = modal.kind === "newFile" && modal.archive;
+  const updatesArchive = renameInArchive || createInArchive;
+  const remoteAddress = (modal.remote ?? modal.lan ?? modal.kswitcher)?.address;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const remoteRecycle = modal.kind === "recycle" && !!(modal.remote || modal.kswitcher);
   const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.lan || modal.remote?.kind === "ssh");
@@ -4651,6 +4684,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
       }
       if (renameInArchive) {
         await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
+      } else if (createInArchive) {
+        await archiveChange.run(createInArchive.id, { kind: "text", parent: createInArchive.segments, name, encoding });
       }
       if (removing && controller && modal.remote?.kind === "ssh") {
         const id = nextTransferId();
@@ -4688,7 +4723,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   function close() {
     if (!waiting) onClose();
-    else if (renameInArchive) archiveChange.cancel();
+    else if (updatesArchive) archiveChange.cancel();
     else if (cancelRemote.current) {
       cancelRemote.current.abort();
       setCancelingRemote(true);
@@ -4727,9 +4762,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
               {Object.entries(textEncodingLabels).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </select>
           </label>}
-          {modal.kind === "newFile" && (modal.remote || modal.lan) && <p>{(modal.remote ?? modal.lan)?.address} · {modal.path}</p>}
+          {modal.kind === "newFile" && <p dir="auto">{remoteAddress ? remoteAddress + " · " + modal.path : modal.path}</p>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          {renameInArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
+          {updatesArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
           {canCancelRemote && removing && waiting && <>
             <progress aria-label={t(remoteRecycle ? "Moving to the remote recycle bin" : "Deleting…")} max={modal.names.length} value={completed} />
             <p role="status">{t("{0} of {1} completed", completed, modal.names.length)}</p>
@@ -4742,7 +4777,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={close}
-            disabled={waiting && (canCancelRemote ? cancelingRemote : !renameInArchive || archiveChange.canceling)}>
+            disabled={waiting && (canCancelRemote ? cancelingRemote : !updatesArchive || archiveChange.canceling)}>
             {t(archiveChange.canceling || cancelingRemote ? "Canceling…" : "Cancel")}
           </Button>
           <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}

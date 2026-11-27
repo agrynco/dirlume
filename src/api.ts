@@ -149,7 +149,7 @@ export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
 export type FileServerPlace = FtpPlace | SshPlace;
 export type LanGroupPlace = Extract<Place, { kind: "server" }> & { groupPeer: string };
-export type TreePlace = Extract<Place, { kind: "local" }> | LanGroupPlace | FileServerPlace;
+export type TreePlace = FilePlace;
 export type LanChange = { kind: "folder" } | { kind: "create_text"; encoding: TextEncoding } |
   { kind: "delete"; recursive: boolean } | { kind: "rename"; name: string };
 export function isLanGroupPlace(place: Place | null | undefined): place is LanGroupPlace {
@@ -160,10 +160,12 @@ export function isFileServer(place: Place | null | undefined): place is FileServ
   return place?.kind === "ftp" || place?.kind === "ssh";
 }
 export function supportsFileTree(place: Place | null | undefined): place is TreePlace {
-  return place?.kind === "local" || isFileServer(place) || isLanGroupPlace(place);
+  return !!place && place.kind !== "connections" && place.kind !== "smbRoot" &&
+    (place.kind !== "kswitcher" || !!place.path) && (!isLanGroupPlace(place) || !!place.segments.length);
 }
 export type ArchivePlace = Extract<Place, { kind: "archive" }>;
 export type ArchiveChange = { kind: "folder"; parent: string[]; name: string }
+  | { kind: "text"; parent: string[]; name: string; encoding: TextEncoding }
   | { kind: "rename"; segments: string[]; name: string };
 export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" | "ssh" | "archive" | "kswitcher" }>;
 export type KSwitcherPlace = Extract<Place, { kind: "kswitcher" }>;

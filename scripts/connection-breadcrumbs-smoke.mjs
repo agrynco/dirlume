@@ -78,12 +78,25 @@ async function fixture(browser, platform, nestedLocal = false) {
         if (command === "list_saved_computer_drives") return [{ name: "Files", type: 3, total: null, available: null }];
         if (command === "connect_saved_server") return remote({ id: args.credential === "fixture-pair" ? 8 : 6,
           share: "share", address: "Server fixture", origin: "https://fixture", listing: listing(0) });
-        if (command === "open_archive") return { id: 7, path: args.path, parent: home, writable: false, canAdd: false, listing: listing(0) };
+        if (command === "open_archive") return { id: 7, path: args.path, parent: home,
+          writable: !!state.archiveWritable, canAdd: !!state.archiveWritable, listing: listing(0) };
         if (command === "list_archive") {
           if (state.measureArchive && args.segments.length) return {
             entries: [{ ...folder("uncompressed.txt"), directory: false, size: 3072 }], omitted: 0,
           };
-          return listing(args.segments.length);
+          const result = listing(args.segments.length);
+          if (args.segments.length === 1 && state.archivedFolder) result.entries.push(folder(state.archivedFolder));
+          return result;
+        }
+        if (command === "change_archive") {
+          state.mutations.push(args.change);
+          state.archivedFolder = args.change.name;
+          return null;
+        }
+        if (command === "delete_archive_entries") {
+          state.mutations.push(args.paths);
+          delete state.archivedFolder;
+          return null;
         }
         if (["list_ftp", "list_ssh", "list_server"].includes(command)) {
           const segments = args.segments;
@@ -493,6 +506,66 @@ async function checkArchive(page, side, home) {
   await waitPath(page, side, archive + folders.join("/"));
 }
 
+async function checkTreeSources(page) {
+  const side = "left";
+  const target = pane(page, side);
+  const treeButton = button(target, "Tree");
+  const listButton = button(target, "List");
+  const directRow = (name) => list(page, side).getByRole("treeitem").and(page.locator(
+    `[data-tooltip=${JSON.stringify(name)}]`,
+  ));
+  const openFirstBranch = async () => {
+    await treeButton.click();
+    await button(directRow(folders[0]), "Expand folder").click();
+    await directRow(folders.slice(0, 2).join("/")).waitFor();
+  };
+
+  await enterFromCatalog(page, side, "Remote machine", "Saved Dirlume Server");
+  await openFirstBranch();
+  await directRow(folders.slice(0, 2).join("/")).click();
+  await list(page, side).press("F7");
+  assert.equal(await page.getByRole("dialog", { name: "New folder", exact: true }).count(), 0);
+  await listButton.click();
+  await button(target, `Locations for ${side} pane`).click();
+  await button(target, "Home").click();
+
+  await row(page, side, "fixture.zip").dblclick();
+  await openFirstBranch();
+  await directRow(folders[0]).click();
+  await list(page, side).press("Shift+F4");
+  assert.equal(await page.getByRole("dialog", { name: "New file", exact: true }).count(), 0);
+  await listButton.click();
+  await button(target, "Parent folder").click();
+
+  await page.evaluate(() => { window.connectionFixture.archiveWritable = true; });
+  await row(page, side, "fixture.zip").dblclick();
+  await openFirstBranch();
+  await directRow(folders[0]).click();
+  await list(page, side).press("F7");
+  const create = page.getByRole("dialog", { name: "New folder", exact: true });
+  await create.getByLabel("Name", { exact: true }).fill("new-directory");
+  await button(create, "Create").click();
+  await create.waitFor({ state: "hidden" });
+  await directRow(folders[0] + "/new-directory").click();
+  await list(page, side).press("F2");
+  const rename = page.getByRole("dialog", { name: "Rename", exact: true });
+  await rename.getByLabel("Name", { exact: true }).fill("renamed-directory");
+  await button(rename, "Rename").click();
+  await rename.waitFor({ state: "hidden" });
+  await directRow(folders[0] + "/renamed-directory").click();
+  await list(page, side).press("F8");
+  const remove = page.getByRole("dialog", { name: "Delete permanently", exact: true });
+  await button(remove, "Delete permanently").click();
+  await remove.waitFor({ state: "hidden" });
+  await directRow(folders[0] + "/renamed-directory").waitFor({ state: "detached" });
+  await directRow(folders.slice(0, 2).join("/")).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.connectionFixture.mutations), [
+    { kind: "folder", name: "new-directory", parent: [folders[0]] },
+    { kind: "rename", name: "renamed-directory", segments: [folders[0], "new-directory"] },
+    [[folders[0], "renamed-directory"]],
+  ]);
+}
+
 async function checkLan(page, side) {
   await button(pane(page, side), `Locations for ${side} pane`).click();
   const host = page.getByRole("group", { name: "Paired fixture", exact: true });
@@ -585,8 +658,12 @@ try {
   await list(archive.page, "left").press("F3");
   await row(archive.page, "left", folders[0]).getByText("3 KiB", { exact: true }).waitFor();
   await archive.page.close();
+  const treeSources = await fixture(browser, platforms[1]);
+  await checkTreeSources(treeSources.page);
+  await treeSources.page.close();
   console.log("Verified KSwitcher transfer routing across drives, revision-checked editing, rename, folder creation, and remote Trash.");
   console.log("Verified parent-row measures through KSwitcher and archived uncompressed file sizes.");
+  console.log("Verified read-only Server and archive Trees and nested archive create, rename, and delete.");
 } finally {
   await browser.close();
 }

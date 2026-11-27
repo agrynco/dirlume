@@ -1164,8 +1164,19 @@ struct ArchiveCopySource {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ArchiveChange {
-    Folder { parent: Vec<String>, name: String },
-    Rename { segments: Vec<String>, name: String },
+    Folder {
+        parent: Vec<String>,
+        name: String,
+    },
+    Text {
+        parent: Vec<String>,
+        name: String,
+        encoding: Encoding,
+    },
+    Rename {
+        segments: Vec<String>,
+        name: String,
+    },
 }
 
 #[tauri::command]
@@ -1190,6 +1201,11 @@ async fn change_archive(
             ArchiveChange::Folder { parent, name } => {
                 archive.create_folder(&parent, &name, progress)
             }
+            ArchiveChange::Text {
+                parent,
+                name,
+                encoding,
+            } => archive.create_text(&parent, &name, encoding, progress),
             ArchiveChange::Rename { segments, name } => {
                 archive.rename_entry(&segments, &name, progress)
             }
