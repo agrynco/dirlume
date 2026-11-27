@@ -31,6 +31,8 @@ pub(crate) use crate::{message, Result};
 
 #[path = "desktop_lan_transfer.rs"]
 mod lan_transfer;
+#[path = "desktop_ssh_transfer.rs"]
+mod ssh_transfer;
 
 #[derive(Deserialize, Serialize)]
 struct DiagramWindowData {
@@ -812,6 +814,7 @@ struct TransferSessions(Mutex<HashMap<u32, Arc<TransferSession>>>);
 struct TransferSession {
     cancelled: CancellationToken,
     pending: Mutex<Option<PendingConflict>>,
+    sudo: ssh_transfer::SudoRequest,
     remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
     local: Mutex<LocalTransferAttempt>,
     upload_move: Mutex<Option<UploadMoveAttempt>>,
@@ -859,6 +862,7 @@ impl TransferSession {
     fn cancel(&self) -> Result<()> {
         self.cancelled.cancel();
         self.pending.lock().map_err(message)?.take();
+        self.sudo.cancel()?;
         Ok(())
     }
 
@@ -1026,6 +1030,55 @@ fn resolve_transfer(
     state: State<'_, TransferSessions>,
 ) -> Result<()> {
     state.get(id)?.answer(decision, remember)
+}
+
+#[tauri::command]
+async fn authorize_transfer_sudo(
+    id: u32,
+    ticket: uuid::Uuid,
+    password: String,
+    state: State<'_, TransferSessions>,
+) -> Result<()> {
+    let session = state.get(id)?;
+    let password = zeroize::Zeroizing::new(password);
+    blocking(move || session.sudo.authorize(ticket, password, &session)).await
+}
+
+#[tauri::command]
+fn decline_transfer_sudo(
+    id: u32,
+    ticket: uuid::Uuid,
+    state: State<'_, TransferSessions>,
+) -> Result<()> {
+    state.get(id)?.sudo.answer(ticket, false)
+}
+
+#[derive(Deserialize)]
+struct SshDeletion {
+    segments: Vec<String>,
+    recursive: bool,
+    recycle: bool,
+}
+
+#[tauri::command]
+async fn delete_ssh(
+    id: u32,
+    request: SshDeletion,
+    job: u32,
+    output: Channel<TransferEvent>,
+    state: State<'_, ssh::SshState>,
+    sessions: State<'_, TransferSessions>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    let transfer = sessions.get(job)?;
+    blocking(move || {
+        ssh_transfer::SshTransfer::open(&connection, false, &transfer, &output)?.remove(
+            &request.segments,
+            request.recursive,
+            request.recycle,
+        )
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1250,6 +1303,11 @@ enum TransferEvent {
     },
     Conflict {
         conflict: local_transfer::Conflict,
+    },
+    SudoRequired {
+        ticket: uuid::Uuid,
+        address: String,
+        path: String,
     },
 }
 
@@ -1884,9 +1942,12 @@ async fn transfer_item(
                             )?;
                         }
                         TransferSource::Ssh { segments, .. } => {
-                            let mut source = ssh_source
-                                .ok_or("Connect to the SSH server first.")?
-                                .open_with_cancel(Some(session.cancelled.clone()))?;
+                            let connection = ssh_source
+                                .as_ref()
+                                .ok_or("Connect to the SSH server first.")?;
+                            let mut source = ssh_transfer::SshTransfer::open(
+                                connection, true, &session, &output,
+                            )?;
                             remote_transfer::download(
                                 &mut source,
                                 segments,
@@ -1996,9 +2057,11 @@ async fn transfer_item(
                     .as_deref()
                     .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
                 if let Some(connection) = ssh_destination {
+                    let mut remote =
+                        ssh_transfer::SshTransfer::open(&connection, false, &session, &output)?;
                     if request.moving {
                         return move_uploaded_file(
-                            &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
+                            &mut remote,
                             &request,
                             source,
                             name,
@@ -2008,7 +2071,7 @@ async fn transfer_item(
                         );
                     }
                     return upload_remote(
-                        connection.open_with_cancel(Some(session.cancelled.clone()))?,
+                        remote,
                         &request,
                         name,
                         source,
@@ -2097,7 +2160,7 @@ async fn transfer_item(
                 }
                 if let TransferSource::Ssh { segments, .. } = &request.source {
                     return remote_transfer::download(
-                        &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
+                        &mut ssh_transfer::SshTransfer::open(&connection, true, &session, &output)?,
                         segments,
                         &target,
                         &options,
@@ -3642,23 +3705,26 @@ async fn read_ssh_bytes(
     id: u32,
     segments: Vec<String>,
     offset: u64,
+    sudo_password: Option<String>,
     state: State<'_, ssh::SshState>,
 ) -> Result<BytePage> {
     let connection = state.connection(id)?;
+    let password = sudo_password.map(zeroize::Zeroizing::new);
     blocking(move || {
-        let mut session = connection.open()?;
-        let before = session.regular(&segments)?;
-        let length = remote_transfer::Entry::size(&before)
-            .ok_or("The SSH server did not report the file size.")?;
-        let data = session.read_limited(
-            &segments,
-            offset.min(length),
-            crate::protocol::BYTE_PAGE_SIZE.min(length.saturating_sub(offset)),
-        )?;
-        if session.regular(&segments)? != before {
-            return Err("The SSH file changed during the read.".to_owned());
-        }
-        Ok(BytePage { length, data })
+        connection.text_operation(password, true, |session| {
+            let before = session.regular(&segments)?;
+            let length = remote_transfer::Entry::size(&before)
+                .ok_or("The SSH server did not report the file size.")?;
+            let data = session.read_limited(
+                &segments,
+                offset.min(length),
+                crate::protocol::BYTE_PAGE_SIZE.min(length.saturating_sub(offset)),
+            )?;
+            if session.regular(&segments)? != before {
+                return Err("The SSH file changed during the read.".into());
+            }
+            Ok(BytePage { length, data })
+        })
     })
     .await
 }
@@ -3764,7 +3830,8 @@ async fn save_ftp_text(
             return Err("The FTP file changed on the server. Reopen it before saving.".to_owned());
         }
         let buffer = encode_text(document.encoding, &text);
-        let staged = session.upload_to_stage(&segments, &mut buffer.as_slice(), |_| Ok(()))?;
+        let staged =
+            session.upload_to_stage(&segments, &mut std::io::Cursor::new(&buffer), |_| Ok(()))?;
         let result = (|| {
             if load_ftp_text(&mut session, &segments)?.revision != document.revision {
                 return Err(
@@ -4214,7 +4281,7 @@ pub fn run() {
         ssh::test_ssh_connection,
         ssh::disconnect_ssh,
         ssh::list_ssh,
-        ssh::delete_ssh,
+        delete_ssh,
         ssh::create_ssh_folder,
         create_ssh_text_file,
         read_ftp_text,
@@ -4262,6 +4329,8 @@ pub fn run() {
         cancel_transfer,
         finish_transfer,
         resolve_transfer,
+        authorize_transfer_sudo,
+        decline_transfer_sudo,
         transfer_item,
         terminal::open_terminal,
         crate::user_menu::user_menu_sources,

@@ -1,6 +1,7 @@
 import { HistoryField } from "./HistoryField";
 import { errorText, locale, t } from "./i18n";
 import { Button } from "./Button";
+import { SudoDialog } from "./SudoDialog";
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { describeError, fileBytePageSize, readPlaceBytes, type BytePage, type NamedFile } from "./api";
 
@@ -15,6 +16,8 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
   const [pages, setPages] = useState(() => new Map<number, BytePage>());
   const [initialError, setInitialError] = useState("");
   const [rangeError, setRangeError] = useState("");
+  const [deniedPage, setDeniedPage] = useState<number | null>(null);
+  const [sudo, setSudo] = useState(false);
   const [position, setPosition] = useState<{ physical: number; logical?: number }>({ physical: 0 });
   const [dimensions, setDimensions] = useState({ rowHeight: 0, height: 0 });
   const controls = useRef<HTMLDivElement>(null);
@@ -43,6 +46,7 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
     setLength(null);
     setPages(new Map());
     setInitialError("");
+    setDeniedPage(null);
     void readPlaceBytes(file, 0).then(
       (result) => {
         if (canceled) return;
@@ -50,7 +54,12 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
         setLength(result.length);
         onSize?.(result.length);
       },
-      (failure: unknown) => { if (!canceled) setInitialError(describeError(failure)); },
+      (failure: unknown) => {
+        if (canceled) return;
+        const reason = describeError(failure);
+        if (file.place.kind === "ssh" && reason === "SSH permission denied.") setDeniedPage(0);
+        setInitialError(reason);
+      },
     );
     return () => { canceled = true; };
   }, [file, onSize, revision]);
@@ -89,8 +98,13 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
         if (!current) return;
         const next = new Map(pages);
         let failure = "";
-        for (const result of results) {
-          if (result.status === "rejected") { failure ||= describeError(result.reason); continue; }
+        for (const [index, result] of results.entries()) {
+          if (result.status === "rejected") {
+            const reason = describeError(result.reason);
+            if (file.place.kind === "ssh" && reason === "SSH permission denied.") setDeniedPage(missing[index]);
+            failure ||= reason;
+            continue;
+          }
           const [start, page] = result.value;
           if (page.length !== length || page.data.length !== Math.min(fileBytePageSize, length - start)) {
             failure ||= t("The file changed on disk.");
@@ -169,6 +183,7 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
         </form>
         {length !== null && <span>{t("{0} bytes", length.toLocaleString(locale()))}</span>}
       </div>
+      {deniedPage !== null && (initialError || rangeError) && <Button onClick={() => setSudo(true)}>{t("Open with sudo…")}</Button>}
       {initialError ? <p role="alert" className="dialog-error">{errorText(initialError)}</p> :
         length === null ? <p role="status" className="text-view">{t("Reading bytes…")}</p> :
         !length ? <p role="status" className="text-view">{t("This file is empty.")}</p> :
@@ -197,6 +212,18 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
               {rangeError && <p role="alert" className="hex-read-error" style={{ top: scrollTop }}>{errorText(rangeError)}</p>}
             </div>
           </div>}
+      {sudo && file.place.kind === "ssh" && deniedPage !== null && <SudoDialog operation="read" address={file.place.address}
+        path={"/" + [...file.place.segments, file.name].join("/")} onClose={() => setSudo(false)}
+        onConfirm={async (password) => {
+          const result = await readPlaceBytes(file, deniedPage, password);
+          if (length !== null && length !== result.length) throw new Error(t("The file changed on disk."));
+          setLength(result.length);
+          setPages((current) => new Map(current).set(deniedPage, result));
+          setDeniedPage(null);
+          setInitialError("");
+          setRangeError("");
+          onSize?.(result.length);
+        }} />}
     </>
   );
 }

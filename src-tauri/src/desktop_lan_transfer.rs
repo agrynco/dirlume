@@ -312,7 +312,7 @@ impl remote_transfer::UploadSession for LanTransfer<'_> {
     fn upload_to_stage(
         &mut self,
         target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + io::Seek),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String> {
         let LanUploadReply::Begun { stage } = self.upload_action(LanUpload::Begin {

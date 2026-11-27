@@ -1016,6 +1016,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "New folder": ["Нова папка", "Новая папка"],
   "Use sudo on {0} to create this folder?": ["Створити цю папку на {0} з правами sudo?", "Создать эту папку на {0} с правами sudo?"],
   "Use sudo on {0} to create this file?": ["Створити цей файл на {0} з правами sudo?", "Создать этот файл на {0} с правами sudo?"],
+  "Use sudo on {0} to continue this transfer?": ["Використати sudo на {0}, щоб продовжити передавання?", "Использовать sudo на {0}, чтобы продолжить передачу?"],
+  "Use sudo on {0} to continue removing this item?": ["Використати sudo на {0}, щоб продовжити видалення?", "Использовать sudo на {0}, чтобы продолжить удаление?"],
   "Delete": ["Видалити", "Удалить"],
   "Trash": ["До кошика", "В корзину"],
   "Compare": ["Порівняти", "Сравнить"],

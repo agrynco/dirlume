@@ -350,7 +350,7 @@ impl UploadSession for ArchiveUpload<'_> {
     fn upload_to_stage(
         &mut self,
         _target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + std::io::Seek),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String> {
         let mut pending = tempfile::NamedTempFile::new_in(self.workspace).map_err(message)?;

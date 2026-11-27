@@ -86,7 +86,8 @@ import { ImageDocument } from "./ImageDocument";
 import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
 import { canEditImage, imageType } from "./ImageViewport";
 import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
-import { TransferDialog, type Transfer } from "./TransferDialog";
+import { TransferDialog, nextTransferId, TransferSudoPrompt, type Transfer } from "./TransferDialog";
+import type { TransferEvent, TransferSudoRequest } from "./api";
 import { useArchiveChange } from "./useArchiveChange";
 import {
   applyListing, breadcrumbTrail, childPlace, closeSearchResults, connectionSource, filesystemPlace, formatSize, localPath, opposite,
@@ -167,6 +168,7 @@ type ActionModal = (
 type RemoteDeletionProgress = {
   signal: AbortSignal;
   completed: (count: number) => void;
+  ssh?: { id: number; output: Channel<TransferEvent> };
 };
 
 type Modal =
@@ -4347,7 +4349,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             for (const name of modal.directories ?? []) {
               const segments = modal.relativePaths?.[modal.names.indexOf(name)] ?? [name];
               const remote = modal.remote;
-              const listing = remote ? await (remote.kind === "ssh" ? api.listSsh : api.listFtp)(remote.id, [...remote.segments, ...segments])
+              const listing = remote ? await (remote.kind === "ssh"
+                ? api.listSsh(remote.id, [...remote.segments, ...segments], undefined, true).catch((error: unknown) => {
+                  if (String(error) === "SSH permission denied.") return { entries: [], omitted: 1 };
+                  throw error;
+                })
+                : api.listFtp(remote.id, [...remote.segments, ...segments]))
                 : modal.lan ? await api.listServer(modal.lan.id, [...modal.lan.segments, ...segments])
                 : await api.listKSwitcher(modal.kswitcher!.directory, modal.kswitcher!.peer, kswitcherPath(modal.path, segments.join("\\")));
               if (listing.entries.length || listing.omitted) return true;
@@ -4410,10 +4417,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           } else if ("names" in modal && remote) {
             const completed: string[][] = [];
             try {
-              const remove = remote.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
               await batch(modal.names, async (name, index) => {
                 const segments = [...remote.segments, ...(modal.relativePaths?.[index] ?? [name])];
-                await remove(remote.id, segments, recursive && (modal.directories?.includes(name) ?? false), modal.kind === "recycle");
+                const directory = recursive && (modal.directories?.includes(name) ?? false);
+                const recycle = modal.kind === "recycle";
+                if (remote.kind === "ssh") {
+                  if (!progress?.ssh) throw new Error("The SSH deletion request has closed.");
+                  await api.deleteSsh(remote.id, segments, directory, recycle, progress.ssh.id, progress.ssh.output);
+                } else await api.deleteFtp(remote.id, segments, directory, recycle);
                 completed.push(segments);
               }, progress);
               if (progress?.signal.aborted) {
@@ -4581,6 +4592,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [encoding, setEncoding] = useState<TextEncoding>("utf8");
   const [error, setError] = useState("");
   const [sudoCreation, setSudoCreation] = useState<{ name: string; encoding: TextEncoding }>();
+  const [sshApproval, setSshApproval] = useState<{ id: number; request: TransferSudoRequest }>();
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
@@ -4591,7 +4603,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const renameInArchive = modal.kind === "rename" && modal.archive;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const remoteRecycle = modal.kind === "recycle" && !!(modal.remote || modal.kswitcher);
-  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.lan);
+  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.lan || modal.remote?.kind === "ssh");
   const title = t(remoteRecycle ? "Move to remote recycle bin" : titles[modal.kind]);
   const removing = "names" in modal;
   const permanent = modal.kind === "delete";
@@ -4605,6 +4617,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     cancelRemote.current = controller;
     setCancelingRemote(false);
     setCompleted(0);
+    let ssh: RemoteDeletionProgress["ssh"];
     try {
       if (hasNonemptyFolders && !recursive && await hasNonemptyFolders()) {
         setRecursive(true);
@@ -4613,9 +4626,22 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
       if (renameInArchive) {
         await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
       }
+      if (removing && controller && modal.remote?.kind === "ssh") {
+        const id = nextTransferId();
+        const output = new Channel<TransferEvent>((request) => {
+          if (request.kind === "sudo_required" && !controller.signal.aborted) setSshApproval({ id, request });
+        });
+        await api.beginTransfer(id);
+        ssh = { id, output };
+        if (controller.signal.aborted) return;
+        controller.signal.addEventListener("abort", () => {
+          setSshApproval(undefined);
+          void api.cancelTransfer(id).catch(() => {});
+        }, { once: true });
+      }
       await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive,
-        controller ? { signal: controller.signal, completed: setCompleted } : undefined);
+        controller ? { signal: controller.signal, completed: setCompleted, ssh } : undefined);
     } catch (error) {
       const reason = describeError(error);
       setError(reason);
@@ -4623,6 +4649,11 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         setSudoCreation({ name, encoding });
       }
     } finally {
+      if (ssh) {
+        ssh.output.onmessage = () => {};
+        await api.finishTransfer(ssh.id).catch(() => {});
+      }
+      setSshApproval(undefined);
       setWaiting(false);
       cancelRemote.current = null;
     }
@@ -4694,6 +4725,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </footer>
       </form>
     </Dialog>
+    {sshApproval && <TransferSudoPrompt key={sshApproval.request.ticket} id={sshApproval.id} request={sshApproval.request}
+      operation="delete" onClose={() => setSshApproval((current) => current?.request.ticket === sshApproval.request.ticket ? undefined : current)} />}
     {sudoCreation && modal.remote?.kind === "ssh" && <SudoDialog address={modal.remote.address}
       path={`/${[...modal.remote.segments, sudoCreation.name].join("/")}`} operation="createFile"
       onClose={() => setSudoCreation(undefined)} onConfirm={(password) =>

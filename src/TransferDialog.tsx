@@ -11,6 +11,7 @@ import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
+import { SudoDialog } from "./SudoDialog";
 import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEstimate";
 
 export interface Transfer {
@@ -31,6 +32,20 @@ type Decision = "overwrite" | "overwrite_all" | "skip";
 let nextSession = 0;
 
 export const nextTransferId = () => ++nextSession;
+
+export function TransferSudoPrompt({ id, request, operation, onClose }: {
+  id: number;
+  request: Extract<TransferEvent, { kind: "sudo_required" }>;
+  operation: "transfer" | "delete";
+  onClose: () => void;
+}) {
+  return <SudoDialog address={request.address} path={request.path} operation={operation}
+    onConfirm={(password) => api.authorizeTransferSudo(id, request.ticket, password)}
+    onClose={() => {
+      onClose();
+      void api.declineTransferSudo(id, request.ticket).catch(() => {});
+    }} />;
+}
 
 function remoteDestinationLabel(place: FtpPlace | SshPlace) {
   const protocol = place.kind === "ssh" ? "SFTP" : "FTP";
@@ -90,6 +105,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [blocked, setBlocked] = useState<Transfer["items"][number]>();
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [conflict, setConflict] = useState<TransferConflict | null>(null);
+  const [sudo, setSudo] = useState<Extract<TransferEvent, { kind: "sudo_required" }> | null>(null);
   const [remember, setRemember] = useState(false);
   const [answering, setAnswering] = useState<TransferConflict | null>(null);
   const [canceling, setCanceling] = useState(false);
@@ -182,6 +198,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     setCanceling(true);
     setEstimatedTime(undefined);
     setConflict(null);
+    setSudo(null);
     void api.cancelTransfer(running.current).catch(() => {});
   }
 
@@ -191,6 +208,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       if (event.kind === "conflict") {
         setRemember(false);
         setConflict(event.conflict);
+        return;
+      }
+      if (event.kind === "sudo_required") {
+        setSudo(event);
         return;
       }
       estimate.current?.progress(event, performance.now());
@@ -308,6 +329,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       }
       running.current = null;
       setConflict(null);
+      setSudo(null);
       const success = finished && !cancelled.current && skippedItems === 0;
       onFinished(success, movedPaths);
       if (success) onClose();
@@ -468,6 +490,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         </>
       )}
     </Dialog>
+    {sudo && running.current !== null && <TransferSudoPrompt key={sudo.ticket} id={running.current} request={sudo}
+      operation="transfer" onClose={() => setSudo((current) => current?.ticket === sudo.ticket ? null : current)} />}
     {conflict && (
       <Dialog key={conflict.path} title={conflict.directory ? t("Folder already exists") : t("File already exists")} tone="warning" onClose={cancel}>
         <div className="dialog-body transfer-body">

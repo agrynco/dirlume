@@ -88,6 +88,7 @@ pub(crate) enum SftpFailure {
     Other(String),
 }
 pub(crate) type SftpResult<T> = std::result::Result<T, SftpFailure>;
+pub(crate) const PERMISSION_DENIED: &str = "SSH permission denied.";
 impl From<openssh_sftp_client::Error> for SftpFailure {
     fn from(error: openssh_sftp_client::Error) -> Self {
         match error {
@@ -137,7 +138,7 @@ impl From<&str> for SftpFailure {
 impl From<SftpFailure> for String {
     fn from(error: SftpFailure) -> Self {
         match error {
-            SftpFailure::PermissionDenied => "SSH permission denied.".to_owned(),
+            SftpFailure::PermissionDenied => PERMISSION_DENIED.to_owned(),
             SftpFailure::ConnectionLost(detail)
             | SftpFailure::Other(detail)
             | SftpFailure::PathUnavailable(detail) => detail,
@@ -366,6 +367,25 @@ pub struct Connection {
 }
 
 impl Connection {
+    pub(crate) fn address(&self) -> String {
+        let endpoint = &self.profile.destination.settings.endpoint;
+        format!("{}:{}", endpoint.host, endpoint.port)
+    }
+
+    pub(crate) fn authorized_operation<T>(
+        &self,
+        password: Option<Zeroizing<String>>,
+        read_only: bool,
+        stop: Option<CancellationToken>,
+        operation: impl FnOnce(&mut Session) -> Result<T>,
+    ) -> Result<Option<T>> {
+        self.sudo
+            .run(self, password, read_only, stop, |session| {
+                Ok(operation(session))
+            })?
+            .transpose()
+    }
+
     pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {
         let client = self
             .listing
@@ -939,26 +959,6 @@ pub async fn create_ssh_folder(
     let password = sudo_password.map(Zeroizing::new);
     blocking(move || {
         connection.text_operation(password, false, |session| session.create_folder(&segments))
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_ssh(
-    id: u32,
-    segments: Vec<String>,
-    recursive: bool,
-    recycle: Option<bool>,
-    state: State<'_, SshState>,
-) -> Result<()> {
-    let connection = state.connection(id)?;
-    blocking(move || {
-        let mut session = connection.open()?;
-        if recycle.unwrap_or(false) {
-            session.recycle(&segments)
-        } else {
-            session.remove(&segments, recursive)
-        }
     })
     .await
 }

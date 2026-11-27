@@ -8,7 +8,7 @@ import { errorText, t } from "./i18n";
 export function SudoDialog({ address, path, operation, onConfirm, onClose }: {
   address: string;
   path: string;
-  operation: "browse" | "read" | "save" | "createFolder" | "createFile";
+  operation: "browse" | "read" | "save" | "createFolder" | "createFile" | "transfer" | "delete";
   onConfirm: (password: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -22,6 +22,8 @@ export function SudoDialog({ address, path, operation, onConfirm, onClose }: {
     save: "Use sudo on {0} to save changes to this file?",
     createFolder: "Use sudo on {0} to create this folder?",
     createFile: "Use sudo on {0} to create this file?",
+    transfer: "Use sudo on {0} to continue this transfer?",
+    delete: "Use sudo on {0} to continue removing this item?",
   };
 
   async function submit(event: FormEvent) {

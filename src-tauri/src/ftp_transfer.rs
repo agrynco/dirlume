@@ -69,7 +69,7 @@ impl UploadSession for ftp::Session {
     fn upload_to_stage(
         &mut self,
         target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + std::io::Seek),
         progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String> {
         self.upload_to_stage(target, input, progress)
