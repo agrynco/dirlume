@@ -23,6 +23,8 @@ The baseline is [KSwitcher Files v0.6.119](https://gitea.hrynco.com/hrynco/hrync
 
 The Space Analyzer reads Windows UNC shares through Windows and OS-mounted SMB shares through the local filesystem on Ubuntu and macOS. Filesystems and servers that expose allocated bytes can report size on disk. FTP, SSH/SFTP, KSwitcher, and Windows-hosted Dirlume Server listings use file size. A Unix-hosted Dirlume Server reports allocated bytes and hard-link identities. Older server versions can report allocation without identity, so shared allocations may be counted more than once. Remote scans skip links that the provider identifies in its listings.
 
+In a file pane, Measure on the parent row totals the logical sizes of visible immediate child folders across local paths, SMB, FTP, SSH/SFTP, Dirlume shares, KSwitcher LAN, and archives. In Tree, expanded descendants contribute to their top-level totals.
+
 The session file operation history records Copy and Move results. Undo and Redo cover verified regular local files transferred to one destination without overwrites. Move reversal stays on the same volume.
 
 Space Analyzer, Scan volume, and folder sizing in List and Tree share a scanner. Local APFS uses batched metadata reads, and ext4 uses one metadata lookup per entry when mount IDs are available. The scanner uses ordinary directory reads and metadata when these optimizations are unavailable.

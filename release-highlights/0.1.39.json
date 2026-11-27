@@ -1,6 +1,7 @@
 {
   "version": "0.1.39",
   "highlights": [
-    "Copy, move, edit, rename, create, and delete files on paired KSwitcher computers with the corresponding trusted-client permissions."
+    "Copy, move, edit, rename, create, and delete files on paired KSwitcher computers with the corresponding trusted-client permissions.",
+    "Use F3 on the parent row to measure visible child folders in local, remote, and archive panes."
   ]
 }

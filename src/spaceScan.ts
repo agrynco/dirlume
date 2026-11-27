@@ -1,5 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
+import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
 export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
@@ -75,7 +75,7 @@ function node(id: number, name: string, directory: boolean, parent: SpaceNode | 
     missingAllocated: 0, pending: directory ? 1 : 0, partial: false, shared: false, error: "" };
 }
 
-export function initialSpaceResult(place: SpacePlace): SpaceResult {
+export function initialSpaceResult(place: FilePlace): SpaceResult {
   const root = node(0, folderLabel(place), true, null);
   return { root, nodes: [root], supportsAllocation: place.kind === "local", phase: "scanning", error: "" };
 }
@@ -246,7 +246,7 @@ function bytes(value: number | null | undefined) {
 }
 
 export async function scanSpace(
-  rootPlace: SpacePlace,
+  rootPlace: FilePlace,
   signal: AbortSignal,
   report: (result: SpaceResult) => void,
 ) {
@@ -254,7 +254,7 @@ export async function scanSpace(
   const result = initialSpaceResult(rootPlace);
   const nodes = [result.root];
   result.nodes = nodes;
-  const jobs = [{ entry: result.root, place: rootPlace as SpacePlace }];
+  const jobs: { entry: SpaceNode; place: FilePlace }[] = [{ entry: result.root, place: rootPlace }];
   const identities = new Set<string>();
   let allocatedFiles = 0;
   let lastReport = 0;
@@ -273,7 +273,7 @@ export async function scanSpace(
     const { entry, place } = job;
     const children: typeof jobs = [];
     try {
-      const listing: Listing = (await readPlace(place)).listing;
+      const listing: Listing = (await readPlace(place, undefined, undefined, signal)).listing;
       if (signal.aborted) return;
       entry.partial = listing.omitted > 0;
       const names = new Set<string>();
@@ -288,7 +288,7 @@ export async function scanSpace(
         nodes.push(child);
         entry.children.push(child);
         if (file.directory) {
-          children.push({ entry: child, place: childPlace(place, file.name) as SpacePlace });
+          children.push({ entry: child, place: childPlace(place, file.name) as FilePlace });
           continue;
         }
         const logical = bytes(file.size);
