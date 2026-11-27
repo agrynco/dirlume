@@ -36,6 +36,8 @@ mod git_view;
 mod image_edit;
 #[cfg(feature = "desktop")]
 mod kswitcher_lan;
+#[cfg(feature = "desktop")]
+mod lan_group;
 mod local;
 #[cfg(feature = "desktop")]
 mod local_transfer;

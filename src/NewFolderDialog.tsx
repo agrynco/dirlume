@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type KSwitcherPlace } from "./api";
+import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type KSwitcherPlace, type LanGroupPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EditableDropdown } from "./EditableDropdown";
@@ -29,7 +29,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
   directory: string;
   archive?: ArchivePlace;
   kswitcher?: KSwitcherPlace;
-  remote?: FileServerPlace;
+  remote?: FileServerPlace | LanGroupPlace;
   showHidden: boolean;
   historyShortcut: readonly string[];
   onCreated: (name: string) => Promise<void>;
@@ -84,7 +84,8 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
     setError("");
     setFailedName("");
     try {
-      if (remote) await api.createRemoteFolder(remote, name);
+      if (remote?.kind === "server") await api.changeLanItem(remote, [name], { kind: "folder" });
+      else if (remote) await api.createRemoteFolder(remote, name);
       if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
       if (kswitcher) {
         if (!name || /[\\/]/.test(name) || name === "." || name === "..") throw new Error(t("Enter a valid folder name."));

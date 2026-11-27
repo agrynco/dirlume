@@ -1,10 +1,8 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { describeError, watchDirectory, windowsClient, type Entry, type PanelMetadata } from "./api";
+import { describeError, watchDirectory, windowsClient, type Entry, type PanelMetadata, type TreePlace } from "./api";
 import type { SortMode, SortSettings } from "./fileSort";
-import { childPlace, readPlace, visibleEntries, type PaneBackgroundSize, type PaneState } from "./panes";
-
-type LocalPlace = NonNullable<Entry["tree"]>["parent"];
+import { childPlace, placeKey, readPlace, visibleEntries, type PaneBackgroundSize, type PaneState } from "./panes";
 type Branch = {
   segments: readonly string[];
   expanded: boolean;
@@ -17,8 +15,8 @@ const emptyBranches = new Map<string, Branch>();
 const emptyMetadata = new Map<string, PanelMetadata>();
 const emptyDescriptions = new Map<string, string>();
 
-function childFolder(root: LocalPlace, segments: readonly string[]) {
-  return segments.reduce((place, name) => childPlace(place, name) as LocalPlace, root);
+function childFolder(root: TreePlace, segments: readonly string[]) {
+  return segments.reduce((place, name) => childPlace(place, name) as TreePlace, root);
 }
 
 export function usePaneTreeRevision(path: string | undefined, active: boolean, fileRevision: number) {
@@ -36,8 +34,8 @@ export function usePaneTreeRevision(path: string | undefined, active: boolean, f
   return fileRevision + revision;
 }
 
-export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revision: number) {
-  const scope = root?.path;
+export function useFilePaneTree(root: TreePlace | null, enabled: boolean, revision: number) {
+  const scope = root ? placeKey(root) : undefined;
   const [snapshot, setSnapshot] = useState<{ scope?: string; branches: ReadonlyMap<string, Branch> }>({ branches: emptyBranches });
   const pending = useRef(new Map<string, Branch>());
   const branches = snapshot.scope === scope ? snapshot.branches : emptyBranches;
@@ -114,7 +112,7 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
     const segments: string[] = [];
     const opened = new Map<string, Branch>();
     for (const [index, part] of path.entries()) {
-      const match = entries.find(({ name }) => windowsClient ? name.toLowerCase() === part.toLowerCase() : name === part);
+      const match = entries.find(({ name }) => root.kind === "local" && windowsClient ? name.toLowerCase() === part.toLowerCase() : name === part);
       if (!current() || !match?.directory || match.link) return null;
       segments.push(match.name);
       if (index + 1 === path.length) break;

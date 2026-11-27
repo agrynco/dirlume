@@ -9,6 +9,7 @@ import { bindingMatches, driveSourceCommand, eventShortcut, showShortcut, type B
 import { readRemoteProfiles } from "./savedConnections";
 
 type LanHost = { kind: "dirlume"; id: string; name: string; credential: string } |
+  { kind: "group"; id: string; name: string; online: boolean } |
   { kind: "kswitcher"; id: string; name: string; online?: boolean };
 type RemoteDrive = { host: LanHost; drive: string };
 type LanComputer = { host: LanHost; drives?: ComputerDrive[]; error?: string };
@@ -44,7 +45,8 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
       let update: Pick<LanComputer, "drives" | "error">;
       try {
         const drives = host.kind === "dirlume" ? await api.listSavedComputerDrives(host.credential) :
-          (await api.listKSwitcher("", host.id, "")).drives ?? [];
+          host.kind === "group" ? await api.listLanGroupDrives(host.id) :
+            (await api.listKSwitcher("", host.id, "")).drives ?? [];
         update = { drives };
       } catch (error) {
         update = { error: describeError(error) };
@@ -52,6 +54,34 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
       if (current) setComputers((computers) => computers.map((item) => item.host === host ? { host, ...update } : item));
     }
     for (const host of hosts) void load(host);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let groupHosts = new Map<string, Extract<LanHost, { kind: "group" }>>();
+    async function loadGroup() {
+      try {
+        const peers = await api.lanGroupPeers();
+        if (!current) return;
+        const next = new Map<string, Extract<LanHost, { kind: "group" }>>();
+        const updated: LanHost[] = [];
+        for (const peer of peers ?? []) {
+          const old = groupHosts.get(peer.id);
+          const host = old?.online === peer.online && old.name === peer.name ? old : { ...peer, kind: "group" as const };
+          next.set(host.id, host);
+          if (host !== old && host.online) updated.push(host);
+        }
+        groupHosts = next;
+        setComputers((computers) => {
+          const existing = new Map(computers.filter(({ host }) => host.kind === "group").map((item) => [item.host, item]));
+          return [...computers.filter(({ host }) => host.kind !== "group"),
+            ...[...next.values()].map((host) => existing.get(host) ?? { host })];
+        });
+        for (const host of updated) void load(host);
+      } catch {
+        // Retry discovery while the sources menu is open.
+      } finally {
+        if (current) timer = setTimeout(() => void loadGroup(), 2_000);
+      }
+    }
+    void loadGroup();
     if (windowsClient) void api.kswitcherPeers("").then(async (peers) => {
       if (!current) return;
       const paired = (peers ?? []).map((peer): LanHost => ({ kind: "kswitcher", ...peer }));
@@ -63,7 +93,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
     }, (error: unknown) => {
       if (current) setKSwitcherError(describeError(error));
     });
-    return () => { current = false; };
+    return () => { current = false; clearTimeout(timer); };
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -133,7 +163,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
       </div>
       <div className="location-source-group" role="group" aria-label={t("Sources")}>{sources.map(sourceButton)}</div>
       {(["dirlume", "kswitcher"] as const).map((kind) => {
-        const hosts = computers.filter(({ host }) => host.kind === kind);
+        const hosts = computers.filter(({ host }) => host.kind === kind || kind === "dirlume" && host.kind === "group");
         const status = kind === "kswitcher" && kswitcherStatus;
         if (!hosts.length && !status) return null;
         const heading = t(kind === "dirlume" ? "Dirlume LAN" : "KSwitcher LAN");
@@ -143,7 +173,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
           {hosts.map(({ host, drives, error }) =>
             <div key={host.kind + host.id} role="group" aria-label={host.name}>
               <span>{host.name}</span>
-              {host.kind === "kswitcher" && host.online === false ? <p>{t("Offline")}</p> :
+              {"online" in host && host.online === false ? <p>{t("Offline")}</p> :
                 error ? <p role="status">{errorText(error)}</p> :
                 !drives ? <p role="status">{t("Loading drives…")}</p> :
                 drives.length === 0 ? <p>{t("No drives.")}</p> : drives.map(({ name, type, total, available }) =>

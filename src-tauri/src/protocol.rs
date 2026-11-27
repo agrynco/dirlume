@@ -4,6 +4,117 @@ use url::Url;
 
 pub const INVITATION_PREFIX: &str = "dirlume-v1:";
 pub const MAX_INVITATION_LENGTH: usize = 8192;
+#[cfg(feature = "desktop")]
+pub(crate) const COMPUTER_NAME_HEADER: &str = "x-dirlume-computer-name";
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum LanChange {
+    Folder,
+    CreateText { encoding: crate::desktop::Encoding },
+    Delete { recursive: bool },
+    DeleteCompared { expected: LanStat, digest: String },
+    Rename { name: String },
+    Move { destination: Vec<String> },
+    RemoveEmptyFolder,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct LanChangeRequest {
+    pub segments: Vec<String>,
+    pub change: LanChange,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct LanTextSave {
+    pub segments: Vec<String>,
+    pub revision: String,
+    pub text: String,
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) const LAN_UPLOAD_CHUNK: usize = 256 * 1024;
+#[cfg(feature = "desktop")]
+pub(crate) const LAN_MOVE_CROSSES_VOLUMES: &str =
+    "The item and destination are on different volumes.";
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum LanUpload {
+    Stat {
+        segments: Vec<String>,
+    },
+    Begin {
+        segments: Vec<String>,
+    },
+    Chunk {
+        stage: uuid::Uuid,
+        offset: u64,
+        encoded: String,
+    },
+    Commit {
+        stage: uuid::Uuid,
+        overwrite: bool,
+    },
+    Cancel {
+        stage: uuid::Uuid,
+    },
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum LanUploadReply {
+    Stat { entry: Option<LanStat> },
+    Begun { stage: uuid::Uuid },
+    Ok,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+pub(crate) struct LanStat {
+    pub name: String,
+    pub directory: bool,
+    pub file: bool,
+    pub size: u64,
+    pub modified: Option<(u64, u32)>,
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn lan_text_revision(bytes: &[u8]) -> String {
+    URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, bytes).as_ref())
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn lan_file_digest(
+    mut reader: impl std::io::Read,
+    mut check: impl FnMut() -> std::io::Result<()>,
+) -> std::io::Result<String> {
+    let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buffer = vec![0; LAN_UPLOAD_CHUNK];
+    loop {
+        check()?;
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        context.update(&buffer[..count]);
+    }
+    Ok(URL_SAFE_NO_PAD.encode(context.finish().as_ref()))
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn computer_name() -> Option<String> {
+    sysinfo::System::host_name().ok().and_then(|name| {
+        let name = name.trim();
+        (!name.is_empty() && name.len() <= 255 && !name.chars().any(char::is_control))
+            .then(|| name.to_owned())
+    })
+}
 
 #[cfg(feature = "desktop")]
 pub(crate) fn file_server_origin(scheme: &str, host: &str, port: u16, default_port: u16) -> String {
