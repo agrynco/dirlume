@@ -459,6 +459,7 @@ try {
     const page = await fixture(browser);
     await connect(page, sshSide, other ? "Alternate fixture" : undefined);
     const identity = other ? "SFTP · other.example:2202" : "SFTP · Remote fixture";
+    const origin = other ? "sftp://other.example:2202" : "sftp://fixture";
     await row(page, localSide, "rollback.txt").click();
     await page.keyboard.press("F5");
     const copy = page.getByRole("dialog", { name: "Copy", exact: true });
@@ -468,7 +469,7 @@ try {
     await list(page, localSide).press("F6");
     const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
     const field = move.getByLabel("Destination", { exact: true });
-    assert.equal(await field.inputValue(), "/destination");
+    assert.equal(await field.inputValue(), `${origin}/destination`);
     await move.getByText(identity, { exact: true }).waitFor();
     await button(move, "Move").click();
     const stopped = page.getByRole("dialog", { name: "Transfer stopped", exact: true });
@@ -483,7 +484,7 @@ try {
       [moving, retry, sshDestination])), [[true, false, other ? 38 : 37], [true, true, other ? 38 : 37]]);
     await row(page, localSide, "upload.txt").click();
     await page.keyboard.press("F6");
-    await field.fill("/elsewhere");
+    await field.fill(`${origin}/elsewhere`);
     await button(move, "Move").click();
     await row(page, localSide, "upload.txt").waitFor({ state: "detached" });
     const edited = await page.evaluate(() => window.sshFixture.transfers.at(-1));

@@ -168,6 +168,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const focusMove = transfer.kind === "move" && !submitDisabled;
   const [setupPromptStart, setupPromptEnd] = moving && onRename
     ? t("Rename or move {0} to:").split("{0}") : [promptStart, promptEnd];
+  const showConnection = !resolveEnteredMove || destination === defaultDestination;
+  const connectionLabel = !showConnection ? undefined : transfer.remoteDestination
+    ? remoteDestinationLabel(transfer.remoteDestination) : kswitcherTarget?.address ?? serverTarget?.address;
   const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
     ? destination.replace(/[\\/]+$/, "") + separator + (transfer.items[0].entry.googleDrive?.name ?? transfer.items[0].entry.name)
@@ -467,12 +470,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                   {setupPromptStart}<strong>{itemCount === 1 ? (transfer.items[0].entry.googleDrive?.name ?? transfer.items[0].entry.name) : t("{0} selected items", itemCount)}</strong>{setupPromptEnd}
                 </>}
               </label>
-              {!resolveEnteredMove && transfer.remoteDestination && <span className="muted" id="transfer-connection">
-                {remoteDestinationLabel(transfer.remoteDestination)}
-              </span>}
-              {!resolveEnteredMove && kswitcherTarget && <span className="muted" id="transfer-connection">{kswitcherTarget.address}</span>}
-              {!resolveEnteredMove && serverTarget && <span className="muted" id="transfer-connection">{serverTarget.address}</span>}
+              {connectionLabel && <span className="muted" id="transfer-connection">{connectionLabel}</span>}
               {archiveTarget || driveTarget || resolveEnteredMove && (serverTarget || transfer.remoteDestination || kswitcherTarget) ? <input id="transfer-destination" type="text"
+                aria-label={t("Destination")} aria-describedby={connectionLabel ? "transfer-connection" : undefined}
                 readOnly={(!resolveEnteredMove && !driveTarget && !onRename) || checkingDestination}
                 data-initial-focus={!focusMove || undefined} value={destination}
                 onFocus={(event) => { if (resolveEnteredMove || driveTarget || onRename) event.currentTarget.select(); }} onChange={(event) => {
@@ -482,7 +482,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               serverTarget ? <input id="transfer-destination" type="text" aria-label={t("Destination")} aria-describedby="transfer-connection"
                 required data-initial-focus={!focusMove || undefined} value={destination} onChange={(event) => setDestination(event.target.value)} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
-                describedBy={transfer.remoteDestination || kswitcherTarget ? "transfer-connection" : undefined}
+                describedBy={connectionLabel ? "transfer-connection" : undefined}
                 required initialFocus={!focusMove} selectOnFocus showHidden={showHidden} server={transfer.remoteDestination}
                 kswitcher={kswitcherTarget} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
