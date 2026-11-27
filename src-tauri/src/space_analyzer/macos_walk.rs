@@ -46,7 +46,7 @@ pub(super) fn scan(
     let mut jobs = vec![(0, root.to_path_buf())];
     let mut buffer = vec![0_u64; 8 * 1024];
     let mut attributes = attrlist {
-        bitmapcount: libc::ATTR_BIT_MAP_COUNT as u16,
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
         reserved: 0,
         commonattr: COMMON,
         volattr: 0,

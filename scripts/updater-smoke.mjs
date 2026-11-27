@@ -297,7 +297,9 @@ try {
     await mkdir(join(moved, "LICENSE"));
     const portableExecutable = join(moved, "Dirlume.exe");
     await exercise(portableExecutable, portableTarget, after.portable.signature, { replacementFailure: true });
-    assert.deepEqual(await portablePreferences(moved), relocated);
+    const restored = await portablePreferences(moved);
+    // Starting the previous build can populate defaults in a sparse settings file.
+    for (const [key, value] of Object.entries(relocated)) assert.deepEqual(restored[key], value, key);
     await rmdir(join(moved, "LICENSE"));
     await exercise(portableExecutable, portableTarget, after.portable.signature);
     await checkLaunch(portableExecutable, { restart_check: true }, nextVersion);
