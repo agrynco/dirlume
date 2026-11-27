@@ -10,6 +10,8 @@ fn main() {
         env::var("CARGO_PKG_VERSION").expect("Cargo must provide the product version");
     if env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         bundle_release_highlights(&version);
+        bundle_google_drive_oauth_client()
+            .expect("Could not prepare the Google Drive OAuth client");
         panic_source_manifest().expect("Could not prepare the panic source manifest");
         if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
             bundle_portable_archive_engine()
@@ -30,6 +32,20 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         tauri_build::build();
     }
+}
+
+fn bundle_google_drive_oauth_client() -> io::Result<()> {
+    println!("cargo:rerun-if-env-changed=DIRLUME_BUNDLE_GOOGLE_OAUTH_CLIENT");
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"))
+        .join("google-drive-oauth.json");
+    if let Some(source) = env::var_os("DIRLUME_BUNDLE_GOOGLE_OAUTH_CLIENT") {
+        let source = PathBuf::from(source);
+        println!("cargo:rerun-if-changed={}", source.display());
+        fs::copy(source, output)?;
+    } else {
+        fs::write(output, [])?;
+    }
+    Ok(())
 }
 
 fn bundle_portable_archive_engine() -> io::Result<()> {

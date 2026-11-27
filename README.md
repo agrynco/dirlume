@@ -246,6 +246,8 @@ For Windows memory investigations, [measure WebView2 by PID and process role](do
 
 Enable the Google Drive API in the Dirlume Google Cloud project and add the `https://www.googleapis.com/auth/drive` scope. Add test accounts under **Google Auth Platform → Audience → Test users** when the app is in Testing. Create a **Desktop app** OAuth client in that project and download its JSON. Set `DIRLUME_GOOGLE_OAUTH_CLIENT` to the absolute path before starting Dirlume, or save the file as `google-drive-oauth.json` in Dirlume's app configuration directory. Keep the JSON out of the repository. The operating system credential store holds saved Google sign-ins. Reconnect a read-only account to grant access for write operations. Testing-mode grants for this scope expire after seven days. Public distribution with full My Drive access requires [Google's restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
 
+To package a test build with Google Drive ready to connect, set `DIRLUME_BUNDLE_GOOGLE_OAUTH_CLIENT` to the absolute path of the Desktop app client JSON at build time. The bundled client is used when the recipient has no local configuration.
+
 Run `node scripts/google-drive-pane-smoke.mjs` after the frontend build to verify the pane workflows with a simulated Google Drive connection.
 
 ## Archives

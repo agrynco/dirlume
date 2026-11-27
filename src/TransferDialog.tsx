@@ -155,8 +155,6 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
-  const submitDisabled = targets.some((path) => !path.trim()) || (localCopy && useFilter && !mask.trim());
-  const focusMove = transfer.kind === "move" && !submitDisabled;
   const singleFile = !transfer.collection && !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
   const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
   const renameName = moving && onRename && destination !== defaultDestination && destination.trim() &&
@@ -167,7 +165,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     !!driveTarget && !qualifiedDrivePath && !localPathEntered);
   const submitDisabled = checkingDestination || unsupportedDestination || targets.some((path) => !path.trim()) ||
     (localCopy && useFilter && !mask.trim());
-  const focusMove = resolveEnteredMove && !submitDisabled;
+  const focusMove = transfer.kind === "move" && !submitDisabled;
   const [setupPromptStart, setupPromptEnd] = moving && onRename
     ? t("Rename or move {0} to:").split("{0}") : [promptStart, promptEnd];
   const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";

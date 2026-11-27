@@ -72,12 +72,28 @@ struct ClientFile {
 }
 
 fn client_config(app: &AppHandle) -> Result<InstalledClient> {
-    let file = std::env::var_os("DIRLUME_GOOGLE_OAUTH_CLIENT")
-        .map(PathBuf::from)
-        .unwrap_or(config_dir(app)?.join("google-drive-oauth.json"));
-    let bytes = fs::read(file)
-        .map_err(|_| "Configure the Dirlume Google Drive OAuth desktop client first.")?;
-    let config: ClientFile = serde_json::from_slice(&bytes)
+    if let Some(file) = std::env::var_os("DIRLUME_GOOGLE_OAUTH_CLIENT") {
+        let bytes = fs::read(file)
+            .map_err(|_| "Configure the Dirlume Google Drive OAuth desktop client first.")?;
+        return parse_client_config(&bytes);
+    }
+    match fs::read(config_dir(app)?.join("google-drive-oauth.json")) {
+        Ok(bytes) => parse_client_config(&bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let bundled = include_bytes!(concat!(env!("OUT_DIR"), "/google-drive-oauth.json"));
+            if bundled.is_empty() {
+                return Err(
+                    "Configure the Dirlume Google Drive OAuth desktop client first.".into(),
+                );
+            }
+            parse_client_config(bundled)
+        }
+        Err(_) => Err("Configure the Dirlume Google Drive OAuth desktop client first.".into()),
+    }
+}
+
+fn parse_client_config(bytes: &[u8]) -> Result<InstalledClient> {
+    let config: ClientFile = serde_json::from_slice(bytes)
         .map_err(|_| "Choose a Google OAuth Desktop app client configuration.")?;
     Ok(config.installed)
 }
