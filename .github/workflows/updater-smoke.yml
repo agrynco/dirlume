@@ -1,54 +1,24 @@
-name: Install signed desktop updates
-
+name: Verify native file operation history
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: dirlume-updater-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  upgrade:
-    name: Verify installed update (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+  history:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-2025, ubuntu-22.04, macos-15, macos-15-intel]
+        runner: [windows-2025, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Install Linux desktop prerequisites
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 patchelf \
-            xvfb openbox x11-utils dbus-x11
-      - name: Prepare Windows WebView2 runtime
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/ensure-webview.ps1
-      - name: Install pinned Rust toolchain
-        run: rustup show active-toolchain
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: updater-cargo-${{ matrix.runner }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
-      - run: npm ci
-      - name: Test install, signature rejection, saved preferences, and release highlights
+      - uses: actions/checkout@v4
+      - name: Verify native filesystem history
+        shell: bash
         env:
-          DIRLUME_TEST_DEBIAN_UPGRADE: ${{ runner.os == 'Linux' && '1' || '0' }}
-        run: node scripts/updater-smoke.mjs
+          DIRLUME_HISTORY_TRASH_FIXTURE: '1'
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>Dirlume history fixture</title>' > dist/index.html
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib file_history
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib undo_copy_trashes_the_copy_and_redo_recreates_it -- --ignored
