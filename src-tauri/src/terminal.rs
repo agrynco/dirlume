@@ -7,12 +7,12 @@ use std::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, State};
 
 use crate::{
     desktop::{blocking, blocking_for, message, Result},
     diagnostics::{failure, FailureCode},
-    local, ssh,
+    local, ssh, user_menu,
 };
 
 #[cfg(windows)]
@@ -189,10 +189,78 @@ fn install_prompt(shell: &std::ffi::OsStr, writer: &mut dyn Write) -> std::io::R
     Ok(true)
 }
 
+#[cfg(unix)]
+fn configure_zsh(
+    command: &mut CommandBuilder,
+    cwd: &std::path::Path,
+) -> std::io::Result<tempfile::TempDir> {
+    // Source the user's startup files before installing the hook. A long command
+    // written to the PTY during startup can be echoed or clipped by the line discipline.
+    let startup = tempfile::Builder::new().prefix("dirlume-zsh-").tempdir()?;
+    let dotdir = command
+        .get_env("ZDOTDIR")
+        .map(std::ffi::OsStr::to_os_string);
+    if let Some(dotdir) = dotdir {
+        command.env("DIRLUME_ZSH_USER_DOTDIR", dotdir);
+    } else {
+        command.env_remove("DIRLUME_ZSH_USER_DOTDIR");
+    }
+    command.env("ZDOTDIR", startup.path());
+    command.env("DIRLUME_ZSH_STARTUP", startup.path());
+    command.env("DIRLUME_ZSH_DIRECTORY", cwd);
+    std::fs::write(
+        startup.path().join(".zshenv"),
+        r#"
+if (( ${+DIRLUME_ZSH_USER_DOTDIR} )); then
+    export ZDOTDIR="$DIRLUME_ZSH_USER_DOTDIR"
+else
+    unset ZDOTDIR
+fi
+unset DIRLUME_ZSH_USER_DOTDIR
+if [[ -r "${ZDOTDIR-$HOME}/.zshenv" ]]; then
+    builtin source "${ZDOTDIR-$HOME}/.zshenv"
+fi
+if [[ -o rcs ]]; then
+    if (( ${+ZDOTDIR} )); then
+        export DIRLUME_ZSH_USER_DOTDIR="$ZDOTDIR"
+    fi
+    export ZDOTDIR="$DIRLUME_ZSH_STARTUP"
+else
+    builtin source "$DIRLUME_ZSH_STARTUP/dirlume-prompt"
+fi
+"#,
+    )?;
+    std::fs::write(
+        startup.path().join(".zshrc"),
+        r#"
+if (( ${+DIRLUME_ZSH_USER_DOTDIR} )); then
+    export ZDOTDIR="$DIRLUME_ZSH_USER_DOTDIR"
+else
+    unset ZDOTDIR
+fi
+unset DIRLUME_ZSH_USER_DOTDIR
+if [[ -r "${ZDOTDIR-$HOME}/.zshrc" ]]; then
+    builtin source "${ZDOTDIR-$HOME}/.zshrc"
+fi
+builtin source "$DIRLUME_ZSH_STARTUP/dirlume-prompt"
+"#,
+    )?;
+    let prompt = format!(
+        "{}\n{}\n",
+        r#"if [[ "$PWD" != "$DIRLUME_ZSH_DIRECTORY" ]]; then builtin cd -- "$DIRLUME_ZSH_DIRECTORY"; fi
+unset DIRLUME_ZSH_STARTUP DIRLUME_ZSH_DIRECTORY"#,
+        unix_prompt("zsh", false)
+    );
+    std::fs::write(startup.path().join("dirlume-prompt"), prompt)?;
+    Ok(startup)
+}
+
 struct Terminal {
-    master: Box<dyn MasterPty + Send>,
+    master: Option<Box<dyn MasterPty + Send>>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn ChildKiller + Send + Sync>,
+    #[cfg(unix)]
+    _zsh_startup: Option<tempfile::TempDir>,
 }
 
 impl Drop for Terminal {
@@ -232,6 +300,7 @@ impl Terminals {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Output {
     Data { data: String },
+    Finished { code: u32 },
     Closed,
     Disconnected,
 }
@@ -255,6 +324,7 @@ pub struct OpenTerminal {
     cols: u16,
     refresh_environment: bool,
     ssh: Option<SshSource>,
+    user_menu: Option<user_menu::Run>,
 }
 
 #[derive(Deserialize)]
@@ -276,9 +346,6 @@ pub fn shell_program() -> std::ffi::OsString {
 
 fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<Terminal>>, bool)> {
     let cwd = local::absolute(&request.directory).map_err(message)?;
-    let pair = native_pty_system()
-        .openpty(size(request.rows, request.cols))
-        .map_err(message)?;
     let shell = shell_program();
     #[cfg(windows)]
     let mut command = {
@@ -297,23 +364,86 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
     };
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(&shell);
+    #[cfg(unix)]
+    let zsh_startup = (std::path::Path::new(&shell).file_name()
+        == Some(std::ffi::OsStr::new("zsh")))
+    .then(|| configure_zsh(&mut command, cwd))
+    .transpose()
+    .map_err(message)?;
+    #[cfg(unix)]
+    let zsh_tracks_prompt = zsh_startup.is_some();
     #[cfg(not(windows))]
     let _ = request.refresh_environment;
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
     command.env("DIRLUME_PROMPT_TOKEN", request.prompt_token);
+    let terminal = start_pty(
+        command,
+        size(request.rows, request.cols),
+        output,
+        None,
+        #[cfg(unix)]
+        zsh_startup,
+    )?;
+    #[cfg(not(windows))]
+    let tracks_prompt = zsh_tracks_prompt
+        || install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer)
+            .map_err(message)?;
+    #[cfg(windows)]
+    let tracks_prompt = true;
+    Ok((terminal, tracks_prompt))
+}
+
+fn start_pty(
+    command: CommandBuilder,
+    dimensions: PtySize,
+    output: Channel<Output>,
+    menu_label: Option<String>,
+    #[cfg(unix)] zsh_startup: Option<tempfile::TempDir>,
+) -> Result<Arc<Mutex<Terminal>>> {
+    let pair = native_pty_system().openpty(dimensions).map_err(message)?;
     let mut reader = pair.master.try_clone_reader().map_err(message)?;
     let writer = pair.master.take_writer().map_err(message)?;
     let mut child = pair.slave.spawn_command(command).map_err(message)?;
     drop(pair.slave);
     let terminal = Arc::new(Mutex::new(Terminal {
-        master: pair.master,
+        master: Some(pair.master),
         writer,
         child: child.clone_killer(),
+        #[cfg(unix)]
+        _zsh_startup: zsh_startup,
     }));
+    let (child, menu_status) = if menu_label.is_some() {
+        let terminal = Arc::downgrade(&terminal);
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("dirlume-menu-wait".into())
+            .spawn(move || {
+                let _ = send.send(child.wait());
+                // ConPTY keeps its output open until the pseudoconsole closes, even
+                // after the shell has exited. Release it while the reader drains.
+                let master = terminal
+                    .upgrade()
+                    .and_then(|terminal| terminal.lock().ok()?.master.take());
+                drop(master);
+            })
+            .map_err(message)?;
+        (None, Some(receive))
+    } else {
+        (Some(child), None)
+    };
     std::thread::Builder::new()
         .name("dirlume-terminal".into())
         .spawn(move || {
+            if let Some(label) = &menu_label {
+                let label: String = label
+                    .chars()
+                    .filter(|character| !character.is_control())
+                    .collect();
+                let _ = output.send(Output::Data {
+                    data: STANDARD.encode(format!("{label}\r\n")),
+                });
+            }
             let mut bytes = [0; 8192];
             loop {
                 let length = match reader.read(&mut bytes) {
@@ -340,26 +470,34 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
                     break;
                 }
             }
-            let _ = output.send(Output::Closed);
-            if let Err(error) = child.wait() {
-                failure("wait_terminal", FailureCode::Io, error.raw_os_error());
+            if let Some(status) = menu_status
+                .and_then(|receiver| receiver.recv().ok())
+                .and_then(std::result::Result::ok)
+            {
+                let _ = output.send(Output::Finished {
+                    code: status.exit_code(),
+                });
+            } else {
+                let _ = output.send(Output::Closed);
+            }
+            if let Some(mut child) = child {
+                if let Err(error) = child.wait() {
+                    failure("wait_terminal", FailureCode::Io, error.raw_os_error());
+                }
             }
         })
         .map_err(message)?;
-    #[cfg(not(windows))]
-    let tracks_prompt =
-        install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer).map_err(message)?;
-    #[cfg(windows)]
-    let tracks_prompt = true;
-    Ok((terminal, tracks_prompt))
+    Ok(terminal)
 }
 
 #[tauri::command]
 pub async fn open_terminal(
-    request: OpenTerminal,
+    mut request: OpenTerminal,
     output: Channel<Output>,
     state: State<'_, Terminals>,
     ssh_state: State<'_, ssh::SshState>,
+    app: AppHandle,
+    menus: State<'_, user_menu::UserMenus>,
 ) -> Result<bool> {
     let id = request.id;
     let connection = request
@@ -367,6 +505,15 @@ pub async fn open_terminal(
         .as_ref()
         .map(|source| ssh_state.connection(source.connection))
         .transpose()?;
+    let user_menu = request
+        .user_menu
+        .take()
+        .map(|run| user_menu::config_path(&app).map(|personal| (run, personal)))
+        .transpose()?;
+    if connection.is_some() && user_menu.is_some() {
+        return Err("Choose a local file pane to use the User Menu.".into());
+    }
+    let menus = menus.inner().clone();
     let (terminal, tracks_prompt) = blocking_for("open_terminal", move || {
         if let (Some(source), Some(connection)) = (&request.ssh, connection) {
             let dimensions = size(request.rows, request.cols);
@@ -379,6 +526,17 @@ pub async fn open_terminal(
                 output,
             )?;
             Ok((SharedTerminal::Ssh(Arc::new(terminal)), true))
+        } else if let Some((run, personal)) = user_menu {
+            let (command, label) = menus.prepare(run, &personal, request.refresh_environment)?;
+            let terminal = start_pty(
+                command,
+                size(request.rows, request.cols),
+                output,
+                Some(label),
+                #[cfg(unix)]
+                None,
+            )?;
+            Ok((SharedTerminal::Local(terminal), false))
         } else {
             create(request, output)
                 .map(|(terminal, tracks_prompt)| (SharedTerminal::Local(terminal), tracks_prompt))
@@ -416,12 +574,12 @@ pub async fn resize_terminal(
     let terminal = state.get(id)?;
     let size = size(rows, cols);
     blocking(move || match terminal {
-        SharedTerminal::Local(terminal) => terminal
-            .lock()
-            .map_err(message)?
-            .master
-            .resize(size)
-            .map_err(message),
+        SharedTerminal::Local(terminal) => {
+            if let Some(master) = &terminal.lock().map_err(message)?.master {
+                master.resize(size).map_err(message)?;
+            }
+            Ok(())
+        }
         SharedTerminal::Ssh(terminal) => terminal.resize(size.rows, size.cols),
     })
     .await
@@ -435,6 +593,136 @@ pub async fn close_terminal(id: u32, state: State<'_, Terminals>) -> Result<()> 
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+pub(crate) fn run_menu_fixture(command: CommandBuilder) -> (u32, String) {
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+
+    let (send, receive) = mpsc::channel();
+    let output = Channel::new(move |value| {
+        if let tauri::ipc::InvokeResponseBody::Json(json) = value {
+            let _ = send.send(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+        }
+        Ok(())
+    });
+    let terminal = start_pty(
+        command,
+        size(24, 80),
+        output,
+        Some("Fixture".into()),
+        #[cfg(unix)]
+        None,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut bytes = Vec::new();
+    let mut answered = [
+        ("\x1b[6n", b"\x1b[1;1R".as_slice(), 0),
+        ("\x1b[c", b"\x1b[?1;2c".as_slice(), 0),
+    ];
+    loop {
+        let value = receive
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "No menu exit result after output: {}",
+                    String::from_utf8_lossy(&bytes)
+                )
+            });
+        if let Some(code) = value["code"].as_u64() {
+            return (code as u32, String::from_utf8_lossy(&bytes).into_owned());
+        }
+        let data = value["data"]
+            .as_str()
+            .expect("Expected terminal output or an exit code");
+        bytes.extend(STANDARD.decode(data).unwrap());
+        let transcript = String::from_utf8_lossy(&bytes);
+        for (query, response, count) in &mut answered {
+            let requests = transcript.matches(*query).count();
+            if requests > *count {
+                let mut terminal = terminal.lock().unwrap();
+                for _ in *count..requests {
+                    let _ = terminal.writer.write_all(response);
+                }
+                let _ = terminal.writer.flush();
+                *count = requests;
+            }
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn zsh_initializes_from_files_before_the_first_pty_prompt() {
+    use std::{fs, path::Path, sync::mpsc, time::Duration};
+
+    let shell = ["/bin/zsh", "/usr/bin/zsh"]
+        .into_iter()
+        .find(|shell| Path::new(shell).is_file());
+    let Some(shell) = shell else { return };
+    let fixture = tempfile::tempdir().unwrap();
+    let dotdir = fixture.path().join("user startup");
+    fs::create_dir(&dotdir).unwrap();
+    fs::write(dotdir.join(".zshenv"), "export STARTUP_FROM_USER=present\n").unwrap();
+    fs::write(dotdir.join(".zshrc"), "cd /\n").unwrap();
+    let token = "Dirlume-zsh-startup-test";
+    for pane in ["left", "right"] {
+        let root = fixture.path().join(pane);
+        let next = root.join("test directory");
+        fs::create_dir_all(&next).unwrap();
+        let root = root.canonicalize().unwrap();
+        let next = next.canonicalize().unwrap();
+        let pair = native_pty_system().openpty(size(24, 80)).unwrap();
+        let mut command = CommandBuilder::new(shell);
+        command.cwd(&root);
+        command.env("ZDOTDIR", &dotdir);
+        command.env("DIRLUME_PROMPT_TOKEN", token);
+        command.env("TERM", "xterm-256color");
+        command.env("HISTFILE", "/dev/null");
+        let _startup = configure_zsh(&mut command, &root).unwrap();
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut writer = pair.master.take_writer().unwrap();
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let (send, receive) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut transcript = Vec::new();
+            let _ = reader.read_to_end(&mut transcript);
+            let _ = send.send(String::from_utf8_lossy(&transcript).into_owned());
+        });
+        writer.write_all(b"printf 'profile:%s\\n' \"$STARTUP_FROM_USER\"\ncd -- 'test directory'\npwd\nexit\n").unwrap();
+        writer.flush().unwrap();
+        let transcript = receive
+            .recv_timeout(Duration::from_secs(15))
+            .unwrap_or_else(|error| {
+                let _ = child.kill();
+                panic!("Zsh did not finish: {error}");
+            });
+        assert!(child.wait().unwrap().success(), "{transcript:?}");
+        assert!(transcript.contains("profile:present"));
+        assert!(!transcript.contains("__dirlume_prompt"), "{transcript:?}");
+        let marker = format!("\x1b]2;{token}:0:");
+        let directories: Vec<_> = transcript
+            .split(&marker)
+            .skip(1)
+            .map(|tail| STANDARD.decode(tail.split_once(':').unwrap().0).unwrap())
+            .collect();
+        assert_eq!(
+            directories.first().map(Vec::as_slice),
+            Some(root.as_os_str().as_encoded_bytes()),
+            "{transcript:?}"
+        );
+        assert!(
+            directories
+                .iter()
+                .any(|path| path.as_slice() == next.as_os_str().as_encoded_bytes()),
+            "{transcript:?}"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -520,6 +808,7 @@ mod tests {
                 cols: 120,
                 refresh_environment: false,
                 ssh: None,
+                user_menu: None,
             },
             output,
         )

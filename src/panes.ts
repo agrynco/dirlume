@@ -1,4 +1,4 @@
-import { api, isFileServer, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { api, isFileServer, supportsFileTree, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
 import { connectionEntries } from "./savedConnections";
 
@@ -191,18 +191,23 @@ export function localPath(path: string): Extract<Place, { kind: "local" }> {
 }
 
 export function filesystemPlace(path: string): FileLocation {
+  if (/^smb:\/\//i.test(path) || !windowsClient && path.startsWith("\\\\")) return { kind: "smbRoot", path };
   const [host, share] = uncParts(path);
   return host && !share ? { kind: "smbRoot", path: "\\\\" + host } : localPath(path);
 }
 
 export function childPlace(place: FileLocation, name: string): FileLocation {
+  if (!windowsClient && place.kind === "smbRoot") {
+    return { kind: "smbRoot", path: place.path.replace(/\/+$/, "") + "/" + encodeURIComponent(name) };
+  }
   if (place.kind === "server" || isFileServer(place) || place.kind === "archive") return { ...place, segments: [...place.segments, name] };
   if (place.kind === "kswitcher") {
     const path = place.path ? place.path + (place.path.endsWith("\\") ? "" : "\\") + name : name + "\\";
     return { ...place, path, parent: null };
   }
   const separator = windowsClient ? "\\" : "/";
-  return localPath(place.path + (place.path.endsWith(separator) ? "" : separator) + name);
+  const child = localPath(place.path + (place.path.endsWith(separator) ? "" : separator) + name);
+  return place.kind === "local" && place.smb ? { ...child, smb: place.smb } : child;
 }
 
 export function parentPlace(place: Place | null): FileLocation | null {
@@ -214,6 +219,10 @@ export function parentPlace(place: Place | null): FileLocation | null {
   }
   if (place.kind === "kswitcher") return place.parent === null ? null : { ...place, path: place.parent, parent: null };
   if (place.kind === "smbRoot") return null;
+  if (place.smb) {
+    if (place.path === place.smb.root) return { kind: "smbRoot", path: place.smb.server };
+    return place.parent ? { kind: "local", path: place.parent, parent: null, smb: place.smb } : null;
+  }
   const [host, share, folder] = uncParts(place.path);
   if (host && share && !folder) return { kind: "smbRoot", path: "\\\\" + host };
   return place.parent ? filesystemPlace(place.parent) : null;
@@ -315,12 +324,13 @@ export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?:
   }
   const unc = uncParts(place.path);
   if (place.kind === "smbRoot" || unc.length === 2) {
-    const result = await api.connectSmb("\\\\" + unc.join("\\"), null, false);
+    const path = windowsClient && unc.length ? "\\\\" + unc.join("\\") : place.path;
+    const result = await api.connectSmb(path, null, false);
     if (result.kind === "credentials_required") throw new SmbCredentialsRequired();
     return smbLocation(result);
   }
   const listing = await api.listLocal(place.path);
-  return { place: { kind: "local", path: listing.path, parent: listing.parent }, listing };
+  return { place: { kind: "local", path: listing.path, parent: listing.parent, smb: place.smb }, listing };
 }
 
 function pushHistory(pane: PaneState, place: Place) {
@@ -348,7 +358,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   const retained = (key: string) => {
     if (current.has(key)) return true;
     const slash = key.indexOf("/");
-    if (slash < 0 || place.kind !== "local") return false;
+    if (slash < 0 || !supportsFileTree(place)) return false;
     const branch = current.get(key.slice(0, slash));
     return !!branch?.directory && !branch.link;
   };

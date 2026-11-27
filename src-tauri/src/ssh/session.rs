@@ -22,7 +22,7 @@ use crate::{
     netbox_connection::{self, WaitError},
     protocol::RemoteListing,
     remote_recycle::{protect_path, RecoveryPath, RecyclePreferences},
-    remote_transfer::{self, DownloadSession as _, Entry as _, Session as _, UploadSession as _},
+    remote_transfer::{self, Entry as _, Session as _, UploadSession as _},
 };
 
 const CHUNK: u32 = 32 * 1024;
@@ -124,6 +124,19 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Session {
+    pub(crate) fn create_folder(&mut self, segments: &[String]) -> SftpResult<()> {
+        self.wait(self.sftp.fs().create_dir(Self::absolute(segments)?))
+    }
+
+    pub(crate) fn create_file(&mut self, segments: &[String], mut bytes: &[u8]) -> SftpResult<()> {
+        let stage = self.stage_upload(segments, &mut bytes, |_| Ok(()))?;
+        let result = self.publish_stage(&stage, segments, false);
+        if result.is_err() {
+            self.remove_stage(&stage);
+        }
+        result
+    }
+
     fn wait<T, E: Into<SftpFailure>>(
         &self,
         operation: impl std::future::Future<Output = std::result::Result<T, E>>,
@@ -151,7 +164,7 @@ impl Session {
     pub(crate) fn verify_uploaded_contents(
         &mut self,
         segments: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + std::io::Seek),
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<()> {
         let changed = "The uploaded SSH file changed. The local source was kept.";
@@ -228,6 +241,9 @@ impl Session {
         let bin = self
             .wait(self.sftp.fs().canonicalize(Self::absolute(&bin)?))
             .map_err(|error| {
+                if error == SftpFailure::PermissionDenied {
+                    return error.into();
+                }
                 format!(
                     "Could not open the remote recycle bin. {}",
                     String::from(error)
@@ -247,6 +263,9 @@ impl Session {
                     .create(Self::absolute(folder)?),
             )
             .map_err(|error| {
+                if error == SftpFailure::PermissionDenied {
+                    return error.into();
+                }
                 format!(
                     "Could not prepare the remote recycle bin. {}",
                     String::from(error)
@@ -256,13 +275,16 @@ impl Session {
         Ok((Self::absolute(&source)?, Self::absolute(&path.destination)?))
     }
 
-    pub(super) fn recycle(&mut self, segments: &[String]) -> Result<()> {
+    pub(crate) fn recycle(&mut self, segments: &[String]) -> Result<()> {
         if !self.recycle_bin.keep_deleted {
             return Err("The remote recycle bin is disabled for this profile.".to_owned());
         }
         let (source, recovery) = self.prepare_recovery(segments)?;
         self.wait(self.sftp.fs().rename(source, &recovery))
             .map_err(|error| {
+                if error == SftpFailure::PermissionDenied {
+                    return error.into();
+                }
                 format!(
                     "Could not confirm the move to {recovery}. {}",
                     String::from(error)
@@ -270,7 +292,10 @@ impl Session {
             })
     }
 
-    fn critical<T>(&self, operation: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    pub(super) fn critical<T>(
+        &self,
+        operation: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
         let deadline = self.client.1.timeout().unwrap_or(Duration::from_secs(15));
         tauri::async_runtime::block_on(netbox_connection::wait(Some(deadline), None, operation))
             .map_err(|error| message(std::io::Error::from(error)))?
@@ -316,9 +341,12 @@ impl Session {
                 .fs()
                 .rename(&target, &recovery)
                 .await
-                .map_err(message)
+                .map_err(|error| SftpFailure::from(error).into())
         })
         .map_err(|error| {
+            if error == super::PERMISSION_DENIED {
+                return error;
+            }
             format!(
                 "Could not confirm preservation of the previous file. Check {recovery}. {error}"
             )
@@ -449,17 +477,9 @@ impl Session {
             .ok_or_else(|| "Choose a regular SSH file.".into())
     }
 
-    pub fn remove(&mut self, segments: &[String], recursive: bool) -> Result<()> {
-        let entry = self
-            .stat(segments)?
-            .ok_or("The SSH item no longer exists.")?;
+    pub(crate) fn remove_leaf(&mut self, segments: &[String], directory: bool) -> Result<()> {
         let path = Self::absolute(segments)?;
-        if entry.is_directory() {
-            if recursive {
-                for child in self.children(segments)? {
-                    self.remove(&remote_transfer::child(segments, child.name()), true)?;
-                }
-            }
+        if directory {
             self.wait(self.sftp.fs().remove_dir(path))
                 .map_err(Into::into)
         } else {
@@ -499,7 +519,7 @@ impl Session {
         &mut self,
         segments: &[String],
         original: &Entry,
-        bytes: &[u8],
+        mut content: impl Read,
         revalidate: impl FnOnce(&mut Self) -> SftpResult<()>,
     ) -> SftpResult<()> {
         let target = Self::absolute(segments)?;
@@ -527,7 +547,6 @@ impl Session {
                 .create(&directory_path),
         )?;
         let result = (|| {
-            let mut content = bytes;
             let staged = self.stage_upload(
                 &remote_transfer::child(&directory, "text"),
                 &mut content,
@@ -600,15 +619,27 @@ impl remote_transfer::DownloadSession for Session {
         &mut self,
         segments: &[String],
         output: &mut std::fs::File,
-        mut progress: impl FnMut(u64) -> Result<()>,
+        progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
+        self.download_file(segments, output, progress)
+            .map_err(Into::into)
+    }
+}
+
+impl Session {
+    pub(crate) fn download_file(
+        &mut self,
+        segments: &[String],
+        output: &mut (impl Write + ?Sized),
+        mut progress: impl FnMut(u64) -> Result<()>,
+    ) -> SftpResult<()> {
         let mut file = self.wait(self.sftp.open(Self::absolute(segments)?))?;
-        let result = (|| {
+        let result = (|| -> SftpResult<()> {
             let mut buffer = Default::default();
             let mut total = 0;
             while let Some(mut data) = self.wait(file.read(CHUNK, buffer))? {
                 if data.is_empty() {
-                    return Err("The SSH server returned an empty data packet.".to_owned());
+                    return Err("The SSH server returned an empty data packet.".into());
                 }
                 output.write_all(&data).map_err(message)?;
                 total += data.len() as u64;
@@ -619,7 +650,7 @@ impl remote_transfer::DownloadSession for Session {
             Ok(())
         })();
         let closed = self.wait(file.close());
-        result.and(closed.map_err(Into::into))
+        result.and(closed)
     }
 }
 
@@ -656,8 +687,7 @@ impl remote_transfer::UploadSession for Session {
         .map(|_| ())
     }
     fn mkdir(&mut self, segments: &[String]) -> Result<()> {
-        self.wait(self.sftp.fs().create_dir(Self::absolute(segments)?))
-            .map_err(Into::into)
+        self.create_folder(segments).map_err(Into::into)
     }
 
     fn upload_to_stage(

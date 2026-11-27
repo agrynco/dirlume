@@ -60,6 +60,10 @@ async function fixture(browser, refresh) {
       if (window.sftpFixture) await window.sftpFixture("write", `${path}/${name}`);
       remote[path].push(entry(name));
     };
+    state.remove = async (path, name) => {
+      if (window.sftpFixture) await window.sftpFixture("remove", `${path}/${name}`);
+      remote[path] = remote[path].filter((entry) => entry.name !== name);
+    };
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1,
       invoke: async (command, args) => {
@@ -86,7 +90,7 @@ async function fixture(browser, refresh) {
           const path = "/" + args.segments.join("/");
           state.listings.push([args.id, path]);
           if (args.reuseSudo) state.requests.push(["ssh", args.id, path]);
-          if (args.id === state.offline) {
+          if (args.id === state.offline || (args.id === 37 && path === state.lostPath)) {
             if (state.deferLoss) {
               state.deferLoss = false;
               await new Promise((done) => { state.releaseLoss = done; });
@@ -96,7 +100,14 @@ async function fixture(browser, refresh) {
           }
           if (args.id === 37 && state.pathError) throw new Error(state.pathError);
           if (state.fail) throw new Error("SSH fixture could not list the directory.");
+          if (path === "/destination/locked") {
+            if (args.sudoPassword !== "fixture-password") throw new Error("SSH permission denied.");
+            return { entries: [{ ...entry("measured.txt"), size: 4 }], omitted: 0, elevated: true };
+          }
           const listing = { entries: await entriesFor(path), omitted: 0, elevated: false };
+          if (state.measureFixture && path === "/destination") {
+            listing.entries.push({ ...entry("locked"), directory: true, size: null });
+          }
           if (state.hold) {
             state.hold = false;
             await new Promise((resolve) => { state.release = resolve; });
@@ -124,6 +135,14 @@ async function fixture(browser, refresh) {
             matches: names.map((label) => ({ label, text: label, directory: false })) };
         }
         if (command === "transfer_item") {
+          if (args.request.source.kind === "ssh" && args.request.moving) {
+            const { source, destination } = args.request;
+            if (source.connection !== state.connection || destination !== state.root) throw new Error("The SSH move used the wrong path or connection.");
+            const name = source.segments.at(-1);
+            state.local.push(entry(name));
+            await state.remove("/destination", name);
+            return { kind: "completed" };
+          }
           if (args.request.sshDestination !== state.connection) throw new Error("The upload used the wrong SSH connection.");
           const { destination, source, moving, retry } = args.request;
           state.transfers ??= [];
@@ -138,12 +157,51 @@ async function fixture(browser, refresh) {
             await state.write(destination, "already-committed.txt");
             throw new Error("The remaining upload failed.");
           }
+          if (state.transfer === "sudo") {
+            await state.write(destination, "first-file.txt");
+            const allowed = await new Promise((resolve) => {
+              state.sudoRequest = { id: args.id, ticket: destination, resolve };
+              args.output.onmessage({ kind: "sudo_required", ticket: destination,
+                address: "fixture:22", path: destination + "/protected" });
+            });
+            if (!allowed) throw new Error("SSH permission denied.");
+          }
           if (!moving || !retry) await state.write(destination, source.name);
           if (moving && state.transfer === "cleanup-failed") {
             return { kind: "source_retained", destination: "/destination/rollback.txt", source: state.root + "/rollback.txt", error: "Sharing violation." };
           }
           if (moving) state.local = state.local.filter(({ name }) => name !== source.name);
           return { kind: "completed" };
+        }
+        if (command === "authorize_transfer_sudo") {
+          if (args.id !== state.sudoRequest?.id || args.ticket !== state.sudoRequest?.ticket) throw new Error("Unknown request.");
+          if (args.password !== "fixture-password") throw new Error("The server rejected the sudo password.");
+          state.sudoRequest.resolve(true);
+          state.sudoRequest = null;
+          return null;
+        }
+        if (command === "delete_ssh") {
+          const path = "/" + args.request.segments.join("/");
+          const allowed = await new Promise((resolve) => {
+            state.sudoRequest = { id: args.job, ticket: path, resolve };
+            args.output.onmessage({ kind: "sudo_required", ticket: path, address: "fixture:22", path });
+          });
+          if (!allowed) throw new Error("SSH permission denied.");
+          await state.remove("/destination", args.request.segments.at(-1));
+          return null;
+        }
+        if (command === "rename_ssh") {
+          if (args.sudoPassword !== "fixture-password") throw new Error("SSH permission denied.");
+          await state.remove("/destination", args.segments.at(-1));
+          await state.write("/destination", args.name);
+          return null;
+        }
+        if (command === "decline_transfer_sudo") {
+          if (args.id === state.sudoRequest?.id && args.ticket === state.sudoRequest.ticket) {
+            state.sudoRequest.resolve(false);
+            state.sudoRequest = null;
+          }
+          return null;
         }
         if (command === "cancel_transfer") { state.cancelTransfer(); return null; }
         return null;
@@ -240,7 +298,7 @@ async function verifyConnectionLoss(browser) {
     await waitPath(explicit, "left", "/destination");
     const address = await editPaneAddress(explicit, "left");
     await address.fill("/elsewhere");
-    await explicit.evaluate(() => { window.sshFixture.offline = 37; });
+    await explicit.evaluate(() => { window.sshFixture.lostPath = "/elsewhere"; });
     await address.press("Enter");
     await waitPath(explicit, "left", "NetBox");
     await waitPath(explicit, "right", "/destination");
@@ -448,6 +506,71 @@ try {
     }
     await page.close();
   }
+  const sudoPage = await fixture(browser);
+  await connect(sudoPage, "right");
+  await sudoPage.evaluate(() => { window.sshFixture.transfer = "sudo"; });
+  await upload(sudoPage, "left", "upload.txt");
+  const permissions = sudoPage.getByRole("dialog", { name: "SSH permissions", exact: true });
+  await permissions.getByText("/destination/protected", { exact: true }).waitFor();
+  await permissions.getByText("fixture:22", { exact: true }).waitFor();
+  const password = permissions.getByLabel("Sudo password", { exact: true });
+  await password.fill("wrong-fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await permissions.getByRole("alert").filter({ hasText: "The server rejected the sudo password." }).waitFor();
+  assert.equal(await password.inputValue(), "");
+  await password.fill("fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await row(sudoPage, "right", "upload.txt").waitFor();
+  assert.equal(await row(sudoPage, "right", "first-file.txt").count(), 1);
+  assert.equal(await sudoPage.evaluate(() => window.sshFixture.transfers.length), 1);
+  await row(sudoPage, "right", "upload.txt").click();
+  await list(sudoPage, "right").press("Shift+Delete");
+  const deletion = sudoPage.getByRole("dialog", { name: "Delete permanently", exact: true });
+  await button(deletion, "Delete permanently").click();
+  await permissions.getByText("/destination/upload.txt", { exact: true }).waitFor();
+  await button(permissions, "Cancel").click();
+  await deletion.waitFor({ state: "hidden" });
+  assert.equal(await row(sudoPage, "right", "upload.txt").count(), 1);
+  await row(sudoPage, "right", "upload.txt").click();
+  await list(sudoPage, "right").press("Shift+Delete");
+  await button(deletion, "Delete permanently").click();
+  await password.fill("fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await row(sudoPage, "right", "upload.txt").waitFor({ state: "detached" });
+  await row(sudoPage, "right", "first-file.txt").click();
+  await list(sudoPage, "right").press("F2");
+  const rename = sudoPage.getByRole("dialog", { name: "Rename", exact: true });
+  await rename.getByLabel("Name", { exact: true }).fill("renamed.txt");
+  await button(rename, "Rename").click();
+  await permissions.getByText("/destination/first-file.txt", { exact: true }).waitFor();
+  await password.fill("fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await row(sudoPage, "right", "renamed.txt").waitFor();
+  await sudoPage.evaluate(() => { window.sshFixture.measureFixture = true; });
+  await button(pane(sudoPage, "right"), "Refresh folder").click();
+  await row(sudoPage, "right", "locked").click();
+  await list(sudoPage, "right").press("F3");
+  await permissions.getByText("/destination/locked", { exact: true }).waitFor();
+  await password.fill("fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await permissions.waitFor({ state: "hidden" });
+  await list(sudoPage, "right").getByText("4 B", { exact: true }).last().waitFor();
+  await button(pane(sudoPage, "right"), "Tree").click();
+  const tree = sudoPage.locator("#right-files");
+  const branch = tree.getByRole("treeitem", { name: /^locked/ });
+  await button(branch, "Expand folder").click();
+  await permissions.getByText("/destination/locked", { exact: true }).waitFor();
+  await password.fill("fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await tree.getByRole("treeitem", { name: /measured\.txt/ }).waitFor();
+  await button(pane(sudoPage, "right"), "List").click();
+  await row(sudoPage, "right", "renamed.txt").click();
+  await list(sudoPage, "right").press("F6");
+  const downloadMove = sudoPage.getByRole("dialog", { name: "Rename or move", exact: true });
+  await button(downloadMove, "Move").click();
+  await row(sudoPage, "left", "renamed.txt").waitFor();
+  await row(sudoPage, "right", "renamed.txt").waitFor({ state: "detached" });
+  await sudoPage.close();
   console.log("Verified SSH uploads during listing and navigation, failures, skips, cancellation, pane refresh, and custom or disabled bindings.");
   console.log("Verified SFTP connection identity, local-to-remote move, editable paths, and cleanup retry in both pane positions.");
   if (process.env.DIRLUME_SFTP_TEST_PYTHON) console.log("Listings and writes used a live loopback SFTP connection.");

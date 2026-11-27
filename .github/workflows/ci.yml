@@ -124,9 +124,9 @@ jobs:
         run: node scripts/build-version.mjs prepare
       - name: Install frontend dependencies
         run: npm ci
-      - name: Verify editor line endings and workspace resource ownership
+      - name: Verify editor, terminal draft, and workspace resource behavior
         if: github.event.action != 'closed'
-        run: node --test scripts/text-format.test.mjs scripts/workspace-resources.test.mjs
+        run: node --test scripts/text-format.test.mjs scripts/terminal-snippet.test.mjs scripts/workspace-resources.test.mjs
       - name: Check package and release versions
         run: node scripts/package.mjs check
       - name: Build and type-check React
@@ -150,6 +150,9 @@ jobs:
       - name: Verify the optional status bar
         if: github.event.action != 'closed'
         run: node scripts/status-bar-smoke.mjs
+      - name: Verify clearing the error log from the viewer
+        if: github.event.action != 'closed'
+        run: node scripts/diagnostic-log-smoke.mjs
       - name: Verify terminal directory synchronization
         if: github.event.action != 'closed'
         run: node scripts/terminal-directory-smoke.mjs
@@ -168,6 +171,9 @@ jobs:
       - name: Verify independent text surface appearance
         if: github.event.action != 'closed'
         run: node scripts/text-appearance-smoke.mjs
+      - name: Verify whitespace and shared tab stops in text documents
+        if: github.event.action != 'closed'
+        run: node scripts/text-whitespace-smoke.mjs
       - name: Verify Quick View in both panes
         if: github.event.action != 'closed'
         run: node scripts/quick-view-smoke.mjs
@@ -217,6 +223,9 @@ jobs:
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs
+      - name: Verify automatic file pane column widths
+        if: github.event.action != 'closed'
+        run: node scripts/pane-column-sizing-smoke.mjs
       - name: Verify local Search results actions and refresh
         if: github.event.action != 'closed'
         run: node scripts/search-results-smoke.mjs

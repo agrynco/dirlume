@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testNativeJumpHosts } from "./ssh-jump-native-smoke.mjs";
-import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
+import { testMountedSmbNavigation, testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testSystemTheme } from "./system-theme-smoke.mjs";
 import { testMarkdown, testViewerReadingArea } from "./markdown-smoke.mjs";
@@ -54,6 +54,7 @@ if (process.platform !== "win32") throw new Error("This smoke test uses Windows 
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 if (process.env.CI) {
   await testSmbNavigation();
+  await testMountedSmbNavigation();
   await testFolderMeasurement();
   await testFolderNavigationHeader();
   await testSyntaxMenu();
@@ -62,12 +63,17 @@ if (process.env.CI) {
   await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
+const build = resolve(`src-tauri/target/${profile}`);
+const executable = join(temp, "Dirlume.exe");
+await copyFile(join(build, "dirlume.exe"), executable);
+await cp(join(build, "archive-tools"), join(temp, "archive-tools"), { recursive: true }).catch((error) => {
+  if (error.code !== "ENOENT") throw error;
+});
 const dockerCompletionFixture = await makeDockerFixture(temp);
 const src = join(temp, "from");
 const dst = join(temp, "to");
 const diagnostics = join(temp, "diagnostics");
 const diagnosticsFile = join(diagnostics, "diagnostics.jsonl");
-const highlightsDirectory = join(temp, "release-highlights");
 const attributes = join(temp, "attributes");
 await mkdir(src);
 await mkdir(dst);
@@ -109,9 +115,9 @@ let browser;
 let otherVolume;
 let lockedBy;
 
-async function startDesktop() {
+async function launchDesktop(program, storage) {
   const debuggingPort = await port();
-  child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
+  const childProcess = spawn(program, [], {
     windowsHide: true,
     env: {
       ...process.env,
@@ -123,40 +129,117 @@ async function startDesktop() {
       ...(process.env.DIRLUME_INTERNAL_CDP === "1"
         ? { DIRLUME_CDP_PORT: String(debuggingPort) }
         : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
-      WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
+      WEBVIEW2_USER_DATA_FOLDER: join(storage, "webview"),
       DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
       DIRLUME_SSH_TEST_CONFIG: join(temp, "ssh-config"),
-      DIRLUME_TEST_DIAGNOSTICS_DIR: diagnostics,
-      DIRLUME_TEST_HIGHLIGHTS_DIR: highlightsDirectory,
+      DIRLUME_TEST_DIAGNOSTICS_DIR: join(storage, "diagnostics"),
+      DIRLUME_TEST_HIGHLIGHTS_DIR: join(storage, "release-highlights"),
     },
   });
   let startupError = "";
   let startupOutput = "";
-  child.on("error", (error) => { startupError = error.message; });
-  child.stderr.on("data", (chunk) => { startupOutput = (startupOutput + chunk).slice(-2500); });
-  for (let attempt = 0; !browser; attempt++) {
-    if (attempt === 100 || startupError || child.exitCode !== null) {
-      throw new Error(`The Windows WebView did not start. PID ${child.pid}, exit code ${child.exitCode}. ${startupError} ${startupOutput}`);
+  childProcess.on("error", (error) => { startupError = error.message; });
+  childProcess.stderr.on("data", (chunk) => { startupOutput = (startupOutput + chunk).slice(-2500); });
+  let connection;
+  try {
+    for (let attempt = 0; !connection; attempt++) {
+      if (attempt === 100 || startupError || childProcess.exitCode !== null) {
+        throw new Error(`The Windows WebView did not start. PID ${childProcess.pid}, exit code ${childProcess.exitCode}. ${startupError} ${startupOutput}`);
+      }
+      try {
+        connection = await chromium.connectOverCDP(`http://127.0.0.1:${debuggingPort}`, { timeout: 1000 });
+      } catch {
+        await setTimeout(250);
+      }
     }
+    const context = connection.contexts()[0];
+    const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
+    page.setDefaultTimeout(8000);
+    await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+    const release = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("installed_release"));
+    if (release.showOnStartup) {
+      const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
+      for (const highlight of release.highlights) await whatsNew.getByText(highlight, { exact: true }).waitFor();
+      await whatsNew.getByRole("button", { name: "Close", exact: true }).click();
+      await whatsNew.waitFor({ state: "hidden" });
+      assert.equal(await readFile(join(storage, "release-highlights", release.version), "utf8"), "");
+    }
+    return { process: childProcess, connection, page };
+  } catch (error) {
+    await connection?.close().catch(() => {});
+    await close(childProcess);
+    throw error;
+  }
+}
+
+async function startDesktop() {
+  const instance = await launchDesktop(executable, temp);
+  child = instance.process;
+  browser = instance.connection;
+  return instance.page;
+}
+
+async function testDirectComputerPairing(guest) {
+  const hostStorage = join(temp, "paired-desktop-host");
+  await mkdir(hostStorage);
+  const hostProgram = join(hostStorage, "Dirlume.exe");
+  await copyFile(executable, hostProgram);
+  const host = await launchDesktop(hostProgram, hostStorage);
+  const systemDrive = process.env.SystemDrive ?? "C:";
+  try {
+    assert.notEqual(host.process.pid, child.pid);
+    const name = await host.page.evaluate(() => window.__TAURI_INTERNALS__.invoke("computer_name")) ?? "127.0.0.1";
+    const share = await host.page.evaluate(() =>
+      window.__TAURI_INTERNALS__.invoke("start_desktop_computer_share", { address: "127.0.0.1" }));
+    await guest.bringToFront();
+    const options = await openOptionsWindow(guest);
+    await options.getByRole("button", { name: "Computers", exact: true }).click();
+    await options.getByText("Legacy pairing codes", { exact: true }).click();
+    assert.equal(await options.getByLabel("Computer name", { exact: true }).count(), 0);
+    await options.getByLabel("Pairing code", { exact: true }).evaluate((input, invitation) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, invitation);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, share.invitation);
+    await options.getByRole("button", { name: "Pair computer", exact: true }).click();
+    await options.getByRole("button", { name: `Forget ${name}`, exact: true }).waitFor();
+    await closeToolWindow(options, () => options.getByRole("button", { name: "Done", exact: true }).click());
+
+    for (const side of ["left", "right"]) {
+      const pane = guest.getByRole("region", { name: `${side} pane`, exact: true });
+      await pane.getByRole("button", { name: `Locations for ${side} pane`, exact: true }).click();
+      const computer = pane.getByRole("group", { name, exact: true });
+      const drive = computer.getByRole("button", { name: new RegExp(`^${systemDrive}`) });
+      await drive.getByText("Fixed", { exact: true }).waitFor();
+      await drive.getByText(/free of/).waitFor();
+      await drive.click();
+      await guest.waitForFunction(({ side, drive }) =>
+        document.querySelector(`#${side}-path`)?.dataset.path === `/${drive}`, { side, drive: systemDrive });
+      await pane.getByRole("option", { name: /^Windows(?:\s|$)/i }).waitFor();
+    }
+    await host.page.evaluate(() => window.__TAURI_INTERNALS__.invoke("stop_desktop_share"));
+    const left = guest.getByRole("region", { name: "left pane", exact: true });
+    await left.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+    const offline = left.getByRole("group", { name, exact: true });
+    await offline.getByRole("status").filter({ hasText: /could not|offline/i }).waitFor();
+    assert.equal(await offline.getByRole("button").count(), 0);
+    await left.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+    console.log("Verified native Dirlume-to-Dirlume pairing, drives in both panes, and revocation on a separate host process.");
+  } finally {
     try {
-      browser = await chromium.connectOverCDP(`http://127.0.0.1:${debuggingPort}`, { timeout: 1000 });
-    } catch {
-      await setTimeout(250);
+      if (!guest.isClosed()) await guest.evaluate(async (label) => {
+        const key = "dirlume.remote-connections";
+        const profiles = JSON.parse(localStorage.getItem(key) ?? "[]");
+        const paired = profiles.find((profile) => profile.label === label && profile.lan === true);
+        if (paired) {
+          await window.__TAURI_INTERNALS__.invoke("remove_server_invitation", { credential: paired.credential });
+          localStorage.setItem(key, JSON.stringify(profiles.filter((profile) => profile.id !== paired.id)));
+        }
+      }, name);
+    } finally {
+      await host.connection.close().catch(() => {});
+      await close(host.process);
     }
   }
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
-  page.setDefaultTimeout(8000);
-  await page.getByRole("heading", { name: "Dirlume" }).waitFor();
-  const release = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("installed_release"));
-  if (release.showOnStartup) {
-    const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
-    for (const highlight of release.highlights) await whatsNew.getByText(highlight, { exact: true }).waitFor();
-    await whatsNew.getByRole("button", { name: "Close", exact: true }).click();
-    await whatsNew.waitFor({ state: "hidden" });
-    assert.equal(await readFile(join(highlightsDirectory, release.version), "utf8"), "");
-  }
-  return page;
 }
 
 async function exitDesktop(page) {
@@ -969,15 +1052,14 @@ try {
   const conflict = page.getByRole("dialog", { name: "File already exists" });
   await conflict.waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Previous version\n");
-  await conflict.getByRole("button", { name: "Overwrite" }).click();
+  await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
   await waitForCompletedTransfer();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
-  const folderConflict = page.getByRole("dialog", { name: "Folder already exists" });
   await navigate("left", src);
   await left.getByRole("option", { name: /^overlap/ }).click();
   await page.keyboard.press("F5");
   await startTransfer("Copy");
-  await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
+  assert.equal(await page.getByRole("dialog", { name: "Folder already exists" }).count(), 0);
   await conflict.getByText("Incoming", { exact: true }).waitFor();
   await conflict.getByText("2 B", { exact: true }).waitFor();
   assert.equal(await conflict.getByRole("button", { name: "Skip", exact: true }).evaluate((button) => document.activeElement === button), true);
@@ -1031,7 +1113,7 @@ try {
   assert.equal(await optionsContent.locator("mark, .setting-search-alias").count(), 0);
   await optionsDialog.getByRole("button", { name: "Computers", exact: true }).click();
   await optionsDialog.getByRole("heading", { name: "Computers", exact: true }).waitFor();
-  await optionsDialog.getByLabel("Pairing code", { exact: true }).waitFor();
+  await optionsDialog.getByLabel("Group code", { exact: true }).waitFor();
   assert.equal(await optionsDialog.getByRole("button", { name: "Pair computer", exact: true }).isEnabled(), false);
   assert.equal(await optionsDialog.getByLabel("KSwitcher installation folder", { exact: true }).count(), 0);
   await closeToolWindow(optionsPage);
@@ -1205,19 +1287,32 @@ try {
   await navigate("left", attributes);
   const attributeRow = (name) => left.locator(`.file-row[data-tooltip="${name}"]`);
   const attributeName = (name) => attributeRow(name).locator(".file-name");
+  const selectionForeground = (name) => attributeName(name).evaluate((element) => {
+    const sample = document.createElement("span");
+    sample.style.color = "var(--panel-selected-ink)";
+    element.append(sample);
+    const color = getComputedStyle(sample).color;
+    sample.remove();
+    return color;
+  });
   assert.equal(await attributeRow("hidden.rs").count(), 0);
   assert.equal(await attributeRow("system-hidden.dll").count(), 0);
+  const ordinary = attributeRow("ordinary.sys");
+  const currentOrdinary = ordinary.and(page.locator('[data-current="true"]'));
+  await ordinary.click();
+  await currentOrdinary.waitFor();
   assert.equal(await foreground(attributeName("system-folder")), attributeColors.system);
   assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
   await left.press("Control+h");
+  await currentOrdinary.waitFor();
   assert.equal(await foreground(attributeName(".metadata")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("hidden.rs")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
   await attributeRow("system-hidden.dll").click();
-  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), await selectionForeground("system-hidden.dll"));
   await attributeRow("system-hidden.dll").click({ modifiers: ["Control"] });
   assert.match(await attributeRow("system-hidden.dll").getAttribute("class"), /marked/);
-  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), await selectionForeground("system-hidden.dll"));
   if (process.env.DIRLUME_ATTRIBUTES_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_ATTRIBUTES_SCREENSHOT, scale: "css" });
   await left.press("Control+h");
   const properties = page.getByRole("dialog", { name: "Attributes", exact: true });
@@ -1237,15 +1332,15 @@ try {
   assert.ok(await properties.getByText("Owner", { exact: true }).isVisible());
   await flag("System attribute").check();
   await cancelAttributes();
-  assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
+  assert.notEqual(await attributeRow("ordinary.sys").getAttribute("data-file-color"), "file-system");
   await left.press("Control+a");
   await flag("System attribute").check();
   await flag("Read-only").check();
   await applyAttributes();
   await properties.getByText("Attributes saved.", { exact: true }).waitFor();
   assert.equal(await flag("Read-only").isChecked(), true);
-  await page.waitForFunction((expected) =>
-    getComputedStyle(document.querySelector('#left-files [data-tooltip="ordinary.sys"] .file-name')).color === expected, attributeColors.system);
+  await attributeRow("ordinary.sys").and(page.locator('[data-file-color="file-system"]')).waitFor();
+  assert.equal(await foreground(attributeName("ordinary.sys")), await selectionForeground("ordinary.sys"));
   await flag("Read-only").uncheck();
   await flag("System attribute").uncheck();
   await applyAttributes();
@@ -1957,13 +2052,13 @@ try {
   for (const layout of ["twin", "classic"]) {
     await layoutSelect.selectOption(layout);
     await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
-    assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
+    await page.locator(`.app[data-layout="${layout}"]`).waitFor();
     assert.ok(await leftDrives.getByRole("button").count() > 0);
     assert.equal(await actionBarDisplay(), "grid");
   }
   await layoutSelect.selectOption("standard");
   await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
-  assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
+  await page.locator('.app[data-layout="standard"]').waitFor();
   assert.equal(await leftDrives.count(), 0);
   assert.equal(await actionBarDisplay(), "grid");
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
@@ -2130,7 +2225,7 @@ try {
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowDown");
   const helpItems = menu("Help").getByRole("menuitem");
-  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log", "Clear error log"]);
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log"]);
   const errorLogAction = helpItems.filter({ hasText: "Open error log" });
   assert.equal(await errorLogAction.evaluate((item) => item.previousElementSibling?.getAttribute("role")), "separator");
   await page.keyboard.press("Enter");
@@ -2154,7 +2249,7 @@ try {
   await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
   await about.getByRole("button", { name: "Donate via monobank", exact: true }).waitFor();
   assert.ok(await about.locator("img").evaluate((image) => image.complete && image.naturalWidth > 0));
-  await about.getByText("bitcodepro", { exact: true }).waitFor();
+  assert.equal(await about.getByRole("link", { name: "Anatolii Hrynchuk", exact: true }).getAttribute("href"), "https://hrynco.com/");
   await about.getByRole("button", { name: "Report an issue", exact: true }).waitFor();
   await about.getByRole("button", { name: "Releases", exact: true }).waitFor();
   await about.getByRole("button", { name: "User guide", exact: true }).click();
@@ -2163,8 +2258,8 @@ try {
   const errorLogViewer = page.getByRole("region", { name: "diagnostics.jsonl", exact: true });
   await appendDiagnosticFixture(diagnosticsFile);
   await openMainMenu(page, "Help");
+  assert.equal(await helpItems.getByText("Clear error log", { exact: true }).count(), 0);
   await page.keyboard.press("End");
-  await page.keyboard.press("ArrowUp");
   assert.equal(await errorLogAction.evaluate((item) => item === document.activeElement), true);
   await page.keyboard.press("Enter");
   await errorLogViewer.waitFor();
@@ -2179,20 +2274,25 @@ try {
   await errorLogViewer.getByText("Text files can be at most 8 MiB.", { exact: true }).waitFor();
   await setTimeout(400);
   assert.equal((await readFile(diagnosticsFile)).length, oversizedLog.length);
-  await page.keyboard.press("Escape");
-  await errorLogViewer.waitFor({ state: "hidden" });
-  const clearLogAction = helpItems.getByText("Clear error log", { exact: true });
   const clearLogDialog = page.getByRole("dialog", { name: "Clear error log", exact: true });
-  await openMainMenu(page, "Help");
-  await clearLogAction.click();
-  await clearLogDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  const logFileMenu = errorLogViewer.getByRole("menuitem", { name: "File", exact: true });
+  const clearLogAction = errorLogViewer.getByRole("menuitem", { name: "Clear error log", exact: true });
+  await logFileMenu.press("ArrowDown");
+  await clearLogAction.press("Enter");
+  const cancelLogClear = clearLogDialog.getByRole("button", { name: "Cancel", exact: true });
+  assert.equal(await cancelLogClear.evaluate((button) => button === document.activeElement), true);
+  await cancelLogClear.click();
   assert.equal((await readFile(diagnosticsFile)).length, oversizedLog.length);
-  await openMainMenu(page, "Help");
+  await logFileMenu.click();
   await clearLogAction.click();
   await clearLogDialog.getByRole("button", { name: "Clear error log", exact: true }).click();
   await clearLogDialog.waitFor({ state: "hidden" });
   assert.equal((await readFile(diagnosticsFile)).length, 0);
+  await errorLogViewer.getByText("No errors have been logged yet.", { exact: true }).waitFor();
   await appendDiagnosticFixture(diagnosticsFile);
+  await errorLogViewer.locator(".diagnostic-entry > summary").first().waitFor();
+  await errorLogViewer.getByRole("button", { name: "Close document", exact: true }).click();
+  await errorLogViewer.waitFor({ state: "hidden" });
   await openMainMenu(page, "Files");
   const attributesAction = menu("Files").getByRole("menuitem", { name: "File attributes", exact: true });
   assert.match(await attributesAction.getAttribute("data-tooltip"), /Ctrl\+A/);
@@ -2324,12 +2424,16 @@ try {
     await otherRow.click();
     const original = await colors();
     await row.click();
-    assert.deepEqual(await colors(), ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
+    const selected = await colors();
+    assert.deepEqual(selected, ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
     await row.click({ modifiers: ["Control"] });
     await attributeList.press("Home");
+    assert.match(await row.getAttribute("class"), /\bmarked\b/);
+    assert.notEqual(await row.getAttribute("data-current"), "true");
     const marked = await colors();
     assert.notEqual(marked[0], original[0]);
-    assert.equal(marked[1], original[1]);
+    assert.notEqual(marked[1], original[1]);
+    assert.equal(marked[1], selected[1]);
   }
   if (process.env.DIRLUME_CLASSIC_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CLASSIC_SCREENSHOT, scale: "css" });
   await exitDesktop(page);
@@ -2387,7 +2491,7 @@ try {
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);
-  await testMarkdownOptionsDismissal(page, attributes);
+  await testMarkdownOptionsDismissal(page, attributes, temp);
   if (process.env.DIRLUME_SSH_FIXTURE_PYTHON) {
     await testNativeJumpHosts(page, temp, dst, join(temp, "ssh-config"), async () => {
       await exitDesktop(page);
@@ -2395,6 +2499,7 @@ try {
       return page;
     });
   }
+  await testDirectComputerPairing(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

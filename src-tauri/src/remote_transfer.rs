@@ -48,7 +48,7 @@ pub trait UploadSession: Session {
     fn upload_to_stage(
         &mut self,
         target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + io::Seek),
         progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String>;
     fn remove_stage(&mut self, stage: &str);
@@ -71,6 +71,7 @@ pub fn download<S: DownloadSession>(
     options: &local_transfer::Options,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     mut ask: impl FnMut(Conflict) -> io::Result<Decision>,
+    mut committed: impl FnMut(&Path, &Path),
 ) -> Result<bool> {
     let parent = target
         .parent()
@@ -100,7 +101,9 @@ pub fn download<S: DownloadSession>(
     if entry.is_file() && !transfer.session.matches_file(segments, &entry)? {
         return Err(file_changed::<S>());
     }
-    prepared.publish(&mut progress).map_err(message)
+    prepared
+        .publish(&mut progress, &mut committed)
+        .map_err(message)
 }
 
 fn download_entry<S: DownloadSession>(session: &mut S, segments: &[String]) -> Result<S::Entry> {
@@ -125,13 +128,18 @@ fn file_changed<S: Session>() -> String {
 
 struct StagedDownload {
     source: PathBuf,
+    remote: PathBuf,
     target: PlannedTarget,
     children: Vec<StagedDownload>,
     complete: bool,
 }
 
 impl StagedDownload {
-    fn publish(self, progress: &mut Progress<'_>) -> io::Result<bool> {
+    fn publish(
+        self,
+        progress: &mut Progress<'_>,
+        committed: &mut impl FnMut(&Path, &Path),
+    ) -> io::Result<bool> {
         progress(&self.source, 0, None)?;
         let PlannedTarget {
             path,
@@ -143,7 +151,7 @@ impl StagedDownload {
             local_transfer::verify_folder(&path, &folder)?;
             for child in self.children {
                 local_transfer::verify_folder(&path, &folder)?;
-                complete &= child.publish(progress)?;
+                complete &= child.publish(progress, committed)?;
             }
         } else {
             let moved = if let Some(file) = &replace {
@@ -167,6 +175,7 @@ impl StagedDownload {
                 }
                 Err(error) => return Err(error),
             }
+            committed(&self.remote, &path);
         }
         Ok(complete)
     }
@@ -189,6 +198,7 @@ impl<S: DownloadSession> Download<'_, S> {
     ) -> Result<StagedDownload> {
         let mut prepared = StagedDownload {
             source,
+            remote: PathBuf::from(format!("/{}", segments.join("/"))),
             target,
             children: Vec::new(),
             complete: true,
@@ -325,6 +335,7 @@ pub fn upload<S: UploadSession>(
     policy: local_transfer::Policy,
     progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+    committed: &mut impl FnMut(&Path, &Path),
 ) -> Result<bool> {
     use local_transfer::{Decision, Policy};
     progress(source, 0, None).map_err(message)?;
@@ -333,12 +344,14 @@ pub fn upload<S: UploadSession>(
         return Err("Choose local files and folders without symbolic links.".to_owned());
     }
     let existing = session.stat(target)?;
-    if let Some(entry) = &existing {
+    if let Some(entry) = existing
+        .as_ref()
+        .filter(|entry| !incoming.is_dir() || !entry.is_directory())
+    {
         if policy == Policy::Skip {
             return Ok(false);
         }
-        let replaceable =
-            (incoming.is_file() && entry.is_file()) || (incoming.is_dir() && entry.is_directory());
+        let replaceable = incoming.is_file() && entry.is_file();
         if policy != Policy::Overwrite || !replaceable {
             let conflict = local_transfer::Conflict::network(
                 S::absolute(target)?,
@@ -363,6 +376,7 @@ pub fn upload<S: UploadSession>(
         let folder = same_file::Handle::from_path(source).map_err(message)?;
         if existing.is_none() {
             session.mkdir(target)?;
+            committed(source, Path::new(&format!("/{}", target.join("/"))));
         }
         let mut complete = true;
         for item in fs::read_dir(source).map_err(message)? {
@@ -379,6 +393,7 @@ pub fn upload<S: UploadSession>(
                 policy,
                 progress,
                 ask,
+                committed,
             )?;
         }
         return Ok(complete);
@@ -406,5 +421,128 @@ pub fn upload<S: UploadSession>(
     if result.is_err() {
         session.remove_stage(&staged);
     }
-    result.map(|()| true)
+    result.map(|()| {
+        committed(source, Path::new(&format!("/{}", target.join("/"))));
+        true
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_transfer::Policy;
+
+    #[derive(PartialEq)]
+    struct TestEntry(bool);
+
+    impl Entry for TestEntry {
+        fn name(&self) -> &str {
+            unreachable!()
+        }
+        fn is_directory(&self) -> bool {
+            self.0
+        }
+        fn is_file(&self) -> bool {
+            !self.0
+        }
+        fn size(&self) -> Option<u64> {
+            None
+        }
+        fn modified(&self) -> Option<SystemTime> {
+            None
+        }
+    }
+
+    #[derive(Default)]
+    struct UploadFixture {
+        staged: Vec<u8>,
+        files: HashMap<Vec<String>, Vec<u8>>,
+    }
+
+    impl Session for UploadFixture {
+        const SOURCE: &'static str = "fixture";
+        type Entry = TestEntry;
+
+        fn stat(&mut self, segments: &[String]) -> Result<Option<TestEntry>> {
+            match segments {
+                [folder] if folder == "target" => Ok(Some(TestEntry(true))),
+                [folder, nested] if folder == "target" && nested == "nested" => {
+                    Ok(Some(TestEntry(true)))
+                }
+                _ => Ok(self
+                    .files
+                    .contains_key(segments)
+                    .then_some(TestEntry(false))),
+            }
+        }
+    }
+
+    impl UploadSession for UploadFixture {
+        fn absolute(segments: &[String]) -> Result<String> {
+            Ok("/".to_owned() + &segments.join("/"))
+        }
+        fn parse_path(_: &str) -> Result<Vec<String>> {
+            unreachable!()
+        }
+        fn check_publication(&self, _: bool) -> Result<()> {
+            Ok(())
+        }
+        fn mkdir(&mut self, _: &[String]) -> Result<()> {
+            panic!("The target directories already exist")
+        }
+        fn upload_to_stage(
+            &mut self,
+            _: &[String],
+            input: &mut (impl Read + io::Seek),
+            _: impl FnMut(u64) -> Result<()>,
+        ) -> Result<String> {
+            input.read_to_end(&mut self.staged).map_err(message)?;
+            Ok("staging".to_owned())
+        }
+        fn remove_stage(&mut self, _: &str) {
+            self.staged.clear();
+        }
+        fn rename_stage(&mut self, _: &str, target: &[String], _: bool) -> Result<()> {
+            self.files
+                .insert(target.to_vec(), std::mem::take(&mut self.staged));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn upload_merges_existing_folders_and_prompts_only_for_file_conflicts() {
+        let fixture = tempfile::tempdir().unwrap();
+        let folder = fixture.path().join("nested");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("collision"), b"incoming").unwrap();
+        fs::write(folder.join("created"), b"new").unwrap();
+        let target = vec!["target".to_owned()];
+        let nested = child(&target, "nested");
+        let collision = child(&nested, "collision");
+        let preserved = child(&nested, "preserved");
+        let mut remote = UploadFixture::default();
+        remote.files.insert(collision.clone(), b"existing".to_vec());
+        remote
+            .files
+            .insert(preserved.clone(), b"unrelated".to_vec());
+        let mut conflicts = 0;
+        assert!(upload(
+            &mut remote,
+            fixture.path(),
+            &target,
+            Policy::Ask,
+            &mut |_, _, _| Ok(()),
+            &mut |conflict| {
+                assert!(!conflict.directory && conflict.replaceable);
+                conflicts += 1;
+                Ok(Decision::Overwrite)
+            },
+            &mut |_, _| {},
+        )
+        .unwrap());
+        assert_eq!(conflicts, 1);
+        assert_eq!(remote.files[&collision], b"incoming");
+        assert_eq!(remote.files[&child(&nested, "created")], b"new");
+        assert_eq!(remote.files[&preserved], b"unrelated");
+    }
 }

@@ -45,6 +45,37 @@ pub async fn create_folders(directory: String, request: Request) -> Result<Creat
     blocking(move || create_at(local::absolute(&directory).map_err(message)?, &request)).await
 }
 
+#[tauri::command]
+pub async fn prepare_collection_folders(directory: String, paths: Vec<Vec<String>>) -> Result<()> {
+    blocking(move || {
+        create_collection_folders(local::absolute(&directory).map_err(message)?, paths)
+    })
+    .await
+}
+
+fn create_collection_folders(root: &Path, paths: Vec<Vec<String>>) -> Result<()> {
+    let root = root.canonicalize().map_err(message)?;
+    if !root.is_dir() {
+        return Err("Choose a local destination folder.".to_owned());
+    }
+    for parts in paths {
+        let mut path = root.clone();
+        for name in parts {
+            path.push(local::name_component(&name).map_err(message)?);
+            if let Err(error) = fs::create_dir(&path) {
+                if error.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(format!("{}: {error}", path.display()));
+                }
+                let metadata = fs::symlink_metadata(&path).map_err(message)?;
+                if !metadata.is_dir() || local::is_link(&metadata) {
+                    return Err(format!("{}: An item already exists.", path.display()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn create_at(directory: &Path, request: &Request) -> Result<CreatedFolders> {
     let mut seen = HashSet::new();
     let names = parse_names(&request.name, request.multiple)?;
@@ -167,6 +198,24 @@ fn create_link(link: LinkType, target: &Path, path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creates_nested_collection_folders_again_without_replacing_other_items() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = vec![vec!["Delivery".into(), "Empty".into()]];
+        create_collection_folders(root.path(), paths.clone()).unwrap();
+        create_collection_folders(root.path(), paths).unwrap();
+        let existing = root.path().join("Delivery").join("item.txt");
+        fs::write(&existing, "keep").unwrap();
+        assert!(root.path().join("Delivery").join("Empty").is_dir());
+        assert!(create_collection_folders(
+            root.path(),
+            vec![vec!["Delivery".into(), "item.txt".into(), "Other".into()]],
+        )
+        .is_err());
+        assert!(create_collection_folders(root.path(), vec![vec!["..".into()]]).is_err());
+        assert_eq!(fs::read_to_string(existing).unwrap(), "keep");
+    }
 
     #[test]
     fn parses_single_and_delimited_names_and_rejects_malformed_lists() {

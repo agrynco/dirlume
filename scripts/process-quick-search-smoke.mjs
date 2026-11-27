@@ -27,7 +27,7 @@ export async function testProcessQuickSearch(page, root) {
       await search.press("ArrowDown");
       await current.locator(".process-cell-name").getByText("powershell.exe", { exact: true }).waitFor();
       assert.notEqual(await current.getAttribute("id"), first);
-      await table.locator(".process-cell-name").getByText("dirlume.exe", { exact: true }).first().waitFor();
+      await table.locator(".process-cell-name").getByText(/^dirlume\.exe$/i).first().waitFor();
       await search.press(side === "left" ? "Escape" : "Enter");
       await search.waitFor({ state: "hidden" });
       assert.equal(await table.evaluate((element) => element === document.activeElement), true);

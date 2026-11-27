@@ -2,7 +2,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs::{self, OpenOptions},
-    io::{self, Cursor, ErrorKind, Write},
+    io::{self, Cursor, ErrorKind, Read, Write},
     os::windows::{fs::MetadataExt, fs::OpenOptionsExt, process::CommandExt},
     path::{Component, Path, PathBuf},
     process::{self, Command},
@@ -12,7 +12,7 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
-    Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT,
+    Storage::FileSystem::{FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT},
     System::Threading::{OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, PROCESS_SYNCHRONIZE},
 };
 use zip::ZipArchive;
@@ -78,44 +78,80 @@ pub fn take_failure(directory: &Path) -> Option<String> {
     Some(failure)
 }
 
+pub fn settings_directory() -> io::Result<PathBuf> {
+    env::current_exe()?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| io::Error::other("The executable folder is unavailable"))
+}
+
 pub fn read_settings(directory: &Path) -> io::Result<Option<serde_json::Value>> {
     let path = directory.join(SETTINGS);
     let _guard = SETTINGS_LOCK
         .lock()
         .map_err(|_| io::Error::other("Settings lock poisoned"))?;
-    match fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_SETTINGS_SIZE => {
-            let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-            if value.is_object() {
-                Ok(Some(value))
-            } else {
-                Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "Invalid portable settings",
-                ))
-            }
-        }
-        Ok(_) => Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "Invalid portable settings",
-        )),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || metadata.len() > MAX_SETTINGS_SIZE
+    {
+        return Err(invalid_settings());
     }
+    let mut bytes = Vec::new();
+    file.take(MAX_SETTINGS_SIZE + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SETTINGS_SIZE {
+        return Err(invalid_settings());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+    if !value.is_object() {
+        return Err(invalid_settings());
+    }
+    Ok(Some(value))
 }
 
-pub fn save_settings(directory: &Path, preferences: &serde_json::Value) -> io::Result<()> {
+fn invalid_settings() -> io::Error {
+    io::Error::new(ErrorKind::InvalidData, "Invalid Windows settings")
+}
+
+pub fn save_settings(
+    directory: &Path,
+    preferences: &serde_json::Value,
+    only_if_missing: bool,
+) -> io::Result<bool> {
     let _guard = SETTINGS_LOCK
         .lock()
         .map_err(|_| io::Error::other("Settings lock poisoned"))?;
     let json = serde_json::to_vec_pretty(preferences)?;
     if !preferences.is_object() || json.len() as u64 > MAX_SETTINGS_SIZE {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "Invalid portable settings",
-        ));
+        return Err(invalid_settings());
     }
-    write_atomic(directory, SETTINGS, &json)
+    if !only_if_missing {
+        let path = directory.join(SETTINGS);
+        match ensure_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        write_atomic(directory, SETTINGS, &json)?;
+        return Ok(true);
+    }
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    temporary.write_all(&json)?;
+    temporary.as_file().sync_all()?;
+    match temporary.persist_noclobber(directory.join(SETTINGS)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.error.kind() == ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error.error),
+    }
 }
 
 fn write_atomic(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
@@ -431,6 +467,41 @@ mod tests {
     }
 
     #[test]
+    fn windows_settings_migration_keeps_the_existing_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let original = serde_json::json!({ "theme": "light" });
+        let legacy = serde_json::json!({ "theme": "dark" });
+        assert_eq!(read_settings(folder.path()).unwrap(), None);
+        assert!(save_settings(folder.path(), &original, true).unwrap());
+        assert!(!save_settings(folder.path(), &legacy, true).unwrap());
+        assert_eq!(read_settings(folder.path()).unwrap(), Some(original));
+        assert!(save_settings(folder.path(), &legacy, false).unwrap());
+        assert_eq!(read_settings(folder.path()).unwrap(), Some(legacy));
+    }
+
+    #[test]
+    fn windows_settings_remain_readable_when_replacement_is_denied() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join(SETTINGS);
+        let original = serde_json::json!({ "theme": "classic-blue" });
+        save_settings(folder.path(), &original, false).unwrap();
+        let permissions = fs::metadata(&path).unwrap().permissions();
+        let mut read_only = permissions.clone();
+        read_only.set_readonly(true);
+        fs::set_permissions(&path, read_only).unwrap();
+        let read = read_settings(folder.path());
+        let failed = save_settings(
+            folder.path(),
+            &serde_json::json!({ "theme": "slate" }),
+            false,
+        );
+        fs::set_permissions(&path, permissions).unwrap();
+        assert_eq!(read.unwrap(), Some(original.clone()));
+        assert!(failed.is_err());
+        assert_eq!(read_settings(folder.path()).unwrap(), Some(original));
+    }
+
+    #[test]
     fn portable_zip_cannot_replace_settings_or_add_arbitrary_files() {
         let folder = tempfile::tempdir().unwrap();
         for name in [SETTINGS, "../outside", "server/other.exe"] {
@@ -446,7 +517,7 @@ mod tests {
         let directory = folder.path();
         let stage = directory.join(".dirlume-update-test");
         let preferences = serde_json::json!({ "viewFontSizes": { "left": 23 } });
-        save_settings(directory, &preferences).unwrap();
+        save_settings(directory, &preferences, false).unwrap();
         fs::write(directory.join(EXECUTABLE), "previous exe").unwrap();
         fs::write(directory.join(MARKER), "previous marker").unwrap();
         fs::create_dir(directory.join("LICENSE")).unwrap();

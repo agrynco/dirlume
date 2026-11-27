@@ -23,7 +23,7 @@ export interface McpContext {
   remote: (side: Side, place: RemotePlace, listing: Listing) => void;
   selection: (side: Side, names: string[]) => void;
   refresh: (side: Side) => void;
-  setPreferences: (preferences: Preferences) => void;
+  setPreferences: (preferences: Preferences) => Promise<void>;
   setShortcuts: (shortcuts: FolderShortcuts) => void;
 }
 
@@ -32,7 +32,7 @@ export type McpRevisions = Map<string, { file: NamedFile; contents: TextDocument
 
 function sameFile(a: NamedFile, b: NamedFile) {
   return a.name === b.name && a.place.kind === b.place.kind && placePath(a.place) === placePath(b.place) &&
-    (a.place.kind === "local" || "id" in b.place && a.place.id === b.place.id);
+    (a.place.kind === "local" || "id" in a.place && "id" in b.place && a.place.id === b.place.id);
 }
 
 function textFile(place: FileLocation, entry: Entry): NamedFile {
@@ -230,7 +230,7 @@ export async function executeMcp({ tool, arguments: args }: McpAction, context: 
         if (!allowedColors.has(key) || typeof color !== "string" || !isHexColor(color)) throw new Error("Use valid color keys and six-digit hex colors.");
       }
       const scheme = { id: crypto.randomUUID(), name: title, base, colors: colors as Palette, fonts: {} };
-      context.setPreferences({ ...context.preferences, schemes: [...context.preferences.schemes, scheme] });
+      await context.setPreferences({ ...context.preferences, schemes: [...context.preferences.schemes, scheme] });
       return scheme;
     }
     case "list_processes": return api.listProcesses();

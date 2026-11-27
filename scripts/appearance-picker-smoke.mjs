@@ -288,7 +288,7 @@ export async function testAppearancePicker() {
     for (const [layout, title, color] of [
       ["standard", "Standard", "Active selection background"],
       ["twin", "Twin panels", "Accent and focus"],
-      ["classic", "Classic commander", "Primary button background"],
+      ["classic", "Classic commander", "Active selection background"],
     ]) {
       await open();
       await selectPage("Main File Panels");
@@ -296,8 +296,7 @@ export async function testAppearancePicker() {
       await done();
       await open();
       await pick(currentRow, `Current file row (${title})`, color);
-      if (layout === "standard") await hex(page, "Active selection text").waitFor();
-      if (layout === "classic") await hex(page, "Primary button text").waitFor();
+      await hex(page, "Active selection text").waitFor();
       await done();
     }
 

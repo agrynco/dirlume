@@ -23,6 +23,8 @@ mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;
 #[cfg(feature = "desktop")]
+mod file_history;
+#[cfg(feature = "desktop")]
 mod folders;
 #[cfg(feature = "desktop")]
 mod ftp;
@@ -34,6 +36,8 @@ mod git_view;
 mod image_edit;
 #[cfg(feature = "desktop")]
 mod kswitcher_lan;
+#[cfg(feature = "desktop")]
+mod lan_group;
 mod local;
 #[cfg(feature = "desktop")]
 mod local_transfer;
@@ -60,16 +64,27 @@ mod remote_transfer;
 mod screen_color;
 #[cfg(any(feature = "server", feature = "desktop"))]
 pub mod server;
+#[cfg(all(
+    feature = "desktop",
+    any(windows, target_os = "linux", target_os = "macos")
+))]
+mod smb;
 #[cfg(feature = "desktop")]
 mod space_analyzer;
 #[cfg(feature = "desktop")]
 mod ssh;
 #[cfg(feature = "desktop")]
 mod terminal;
+#[cfg(any(feature = "desktop", feature = "server"))]
+mod text_format;
+#[cfg(feature = "desktop")]
+mod text_pages;
 #[cfg(feature = "desktop")]
 mod timestamps;
 #[cfg(feature = "desktop")]
 mod updates;
+#[cfg(feature = "desktop")]
+mod user_menu;
 #[cfg(feature = "desktop")]
 mod watch;
 #[cfg(all(feature = "desktop", windows))]
@@ -86,10 +101,10 @@ pub use desktop::run;
 
 pub const BUILD_VERSION: &str = env!("DIRLUME_BUILD_VERSION");
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
 }

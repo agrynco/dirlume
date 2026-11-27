@@ -1,6 +1,5 @@
 use std::{io, path::PathBuf, ptr};
 
-use serde::{Deserialize, Serialize};
 use windows::{
     core::{PCWSTR, PWSTR},
     Win32::NetworkManagement::WNet::{
@@ -16,30 +15,8 @@ use windows_sys::Win32::{
 use crate::{
     desktop::{blocking, message, Result},
     local,
+    smb::{saved_credentials, vault, Connection, Credentials},
 };
-
-#[derive(Deserialize)]
-pub struct Credentials {
-    username: String,
-    password: String,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Connection {
-    Opened {
-        listing: local::Listing,
-        warning: Option<String>,
-    },
-    Shares {
-        server: String,
-        names: Vec<String>,
-        warning: Option<String>,
-    },
-    CredentialsRequired {
-        error: Option<String>,
-    },
-}
 
 struct SmbTarget {
     server: String,
@@ -185,20 +162,7 @@ fn list_shares(server: &str) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-fn vault(location: &str) -> keyring::Result<keyring::Entry> {
-    keyring::Entry::new("Dirlume SMB", &location.to_lowercase())
-}
-
-fn saved_credentials(location: &str) -> Option<Credentials> {
-    let value = vault(location)
-        .and_then(|entry| entry.get_password())
-        .ok()?;
-    let (username, password) = serde_json::from_str::<(String, String)>(&value).ok()?;
-    Some(Credentials { username, password })
-}
-
-#[tauri::command]
-pub async fn connect_smb(
+pub async fn connect(
     path: String,
     credentials: Option<Credentials>,
     remember: bool,

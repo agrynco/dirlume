@@ -2,12 +2,12 @@
   "version": "0.1.38",
   "highlights": [
     "Stage or unstage files in Git View and review all staged paths before creating a local commit.",
-    "Route NetBox FTP, FTPS, and SFTP profiles through a SOCKS5 or HTTP CONNECT proxy.",
-    "Choose a custom SFTP server command, legacy timestamp handling, and the SSH terminal shell in NetBox.",
-    "Checkboxes are consistently placed to the left of their labels in dialogs.",
+    "Open SMB shares on Windows, macOS, and Ubuntu, and configure proxy routing, SFTP server commands, legacy timestamps, and SSH shells in NetBox.",
     "Use the color scheme’s selection text color for current and marked file names, including hidden and system entries.",
-    "Use the refreshed main menu, two-pane app icon, and high-contrast Windows Administrator badge in the title bar.",
-    "Switch from Tree to List even when the selected item’s parent folder cannot be opened.",
-    "Request Windows administrator consent when the system denies a directly submitted ipconfig /flushdns command."
+    "Use the refreshed main menu, two-pane app icon, high-contrast Windows Administrator badge, and consistent checkbox placement in dialogs.",
+    "Undo and redo verified local transfers from Copy and Move history. Measure local folders faster on APFS and ext4. Tree falls back to List after a failed folder lookup. Merge folders with per-file overwrite choices.",
+    "Share the settings file beside Dirlume.exe between ordinary and administrator launches of the same Windows copy.",
+    "Run saved commands from User Menu with the active pane’s paths and prompted arguments. Local zsh starts in the active pane’s folder without showing its setup command.",
+    "Browse and edit large text files in pages, with streaming saves that preserve the untouched contents."
   ]
 }

@@ -59,6 +59,14 @@ class Files(paramiko.SFTPServerInterface):
             return paramiko.SFTPServer.convert_errno(errno.ENOENT)
         return WritableFile(files, path.name)
 
+    def remove(self, path):
+        path = PurePosixPath(path)
+        files = folders.get(str(path.parent), {})
+        if path.name not in files:
+            return paramiko.SFTPServer.convert_errno(errno.ENOENT)
+        del files[path.name]
+        return paramiko.SFTP_OK
+
 
 def serve(listener):
     with paramiko.Transport(listener.accept()[0]) as server:
@@ -80,6 +88,9 @@ with socket.create_server(("127.0.0.1", 0)) as listener:
                     if command == "write":
                         with sftp.file(path, "wb") as file:
                             file.write(b"data")
+                        result = None
+                    elif command == "remove":
+                        sftp.remove(path)
                         result = None
                     else:
                         result = [entry.filename for entry in sftp.listdir_attr(path)]

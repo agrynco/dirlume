@@ -1,10 +1,8 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { describeError, watchDirectory, windowsClient, type Entry, type PanelMetadata } from "./api";
+import { describeError, watchDirectory, windowsClient, type Entry, type Listing, type PanelMetadata, type SshPlace, type TreePlace } from "./api";
 import type { SortMode, SortSettings } from "./fileSort";
-import { childPlace, readPlace, visibleEntries, type PaneBackgroundSize, type PaneState } from "./panes";
-
-type LocalPlace = NonNullable<Entry["tree"]>["parent"];
+import { childPlace, placeKey, readPlace, visibleEntries, type PaneBackgroundSize, type PaneState } from "./panes";
 type Branch = {
   segments: readonly string[];
   expanded: boolean;
@@ -17,8 +15,8 @@ const emptyBranches = new Map<string, Branch>();
 const emptyMetadata = new Map<string, PanelMetadata>();
 const emptyDescriptions = new Map<string, string>();
 
-function childFolder(root: LocalPlace, segments: readonly string[]) {
-  return segments.reduce((place, name) => childPlace(place, name) as LocalPlace, root);
+function childFolder(root: TreePlace, segments: readonly string[]) {
+  return segments.reduce((place, name) => childPlace(place, name) as TreePlace, root);
 }
 
 export function usePaneTreeRevision(path: string | undefined, active: boolean, fileRevision: number) {
@@ -36,20 +34,28 @@ export function usePaneTreeRevision(path: string | undefined, active: boolean, f
   return fileRevision + revision;
 }
 
-export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revision: number) {
-  const scope = root?.path;
+export function useFilePaneTree(root: TreePlace | null, enabled: boolean, revision: number,
+  authorize?: (place: SshPlace, signal: AbortSignal) => Promise<Listing>) {
+  const scope = root ? placeKey(root) : undefined;
   const [snapshot, setSnapshot] = useState<{ scope?: string; branches: ReadonlyMap<string, Branch> }>({ branches: emptyBranches });
   const pending = useRef(new Map<string, Branch>());
+  const controller = useRef<AbortController>(null);
   const branches = snapshot.scope === scope ? snapshot.branches : emptyBranches;
 
   useEffect(() => {
+    const current = new AbortController();
+    controller.current = current;
     pending.current.clear();
     setSnapshot({ scope, branches: emptyBranches });
-    return () => pending.current.clear();
+    return () => {
+      current.abort();
+      pending.current.clear();
+    };
   }, [scope]);
 
   useEffect(() => {
-    if (!enabled || !root) return;
+    const signal = controller.current?.signal;
+    if (!enabled || !root || !signal) return;
     for (const [key, branch] of branches) {
       if (branch.revision === revision || pending.current.get(key)?.segments === branch.segments) continue;
       pending.current.set(key, branch);
@@ -62,11 +68,17 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
           return { scope, branches: new Map(current.branches).set(key, { ...latest, entries: entries ?? latest.entries, revision, error }) };
         });
       };
-      void readPlace(childFolder(root, branch.segments), undefined, false).then(({ listing }) => {
-        complete(listing.entries);
-      }, (error: unknown) => complete(undefined, describeError(error)));
+      const place = childFolder(root, branch.segments);
+      void readPlace(place, undefined, true, signal).then(({ listing }) => listing).catch((error: unknown) => {
+        if (!signal.aborted && branch.expanded && place.kind === "ssh" && authorize &&
+            (error instanceof Error ? error.message : String(error)) === "SSH permission denied.") {
+          return authorize(place, signal);
+        }
+        throw error;
+      }).then((listing) => complete(listing.entries),
+        (error: unknown) => complete(undefined, describeError(error)));
     }
-  }, [branches, enabled, revision, root, scope]);
+  }, [authorize, branches, enabled, revision, root, scope]);
 
   function toggle(entry: Entry) {
     if (!root || !entry.tree || !entry.directory || entry.link) return;
@@ -114,7 +126,7 @@ export function useFilePaneTree(root: LocalPlace | null, enabled: boolean, revis
     const segments: string[] = [];
     const opened = new Map<string, Branch>();
     for (const [index, part] of path.entries()) {
-      const match = entries.find(({ name }) => windowsClient ? name.toLowerCase() === part.toLowerCase() : name === part);
+      const match = entries.find(({ name }) => root.kind === "local" && windowsClient ? name.toLowerCase() === part.toLowerCase() : name === part);
       if (!current() || !match?.directory || match.link) return null;
       segments.push(match.name);
       if (index + 1 === path.length) break;

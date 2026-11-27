@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { mkdir, rename, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export async function checkResizeMarker(marker) {
@@ -71,7 +71,7 @@ export async function keepSuggestedColorSchemeName(page) {
   if (visible) await naming.getByRole("button", { name: "Save scheme", exact: true }).click();
 }
 
-export async function testMarkdownOptionsDismissal(page, source) {
+export async function testMarkdownOptionsDismissal(page, source, settingsDirectory) {
   const name = "options-reader.md";
   await writeFile(join(source, name), "# Options dismissal fixture\n\nOriginal Markdown document.\n");
   await page.locator(`#left-files [role="option"][data-tooltip="${name}"]`).click();
@@ -133,26 +133,27 @@ export async function testMarkdownOptionsDismissal(page, source) {
     await dismiss(invalid, action);
   }
 
-  const failSaves = (tool) => tool.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (key, value) {
-      if (key === "dirlume.preferences.v1" && document.documentElement.hasAttribute("data-test-fail-save")) {
-        throw new DOMException("The test settings storage is full.", "QuotaExceededError");
-      }
-      return original.call(this, key, value);
-    };
-    document.documentElement.setAttribute("data-test-fail-save", "");
-  });
+  const settingsPath = join(settingsDirectory, "dirlume-settings.json");
+  const backupPath = join(settingsDirectory, "dirlume-settings.backup.json");
   for (const [save, action] of [["Done", "Cancel"], ["Apply", "native"], ["Done", "Done"]]) {
     const unavailable = await open();
     assert.equal(await width(unavailable).inputValue(), "1650");
     await width(unavailable).fill("1300");
-    await failSaves(unavailable);
-    await button(unavailable, save).click();
-    await unavailable.getByRole("alert").filter({ hasText: "Could not save settings." }).waitFor();
-    assert.equal(await width(unavailable).inputValue(), "1300");
-    assert.equal(await savedWidth(), 1650);
-    if (action === "Done") await unavailable.evaluate(() => document.documentElement.removeAttribute("data-test-fail-save"));
+    // Windows saves beside the executable. Put a directory at the file path to reject the native write.
+    await rename(settingsPath, backupPath);
+    try {
+      await mkdir(settingsPath);
+      try {
+        await button(unavailable, save).click();
+        await unavailable.getByRole("alert").filter({ hasText: "Could not save settings." }).waitFor();
+        assert.equal(await width(unavailable).inputValue(), "1300");
+        assert.equal(await savedWidth(), 1650);
+      } finally {
+        await rmdir(settingsPath);
+      }
+    } finally {
+      await rename(backupPath, settingsPath);
+    }
     await dismiss(unavailable, action);
     assert.equal(await savedWidth(), action === "Done" ? 1300 : 1650);
   }

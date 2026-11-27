@@ -8,7 +8,7 @@ import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, supportsFileTree, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
@@ -16,7 +16,7 @@ import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
 import { showShortcut, type PanelLayout } from "./preferences";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle } from "./viewFonts";
-import { columnGroupTrack, fieldClass, FileColumns, measuredColumnFields, panelColumnTracks, readColumnLayout, saveColumnLayout, type MeasuredColumnField } from "./FileColumns";
+import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColumnLayout, saveColumnLayout, type ColumnSamples } from "./FileColumns";
 import { defaultPanelModes, displayPanelName, isNameField, panelColumnGroups, type PanelField, type PanelMode, type PanelModeId } from "./panelModes";
 import { usePanelMetadata } from "./usePanelMetadata";
 import { QuickSearch, useQuickSearch } from "./QuickSearch";
@@ -158,7 +158,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onOpenConnections, onAddNetBoxConnection, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
-  const path = pane.place ? placePath(pane.place) : "";
+  const path = pane.place ? placeAddress(pane.place) : "";
   const catalog = pane.place?.kind === "connections";
   const netbox = pane.place?.kind === "connections" && pane.place.source === "netbox";
   const [filterOpen, setFilterOpen] = useState(false);
@@ -227,49 +227,50 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const statusColumns = catalog ? [] : mode.status;
   const displayedColumns = [...columns, ...statusColumns];
   const displayedFields = displayedColumns.map(({ field }) => field);
-  const automatic = measuredColumnFields.filter((field) => displayedColumns.some((column) => column.field === field && column.width === "0"));
-  const autoSize = automatic.includes("size");
-  const autoBytes = automatic.includes("bytes");
-  const sampleSize = autoSize || (fitMeasuredFolders && columns.some(({ field }) => field === "size"));
-  const sampleBytes = autoBytes || (fitMeasuredFolders && columns.some(({ field }) => field === "bytes"));
+  const autoNameCount = columns.filter(({ field, width }) => width === "0" && isNameField(field)).length;
+  const automaticFields = [...new Set(columns.filter(({ field, width }) =>
+    width === "0" && (!isNameField(field) || autoNameCount > 1)).map(({ field }) => field))].join(",");
+  const sampleSize = fitMeasuredFolders && columns.some(({ field }) => field === "size");
+  const sampleBytes = fitMeasuredFolders && columns.some(({ field }) => field === "bytes");
   const language = locale();
   const bytesFormat = useMemo(() => new Intl.NumberFormat(language), [language]);
   const measuredSizes = useMemo(() => {
     const size = new Map<string, string>();
     const bytes = new Map<string, string>();
-    if (!search && (sampleSize || sampleBytes)) {
+    if (sampleSize || sampleBytes) {
       const measurements = pane.backgroundSizes ? new Map([...pane.sizes, ...pane.backgroundSizes]) : pane.sizes;
       for (const [name, result] of measurements) {
         const background = pane.backgroundSizes?.get(name);
         if (background?.unavailable || (background?.pending && background.bytes === 0)) continue;
-        const measured = pane.sizes.has(name) || !!background;
         // The pane uses tabular figures. One sample per digit pattern keeps large batches compact.
-        if (autoSize || (sampleSize && measured)) {
+        if (sampleSize) {
           const sample = sizeLabel(result.bytes, result.incomplete);
           size.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
         }
-        if (autoBytes || (sampleBytes && measured)) {
+        if (sampleBytes) {
           const sample = sizeLabel(result.bytes, result.incomplete, bytesFormat);
           bytes.set(sample.replace(/\p{Decimal_Number}/gu, "0"), sample);
         }
       }
     }
     return { size: [...size.values()], bytes: [...bytes.values()] };
-  }, [search, autoSize, autoBytes, sampleSize, sampleBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
+  }, [sampleSize, sampleBytes, pane.backgroundSizes, pane.sizes, bytesFormat]);
   const visibleTimestamps = processView ? [] : indices.map((index) => entries[index].modified);
   const dateLabel = useTimestamps(displayedFields.includes("date") ? visibleTimestamps : [], "date");
   const timeLabel = useTimestamps(displayedFields.includes("time") ? visibleTimestamps : [], "time");
   const metadataRequests = new Map<string, PanelMetadataRequest>();
   const listingFields = columns.map(({ field }) => field);
   const statusFields = statusColumns.map(({ field }) => field);
+  const listOwner = listingFields.includes("owner");
+  const listLinks = listingFields.includes("links");
   if (!processView && (displayedFields.includes("owner") || displayedFields.includes("links"))) {
     for (const index of indices) {
       const entry = entries[index];
       const item = paneItem(pane, entry);
       if (item?.place.kind !== "local") continue;
-      const owner = listingFields.includes("owner") || (index === selected && statusFields.includes("owner"));
+      const owner = listOwner || (index === selected && statusFields.includes("owner"));
       const links = !entry.directory && !entry.link &&
-        (listingFields.includes("links") || (index === selected && statusFields.includes("links")));
+        (listLinks || (index === selected && statusFields.includes("links")));
       if (owner || links) metadataRequests.set(entry.name, { directory: item.place.path, name: item.entry.name, owner, links });
     }
   }
@@ -390,8 +391,17 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const current = selected >= 0 ? entries[selected] : undefined;
   const missing = "—";
   function itemValue(entry: Entry, field: PanelField, listing = false) {
-    const request = metadataRequests.get(entry.name);
-    const details = request && metadata?.get(metadataKey(request));
+    const requestsMetadata = field === "owner" || field === "links";
+    const request = requestsMetadata ? metadataRequests.get(entry.name) : undefined;
+    let details = request && metadata?.get(metadataKey(request));
+    if (requestsMetadata && !request && metadata && listing) {
+      // Keep values that have already arrived in the sizing sample when their rows scroll out of view.
+      const item = paneItem(pane, entry);
+      if (item?.place.kind === "local") details = metadata.get(metadataKey({
+        directory: item.place.path, name: item.entry.name, owner: listOwner,
+        links: !entry.directory && !entry.link && listLinks,
+      }));
+    }
     switch (field) {
       case "size":
       case "bytes": {
@@ -419,11 +429,24 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     }
   }
 
-  const widthSamples: Partial<Record<MeasuredColumnField, string[]>> = { ...measuredSizes };
-  for (const field of automatic) {
-    const samples = new Set(field === "size" || field === "bytes" ? measuredSizes[field] : []);
-    for (const index of indices) samples.add(itemValue(entries[index], field));
-    widthSamples[field] = [...samples];
+  const widthSamples = useMemo<ColumnSamples>(() => {
+    const result: ColumnSamples = { ...measuredSizes };
+    if (processView || netbox || !automaticFields) return result;
+    for (const field of automaticFields.split(",") as PanelField[]) {
+      const samples = new Map<string, string>();
+      const tabular = field !== "owner" && !isNameField(field);
+      const add = (label: string) => samples.set(tabular ? label.replace(/\p{Decimal_Number}/gu, "0") : label, label);
+      for (const sample of result[field] ?? []) add(sample);
+      for (const entry of entries) add(itemValue(entry, field, true));
+      result[field] = [...samples.values()];
+    }
+    return result;
+  }, [automaticFields, entries, measuredSizes, processView, netbox, metadata, pane, language, dateLabel, timeLabel, definition, listOwner, listLinks]);
+  const statusSamples: ColumnSamples = {};
+  if (!processView && !netbox && current && current.name !== "..") {
+    for (const { field, width } of statusColumns) {
+      if (width === "0") statusSamples[field] = [itemValue(current, field)];
+    }
   }
 
   function renderName(entry: Entry, field: PanelField, listing: boolean) {
@@ -447,10 +470,11 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
   }, undefined) : undefined;
   const localView = pane.place?.kind === "local" && !pane.loading;
+  const treeView = !pane.search && !pane.loading && supportsFileTree(pane.place);
   const viewControls = !catalog && !processView && !search && pane.place && <div className="pane-view-toolbar" data-help-topic="paneViews">
       <div className="pane-view-modes" role="group" aria-label={t("File pane view")}>
-          <Button type="button" aria-pressed={!tree} disabled={!localView} onClick={() => onFileView("list")}>{t("List")}</Button>
-          <Button type="button" aria-pressed={tree} disabled={!localView} onClick={() => onFileView("tree")}>{t("Tree")}</Button>
+          <Button type="button" aria-pressed={!tree} disabled={!treeView} onClick={() => onFileView("list")}>{t("List")}</Button>
+          <Button type="button" aria-pressed={tree} disabled={!treeView} onClick={() => onFileView("tree")}>{t("Tree")}</Button>
         </div>
         <Button type="button" aria-pressed={folderSizes.active} disabled={!localView} onClick={onFolderSizes}>
           <Ruler aria-hidden="true" />{t("Folder sizes")}
@@ -558,7 +582,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <div className="file-column"><span className="file-column-label">{t("Protocol")}</span></div>
           <div className="file-column"><span className="file-column-label">{t("Host")}</span></div>
         </div>
-      </div> : <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples}
+      </div> : <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples} statusSamples={statusSamples}
         visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
         onVisibility={(column, visible) => {
           const next = { ...visibility, [column]: visible };
@@ -714,7 +738,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
               <Button type="button" className="icon-button" aria-label={t("Cancel folder size calculation")}
                 shortcut={cancelKey} onClick={onCancelFolderOperation}><X aria-hidden="true" /></Button>
             </div> : current && current.name !== ".." && statusColumns.length > 0 &&
-              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns) }}
+              <div className="pane-details" style={{ gridTemplateColumns: panelColumnTracks(statusColumns, false, true) }}
                 data-tooltip={statusColumns.map(({ field }) => itemValue(current, field)).filter(Boolean).join(" · ")}>
                 {statusColumns.map(({ field }, index) => <span key={index} className={`pane-detail pane-detail-${fieldClass[field]}`}
                   data-tooltip={itemValue(current, field)}>

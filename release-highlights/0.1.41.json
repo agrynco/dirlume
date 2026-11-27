@@ -1,0 +1,12 @@
+{
+  "version": "0.1.41",
+  "highlights": [
+    "Join a Dirlume LAN group with one shared code to browse each member’s drives.",
+    "Find local folders, Dirlume LAN, and KSwitcher LAN in separate sections of the source menu.",
+    "Create, edit, copy, move, rename, and delete items in List and Tree on supported writable sources.",
+    "Copy nested folders from remote shares and resolve file conflicts in the transfer dialog.",
+    "Retry denied SFTP file operations with sudo after confirming.",
+    "Organize file references in named collections and open them from either pane.",
+    "Request Windows administrator consent when a DNS cache flush requires it."
+  ]
+}

@@ -13,7 +13,7 @@ import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
 import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
-import { replaceTerminalRange, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
+import { replaceTerminalRange, replaceTerminalSnippet, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
 import { showTooltipAtPointer } from "./tooltips";
 import "@xterm/xterm/css/xterm.css";
 
@@ -65,7 +65,7 @@ function terminalAppearance(): ITerminalOptions {
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
   history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onDisconnected,
-  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onFileOpens, onRestart, onClose }: {
+  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onFileOpens, onRestart, onRunFinished, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -90,15 +90,21 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   focusRequested: { current: number | null };
   onFileOpens: () => void;
   onRestart?: () => void;
+  onRunFinished?: () => void;
   onClose: () => void;
 }) {
   const remoteTerminal = session.kind === "ssh";
+  const menuRun = session.kind === "local" && !!session.userMenu;
   const container = useRef<HTMLDivElement>(null);
   const instance = useRef<{ term: Terminal; fit: () => void; paste: () => void; copy: (text: string) => void; openLink: (href: string) => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
   const [commandsWaiting, setCommandsWaiting] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const stopRun = useRef<(() => void) | null>(null);
+  const runFinished = useRef(onRunFinished);
+  runFinished.current = onRunFinished;
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string; href: string | null } | null>(null);
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
@@ -237,6 +243,65 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let lastCommand = 0;
     const submitted = new Map<string, { original: string; pending: number }>();
     const applicationQueue: Exclude<TerminalCommand, null>[] = [];
+    // Keep the accessibility receiver beside the xterm input so a request
+    // can only target the terminal that owns focus.
+    const snippetInput = windowsClient && !menuRun && term.textarea?.parentElement
+      ? document.createElement("input") : null;
+    let snippetTicket = "";
+    let snippetInputHasTerminalFocus = false;
+    let returnSnippetFocusTimer = 0;
+    if (snippetInput) {
+      snippetInput.className = "dirlume-terminal-snippet-input";
+      snippetInput.tabIndex = -1;
+      snippetInput.hidden = true;
+      snippetInput.setAttribute("aria-label", t("Insert KSwitcher snippet"));
+      term.textarea?.parentElement?.append(snippetInput);
+      snippetInput.addEventListener("input", insertSnippet);
+      snippetInput.addEventListener("focus", () => {
+        // WebView2 focuses the receiver before applying an accessibility edit.
+        returnSnippetFocusTimer = window.setTimeout(restoreSnippetFocus, 100);
+      });
+    }
+
+    function snippetDraft() {
+      const buffer = term.buffer.active;
+      return atPrompt && !closed && !stopped && clipboard.current.visible &&
+        buffer.type === "normal" && buffer.viewportY === buffer.baseY
+        ? editable : null;
+    }
+
+    function syncSnippetInput() {
+      if (!snippetInput) return;
+      if (!snippetDraft()) snippetTicket = "";
+      else if (!snippetTicket) snippetTicket = "dirlume-terminal-snippet-v1:" + crypto.randomUUID();
+      snippetInput.hidden = !snippetTicket;
+      snippetInput.value = snippetTicket;
+    }
+
+    function insertSnippet() {
+      if (!snippetInput) return;
+      const focus = document.activeElement;
+      const input = document.hasFocus() &&
+        (focus === term.textarea || snippetInputHasTerminalFocus && focus === snippetInput) && snippetDraft();
+      const replacement = input && snippetTicket && replaceTerminalSnippet(input, snippetTicket, snippetInput.value,
+        term.modes.applicationCursorKeysMode, term.modes.bracketedPasteMode);
+      if (replacement) {
+        editable = replacement.draft;
+        snippetTicket = "";
+        hideSuggestions();
+        send(replacement.data, false);
+      }
+      restoreSnippetFocus();
+    }
+
+    function restoreSnippetFocus() {
+      window.clearTimeout(returnSnippetFocusTimer);
+      const restore = snippetInputHasTerminalFocus && document.hasFocus() && !closed && !stopped &&
+        clipboard.current.visible && document.activeElement === snippetInput;
+      snippetInputHasTerminalFocus = false;
+      if (restore) term.focus();
+      syncSnippetInput();
+    }
 
     function hideSuggestions() {
       revision++;
@@ -335,7 +400,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       activeRequest = null;
       hideSuggestions();
     };
-    term.textarea?.addEventListener("blur", hideSuggestions);
+    function blurTerminal(event: FocusEvent) {
+      snippetInputHasTerminalFocus = snippetInput !== null && event.relatedTarget === snippetInput;
+      if (event.relatedTarget && !snippetInputHasTerminalFocus) {
+        snippetTicket = "";
+        syncSnippetInput();
+      }
+      hideSuggestions();
+    }
+    term.textarea?.addEventListener("blur", blurTerminal);
 
     function runQueuedCommand() {
       if (closed || stopped || !opened || (tracksPrompt && (!atPrompt || draft))) return false;
@@ -479,6 +552,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       draft = false;
       hideSuggestions();
       editable = editorSupported ? { text: "", caret: 0 } : null;
+      snippetTicket = "";
+      syncSnippetInput();
       if (!followingPane && nextDirectory === null && currentDirectory && currentDirectory !== previousDirectory) {
         reportDirectory.current(currentDirectory);
       }
@@ -490,16 +565,33 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     moveTo.current = (path) => { nextDirectory = path; synchronize(); };
     output.onmessage = (message) => {
       if (stopped || closed) return;
-      if (message.event !== "data") {
+      if (message.event === "finished") {
+        const result = message.code === 0 ? t("Completed") : t("Command exited with code {0}.", message.code);
+        endSession(result, new Error(result));
+        setSessionError(null);
+        setRunStatus(result);
+        term.writeln("\r\n" + result);
+        runFinished.current?.();
+      } else if (message.event !== "data") {
         const reason = t("This terminal session has closed.");
         endSession(reason, new Error(reason), false, message.event === "disconnected");
         if (!windows) term.writeln("\r\n" + reason);
+        if (menuRun) { setRunStatus(reason); runFinished.current?.(); }
       } else {
         term.write(Uint8Array.from(atob(message.data), (byte) => byte.charCodeAt(0)));
       }
     };
     const opening = api.openTerminal(session, promptToken, term.rows, term.cols, output);
-    if (windows) {
+    if (menuRun) stopRun.current = () => {
+      if (closed || stopped) return;
+      const result = t("Canceled");
+      endSession(result, new Error(result));
+      setSessionError(null);
+      setRunStatus(result);
+      term.writeln("\r\n" + result);
+      void closing?.then(() => runFinished.current?.());
+    };
+    if (windows && !menuRun) {
       startupTimer = window.setTimeout(() => {
         const reason = t("PowerShell did not reach its prompt in time.");
         endSession(reason, new Error(reason));
@@ -515,7 +607,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       } else if (!runQueuedCommand()) synchronize();
     }, (error: unknown) => {
       if (!stopped && !closed) {
-        endSession(t("PowerShell could not start."), error);
+        const reason = menuRun ? describeError(error) : t("PowerShell could not start.");
+        endSession(reason, error);
+        if (menuRun) { setRunStatus(errorText(reason)); runFinished.current?.(); }
         term.writeln(describeError(error));
       }
     });
@@ -540,6 +634,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
           if (editable?.text.trim()) completionTimer = window.setTimeout(() => void completeDraft(), 160);
         }
       }
+      syncSnippetInput();
       queued = queued.then(async () => {
         await opening;
         if (stopped) return;
@@ -651,6 +746,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }).catch(() => {});
     });
     const scrolled = term.onScroll(() => {
+      syncSnippetInput();
       hideLinkTooltip();
       if (term.buffer.active.viewportY !== term.buffer.active.baseY) hideSuggestions();
       else renderSuggestions();
@@ -661,6 +757,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     return () => {
       stopped = true;
       clearTimeout(startupTimer);
+      clearTimeout(returnSnippetFocusTimer);
       hideLinkTooltip();
       hideSuggestions();
       suspendSuggestions.current = () => {};
@@ -673,7 +770,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       resized.dispose();
       scrolled.dispose();
       outputChanged.dispose();
-      term.textarea?.removeEventListener("blur", hideSuggestions);
+      term.textarea?.removeEventListener("blur", blurTerminal);
       surface.removeEventListener("mousedown", preserveSelection, true);
       surface.removeEventListener("mousemove", trackLinkDrag, true);
       surface.removeEventListener("contextmenu", openContextMenu, true);
@@ -737,11 +834,13 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   return (
     <section className="terminal-card" data-font-zoom="terminal" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
       <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}>
-        <h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2>
+        <h2>{t(remoteTerminal ? "SSH terminal" : menuRun ? "User Menu command" : "Terminal")}</h2>
         <span className="terminal-location" data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
         {focusHint}
+        {menuRun && (runStatus ? <span role="status" className="terminal-location">{runStatus}</span> :
+          <Button type="button" onClick={() => stopRun.current?.()}>{t("Stop")}</Button>)}
         <Button type="button" data-file-opens onClick={onFileOpens}>{t("File opens")}</Button>
-        <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={() => { if (menuRun) stopRun.current?.(); onClose(); }}><X /></Button>
       </header>
       {watchEnvironment && environmentChanged && !sessionError && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
@@ -7,7 +7,7 @@ import { reportFrontendError } from "./diagnostics";
 import { saveDialogSize } from "./Dialog";
 import { useHelpShortcut } from "./contextHelp";
 import { setLanguage, t } from "./i18n";
-import { persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
+import { acceptWindowsPreferences, persistPreferences, preferenceKey, readPreferences, shortcutBindings, type Preferences } from "./preferences";
 import { Settings } from "./Settings";
 import type { FeaturePage } from "./featureOptions";
 import { CompareDialog } from "./TextTools";
@@ -27,14 +27,19 @@ export function ToolWindow({ initialPreferences, comparison, diagram, optionsPag
   optionsPage?: FeaturePage;
 }) {
   const [preferences, setPreferences] = useState(initialPreferences);
+  const latest = useRef(preferences);
+  latest.current = preferences;
   const shortcuts = shortcutBindings(preferences);
   useFontZoom(shortcuts.zoomFont, preferences.viewFontSizes, (view, change, base) => {
-    const current = readPreferences();
+    const current = latest.current;
     const sizes = resizeViewFont(current.viewFontSizes, view, change, base);
     if (sizes === current.viewFontSizes) return;
     const next = { ...current, viewFontSizes: sizes };
-    persistPreferences(next);
+    latest.current = next;
     setPreferences(next);
+    void persistPreferences(next).catch((error: unknown) => {
+      reportFrontendError("save_preferences", error);
+    });
   });
   const [help, setHelp] = useHelpShortcut(shortcuts.help, diagram ? "viewer" : comparison ? "compare" : "general");
   const { scheme, theme } = resolveAppearance(preferences, useSystemTheme());
@@ -78,6 +83,7 @@ export function ToolWindow({ initialPreferences, comparison, diagram, optionsPag
     const sync = (event: StorageEvent) => {
       if (event.key !== preferenceKey) return;
       const next = readPreferences();
+      acceptWindowsPreferences(next);
       setLanguage(next.language);
       setPreferences(next);
     };
@@ -99,12 +105,12 @@ export function ToolWindow({ initialPreferences, comparison, diagram, optionsPag
       comparison ? <CompareDialog {...comparison} standalone
       previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap}
       onDirtyChange={(dirty) => { void reportDirty(dirty).catch(() => {}); }} onClose={close} /> :
-      <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={(draft) => {
+      <Settings standalone initialPage={optionsPage} preferences={preferences} onClose={close} onPick={pickFromDesktop} onChange={async (draft) => {
       const next = readPreferences();
       for (const key of Object.keys(draft) as (keyof Preferences)[]) {
         if (JSON.stringify(draft[key]) !== JSON.stringify(preferences[key])) Object.assign(next, { [key]: draft[key] });
       }
-      persistPreferences(next);
+      await persistPreferences(next);
       setLanguage(next.language);
       setPreferences(next);
       return next;

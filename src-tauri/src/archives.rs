@@ -9,6 +9,7 @@ use std::{
     },
 };
 
+use ring::digest::{self, Digest, SHA256};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
@@ -22,6 +23,7 @@ use crate::{
     local,
     local_transfer::{Conflict, Decision, FileRevision, Options},
     protocol::{BytePage, RemoteListing, BYTE_PAGE_SIZE},
+    text_pages,
 };
 
 mod updates;
@@ -74,6 +76,12 @@ pub struct Archive {
     generation: String,
     writable: bool,
     byte_cache: Option<MemberCache>,
+}
+
+pub(crate) enum MoveOutcome {
+    Completed,
+    Skipped,
+    SourceRetained(String),
 }
 
 #[derive(Serialize)]
@@ -177,6 +185,37 @@ pub async fn read_archive_text(
 }
 
 #[tauri::command]
+pub(crate) async fn open_archive_text_pages(
+    id: u32,
+    segments: Vec<String>,
+    editing: bool,
+    archives: State<'_, Archives>,
+    state: State<'_, text_pages::Documents>,
+) -> Result<Option<text_pages::PageInfo>> {
+    let archive = archives.get(id)?;
+    let document = blocking(move || {
+        let member = archive.lock().map_err(message)?;
+        let entry = member.file(&segments)?;
+        if entry.size <= TEXT_LIMIT {
+            return Ok(None);
+        }
+        let (file, baseline) = text_pages::snapshot(editing && member.writable, |writer| {
+            member.extract(entry, writer, |_| Ok(())).map(drop)
+        })?;
+        let revision = member.generation.clone();
+        drop(member);
+        text_pages::Document::new(
+            text_pages::Source::Archive(archive, segments, revision),
+            file,
+            baseline,
+        )
+        .map(Some)
+    })
+    .await?;
+    document.map(|document| state.insert(document)).transpose()
+}
+
+#[tauri::command]
 pub async fn read_archive_bytes(
     id: u32,
     segments: Vec<String>,
@@ -207,8 +246,8 @@ pub async fn save_archive_text(
             return Err("The archive changed. Reopen the file before saving.".to_owned());
         }
         archive.file(&segments)?;
-        let data = encode_text(encoding, &text)?;
-        archive.write(&[segments], Some(data))?;
+        let data = encode_text(encoding, &text);
+        archive.write_member(&segments, &data)?;
         Ok(TextDocument {
             text,
             encoding,
@@ -229,6 +268,11 @@ pub async fn delete_archive_entries(
 }
 
 const HEX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+struct MemberUpdate<'a> {
+    bytes: &'a mut dyn Read,
+    length: u64,
+    digest: &'a Digest,
+}
 struct MemberCache {
     name: Vec<String>,
     start: u64,
@@ -257,7 +301,7 @@ impl Write for CacheWriter {
 }
 
 impl Archive {
-    fn open(engine: Engine, path: PathBuf, password: Option<String>) -> Result<Self> {
+    pub(crate) fn open(engine: Engine, path: PathBuf, password: Option<String>) -> Result<Self> {
         let metadata = fs::symlink_metadata(&path).map_err(message)?;
         if !metadata.is_file() || local::is_link(&metadata) {
             return Err("Choose a regular archive file.".to_owned());
@@ -324,13 +368,33 @@ impl Archive {
         Ok(BytePage { length, data })
     }
 
-    fn verify(&self) -> Result<()> {
+    pub(crate) fn verify(&self) -> Result<()> {
         self.revision
             .verify(&self.path)
             .map_err(|_| "The archive changed on disk. Open it again.".to_owned())
     }
 
-    fn list(&self, segments: &[String]) -> Result<RemoteListing> {
+    pub(crate) fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    pub(crate) fn is_writable(&self) -> bool {
+        self.writable
+    }
+
+    pub(crate) fn remove_moved_member(
+        &mut self,
+        segments: &[String],
+        generation: &str,
+        check: impl FnMut() -> io::Result<()>,
+    ) -> Result<()> {
+        if self.generation != generation {
+            return Err("The source archive changed during the move.".to_owned());
+        }
+        self.write_with_progress(&[segments.to_vec()], None, check)
+    }
+
+    pub(crate) fn list(&self, segments: &[String]) -> Result<RemoteListing> {
         self.verify()?;
         if !segments.is_empty()
             && !self
@@ -403,6 +467,7 @@ impl Archive {
         options: &Options,
         progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
         ask: impl FnMut(Conflict) -> io::Result<Decision>,
+        committed: impl FnMut(&Path, &Path),
     ) -> Result<bool> {
         crate::remote_transfer::download(
             &mut ArchiveReader(self),
@@ -411,10 +476,112 @@ impl Archive {
             options,
             progress,
             ask,
+            committed,
         )
     }
 
-    fn write(&mut self, selected: &[Vec<String>], updated: Option<Vec<u8>>) -> Result<()> {
+    pub(crate) fn move_to(
+        &mut self,
+        segments: &[String],
+        target: &Path,
+        options: &Options,
+        mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        ask: impl FnMut(Conflict) -> io::Result<Decision>,
+        committed: impl FnMut(&Path, &Path),
+    ) -> Result<MoveOutcome> {
+        self.verify()?;
+        if !self.writable {
+            return Err("The archive is read-only.".to_owned());
+        }
+        let parent = target
+            .parent()
+            .ok_or("Choose a local destination folder.")?;
+        let name = target.file_name().ok_or("Enter a destination name.")?;
+        let destination = parent.canonicalize().map_err(message)?.join(name);
+        let archive = self.path.canonicalize().map_err(message)?;
+        let same_file = destination.exists()
+            && same_file::is_same_file(&destination, &archive).map_err(message)?;
+        #[cfg(windows)]
+        let overlaps = archive
+            .to_string_lossy()
+            .to_lowercase()
+            .starts_with(&(destination.to_string_lossy().to_lowercase() + "\\"));
+        #[cfg(not(windows))]
+        let overlaps = archive.starts_with(&destination);
+        if same_file
+            || destination == archive
+            || overlaps
+            || destination.is_dir()
+                && archive.starts_with(destination.canonicalize().map_err(message)?)
+        {
+            return Err(
+                "Choose a destination outside the source archive's containing subtree.".to_owned(),
+            );
+        }
+        if !self.copy_to(segments, target, options, &mut progress, ask, committed)? {
+            return Ok(MoveOutcome::Skipped);
+        }
+        let cleanup = progress(target, 0, None).map_err(message).and_then(|()| {
+            self.write_with_progress(&[segments.to_vec()], None, || progress(target, 0, None))
+        });
+        Ok(match cleanup {
+            Ok(()) => MoveOutcome::Completed,
+            Err(error) => MoveOutcome::SourceRetained(error),
+        })
+    }
+
+    fn write_member(&mut self, segments: &[String], data: &[u8]) -> Result<()> {
+        let mut bytes = data;
+        let checksum = digest::digest(&SHA256, data);
+        self.write(
+            &[segments.to_vec()],
+            Some(MemberUpdate {
+                bytes: &mut bytes,
+                length: data.len() as u64,
+                digest: &checksum,
+            }),
+        )
+    }
+
+    pub(crate) fn save_paged_member(
+        &mut self,
+        segments: &[String],
+        revision: &str,
+        snapshot: &mut fs::File,
+        length: u64,
+        previous: &Digest,
+        replacement: &Digest,
+    ) -> Result<String> {
+        let changed = "The archive changed. Reopen the file before saving.";
+        if self.generation != revision {
+            return Err(changed.into());
+        }
+        let entry = self.file(segments)?;
+        let actual = text_pages::hash(|writer| self.extract(entry, writer, |_| Ok(())).map(drop))?;
+        if actual.as_ref() != previous.as_ref() {
+            return Err(changed.into());
+        }
+        self.write(
+            &[segments.to_vec()],
+            Some(MemberUpdate {
+                bytes: snapshot,
+                length,
+                digest: replacement,
+            }),
+        )?;
+        Ok(self.generation.clone())
+    }
+
+    fn write(&mut self, selected: &[Vec<String>], updated: Option<MemberUpdate<'_>>) -> Result<()> {
+        self.write_with_progress(selected, updated, || Ok(()))
+    }
+
+    fn write_with_progress(
+        &mut self,
+        selected: &[Vec<String>],
+        mut updated: Option<MemberUpdate<'_>>,
+        mut check: impl FnMut() -> io::Result<()>,
+    ) -> Result<()> {
         self.verify()?;
         if !self.writable {
             return Err("The archive is read-only.".to_owned());
@@ -430,7 +597,7 @@ impl Archive {
         let modifies =
             |name: &[String]| selected.iter().any(|selection| name.starts_with(selection));
         let mut command;
-        if let Some(contents) = updated.as_deref() {
+        if let Some(contents) = updated.as_mut() {
             let root = workspace.path().join("update");
             // 7-Zip requires the actual relative member name for the replacement.
             let path = selected[0]
@@ -441,7 +608,11 @@ impl Archive {
                     .ok_or("The archive member has no directory.")?,
             )
             .map_err(message)?;
-            fs::write(&path, contents).map_err(message)?;
+            let mut file = fs::File::create(&path).map_err(message)?;
+            if io::copy(contents.bytes, &mut file).map_err(message)? != contents.length {
+                return Err("The edited file could not be staged.".to_owned());
+            }
+            drop(file);
             let list = archive_engine::list_file(workspace.path(), [selected[0].join("/")])?;
             command = self.engine.command("a");
             command
@@ -463,7 +634,7 @@ impl Archive {
         }
         archive_args(&mut command, &staged);
         let _ = archive_engine::run(&mut command, self.password.as_deref(), io::sink(), |_| {
-            Ok(())
+            check()
         })?
         .checked(false)?;
         let new_index = inspect(&self.engine, &staged, self.password.as_deref())?;
@@ -476,17 +647,18 @@ impl Archive {
             let member = new_index
                 .members
                 .get(&selected[0])
-                .filter(|item| item.size == data.len() as u64)
+                .filter(|item| item.size == data.length)
                 .ok_or("The edited file was not saved into the archive.")?;
-            let actual =
-                extract_member(&self.engine, &staged, None, member, Vec::new(), |_| Ok(()))?;
-            if actual != data {
+            let actual = text_pages::hash(|writer| {
+                extract_member(&self.engine, &staged, None, member, writer, |_| Ok(())).map(drop)
+            })?;
+            if actual.as_ref() != data.digest.as_ref() {
                 return Err("The edited file was not saved into the archive.".to_owned());
             }
         } else if new_index.members.keys().any(|name| modifies(name)) {
             return Err("An archive entry could not be deleted.".to_owned());
         }
-        self.commit_update(&staged, new_index, || Ok(()))
+        self.commit_update(&staged, new_index, || check().map_err(message))
     }
 
     fn stage_update(&self) -> Result<(tempfile::TempDir, PathBuf)> {
@@ -829,12 +1001,11 @@ mod tests {
                     &target,
                     &options,
                     |_, _, _| panic!("must skip before extraction"),
-                    |_| panic!("unexpected question")
+                    |_| panic!("unexpected question"),
+                    |_, _| {}
                 )
                 .unwrap());
-            archive
-                .write(&[note.clone().to_vec()], Some(b"updated text".to_vec()))
-                .unwrap();
+            archive.write_member(&note, b"updated text").unwrap();
             assert!(archive.byte_cache.is_none());
             assert_eq!(archive.byte_page(&note, 0).unwrap().data, b"updated text");
             assert_eq!(extract(&archive, &note), b"updated text");
@@ -845,7 +1016,150 @@ mod tests {
                 use crate::local_transfer::Policy;
                 let parent = ["docs".to_owned()];
                 archive.create_folder(&parent, "empty", |_| Ok(())).unwrap();
+                let empty = ["docs".to_owned(), "empty".to_owned()];
+                archive
+                    .relocate_entry(&note, &empty, "note.txt", |_| Ok(()))
+                    .unwrap();
+                assert!(archive.file(&note).is_err());
+                let relocated = ["docs".to_owned(), "empty".to_owned(), "note.txt".to_owned()];
+                assert_eq!(extract(&archive, &relocated), b"updated text");
+                archive
+                    .relocate_entry(&relocated, &parent, "note.txt", |_| Ok(()))
+                    .unwrap();
+                assert_eq!(extract(&archive, &note), b"updated text");
+                archive
+                    .create_text(&parent, "created.txt", Encoding::Utf8Bom, |_| Ok(()))
+                    .unwrap();
+                let created = ["docs".to_owned(), "created.txt".to_owned()];
+                assert_eq!(extract(&archive, &created), b"\xEF\xBB\xBF");
+                assert!(archive
+                    .move_to(
+                        &created,
+                        &path,
+                        &options,
+                        |_, _, _| Ok(()),
+                        |_| panic!("archive cannot overwrite itself"),
+                        |_, _| {},
+                    )
+                    .is_err());
+                let extracted = fixture.path().join("moved.txt");
+                fs::write(&extracted, b"existing").unwrap();
+                assert!(matches!(
+                    archive
+                        .move_to(
+                            &created,
+                            &extracted,
+                            &options,
+                            |_, _, _| Ok(()),
+                            |_| panic!("skip existing file"),
+                            |_, _| {}
+                        )
+                        .unwrap(),
+                    MoveOutcome::Skipped,
+                ));
+                assert_eq!(extract(&archive, &created), b"\xEF\xBB\xBF");
+                fs::remove_file(&extracted).unwrap();
+                assert!(matches!(
+                    archive
+                        .move_to(
+                            &created,
+                            &extracted,
+                            &options,
+                            |item, _, _| {
+                                if item == extracted {
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::Interrupted,
+                                        "Canceled after copy",
+                                    ));
+                                }
+                                Ok(())
+                            },
+                            |_| panic!("no conflict"),
+                            |_, _| {}
+                        )
+                        .unwrap(),
+                    MoveOutcome::SourceRetained(_),
+                ));
+                assert_eq!(fs::read(&extracted).unwrap(), b"\xEF\xBB\xBF");
+                assert_eq!(extract(&archive, &created), b"\xEF\xBB\xBF");
+                fs::remove_file(&extracted).unwrap();
+                assert!(matches!(
+                    archive
+                        .move_to(
+                            &created,
+                            &extracted,
+                            &options,
+                            |_, _, _| Ok(()),
+                            |_| panic!("no conflict"),
+                            |_, _| {}
+                        )
+                        .unwrap(),
+                    MoveOutcome::Completed,
+                ));
+                assert_eq!(fs::read(&extracted).unwrap(), b"\xEF\xBB\xBF");
+                assert!(archive.file(&created).is_err());
+                archive
+                    .create_folder(&parent, "move-folder", |_| Ok(()))
+                    .unwrap();
+                let moved_folder = ["docs".to_owned(), "move-folder".to_owned()];
+                archive
+                    .create_text(&moved_folder, "child.txt", Encoding::Utf8Bom, |_| Ok(()))
+                    .unwrap();
+                let destination = fixture.path().join(format!("moved-folder-{kind}"));
+                assert!(matches!(
+                    archive
+                        .move_to(
+                            &moved_folder,
+                            &destination,
+                            &options,
+                            |_, _, _| Ok(()),
+                            |_| panic!("no conflict"),
+                            |_, _| {}
+                        )
+                        .unwrap(),
+                    MoveOutcome::Completed,
+                ));
+                assert_eq!(
+                    fs::read(destination.join("child.txt")).unwrap(),
+                    b"\xEF\xBB\xBF"
+                );
+                assert!(archive.list(&moved_folder).is_err());
+                let incoming_move = fixture.path().join(format!("incoming-move-{kind}.txt"));
+                fs::write(&incoming_move, b"archived contents").unwrap();
+                let destination_name = "incoming-move.txt".to_owned();
+                let target = [parent[0].clone(), destination_name.clone()];
+                let copy = archive
+                    .copy_for_move(
+                        &parent,
+                        (incoming_move.clone(), destination_name.clone()),
+                        Policy::Ask,
+                        |_, _, _| Ok(()),
+                        |_| panic!("no conflict"),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(extract(&archive, &target), b"archived contents");
+                copy.verify_file(&target, fs::File::open(&incoming_move).unwrap(), || Ok(()))
+                    .unwrap();
+                fs::write(&incoming_move, b"source has changed").unwrap();
+                assert!(copy
+                    .verify_file(&target, fs::File::open(&incoming_move).unwrap(), || Ok(()))
+                    .is_err());
+                assert_eq!(fs::read(&incoming_move).unwrap(), b"source has changed");
+                assert!(archive
+                    .copy_for_move(
+                        &parent,
+                        (incoming_move, destination_name),
+                        Policy::Skip,
+                        |_, _, _| Ok(()),
+                        |_| panic!("skip existing file"),
+                    )
+                    .unwrap()
+                    .is_none());
                 let before = fs::read(&path).unwrap();
+                assert!(archive
+                    .create_text(&parent, "note.txt", Encoding::Utf8, |_| Ok(()))
+                    .is_err());
                 assert!(archive.create_folder(&parent, "empty", |_| Ok(())).is_err());
                 assert!(archive
                     .create_folder(&parent, "canceled", |percent| {

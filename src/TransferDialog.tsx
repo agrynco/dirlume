@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isWritableServerPlace, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type KSwitcherPlace, type WritableServerPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath, type Side } from "./panes";
@@ -11,22 +11,41 @@ import { useTimestamps } from "./useTimestamps";
 import { PathField } from "./PathField";
 import { HistoryField } from "./HistoryField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
+import { SudoDialog } from "./SudoDialog";
 import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEstimate";
 
 export interface Transfer {
   kind: "copy" | "move";
   source: FilePlace;
-  items: { place: FilePlace; entry: Entry; searchPath?: string }[];
+  items: { place: FilePlace; entry: Entry; searchPath?: string; collectionDestination?: string[] }[];
   target: string;
   remoteDestination?: FtpPlace | SshPlace;
+  serverDestination?: WritableServerPlace;
+  kswitcherDestination?: KSwitcherPlace;
+  kswitcherBroker?: boolean;
   archiveDestination?: ArchivePlace;
   chooseOperation?: boolean;
+  collection?: { folders: string[][]; unavailable: string[]; needsLocalDestination: boolean };
 }
 
-type Decision = "overwrite" | "skip";
+type Decision = "overwrite" | "overwrite_all" | "skip";
 let nextSession = 0;
 
 export const nextTransferId = () => ++nextSession;
+
+export function TransferSudoPrompt({ id, request, operation, onClose }: {
+  id: number;
+  request: Extract<TransferEvent, { kind: "sudo_required" }>;
+  operation: "transfer" | "delete";
+  onClose: () => void;
+}) {
+  return <SudoDialog address={request.address} path={request.path} operation={operation}
+    onConfirm={(password) => api.authorizeTransferSudo(id, request.ticket, password)}
+    onClose={() => {
+      onClose();
+      void api.declineTransferSudo(id, request.ticket).catch(() => {});
+    }} />;
+}
 
 function remoteDestinationLabel(place: FtpPlace | SshPlace) {
   const protocol = place.kind === "ssh" ? "SFTP" : "FTP";
@@ -49,11 +68,14 @@ export function itemSource(place: FilePlace, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (isFileServer(place)) return { kind: place.kind, connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
+  const metadata = item.modified === null ? {} : { modified: item.modified };
   if (place.kind === "server") {
-    return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
+    return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory, ...metadata,
+      ...(isWritableServerPlace(place) ? { writable_server: true } : {}) };
   }
   const target = childPlace(place, item.name) as typeof place;
-  return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name };
+  return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name,
+    folder: item.directory, ...metadata };
 }
 
 export function TransferDialog({ transfer, side, showHidden, onClose, onFinished }: {
@@ -83,6 +105,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [blocked, setBlocked] = useState<Transfer["items"][number]>();
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [conflict, setConflict] = useState<TransferConflict | null>(null);
+  const [sudo, setSudo] = useState<Extract<TransferEvent, { kind: "sudo_required" }> | null>(null);
   const [remember, setRemember] = useState(false);
   const [answering, setAnswering] = useState<TransferConflict | null>(null);
   const [canceling, setCanceling] = useState(false);
@@ -96,17 +119,26 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
   const archiveTarget = transfer.archiveDestination;
-  const localTarget = !transfer.remoteDestination && !archiveTarget;
-  const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive";
+  const serverTarget = transfer.serverDestination;
+  const remoteMove = moving && (serverTarget || transfer.items.some(({ place }) =>
+    isWritableServerPlace(place) || isFileServer(place) || place.kind === "archive"));
+  const sameServerMove = moving && serverTarget && isWritableServerPlace(transfer.source) && transfer.source.share === serverTarget.share;
+  const sameArchiveMove = moving && archiveTarget && transfer.source.kind === "archive" && transfer.source.path === archiveTarget.path;
+  const kswitcherTarget = transfer.kswitcherDestination;
+  const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
+    (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
+  const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget && !serverTarget;
+  const replaceable = serverTarget || transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
+    transfer.kswitcherBroker || transfer.items.every(({ place }) => place.kind === "server" || place.kind === "kswitcher");
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
-  const manyDestinations = multipleDestinations && !moving;
+  const manyDestinations = multipleDestinations && !moving && !serverTarget;
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
-  const singleFile = !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
+  const singleFile = !transfer.collection && !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
   const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
-  const separator = localTarget && windowsClient ? "\\" : "/";
+  const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
     ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
     : destination;
@@ -168,6 +200,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     setCanceling(true);
     setEstimatedTime(undefined);
     setConflict(null);
+    setSudo(null);
     void api.cancelTransfer(running.current).catch(() => {});
   }
 
@@ -177,6 +210,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       if (event.kind === "conflict") {
         setRemember(false);
         setConflict(event.conflict);
+        return;
+      }
+      if (event.kind === "sudo_required") {
+        setSudo(event);
         return;
       }
       estimate.current?.progress(event, performance.now());
@@ -197,8 +234,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     session.current = id;
     running.current = id;
     failedDecision.current = false;
-    const jobs = archiveTarget ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
-    estimate.current = new TransferEstimate(archiveTarget ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
+    const archiveCopy = !moving && transfer.items.every(({ place }) => place.kind === "local") ? archiveTarget : undefined;
+    const jobs = archiveCopy ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+    estimate.current = new TransferEstimate(archiveCopy ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
     setEstimatedTime(undefined);
     setPhase("working");
     setError("");
@@ -210,16 +248,25 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     const movedPaths: string[] = [];
     try {
       if (!initialized) {
-        await api.beginTransfer(id);
+        await api.beginTransfer(id, {
+          moving, source: placePath(transfer.source), destination: targets.join(", "),
+          multipleDestinations: manyDestinations && targets.length > 1,
+        });
         initialized = true;
       }
-      if (archiveTarget && !cancelled.current) {
+      if (transfer.collection?.folders.length && !cancelled.current) {
+        for (const target of targets) {
+          if (cancelled.current) break;
+          await api.prepareCollectionFolders(target, transfer.collection.folders);
+        }
+      }
+      if (archiveCopy && !cancelled.current) {
         const sources = transfer.items.map(({ place, entry }) => {
           if (place.kind !== "local") throw new Error(t("Choose local files or folders to copy into the archive."));
           return { directory: place.path, name: entry.name };
         });
         const output = transferEvents(id);
-        const result = await api.copyIntoArchive(id, archiveTarget, sources, policy, output)
+        const result = await api.copyIntoArchive(id, archiveCopy, sources, policy, output)
           .finally(() => { output.onmessage = () => {}; });
         const written = result.filter(Boolean).length;
         skippedItems = result.length - written;
@@ -234,21 +281,28 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         attempted = item;
         const { place, entry } = item;
         setProgress({ file: entry.name, bytes: 0, total: null });
-        const remoteCopy = !localTarget || isFileServer(transfer.source);
-        const target = remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
+        const remoteCopy = !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
+          (place.kind === "server" || place.kind === "kswitcher") && entry.directory;
+        const target = item.collectionDestination?.length
+          ? [destination.replace(/[\\/]+$/, ""), ...item.collectionDestination].join(separator)
+          : remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
           : destination;
         const request = {
           source: itemSource(place, entry), destination: target, moving,
           ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
           sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
-          multiple: itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
+          serverDestination: serverTarget?.id,
+          archiveDestination: archiveTarget ? { id: archiveTarget.id, segments: archiveTarget.segments } : undefined,
+          kswitcherDestination: kswitcherTarget?.peer, kswitcherBroker: transfer.kswitcherBroker,
+          multiple: !!transfer.collection || itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "source_retained") {
-          setError(t("Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
+          setError(t(transfer.kswitcherBroker || item.place.kind !== "local" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+            "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
           setBlocked(item);
           return;
         }
@@ -279,6 +333,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       }
       running.current = null;
       setConflict(null);
+      setSudo(null);
       const success = finished && !cancelled.current && skippedItems === 0;
       onFinished(success, movedPaths);
       if (success) onClose();
@@ -302,22 +357,35 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           <div className="dialog-body transfer-body transfer-options">
             <div className="field">
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
-                {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+                {transfer.collection ? t("Copy from collection") : <>
+                  {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+                </>}
               </label>
               {transfer.remoteDestination && <span className="muted" id="transfer-connection">
                 {remoteDestinationLabel(transfer.remoteDestination)}
               </span>}
+              {kswitcherTarget && <span className="muted" id="transfer-connection">{kswitcherTarget.address}</span>}
+              {serverTarget && <span className="muted" id="transfer-connection">{serverTarget.address}</span>}
               {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus value={destination} /> :
+              serverTarget ? <input id="transfer-destination" type="text" aria-label={t("Destination")} aria-describedby="transfer-connection"
+                required data-initial-focus value={destination} onChange={(event) => setDestination(event.target.value)} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
-                describedBy={transfer.remoteDestination ? "transfer-connection" : undefined}
-                required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination} includeFiles={singleFile}
+                describedBy={transfer.remoteDestination || kswitcherTarget ? "transfer-connection" : undefined}
+                required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination}
+                kswitcher={kswitcherTarget} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
             </div>
+            {!!transfer.collection?.unavailable.length && <div role="status">
+              <p>{t("These originals are unavailable. Available items can still be copied.")}</p>
+              <ul>{transfer.collection.unavailable.map((message, index) => <li key={index}>{message}</li>)}</ul>
+            </div>}
+            {transfer.collection?.needsLocalDestination &&
+              <p role="status">{t("Choose a local destination for this collection selection.")}</p>}
             {manyDestinations && <>
               {additional.map((path, index) => <PathField key={index} id={`transfer-destination-${index + 2}`}
                 label={t("Destination {0}", index + 2)} historyKey="transfer-destination" value={path} required
                 onChange={(value) => setAdditional((current) => current.map((old, offset) => offset === index ? value : old))}
-                showHidden={showHidden} server={transfer.remoteDestination} browse="folder" />)}
+                showHidden={showHidden} server={transfer.remoteDestination} kswitcher={kswitcherTarget} browse="folder" />)}
               <div className="dialog-action-group">
                 <DialogIconButton label={t("Add destination")} onClick={() => setAdditional([...additional, ""])}><Plus /></DialogIconButton>
                 <DialogIconButton label={t("Remove last destination")} onClick={() => {
@@ -335,16 +403,17 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
             </label>}
             <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
-                <option value="ask">{t("Ask")}</option><option value="skip">{t("Skip")}</option>
-                {replaceable && <option value="overwrite">{t("Overwrite")}</option>}
-                {replaceable && localTarget && <>
+                <option value="ask">{t(sameServerMove || sameArchiveMove || transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
+                <option value="skip">{t("Skip")}</option>
+                {replaceable && !sameServerMove && !sameArchiveMove && <option value="overwrite">{t("Overwrite all")}</option>}
+                {replaceable && localTarget && !transfer.kswitcherBroker && !remoteMove && <>
                   <option value="rename">{t("Rename incoming item")}</option>
                   <option value="newer">{t("Overwrite older files only")}</option>
                 </>}
               </select>
             </label>
-            {replaceable && localTarget && <label className="field-checkbox">
-              <input type="checkbox" checked={askReadOnly} onChange={(event) => setAskReadOnly(event.target.checked)} />
+            {replaceable && localTarget && !transfer.kswitcherBroker && <label className="field-checkbox">
+              <input type="checkbox" checked={askReadOnly} disabled={policy === "overwrite"} onChange={(event) => setAskReadOnly(event.target.checked)} />
               <span>{t("Also ask about read-only files")}</span>
             </label>}
             {localCopy && <>
@@ -357,7 +426,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <span>{t("Copy contents of symbolic links")}</span>
               </label>
             </>}
-            {!moving && !archiveTarget && <label className="field-checkbox">
+            {!moving && !archiveTarget && !serverTarget && <label className="field-checkbox">
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
               <span>{t("Process multiple destinations")}</span>
             </label>}
@@ -425,6 +494,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         </>
       )}
     </Dialog>
+    {sudo && running.current !== null && <TransferSudoPrompt key={sudo.ticket} id={running.current} request={sudo}
+      operation="transfer" onClose={() => setSudo((current) => current?.ticket === sudo.ticket ? null : current)} />}
     {conflict && (
       <Dialog key={conflict.path} title={conflict.directory ? t("Folder already exists") : t("File already exists")} tone="warning" onClose={cancel}>
         <div className="dialog-body transfer-body">
@@ -435,18 +506,19 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               <ConflictDetails label={t("Existing")} details={conflict.existing} />
             </tbody>
           </table>
-          {conflict.directory && conflict.replaceable && <p>{t("Merge the folders and handle conflicting files individually.")}</p>}
           {!conflict.replaceable && <p>{t("Skip this item or choose another destination.")}</p>}
           {conflict.allowRemember && <label className="field-checkbox">
-            <span>{t("Remember choice")}</span>
+            <span>{t(conflict.confirmReadOnly ? "Remember choice for read-only files" : "Remember choice")}</span>
             <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
           </label>}
         </div>
         <footer className="dialog-footer">
           {conflict.replaceable && (
             <Button type="button" className="alert-confirm" disabled={answering === conflict}
-              onClick={() => { void resolve("overwrite"); }}>{t(conflict.directory ? "Merge" : "Overwrite")}</Button>
+              onClick={() => { void resolve("overwrite"); }}>{t("Overwrite")}</Button>
           )}
+          {conflict.replaceable && <Button type="button" disabled={answering === conflict}
+            onClick={() => { void resolve("overwrite_all"); }}>{t("Overwrite all")}</Button>}
           <Button type="button" data-initial-focus disabled={answering === conflict} onClick={() => { void resolve("skip"); }}>{t("Skip")}</Button>
           <Button type="button" onClick={cancel}>{t("Cancel")}</Button>
         </footer>

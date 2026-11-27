@@ -8,6 +8,26 @@ use crate::remote_transfer::{self, Session, UploadSession};
 
 use super::*;
 
+pub(crate) struct ArchiveMoveCopy(tempfile::TempDir);
+
+impl ArchiveMoveCopy {
+    pub(crate) fn verify_file(
+        &self,
+        target: &[String],
+        source: fs::File,
+        mut check: impl FnMut() -> io::Result<()>,
+    ) -> Result<()> {
+        let staged =
+            fs::File::open(member_path(&self.0.path().join("update"), target)?).map_err(message)?;
+        let source = crate::protocol::lan_file_digest(source, &mut check).map_err(message)?;
+        let staged = crate::protocol::lan_file_digest(staged, &mut check).map_err(message)?;
+        if source != staged {
+            return Err("The local file differs from the archived copy.".to_owned());
+        }
+        Ok(())
+    }
+}
+
 impl Archive {
     pub(super) fn can_add(&self) -> bool {
         self.writable && matches!(self.index.format.as_str(), "zip" | "7z")
@@ -34,6 +54,26 @@ impl Archive {
         &mut self,
         parent: &[String],
         name: &str,
+        tick: impl FnMut(u8) -> io::Result<()>,
+    ) -> Result<()> {
+        self.create_member(parent, name, None, tick)
+    }
+
+    pub(crate) fn create_text(
+        &mut self,
+        parent: &[String],
+        name: &str,
+        encoding: Encoding,
+        tick: impl FnMut(u8) -> io::Result<()>,
+    ) -> Result<()> {
+        self.create_member(parent, name, Some(&encode_text(encoding, "")), tick)
+    }
+
+    fn create_member(
+        &mut self,
+        parent: &[String],
+        name: &str,
+        data: Option<&[u8]>,
         mut tick: impl FnMut(u8) -> io::Result<()>,
     ) -> Result<()> {
         self.require_folder(parent)?;
@@ -44,13 +84,20 @@ impl Archive {
         tick(0).map_err(message)?;
         let (workspace, staged) = self.stage_update()?;
         let root = workspace.path().join("update");
-        fs::create_dir_all(member_path(&root, &target)?).map_err(message)?;
+        let path = member_path(&root, &target)?;
+        if let Some(data) = data {
+            fs::create_dir_all(path.parent().ok_or("Choose a folder in the archive.")?)
+                .map_err(message)?;
+            fs::write(&path, data).map_err(message)?;
+        } else {
+            fs::create_dir_all(&path).map_err(message)?;
+        }
         let mut writer = ArchiveUpload::new(self, root, workspace.path());
         writer.changes.insert(
             target,
             Change {
-                directory: true,
-                size: 0,
+                directory: data.is_none(),
+                size: data.map_or(0, |bytes| bytes.len() as u64),
             },
         );
         let index = writer.add_members(&staged, &mut tick)?;
@@ -61,9 +108,19 @@ impl Archive {
         &mut self,
         target: &[String],
         name: &str,
-        mut tick: impl FnMut(u8) -> io::Result<()>,
+        tick: impl FnMut(u8) -> io::Result<()>,
     ) -> Result<()> {
         let (_, parent) = target.split_last().ok_or("Choose an archive entry.")?;
+        self.relocate_entry(target, parent, name, tick)
+    }
+
+    pub(crate) fn relocate_entry(
+        &mut self,
+        target: &[String],
+        parent: &[String],
+        name: &str,
+        mut tick: impl FnMut(u8) -> io::Result<()>,
+    ) -> Result<()> {
         self.require_folder(parent)?;
         let destination = checked_child(parent, name)?;
         let member = self
@@ -73,6 +130,9 @@ impl Archive {
             .ok_or("Choose an archive entry.")?;
         if destination == target {
             return Ok(());
+        }
+        if destination.starts_with(target) {
+            return Err("Choose an archive destination outside the source folder.".to_owned());
         }
         if self.index.members.contains_key(&destination) {
             return Err("An archive entry with that name already exists.".to_owned());
@@ -95,22 +155,28 @@ impl Archive {
         archive_engine::run(&mut command, None, io::sink(), &mut tick)?.checked(false)?;
         let index = inspect(&self.engine, &staged, None)?;
         validate_index(self, &index)?;
-        if index.members.len() != self.index.members.len()
-            || self.index.members.iter().any(|(path, entry)| {
-                if let Some(tail) = path.strip_prefix(target) {
-                    let moved = [destination.as_slice(), tail].concat();
-                    !index.members.get(&moved).is_some_and(|replacement| {
-                        replacement.directory == entry.directory
-                            && replacement.link == entry.link
-                            && replacement.size == entry.size
-                            && replacement.crc == entry.crc
-                            && replacement.raw.is_some() == entry.raw.is_some()
-                    })
-                } else {
-                    index.members.get(path) != Some(entry)
+        if self.index.members.iter().any(|(path, entry)| {
+            if let Some(tail) = path.strip_prefix(target) {
+                let moved = [destination.as_slice(), tail].concat();
+                !index.members.get(&moved).is_some_and(|replacement| {
+                    replacement.directory == entry.directory
+                        && replacement.link == entry.link
+                        && replacement.size == entry.size
+                        && replacement.crc == entry.crc
+                        && replacement.raw.is_some() == entry.raw.is_some()
+                })
+            } else {
+                match index.members.get(path) {
+                    Some(member) => member != entry,
+                    None => entry.raw.is_some() || !target.starts_with(path),
                 }
-            })
-        {
+            }
+        }) || index.members.keys().any(|path| {
+            !self.index.members.contains_key(path)
+                && !path
+                    .strip_prefix(destination.as_slice())
+                    .is_some_and(|tail| self.index.members.contains_key(&[target, tail].concat()))
+        }) {
             return Err("The archive rename did not preserve the original entries.".to_owned());
         }
         self.commit_update(&staged, index, || tick(100).map_err(message))
@@ -121,9 +187,37 @@ impl Archive {
         parent: &[String],
         sources: &[(PathBuf, String)],
         policy: Policy,
+        progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        ask: impl FnMut(Conflict) -> io::Result<Decision>,
+    ) -> Result<Vec<bool>> {
+        self.copy_from_local(parent, sources, policy, progress, ask)
+            .map(|(result, _)| result)
+    }
+
+    pub(crate) fn copy_for_move(
+        &mut self,
+        parent: &[String],
+        source: (PathBuf, String),
+        policy: Policy,
+        progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        ask: impl FnMut(Conflict) -> io::Result<Decision>,
+    ) -> Result<Option<ArchiveMoveCopy>> {
+        let (result, workspace) = self.copy_from_local(parent, &[source], policy, progress, ask)?;
+        Ok(result
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .then_some(ArchiveMoveCopy(workspace)))
+    }
+
+    fn copy_from_local(
+        &mut self,
+        parent: &[String],
+        sources: &[(PathBuf, String)],
+        policy: Policy,
         mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
         mut ask: impl FnMut(Conflict) -> io::Result<Decision>,
-    ) -> Result<Vec<bool>> {
+    ) -> Result<(Vec<bool>, tempfile::TempDir)> {
         self.require_folder(parent)?;
         if sources.is_empty() || !matches!(policy, Policy::Ask | Policy::Overwrite | Policy::Skip) {
             return Err("Choose local files and folders and a supported copy option.".to_owned());
@@ -158,6 +252,7 @@ impl Archive {
                 policy,
                 &mut copy_progress,
                 &mut ask,
+                &mut |_, _| {},
             )?);
         }
         if !writer.changes.is_empty() {
@@ -165,7 +260,7 @@ impl Archive {
             let path = self.path.clone();
             self.commit_update(&staged, index, || progress(&path, 0, None).map_err(message))?;
         }
-        Ok(results)
+        Ok((results, workspace))
     }
 }
 
@@ -349,7 +444,7 @@ impl UploadSession for ArchiveUpload<'_> {
     fn upload_to_stage(
         &mut self,
         _target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + std::io::Seek),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String> {
         let mut pending = tempfile::NamedTempFile::new_in(self.workspace).map_err(message)?;

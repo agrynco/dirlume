@@ -1,4 +1,4 @@
-import { folderLabel, uncParts, windowsClient, type Place } from "./api";
+import { folderLabel, mountedSmbPath, smbHost, uncParts, windowsClient, type Place } from "./api";
 
 const key = "dirlume.recent-locations.v1";
 export const recentLocationLimit = 100;
@@ -14,6 +14,7 @@ export function recentLocation(place: Place): RecentLocation | null {
   const name = folderLabel(place);
   switch (place.kind) {
     case "local": {
+      if (place.smb) return { kind: "smb", path: mountedSmbPath(place.path, place.smb), name, source: smbHost(place) ?? "" };
       const [host, share] = uncParts(place.path);
       if (host && !share) return null;
       return { kind: host ? "smb" : "local", path: place.path, name, source: host ?? "" };

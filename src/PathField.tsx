@@ -231,7 +231,7 @@ export function PathField({ id, label, suggestionLabel, describedBy, value, onCh
             setSelection(-1);
           }} onKeyDown={handleKeys} />
       </EditableDropdown>
-      {browse && !readOnly && !server && isTauri() &&
+      {browse && !readOnly && !server && !kswitcher && isTauri() &&
         <Button type="button" className="icon-button path-browse" aria-label={browseLabel} disabled={browsing} onClick={() => void pickPath()}>
           <FolderOpen aria-hidden="true" />
         </Button>}

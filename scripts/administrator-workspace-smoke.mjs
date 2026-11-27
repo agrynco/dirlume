@@ -12,7 +12,7 @@ const stale = { theme: "light", layout: "classic", viewFontSizes: { left: 12 } }
 const files = (page, side) => page.locator(`#${side}-files`);
 const blocked = (page, side) => files(page, side).locator('.file-row[data-tooltip="Protected folder"]');
 
-async function openWindow(browser, { administrator = false, workspace = null, portable = false, missing = false, settings } = {}) {
+async function openWindow(browser, { administrator = false, workspace = null, portable = false, missing = false, settings, shared, label = "main" } = {}) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 710 }, locale: "en-US",
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
   page.setDefaultTimeout(8000);
@@ -20,7 +20,17 @@ async function openWindow(browser, { administrator = false, workspace = null, po
     const path = new URL(route.request().url()).pathname;
     return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
   });
-  await page.addInitScript(({ administrator, workspace, portable, missing, folders, dark, stale, settings }) => {
+  if (shared) {
+    await page.exposeFunction("readSharedSettings", () => shared.file);
+    await page.exposeFunction("writeSharedSettings", (preferences, onlyIfMissing) => {
+      if (!shared.writable) return false;
+      if (onlyIfMissing && shared.file) return null;
+      shared.file = preferences;
+      shared.writes++;
+      return true;
+    });
+  }
+  await page.addInitScript(({ administrator, workspace, portable, missing, folders, dark, stale, settings, shared, label }) => {
     window.isTauri = true;
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.elevationRequests = [];
@@ -35,12 +45,20 @@ async function openWindow(browser, { administrator = false, workspace = null, po
     }));
     const entry = (name) => ({ name, directory: true, hidden: false, link: false, size: null, modified: null });
     window.__TAURI_INTERNALS__ = {
-      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+      metadata: { currentWindow: { label }, currentWebview: { label } },
       transformCallback: () => 1,
       invoke: async (command, args) => {
         if (command === "windows_startup") return { administrator, handoff: workspace !== null, workspace, workspaceUnavailable: false };
-        if (command === "read_portable_state" && portable) return { preferences: administrator ? stale : dark, settingsError: null, updateError: null };
-        if (command === "save_portable_preferences") window.portableWrites++;
+        if (command === "read_windows_settings" && (shared || portable)) {
+          const preferences = shared ? await window.readSharedSettings() : workspace?.preferences ?? (administrator ? stale : dark);
+          return { preferences, settingsError: null, updateError: null };
+        }
+        if (command === "save_windows_preferences") {
+          if (!shared) { window.portableWrites++; return true; }
+          const saved = await window.writeSharedSettings(args.preferences, args.onlyIfMissing);
+          if (saved === false) throw new Error("Could not save dirlume-settings.json beside Dirlume.exe.");
+          return saved === true;
+        }
         if (command === "plugin:window|set_title") window.nativeTitle = args.value;
         if (command === "locations") return [{ label: "Home", path: "C:\\default" }, { label: "Downloads", path: "C:\\default\\downloads" }];
         if (command === "list_directory") return { path: args.path, parent: null, omitted: 0,
@@ -64,9 +82,70 @@ async function openWindow(browser, { administrator = false, workspace = null, po
         return null;
       },
     };
-  }, { administrator, workspace, portable, missing, folders, dark, stale, settings });
+  }, { administrator, workspace, portable, missing, folders, dark, stale, settings, shared: !!shared, label });
   await page.goto("http://dirlume.test/");
   return page;
+}
+
+async function checkSharedSettings(browser, portable) {
+  const shared = { file: null, writable: true, writes: 0 };
+  const legacy = { theme: "lavender", layout: "twin", showTitlebarScheme: true, activeShortcutScheme: "fixture",
+    shortcutSchemes: [{ id: "fixture", name: "Fixture keys", bindings: { newFile: ["Ctrl+Alt+J"] } }] };
+  const directBeforeMigration = await openWindow(browser, { administrator: true, portable, shared });
+  await directBeforeMigration.locator(".administrator-label").waitFor();
+  assert.equal(shared.file, null);
+  assert.equal(shared.writes, 0);
+  await directBeforeMigration.close();
+
+  const normal = await openWindow(browser, { portable, shared, settings: legacy });
+  await normal.locator('html[data-theme="lavender"]').waitFor();
+  assert.equal(shared.file.theme, "lavender");
+  assert.equal(shared.file.layout, "twin");
+  assert.deepEqual(shared.file.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+J"]);
+  assert.equal(shared.writes, 1);
+
+  const administrator = await openWindow(browser, { administrator: true, portable, shared });
+  await administrator.locator('html[data-theme="lavender"]').waitFor();
+  assert.equal(shared.writes, 1);
+  await administrator.locator(".topbar-scheme").selectOption("slate");
+  await administrator.waitForFunction(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme === "slate");
+  assert.equal(shared.file.theme, "slate");
+
+  const next = await openWindow(browser, { portable, shared, settings: legacy });
+  await next.locator('html[data-theme="slate"]').waitFor();
+  shared.writable = false;
+  const optionsWindow = await openWindow(browser, { portable, shared, label: "options" });
+  const options = optionsWindow.getByRole("dialog", { name: "Options", exact: true });
+  await options.getByRole("button", { name: "Appearance", exact: true }).click();
+  await options.getByRole("combobox", { name: "Color scheme", exact: true }).selectOption("sunrise");
+  await options.getByRole("button", { name: "Done", exact: true }).click();
+  await options.getByRole("alert").filter({ hasText: "Could not save dirlume-settings.json" }).waitFor();
+  assert.equal(shared.file.theme, "slate");
+  assert.equal(await next.locator("html").getAttribute("data-theme"), "slate");
+  assert.equal(await optionsWindow.evaluate(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme), "slate");
+
+  shared.writable = true;
+  await options.getByRole("button", { name: "Apply", exact: true }).click();
+  await optionsWindow.waitForFunction(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme === "sunrise");
+  assert.equal(shared.file.theme, "sunrise");
+  const reopened = await openWindow(browser, { administrator: true, portable, shared });
+  await reopened.locator('html[data-theme="sunrise"]').waitFor();
+  const handoff = await openWindow(browser, { administrator: true, portable, shared,
+    workspace: { side: "left", directory: folders.left, split: 50, preferences: stale } });
+  await handoff.locator('html[data-theme="sunrise"]').waitFor();
+  assert.equal(shared.file.theme, "sunrise");
+  await Promise.all([normal.close(), administrator.close(), next.close(), optionsWindow.close(), reopened.close(), handoff.close()]);
+
+  const protectedFolder = { file: null, writable: false, writes: 0 };
+  const oldProfile = await openWindow(browser, { portable, shared: protectedFolder, settings: legacy });
+  await oldProfile.locator('html[data-theme="lavender"]').waitFor();
+  assert.equal(protectedFolder.file, null);
+  protectedFolder.writable = true;
+  const upgradeHandoff = await openWindow(browser, { administrator: true, portable, shared: protectedFolder,
+    workspace: { side: "left", directory: folders.left, split: 50, preferences: legacy } });
+  await upgradeHandoff.locator('html[data-theme="lavender"]').waitFor();
+  assert.equal(protectedFolder.file.theme, "lavender");
+  await Promise.all([oldProfile.close(), upgradeHandoff.close()]);
 }
 
 function contrast(first, second) {
@@ -192,9 +271,11 @@ try {
 
   const direct = await openWindow(browser, { administrator: true });
   await direct.getByRole("heading", { name: "Dirlume (Administrator)", exact: true }).waitFor();
+  for (const portable of [false, true]) await checkSharedSettings(browser, portable);
+  console.log("Verified settings migration, both launch modes, denied writes, and successful retry for installed and Portable fixtures.");
   await checkBadge(browser);
   console.log("Verified Administrator badge contrast in every built-in scheme and a matching custom scheme at minimum width in all three languages.");
-  console.log("Verified administrator workspace handoff, original window after UAC cancellation, both panes, missing selection, and isolated Portable settings.");
+  console.log("Verified administrator workspace handoff, original window after UAC cancellation, both panes, and missing selection.");
 } finally {
   await browser.close();
 }

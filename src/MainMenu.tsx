@@ -10,6 +10,7 @@ import appIcon from "../src-tauri/icons/128x128.png";
 export const donationUrl = "https://send.monobank.ua/jar/6ZninEa3R4";
 const repositoryUrl = "https://github.com/agrynco/dirlume";
 const licenseUrl = `${repositoryUrl}/blob/main/LICENSE`;
+const creatorUrl = "https://hrynco.com/";
 const aboutLinks = [
   { label: "Source code", href: repositoryUrl, Icon: CodeXml },
   { label: "Report an issue", href: `${repositoryUrl}/issues/new`, Icon: Bug },
@@ -23,6 +24,7 @@ export interface MenuAction {
   separatorBefore?: boolean;
   id?: string;
   checked?: boolean;
+  checkbox?: boolean;
   translated?: boolean;
   Icon?: LucideIcon;
   run: () => void;
@@ -53,7 +55,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
     setSubmenu(null);
     setTemporarilyVisible(false);
     if (restore) {
-      if (priorFocus.current?.isConnected) priorFocus.current.focus();
+      if (priorFocus.current?.isConnected) priorFocus.current.focus({ preventScroll: true });
       else if (bar.current?.contains(document.activeElement) && document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
@@ -196,12 +198,12 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
           {shown && <div className="main-menu-dropdown" role="menu" aria-label={t(label)}
             data-action-icons={items.some(({ Icon }) => Icon) || undefined} data-tauri-drag-region="false">
             {items.map((action, item) => {
-              const { label, shortcut, disabled, separatorBefore, checked, id, translated, Icon } = action;
+              const { label, shortcut, disabled, separatorBefore, checked, checkbox, id, translated, Icon } = action;
               const legacyChoice = !Icon && checked !== undefined;
               const nested = "items" in action;
               return <Fragment key={id ?? label}>
                   {separatorBefore && <div className="main-menu-separator" role="separator" />}
-                  <Button type="button" role={checked === undefined ? "menuitem" : "menuitemradio"}
+                  <Button type="button" role={checked === undefined ? "menuitem" : checkbox ? "menuitemcheckbox" : "menuitemradio"}
                     aria-checked={checked} tabIndex={-1} data-menu-item={item}
                     aria-disabled={disabled || undefined} shortcut={shortcut} aria-haspopup={nested ? "menu" : undefined}
                     aria-expanded={nested ? submenu?.item === item : undefined}
@@ -268,6 +270,13 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
     void api.openWebLink(href).catch((failure: unknown) => setLinkError(describeError(failure)));
   }
 
+  function aboutLink(href: string, label: string) {
+    return <a href={href} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
+      event.preventDefault();
+      openLink(href);
+    }}>{label}</a>;
+  }
+
   return <Dialog title={t("About")} onClose={onClose} footer={<>
     <DonationButton onClick={() => openLink(donationUrl)} />
     <Button data-initial-focus type="button" onClick={onClose}><X aria-hidden="true" />{t("Close")}</Button>
@@ -285,12 +294,9 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
         <dd>{version ? <code>{version}</code> :
           error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}</dd>
         <dt>{t("Created by")}</dt>
-        <dd>bitcodepro</dd>
+        <dd>{aboutLink(creatorUrl, "Anatolii Hrynchuk")}</dd>
         <dt>{t("License")}</dt>
-        <dd><a href={licenseUrl} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
-          event.preventDefault();
-          openLink(licenseUrl);
-        }}>MIT</a></dd>
+        <dd>{aboutLink(licenseUrl, "MIT")}</dd>
       </dl>
       <p className="about-stack">{t("Built with Rust, Tauri, React, and TypeScript.")}</p>
       <div className="about-actions">

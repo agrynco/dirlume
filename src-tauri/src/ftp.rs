@@ -652,6 +652,10 @@ async fn open_control(
 }
 
 impl Connection {
+    pub(crate) fn host(&self) -> &str {
+        &self.profile.host
+    }
+
     pub fn open(&self) -> Result<Session> {
         self.open_with_cancel(None)
     }
@@ -1258,7 +1262,7 @@ impl Session {
     pub fn download(
         &mut self,
         segments: &[String],
-        output: &mut impl Write,
+        output: &mut (impl Write + ?Sized),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
         let mut stream = self
@@ -1392,6 +1396,48 @@ impl Session {
     pub fn mkdir(&mut self, segments: &[String]) -> Result<()> {
         self.limits
             .call(self.stream.mkdir(absolute(segments)?))
+            .map_err(message)
+    }
+
+    pub(crate) fn create_file(&mut self, segments: &[String], mut bytes: &[u8]) -> Result<()> {
+        if self.stat(segments)?.is_some() {
+            return Err("An item with that name already exists.".to_owned());
+        }
+        let stage = self.upload_to_stage(segments, &mut bytes, |_| Ok(()))?;
+        let result = (|| {
+            if self.stat(segments)?.is_some() {
+                return Err("An item with that name already exists.".to_owned());
+            }
+            self.rename_stage(&stage, segments)
+        })();
+        if result.is_err() {
+            self.remove_stage(&stage);
+        }
+        result
+    }
+
+    pub(crate) fn remove_move_file(
+        &mut self,
+        segments: &[String],
+        expected: &FtpEntry,
+    ) -> Result<()> {
+        if !self.matches_file(segments, expected)? {
+            return Err("The FTP file changed during the move.".to_owned());
+        }
+        self.limits
+            .call(self.stream.rm(absolute(segments)?))
+            .map_err(message)
+    }
+
+    pub(crate) fn remove_empty_move_folder(&mut self, segments: &[String]) -> Result<()> {
+        if !self
+            .stat(segments)?
+            .is_some_and(|entry| entry.is_directory())
+        {
+            return Err("The FTP folder changed during the move.".to_owned());
+        }
+        self.limits
+            .call(self.stream.rmdir(absolute(segments)?))
             .map_err(message)
     }
 
@@ -1588,6 +1634,16 @@ pub(crate) fn matches_mask(pattern: &[char], name: &str) -> bool {
 }
 
 #[tauri::command]
+pub async fn create_ftp_folder(
+    id: u32,
+    segments: Vec<String>,
+    state: State<'_, FtpState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    blocking(move || connection.open()?.mkdir(&segments)).await
+}
+
+#[tauri::command]
 pub async fn rename_ftp(
     id: u32,
     segments: Vec<String>,
@@ -1646,9 +1702,25 @@ mod compatibility_tests;
 mod tls_tests;
 
 #[cfg(test)]
+pub(crate) fn move_test_connection(port: u16) -> Connection {
+    tls_tests::connection(port, Encryption::Plain)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn moves_nested_folders_with_a_real_ftp_server() {
+        let Some(port) = std::env::var("DIRLUME_FTP_MOVE_TEST_PORT").ok() else {
+            return;
+        };
+        let root = std::env::var_os("DIRLUME_FTP_MOVE_TEST_ROOT").unwrap();
+        let connection = move_test_connection(port.parse().unwrap());
+        let mut session = connection.open().unwrap();
+        crate::desktop::verify_ftp_folder_moves(&mut session, Path::new(&root));
+    }
 
     #[tokio::test]
     async fn data_and_control_sockets_inherit_the_profile_settings() {

@@ -88,6 +88,7 @@ pub(crate) enum SftpFailure {
     Other(String),
 }
 pub(crate) type SftpResult<T> = std::result::Result<T, SftpFailure>;
+pub(crate) const PERMISSION_DENIED: &str = "SSH permission denied.";
 impl From<openssh_sftp_client::Error> for SftpFailure {
     fn from(error: openssh_sftp_client::Error) -> Self {
         match error {
@@ -137,7 +138,7 @@ impl From<&str> for SftpFailure {
 impl From<SftpFailure> for String {
     fn from(error: SftpFailure) -> Self {
         match error {
-            SftpFailure::PermissionDenied => "SSH permission denied.".to_owned(),
+            SftpFailure::PermissionDenied => PERMISSION_DENIED.to_owned(),
             SftpFailure::ConnectionLost(detail)
             | SftpFailure::Other(detail)
             | SftpFailure::PathUnavailable(detail) => detail,
@@ -363,9 +364,58 @@ pub struct Connection {
     host_keys: Vec<HostKey>,
     listing: Mutex<Session>,
     sudo: sudo::Access,
+    #[cfg(test)]
+    fixture_login: Option<serde_json::Value>,
 }
 
 impl Connection {
+    pub(crate) fn host(&self) -> &str {
+        &self.profile.destination.settings.endpoint.host
+    }
+
+    pub(crate) fn address(&self) -> String {
+        let endpoint = &self.profile.destination.settings.endpoint;
+        format!("{}:{}", endpoint.host, endpoint.port)
+    }
+
+    pub(crate) fn authorized_operation<T>(
+        &self,
+        password: Option<Zeroizing<String>>,
+        read_only: bool,
+        stop: Option<CancellationToken>,
+        operation: impl FnOnce(&mut Session) -> Result<T>,
+    ) -> Result<Option<T>> {
+        self.sudo
+            .run(self, password, read_only, stop, |session| {
+                Ok(operation(session))
+            })?
+            .transpose()
+    }
+
+    fn rename_exclusive(
+        &self,
+        source: &[String],
+        name: &str,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<()> {
+        use crate::remote_transfer::UploadSession;
+        let (_, parent) = source.split_last().ok_or("Choose an SSH file or folder.")?;
+        let target = crate::remote_transfer::child(parent, name);
+        let from = Session::absolute(source)?;
+        let to = Session::absolute(&target)?;
+        if from == to {
+            return Ok(());
+        }
+        if password.is_none() {
+            let client = self.authenticated_client()?;
+            match client.1.wait(standard_rename::run(&client, &from, &to)) {
+                Err(error) if error == PERMISSION_DENIED => {}
+                result => return result,
+            }
+        }
+        self.sudo.rename(self, password, &from, &to)
+    }
+
     pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {
         let client = self
             .listing
@@ -383,6 +433,25 @@ impl Connection {
         &self,
         stop: Option<CancellationToken>,
     ) -> Result<AuthenticatedRoute> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture_login {
+            let input: ProfileInput = serde_json::from_value(fixture.clone()).map_err(message)?;
+            let config = Config::default();
+            let compatibility = input.compatibility(&config)?;
+            let mut hosts = input.test_route(&config)?;
+            return open_route(
+                hosts.iter_mut().map(RouteHost::Draft).collect(),
+                |endpoint| stored_key(&self.host_keys, endpoint),
+                &[],
+                RouteOptions {
+                    stop,
+                    compatibility,
+                    ..RouteOptions::default()
+                },
+            )?
+            .map(|(client, _)| client)
+            .map_err(|_| "Fixture SSH host key changed.".to_owned());
+        }
         match open_route(
             self.profile.route().map(RouteHost::Saved).collect(),
             |endpoint| stored_key(&self.host_keys, endpoint),
@@ -816,6 +885,8 @@ pub async fn connect_ssh(
                     session
                 }),
                 sudo: sudo::Access::default(),
+                #[cfg(test)]
+                fixture_login: None,
             },
             start,
         )))
@@ -929,21 +1000,29 @@ pub struct SshListing {
 }
 
 #[tauri::command]
-pub async fn delete_ssh(
+pub async fn create_ssh_folder(
     id: u32,
     segments: Vec<String>,
-    recursive: bool,
-    recycle: Option<bool>,
+    sudo_password: Option<String>,
     state: State<'_, SshState>,
 ) -> Result<()> {
     let connection = state.connection(id)?;
+    let password = sudo_password.map(Zeroizing::new);
     blocking(move || {
-        let mut session = connection.open()?;
-        if recycle.unwrap_or(false) {
-            session.recycle(&segments)
-        } else {
-            session.remove(&segments, recursive)
-        }
+        connection.text_operation(password, false, |session| session.create_folder(&segments))
     })
     .await
+}
+
+#[tauri::command]
+pub async fn rename_ssh(
+    id: u32,
+    segments: Vec<String>,
+    name: String,
+    sudo_password: Option<String>,
+    state: State<'_, SshState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    let password = sudo_password.map(Zeroizing::new);
+    blocking(move || connection.rename_exclusive(&segments, &name, password)).await
 }

@@ -5,7 +5,7 @@ import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Copy, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, openPlaceTextPages, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument, type TextPages } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogDisclosure, DialogIconButton } from "./DialogActions";
 import { DiagnosticLog } from "./DiagnosticLog";
@@ -29,20 +29,72 @@ import { PathField } from "./PathField";
 const CodeSurface = lazy(() => import("./CodeSurface"));
 const SyntaxPicker = lazy(() => import("./SyntaxPicker"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
+const PagedTextWindow = lazy(() => import("./PagedTextWindow").then(({ PagedTextWindow }) => ({ default: PagedTextWindow })));
 
 function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
+export function TextWindow(props: Omit<Parameters<typeof WholeTextWindow>[0], "openPaged">) {
+  const { file, editing, active, fontSizes, diagnosticLog, onClose } = props;
+  const key = diagnosticLog ? null : JSON.stringify([documentPath(file), editing]);
+  const [opened, setOpened] = useState<{ key: string; pages: TextPages | null }>();
+  const request = useRef<AbortController | null>(null);
+
+  function releasePages(id: number) {
+    void api.closeTextPages(id).catch(() => undefined);
+  }
+
+  useEffect(() => {
+    if (key === null) return;
+    const current = new AbortController();
+    request.current = current;
+    void openPlaceTextPages(file, editing).then((pages) => {
+      if (current.signal.aborted) { if (pages) releasePages(pages.id); }
+      else setOpened({ key, pages });
+    }).catch(() => { if (!current.signal.aborted) setOpened({ key, pages: null }); });
+    return () => current.abort();
+  }, [key, file, editing]);
+  const openedId = opened?.pages?.id;
+  useEffect(() => () => { if (openedId !== undefined) releasePages(openedId); }, [openedId]);
+
+  async function openPaged(password?: string) {
+    const current = request.current;
+    if (!key || !current || current.signal.aborted) return false;
+    const pages = await openPlaceTextPages(file, editing, password);
+    if (!pages) return false;
+    if (current.signal.aborted) releasePages(pages.id);
+    else setOpened({ key, pages });
+    return true;
+  }
+
+  if (key !== null && opened?.key !== key) {
+    return <section hidden={!active} className="text-window" aria-label={file.name}>
+      <div className="dialog-body">
+        <span role="status">{t("Loading…")}</span>
+        <Button type="button" onClick={onClose}>{t("Close document")}</Button>
+      </div>
+    </section>;
+  }
+  if (key !== null && opened?.pages) return <Suspense>
+    <PagedTextWindow key={opened.pages.id} initial={opened.pages} {...props} fontSize={fontSizes[editing ? "editor" : "viewer"]} />
+  </Suspense>;
+  return <WholeTextWindow {...props} openPaged={openPaged} />;
+}
+
+function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
+  textTabWidth, showTextWhitespace, onToggleTextWhitespace,
   onOptions, onCopyPath, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
-  fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks }: {
+  fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks, openPaged }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
   theme: BaseTheme;
   shortcuts: Bindings;
   fontSizes: ViewFontSizes;
+  textTabWidth: number;
+  showTextWhitespace: boolean;
+  onToggleTextWhitespace: () => void;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
   mermaidScale?: number;
@@ -63,6 +115,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   bookmarkJump?: BookmarkJump;
   onBookmark: (bookmark: FileBookmark) => void;
   onFileBookmarks: () => void;
+  openPaged: (password?: string) => Promise<boolean>;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
@@ -70,6 +123,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
   const [diagnosticSource, setDiagnosticSource] = useState(false);
+  const [clearLog, setClearLog] = useState<{ clearing?: boolean; error?: string } | null>(null);
+  const [clearRevision, setClearRevision] = useState(0);
   const [syntax, setSyntax] = useState("auto");
   const [syntaxInfo, setSyntaxInfo] = useState<{ detected: string | undefined; unavailable: boolean }>();
   const [choosingSyntax, setChoosingSyntax] = useState(false);
@@ -249,7 +304,24 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       window.clearInterval(fallback);
       watch?.stop();
     };
-  }, [file, editing]);
+  }, [file, editing, clearRevision]);
+
+  async function clearErrorLog() {
+    if (!clearLog || clearLog.clearing) return;
+    setClearLog({ clearing: true });
+    try {
+      await api.clearErrorLog();
+      ++diskOperation.current;
+      replaceDocument({ text: "", encoding: "utf8" });
+      setDiagnosticSource(false);
+      setHex(false);
+      setHexSize(undefined);
+      setClearRevision((revision) => revision + 1);
+      setClearLog(null);
+    } catch (error) {
+      setClearLog({ error: describeError(error) });
+    }
+  }
 
   function keepEditing() {
     if (diskBusy.current) return;
@@ -287,6 +359,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       replaceDocument(saved);
       setDeniedWrite(null);
       onSaved();
+      // A small document can cross the paging threshold after an edit.
+      if (updated.length >= 2 * 1024 * 1024) await openPaged(sudoPassword).catch(() => false);
     } catch (error) {
       const message = describeError(error);
       setError(message);
@@ -375,7 +449,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   const bookmarksAction = action("File bookmarks", "fileBookmarks", onFileBookmarks);
   const switchMode = action(editing ? "Open in Viewer" : "Open in Editor", "switchDocumentMode", onSwitchMode,
     saving || sudoAction !== null || (!editing && (!writable || !document)));
-  const fileActions = [...(editing ? [saveAction] : []), switchMode, closeAction];
+  const fileActions: Action[] = [...(editing ? [saveAction] : []), switchMode,
+    ...(diagnosticLog ? [{ label: "Clear error log", run: () => setClearLog({}) }] : []), closeAction];
   const selectionActions = [
     ...(editing && sourceVisible ? [
       action("Undo", "documentUndo", () => sourceActions.current?.undo(), saving || !sourceStatus.canUndo),
@@ -396,6 +471,9 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
     ...(navigationActions.length || !editing ? [
       { label: "Navigate", items: [...navigationActions, ...(!editing && !markdownViewer ? [hexAction] : [])] },
     ] : []),
+    ...(sourceVisible ? [{ label: "Display", items: [
+      { label: "Show whitespace", checked: showTextWhitespace, checkbox: true, run: onToggleTextWhitespace },
+    ] }] : []),
     ...(sourceVisible ? [{ label: "Syntax", items: [
       { label: "Automatic", run: () => setSyntax("auto") },
       { label: "Plain text", run: () => setSyntax("plain") },
@@ -544,6 +622,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
+              textTabWidth={textTabWidth} showTextWhitespace={showTextWhitespace}
               bookmarkLines={bookmarkLines} bookmarkJump={bookmarkJump && "line" in bookmarkJump ? bookmarkJump : undefined} onBookmarkResult={setBookmarkResult}
               onBookmarkLine={localBookmarkPath ? (line, lineText) =>
                 onBookmark({ path: localBookmarkPath, line, fingerprint: lineFingerprint(lineText) }) : undefined}
@@ -562,7 +641,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         path={path} onClose={() => setSudoAction(null)}
         onConfirm={async (password) => {
           if (sudoAction === "read") {
-            replaceDocument(await readPlaceText(file, password, editing ? "editor" : "viewer"));
+            if (!await openPaged(password)) replaceDocument(await readPlaceText(file, password, editing ? "editor" : "viewer"));
           } else if (editing) await save(password);
           else if (deniedWrite !== null) await write(deniedWrite, password);
         }} />}
@@ -571,6 +650,18 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
           <Button type="button" className="alert-confirm" onClick={onClose}>{t("Discard changes")}</Button>
+        </footer>
+      </Dialog>}
+      {active && clearLog && <Dialog title={t("Clear error log")} tone="warning"
+        onClose={() => { if (!clearLog.clearing) setClearLog(null); }}>
+        <div className="dialog-body">
+          <p>{t("Permanently clear all entries in the error log?")}</p>
+          {clearLog.error && <p role="alert" className="dialog-error">{errorText(clearLog.error)}</p>}
+        </div>
+        <footer className="dialog-footer">
+          <Button type="button" data-initial-focus disabled={clearLog.clearing} onClick={() => setClearLog(null)}>{t("Cancel")}</Button>
+          <Button type="button" className="alert-confirm" disabled={clearLog.clearing}
+            onClick={() => void clearErrorLog()}>{t("Clear error log")}</Button>
         </footer>
       </Dialog>}
       {active && externalChange && !confirm && !saving && <Dialog title={t("File changed on disk")} tone="warning" onClose={keepEditing}
