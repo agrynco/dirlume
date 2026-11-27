@@ -28,6 +28,8 @@ Press **Ctrl+U** (**Command+U** on macOS) or choose **Commands → Swap panes** 
 
 Local copies can preserve timestamps and access rights, follow symbolic links, and filter filenames using `*` and `?`. **Process multiple destinations** copies the selection to each listed folder.
 
+Choose **Collections** from either pane's sources, or press **6** while the sources menu has focus. Create a named collection and use **F7** to add virtual folders. With a collection folder open, select files or folders in the other pane and press **F5** to add references. Dirlume saves the references and folders across restarts. Removing entries from a collection leaves their originals in place. To copy the current originals, select references or a virtual folder and press **F5** with a local destination. Virtual folders are recreated in the destination, including empty folders. The copy dialog lists unavailable sources so you can reconnect and retry.
+
 Drop files or folders from your system file manager onto a local, FTP, or SSH pane to open the transfer dialog. Local drops also offer a move. Dragging between Dirlume's panes uses the same transfer flow.
 
 Pane addresses, transfer destinations, and the KSwitcher installation folder suggest matching paths as you type. Use the arrow keys and **Enter** or click a suggestion to choose it. Press **Tab** to complete a folder and continue the path. The browse button opens the system folder picker for local folder paths or a Save As dialog for a single-file destination. FTP and SSH suggestions come from the connected server.

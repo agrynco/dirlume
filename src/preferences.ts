@@ -177,6 +177,7 @@ export const commands = {
   netboxSources: { label: "Select NetBox in the sources menu", key: "2" },
   smbSources: { label: "Select SMB in the sources menu", key: "3" },
   remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
+  collectionsSources: { label: "Select Collections in the sources menu", key: "6" },
   ...driveSourceCommands,
   addNetBoxProfile: { label: "Add NetBox connection", key: "Shift+F4" },
   editNetBoxProfile: { label: "Edit NetBox connection", key: "F4" },
