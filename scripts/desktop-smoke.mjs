@@ -1211,6 +1211,14 @@ try {
   await navigate("left", attributes);
   const attributeRow = (name) => left.locator(`.file-row[data-tooltip="${name}"]`);
   const attributeName = (name) => attributeRow(name).locator(".file-name");
+  const selectionForeground = (name) => attributeName(name).evaluate((element) => {
+    const sample = document.createElement("span");
+    sample.style.color = "var(--panel-selected-ink)";
+    element.append(sample);
+    const color = getComputedStyle(sample).color;
+    sample.remove();
+    return color;
+  });
   assert.equal(await attributeRow("hidden.rs").count(), 0);
   assert.equal(await attributeRow("system-hidden.dll").count(), 0);
   assert.equal(await foreground(attributeName("system-folder")), attributeColors.system);
@@ -1220,10 +1228,10 @@ try {
   assert.equal(await foreground(attributeName("hidden.rs")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
   await attributeRow("system-hidden.dll").click();
-  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), await selectionForeground("system-hidden.dll"));
   await attributeRow("system-hidden.dll").click({ modifiers: ["Control"] });
   assert.match(await attributeRow("system-hidden.dll").getAttribute("class"), /marked/);
-  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), await selectionForeground("system-hidden.dll"));
   if (process.env.DIRLUME_ATTRIBUTES_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_ATTRIBUTES_SCREENSHOT, scale: "css" });
   await left.press("Control+h");
   const properties = page.getByRole("dialog", { name: "Attributes", exact: true });
@@ -1243,15 +1251,15 @@ try {
   assert.ok(await properties.getByText("Owner", { exact: true }).isVisible());
   await flag("System attribute").check();
   await cancelAttributes();
-  assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
+  assert.notEqual(await attributeRow("ordinary.sys").getAttribute("data-file-color"), "file-system");
   await left.press("Control+a");
   await flag("System attribute").check();
   await flag("Read-only").check();
   await applyAttributes();
   await properties.getByText("Attributes saved.", { exact: true }).waitFor();
   assert.equal(await flag("Read-only").isChecked(), true);
-  await page.waitForFunction((expected) =>
-    getComputedStyle(document.querySelector('#left-files [data-tooltip="ordinary.sys"] .file-name')).color === expected, attributeColors.system);
+  await attributeRow("ordinary.sys").and(page.locator('[data-file-color="file-system"]')).waitFor();
+  assert.equal(await foreground(attributeName("ordinary.sys")), await selectionForeground("ordinary.sys"));
   await flag("Read-only").uncheck();
   await flag("System attribute").uncheck();
   await applyAttributes();
