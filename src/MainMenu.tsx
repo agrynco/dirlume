@@ -55,7 +55,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
     setSubmenu(null);
     setTemporarilyVisible(false);
     if (restore) {
-      if (priorFocus.current?.isConnected) priorFocus.current.focus();
+      if (priorFocus.current?.isConnected) priorFocus.current.focus({ preventScroll: true });
       else if (bar.current?.contains(document.activeElement) && document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
