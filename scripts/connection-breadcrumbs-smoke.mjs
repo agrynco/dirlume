@@ -74,10 +74,10 @@ async function fixture(browser, platform, nestedLocal = false) {
             segments, listing: listing(segments.length), directories: state.directorySettings });
         }
         if (command === "connect_ssh") return remote({ kind: "connected", id: 5, address: "SFTP fixture", origin: "sftp://fixture",
-          segments: folders, listing: listing(folders.length) });
+          segments: state.relayRoots ? [] : folders, listing: listing(state.relayRoots ? 0 : folders.length) });
         if (command === "list_saved_computer_drives") return [{ name: "Files", type: 3, total: null, available: null }];
         if (command === "connect_saved_server") return remote({ id: args.credential === "fixture-pair" ? 8 : 6,
-          share: "share", address: "Server fixture", origin: "https://fixture", listing: listing(0) });
+          share: "share", address: "Server fixture", origin: "https://fixture", writable: !!state.writableShare, listing: listing(0) });
         if (command === "open_archive") return { id: 7, path: args.path, parent: home,
           writable: !!state.archiveWritable, canAdd: !!state.archiveWritable, listing: listing(0) };
         if (command === "list_archive") {
@@ -101,7 +101,34 @@ async function fixture(browser, platform, nestedLocal = false) {
         if (["list_ftp", "list_ssh", "list_server"].includes(command)) {
           const segments = args.segments;
           const depth = segments[0] === "Files" ? segments.length - 1 : segments.length;
-          return remote(listing(depth));
+          const result = listing(depth);
+          if (command === "list_server" && state.writableShare) {
+            for (const item of state.shareItems ?? []) {
+              if (JSON.stringify(item.parent) === JSON.stringify(segments)) {
+                result.entries.push({ ...folder(item.name), directory: item.directory, size: item.directory ? null : 0 });
+              }
+            }
+          }
+          return remote(result);
+        }
+        if (command === "change_lan_item" && state.writableShare) {
+          state.mutations.push(args);
+          const name = args.segments.at(-1);
+          const parent = args.segments.slice(0, -1);
+          const items = state.shareItems ??= [];
+          if (args.change.kind === "folder" || args.change.kind === "create_text") {
+            items.push({ name, parent, directory: args.change.kind === "folder" });
+          } else {
+            const index = items.findIndex((item) => item.name === name && JSON.stringify(item.parent) === JSON.stringify(parent));
+            if (args.change.kind === "rename" && index >= 0) items[index].name = args.change.name;
+            if (args.change.kind === "delete" && index >= 0) items.splice(index, 1);
+          }
+          return null;
+        }
+        if (command === "read_server_text" && state.writableShare) return { text: "", encoding: "utf8", revision: "fixture-revision" };
+        if (command === "save_lan_text" && state.writableShare) {
+          state.edits.push(args);
+          return "new-revision";
         }
         if (command === "list_kswitcher") {
           const parts = args.path.split("\\").filter(Boolean);
@@ -126,7 +153,7 @@ async function fixture(browser, platform, nestedLocal = false) {
           state.transfers.push(args.request);
           if (args.request.source.kind === "archive" && args.request.moving) delete state.archivedFolder;
           if (args.request.archiveDestination && args.request.moving) {
-            state.archivedFolder = args.request.source.name;
+            state.archivedFolder = args.request.source.name ?? args.request.source.segments.at(-1);
             state.localArchiveInput = false;
           }
           return { kind: "completed" };
@@ -600,6 +627,18 @@ async function checkTreeSources(page) {
   assert.equal(inbound.moving, true);
   assert.deepEqual(inbound.source, { kind: "local", directory: "/fixture", name: "local-folder" });
   assert.deepEqual(inbound.archiveDestination, { id: 7, segments: [folders[0]] });
+  await row(page, "right", "fixture.zip").dblclick();
+  await button(pane(page, "right"), "Tree").click();
+  await button(row(page, "right", folders[0]), "Expand folder").click();
+  await row(page, "right", folders.slice(0, 2).join("/")).click();
+  await directRow(folders[0] + "/local-folder").click();
+  await list(page, side).press("F6");
+  assert.equal(await move.locator("#transfer-destination").inputValue(), "/fixture/fixture.zip!/" + folders.slice(0, 2).join("/"));
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  const within = await page.evaluate(() => window.connectionFixture.transfers[2]);
+  assert.deepEqual(within.source, { kind: "archive", archive: 7, segments: [folders[0], "local-folder"] });
+  assert.deepEqual(within.archiveDestination, { id: 7, segments: folders.slice(0, 2) });
 }
 
 async function checkFtpMoves(page) {
@@ -626,6 +665,78 @@ async function checkFtpMoves(page) {
   assert.equal(download.moving, true);
   assert.equal(download.destination, "/fixture");
   assert.deepEqual(download.source, { kind: "ftp", connection: 4, segments: [folders[0]] });
+  await page.evaluate(() => { window.connectionFixture.relayRoots = true; });
+  await enterFromCatalog(page, "left", "NetBox", "Saved SFTP");
+  await row(page, "left", folders[0]).waitFor();
+  await row(page, "right", folders[0]).click();
+  await list(page, "right").press("F5");
+  const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+  await button(copy, "Copy").click();
+  await copy.waitFor({ state: "hidden" });
+  await row(page, "left", folders[0]).click();
+  await list(page, "left").press("F6");
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  const [relayedCopy, relayedMove] = await page.evaluate(() => window.connectionFixture.transfers.slice(2));
+  assert.equal(relayedCopy.moving, false);
+  assert.equal(relayedCopy.sshDestination, 5);
+  assert.deepEqual(relayedCopy.source, { kind: "ftp", connection: 4, segments: [folders[0]] });
+  assert.equal(relayedMove.moving, true);
+  assert.equal(relayedMove.ftpDestination, 4);
+  assert.deepEqual(relayedMove.source, { kind: "ssh", connection: 5, segments: [folders[0]] });
+}
+
+async function checkWritableServer(page) {
+  const side = "left";
+  const panel = pane(page, side);
+  await page.evaluate(() => {
+    window.connectionFixture.writableShare = true;
+    window.connectionFixture.localArchiveInput = true;
+  });
+  await button(pane(page, "right"), "Refresh folder").click();
+  await enterFromCatalog(page, side, "Remote machine", "Saved Dirlume Server");
+  await waitPath(page, side, "/");
+  await list(page, side).press("F7");
+  const folderDialog = page.getByRole("dialog", { name: "New folder", exact: true });
+  await folderDialog.getByLabel("Name", { exact: true }).fill("at-share-root");
+  await button(folderDialog, "Create").click();
+  await row(page, side, "at-share-root").waitFor();
+  await button(panel, "Tree").click();
+  await row(page, side, folders[0]).click();
+  await list(page, side).press("Shift+F4");
+  const fileDialog = page.getByRole("dialog", { name: "New file", exact: true });
+  await fileDialog.getByLabel("Name", { exact: true }).fill("new.txt");
+  await button(fileDialog, "Create").click();
+  const editor = page.getByRole("region", { name: "new.txt", exact: true });
+  const field = editor.getByLabel("Edit new.txt", { exact: true });
+  await field.fill("edited");
+  await field.press("F2");
+  await page.waitForFunction(() => window.connectionFixture.edits.length === 1);
+  await button(editor, "Close document").click();
+  await row(page, side, folders[0] + "/new.txt").click();
+  await list(page, side).press("F2");
+  const rename = page.getByRole("dialog", { name: "Rename", exact: true });
+  await rename.getByLabel("Name", { exact: true }).fill("renamed.txt");
+  await button(rename, "Rename").click();
+  await row(page, side, folders[0] + "/renamed.txt").click();
+  await list(page, side).press("F8");
+  const confirm = page.getByRole("dialog", { name: "Delete permanently", exact: true });
+  await button(confirm, "Delete permanently").click();
+  await row(page, side, folders[0] + "/renamed.txt").waitFor({ state: "detached" });
+  await row(page, side, folders[0]).click();
+  await row(page, "right", "local-folder").click();
+  await list(page, "right").press("F5");
+  const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+  await button(copy, "Copy").click();
+  await copy.waitFor({ state: "hidden" });
+  const state = await page.evaluate(() => window.connectionFixture);
+  assert.deepEqual(state.mutations.map(({ segments, change }) => [segments, change.kind]), [
+    [["at-share-root"], "folder"], [[folders[0], "new.txt"], "create_text"],
+    [[folders[0], "new.txt"], "rename"], [[folders[0], "renamed.txt"], "delete"],
+  ]);
+  assert.deepEqual(state.edits[0].segments, [folders[0], "new.txt"]);
+  assert.equal(state.transfers[0].serverDestination, 6);
+  assert.equal(state.transfers[0].destination, "/" + folders[0]);
 }
 
 async function checkLan(page, side) {
@@ -726,10 +837,14 @@ try {
   const ftpMoves = await fixture(browser, platforms[1]);
   await checkFtpMoves(ftpMoves.page);
   await ftpMoves.page.close();
+  const shareWrites = await fixture(browser, platforms[1]);
+  await checkWritableServer(shareWrites.page);
+  await shareWrites.page.close();
   console.log("Verified KSwitcher transfer routing across drives, revision-checked editing, rename, folder creation, and remote Trash.");
   console.log("Verified parent-row measures through KSwitcher and archived uncompressed file sizes.");
-  console.log("Verified read-only Server and archive Trees and nested archive create, rename, delete, and moves in both directions.");
-  console.log("Verified FTP F6 transfer routing in both directions.");
+  console.log("Verified read-only Server and archive Trees, nested archive changes, and moves between a local folder or archive folder.");
+  console.log("Verified copy and move routing between local, FTP, and SFTP panes.");
+  console.log("Verified a writable Dirlume Server share can create at the root and edit, rename, delete, and receive items in a nested Tree folder.");
 } finally {
   await browser.close();
 }

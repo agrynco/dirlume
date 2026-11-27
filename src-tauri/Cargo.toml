@@ -21,7 +21,7 @@ required-features = ["server"]
 default = ["desktop"]
 desktop = ["dep:async-trait", "dep:axum", "dep:axum-server", "dep:block2", "dep:bytes", "dep:cap-std", "dep:clipboard-rs", "dep:codepage", "dep:core-foundation", "dep:encoding_rs", "dep:font-kit", "dep:gio", "dep:image", "dep:jiff", "dep:junction", "dep:keyring", "dep:libc", "dep:notify", "dep:ntfs-mft", "dep:objc2-app-kit", "dep:png", "dep:portable-pty", "dep:percent-encoding", "dep:rcgen", "dep:reqwest", "dep:ring", "dep:rustls", "dep:rustls-native-certs", "dep:semver", "dep:socket2", "dep:smb2", "dep:subtle", "dep:suppaftp", "dep:sysinfo", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tokio", "dep:tokio-util", "dep:uuid", "dep:windows", "dep:futures-util", "dep:openssh-sftp-client", "dep:openssh-sftp-client-lowlevel", "dep:russh", "dep:x11rb", "dep:zbus", "dep:zeroize", "dep:zip"]
 ui-automation = ["desktop", "tauri/devtools"]
-server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util"]
+server = ["dep:axum", "dep:axum-server", "dep:cap-std", "dep:clap", "dep:libc", "dep:rcgen", "dep:ring", "dep:subtle", "dep:tokio", "dep:tokio-util", "dep:uuid"]
 
 [lib]
 name = "dirlume_lib"

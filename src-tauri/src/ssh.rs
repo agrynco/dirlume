@@ -369,6 +369,10 @@ pub struct Connection {
 }
 
 impl Connection {
+    pub(crate) fn host(&self) -> &str {
+        &self.profile.destination.settings.endpoint.host
+    }
+
     pub(crate) fn address(&self) -> String {
         let endpoint = &self.profile.destination.settings.endpoint;
         format!("{}:{}", endpoint.host, endpoint.port)

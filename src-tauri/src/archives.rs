@@ -374,7 +374,27 @@ impl Archive {
             .map_err(|_| "The archive changed on disk. Open it again.".to_owned())
     }
 
-    fn list(&self, segments: &[String]) -> Result<RemoteListing> {
+    pub(crate) fn generation(&self) -> &str {
+        &self.generation
+    }
+
+    pub(crate) fn is_writable(&self) -> bool {
+        self.writable
+    }
+
+    pub(crate) fn remove_moved_member(
+        &mut self,
+        segments: &[String],
+        generation: &str,
+        check: impl FnMut() -> io::Result<()>,
+    ) -> Result<()> {
+        if self.generation != generation {
+            return Err("The source archive changed during the move.".to_owned());
+        }
+        self.write_with_progress(&[segments.to_vec()], None, check)
+    }
+
+    pub(crate) fn list(&self, segments: &[String]) -> Result<RemoteListing> {
         self.verify()?;
         if !segments.is_empty()
             && !self
@@ -996,6 +1016,17 @@ mod tests {
                 use crate::local_transfer::Policy;
                 let parent = ["docs".to_owned()];
                 archive.create_folder(&parent, "empty", |_| Ok(())).unwrap();
+                let empty = ["docs".to_owned(), "empty".to_owned()];
+                archive
+                    .relocate_entry(&note, &empty, "note.txt", |_| Ok(()))
+                    .unwrap();
+                assert!(archive.file(&note).is_err());
+                let relocated = ["docs".to_owned(), "empty".to_owned(), "note.txt".to_owned()];
+                assert_eq!(extract(&archive, &relocated), b"updated text");
+                archive
+                    .relocate_entry(&relocated, &parent, "note.txt", |_| Ok(()))
+                    .unwrap();
+                assert_eq!(extract(&archive, &note), b"updated text");
                 archive
                     .create_text(&parent, "created.txt", Encoding::Utf8Bom, |_| Ok(()))
                     .unwrap();

@@ -108,9 +108,19 @@ impl Archive {
         &mut self,
         target: &[String],
         name: &str,
-        mut tick: impl FnMut(u8) -> io::Result<()>,
+        tick: impl FnMut(u8) -> io::Result<()>,
     ) -> Result<()> {
         let (_, parent) = target.split_last().ok_or("Choose an archive entry.")?;
+        self.relocate_entry(target, parent, name, tick)
+    }
+
+    pub(crate) fn relocate_entry(
+        &mut self,
+        target: &[String],
+        parent: &[String],
+        name: &str,
+        mut tick: impl FnMut(u8) -> io::Result<()>,
+    ) -> Result<()> {
         self.require_folder(parent)?;
         let destination = checked_child(parent, name)?;
         let member = self
@@ -120,6 +130,9 @@ impl Archive {
             .ok_or("Choose an archive entry.")?;
         if destination == target {
             return Ok(());
+        }
+        if destination.starts_with(target) {
+            return Err("Choose an archive destination outside the source folder.".to_owned());
         }
         if self.index.members.contains_key(&destination) {
             return Err("An archive entry with that name already exists.".to_owned());
@@ -142,22 +155,28 @@ impl Archive {
         archive_engine::run(&mut command, None, io::sink(), &mut tick)?.checked(false)?;
         let index = inspect(&self.engine, &staged, None)?;
         validate_index(self, &index)?;
-        if index.members.len() != self.index.members.len()
-            || self.index.members.iter().any(|(path, entry)| {
-                if let Some(tail) = path.strip_prefix(target) {
-                    let moved = [destination.as_slice(), tail].concat();
-                    !index.members.get(&moved).is_some_and(|replacement| {
-                        replacement.directory == entry.directory
-                            && replacement.link == entry.link
-                            && replacement.size == entry.size
-                            && replacement.crc == entry.crc
-                            && replacement.raw.is_some() == entry.raw.is_some()
-                    })
-                } else {
-                    index.members.get(path) != Some(entry)
+        if self.index.members.iter().any(|(path, entry)| {
+            if let Some(tail) = path.strip_prefix(target) {
+                let moved = [destination.as_slice(), tail].concat();
+                !index.members.get(&moved).is_some_and(|replacement| {
+                    replacement.directory == entry.directory
+                        && replacement.link == entry.link
+                        && replacement.size == entry.size
+                        && replacement.crc == entry.crc
+                        && replacement.raw.is_some() == entry.raw.is_some()
+                })
+            } else {
+                match index.members.get(path) {
+                    Some(member) => member != entry,
+                    None => entry.raw.is_some() || !target.starts_with(path),
                 }
-            })
-        {
+            }
+        }) || index.members.keys().any(|path| {
+            !self.index.members.contains_key(path)
+                && !path
+                    .strip_prefix(destination.as_slice())
+                    .is_some_and(|tail| self.index.members.contains_key(&[target, tail].concat()))
+        }) {
             return Err("The archive rename did not preserve the original entries.".to_owned());
         }
         self.commit_update(&staged, index, || tick(100).map_err(message))

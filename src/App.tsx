@@ -23,7 +23,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { isLanGroupPlace, supportsFileTree, type LanGroupPlace, type TreePlace } from "./api";
+import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -164,7 +164,7 @@ function localSearchRoot(pane: PaneState) {
 type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string; side?: Side }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[]; relativePaths?: string[][]; searchSide?: Side }
-) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace; kswitcher?: KSwitcherPlace; lan?: LanGroupPlace };
+) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace; kswitcher?: KSwitcherPlace; shared?: WritableServerPlace };
 
 type RemoteDeletionProgress = {
   signal: AbortSignal;
@@ -187,7 +187,7 @@ type Modal =
   | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
-  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> | LanGroupPlace }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> | WritableServerPlace }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
@@ -506,17 +506,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
-  const lanGroupPlace = isLanGroupPlace(pane.place) && pane.place.segments.length ? pane.place : undefined;
+  const writableServer = isWritableServerPlace(pane.place) ? pane.place : undefined;
   const kswitcher = pane.place?.kind === "kswitcher" && pane.place.path ? pane.place : undefined;
   const kswitcherWrite = kswitcher?.capabilities?.write;
   const kswitcherDelete = kswitcher?.capabilities?.delete;
   const actionDirectory = treeFolder(active) ?? pane.place;
   const canCreateItem = actionDirectory?.kind === "local" || isFileServer(actionDirectory) ||
-    isLanGroupPlace(actionDirectory) && !!actionDirectory.segments.length ||
+    isWritableServerPlace(actionDirectory) ||
     actionDirectory?.kind === "archive" && actionDirectory.canAdd ||
     actionDirectory?.kind === "kswitcher" && !!actionDirectory.path;
   const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
-  const permanentDelete = Boolean(fileServer && !remoteTrash || lanGroupPlace || smbHost(local));
+  const permanentDelete = Boolean(fileServer && !remoteTrash || writableServer || smbHost(local));
   const canTransfer = Boolean(currentItem && (currentItem.place.kind !== "kswitcher" ||
     currentItem.place.path && !currentItem.entry.link));
   const shortcuts = shortcutBindings(preferences);
@@ -2258,37 +2258,33 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
-    if (kind === "move" && source.kind === "archive" && (!source.writable || target && target.kind !== "local")) {
-      setStatus({ text: source.writable ? "Choose a local destination for the archive move." : "The archive is read-only.", error: true });
+    if (kind === "move" && source.kind === "archive" && (!source.writable || target && target.kind !== "local" && target.kind !== "archive")) {
+      setStatus({ text: source.writable ? "Choose a local folder or writable archive for the archive move." : "The archive is read-only.", error: true });
       return;
     }
-    if (kind === "move" && source.kind === "ssh" && target && target.kind !== "local") {
-      setStatus({ text: "Choose a local destination for the SSH/SFTP move.", error: true });
-      return;
-    }
-    if (kind === "move" && source.kind === "ftp" && target && target.kind !== "local") {
-      setStatus({ text: "Choose a local destination for the FTP move.", error: true });
+    if (kind === "move" && isFileServer(source) && target && target.kind !== "local" && !isFileServer(target)) {
+      setStatus({ text: "Choose a local, FTP, or SFTP destination for this move.", error: true });
       return;
     }
     const remoteDestination = isFileServer(target) ? target : undefined;
-    const lanDestination = isLanGroupPlace(target) && target.segments.length ? target : undefined;
+    const serverDestination = isWritableServerPlace(target) ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
     const fromKSwitcher = source.kind === "kswitcher";
-    const kswitcherBroker = !lanDestination && Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
-    if (isLanGroupPlace(target) && !lanDestination) {
-      setStatus({ text: "Choose a location inside a remote drive.", error: true });
+    const kswitcherBroker = !serverDestination && Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
+    if (target?.kind === "server" && !serverDestination) {
+      setStatus({ text: isLanGroupPlace(target) ? "Choose a location inside a remote drive." : "This source is read-only.", error: true });
       return;
     }
-    const sameLanComputer = lanDestination && isLanGroupPlace(source) && source.groupPeer === lanDestination.groupPeer;
-    if (lanDestination && items.some(({ place, entry }) => entry.link ||
-      kind === "move" && !sameLanComputer && place.kind !== "local" && !isLanGroupPlace(place))) {
-      setStatus({ text: kind === "move" ? "Choose local or Dirlume LAN files and folders without links." :
-        "Choose files or folders without links to copy to Dirlume LAN.", error: true });
+    const sameServerShare = serverDestination && isWritableServerPlace(source) && source.share === serverDestination.share;
+    if (serverDestination && items.some(({ place, entry }) => entry.link ||
+      kind === "move" && !sameServerShare && place.kind !== "local" && !isWritableServerPlace(place))) {
+      setStatus({ text: kind === "move" ? "Choose local or shared files and folders without links." :
+        "Choose files or folders without links to copy to the shared folder.", error: true });
       return;
     }
-    if (kind === "move" && isLanGroupPlace(source) && !sameLanComputer &&
-      (!lanDestination && target && target.kind !== "local" || items.some(({ entry }) => entry.link))) {
-      setStatus({ text: "Choose Dirlume LAN files or folders without links and a local or Dirlume LAN destination.", error: true });
+    if (kind === "move" && isWritableServerPlace(source) && !sameServerShare &&
+      (!serverDestination && target && target.kind !== "local" || items.some(({ entry }) => entry.link))) {
+      setStatus({ text: "Choose shared files or folders without links and a local or writable share destination.", error: true });
       return;
     }
     if (kswitcherDestination && source.kind !== "local" && !fromKSwitcher) {
@@ -2302,19 +2298,18 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Grant the required file permission in Trusted clients.", error: true });
       return;
     }
-    const archiveDestination = source.kind === "local" && target?.kind === "archive" ? target : undefined;
+    const archiveDestination = (source.kind === "local" || source.kind === "archive") && target?.kind === "archive" ? target : undefined;
     if (archiveDestination && (!archiveDestination.canAdd || items.some(({ entry }) => entry.link))) {
       setStatus({ text: archiveDestination.canAdd ? "Choose local files and folders without symbolic links." :
         "Choose a writable ZIP or 7z archive.", error: true });
       return;
     }
-    if (kind === "move" && remoteDestination && items.some(({ place, entry }) => place.kind !== "local" || entry.link)) {
-      setStatus({ text: "Choose local files or folders without symbolic links.", error: true });
+    if (kind === "move" && remoteDestination && items.some(({ place, entry }) => place.kind !== "local" && !isFileServer(place) || entry.link)) {
+      setStatus({ text: "Choose local, FTP, or SFTP items without symbolic links.", error: true });
       return;
     }
-    if (remoteDestination && source.kind !== "local") {
-      setStatus({ text: remoteDestination.kind === "ssh" ? "Choose a local source for the SSH upload." :
-        "Choose a local source for the FTP upload.", error: true });
+    if (remoteDestination && source.kind !== "local" && !isFileServer(source)) {
+      setStatus({ text: "Choose a local, FTP, or SFTP source for this copy.", error: true });
       return;
     }
     if ((source.kind !== "local" || kswitcherBroker) && items.some(({ entry }) => entry.link)) {
@@ -2323,8 +2318,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     setModal({ kind: "transfer", side, transfer: {
       kind, source, items, chooseOperation,
-      target: target && (archiveDestination || kswitcherDestination || lanDestination || target.kind === "local" || isFileServer(target)) ? placePath(target) : "",
-      remoteDestination, lanDestination, archiveDestination, kswitcherDestination, kswitcherBroker,
+      target: target && (archiveDestination || kswitcherDestination || serverDestination || target.kind === "local" || isFileServer(target)) ? placePath(target) : "",
+      remoteDestination, serverDestination, archiveDestination, kswitcherDestination, kswitcherBroker,
     } });
   }
 
@@ -2366,16 +2361,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     return true;
   }
 
-  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace | KSwitcherPlace | LanGroupPlace,
+  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace | KSwitcherPlace | WritableServerPlace,
     entries: readonly Entry[], tree = false, searchSide?: Side) {
     if (!entries.length) return;
     const remote = place.kind === "ftp" || place.kind === "ssh" ? place : undefined;
     const archive = place.kind === "archive" ? place : undefined;
     const kswitcher = place.kind === "kswitcher" ? place : undefined;
-    const lan = isLanGroupPlace(place) ? place : undefined;
+    const shared = isWritableServerPlace(place) ? place : undefined;
     setModal({
-      kind: remote && !remote.environment?.recycleBin?.keepDeleted || archive || lan || smbHost(place) ? "delete" : command,
-      path: placePath(place), remote, archive, kswitcher, lan, names: entries.map(({ name }) => name),
+      kind: remote && !remote.environment?.recycleBin?.keepDeleted || archive || shared || smbHost(place) ? "delete" : command,
+      path: placePath(place), remote, archive, kswitcher, shared, names: entries.map(({ name }) => name),
       directories: entries.filter(({ directory, link }) => directory && !link).map(({ name }) => name),
       relativePaths: searchSide ? entries.map(({ name }) => name.split("/")) :
         tree ? entries.map((entry) => [...(entry.tree?.segments ?? [entry.name])]) : undefined,
@@ -2392,7 +2387,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       return;
     }
     const place = state.place;
-    if (place?.kind === "local" || isFileServer(place) || isLanGroupPlace(place) && place.segments.length || place?.kind === "archive" && place.writable ||
+    if (place?.kind === "local" || isFileServer(place) || isWritableServerPlace(place) || place?.kind === "archive" && place.writable ||
       place?.kind === "kswitcher" && place.path && place.capabilities?.delete) {
       confirmDeletion(command, place, selectedEntries(side, selected), trees[side].enabled);
     }
@@ -2432,7 +2427,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (kind === "copy") collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
       return;
     }
-    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isLanGroupPlace(source) &&
+    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isWritableServerPlace(source) &&
       !(source.kind === "archive" && source.writable) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     const otherPane = panes[targetSide];
@@ -3304,9 +3299,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           setRowRename({ side: active, place, name: currentItem?.entry.name ?? current.name, treeKey: current.tree ? current.name : undefined });
         } else if (currentItem?.place.kind === "ssh" && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, remote: currentItem.place });
-        } else if (lanGroupPlace && currentItem && isLanGroupPlace(currentItem.place) &&
+        } else if (writableServer && currentItem && isWritableServerPlace(currentItem.place) &&
           !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
-          setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, lan: currentItem.place });
+          setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, shared: currentItem.place });
         } else if (currentItem?.place.kind === "archive" && currentItem.place.canAdd &&
           !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "rename", side: active, path: placePath(currentItem.place),
@@ -3322,7 +3317,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           setModal({ kind: "newFile", side: active, path: placePath(actionDirectory), name: "",
             archive: actionDirectory.kind === "archive" ? actionDirectory : undefined,
             kswitcher: actionDirectory.kind === "kswitcher" ? actionDirectory : undefined,
-            lan: isLanGroupPlace(actionDirectory) ? actionDirectory : undefined,
+            shared: isWritableServerPlace(actionDirectory) ? actionDirectory : undefined,
             remote: isFileServer(actionDirectory) ? actionDirectory : undefined });
         }
         break;
@@ -3501,14 +3496,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: "Move", Icon: ArrowLeftRight,
       disabled: Boolean(collectionPanes[opposite(active)]) ||
-        (!local && !fileServer && !lanGroupPlace && !archive?.writable && !(kswitcherWrite && kswitcherDelete)) ||
+        (!local && !fileServer && !writableServer && !archive?.writable && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
-      !!pane.search || !current || ((archive || kswitcher || lanGroupPlace) && current.link) || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !writableServer && !archive?.canAdd && !kswitcherWrite) ||
+      !!pane.search || !current || ((archive || kswitcher || writableServer) && current.link) || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: !canCreateItem || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !canCreateItem || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2,
-      disabled: (!local && !fileServer && !lanGroupPlace && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
+      disabled: (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const);
@@ -4215,10 +4210,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               const items = transferItems(side, entry!, state.marked.includes(entry!.name));
               if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
               else openTransfer("copy", item.place, items,
-                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null :
+                target.search ? null :
                   treeFolder(opposite(side)) ?? target.place, false, side);
             }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
-            {isLanGroupPlace(item.place) && item.place.segments.length > 0 && entry && !state.search && !state.loading && !busy && <>
+            {isWritableServerPlace(item.place) && entry && !state.search && !state.loading && !busy && <>
               {!item.entry.directory && !item.entry.link && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
                 openDocument({ place: item.place, name: item.entry.name }, true, { fromPane: side });
@@ -4230,7 +4225,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               {!item.entry.link && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
                 const place = item.place;
-                if (isLanGroupPlace(place)) setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, lan: place });
+                if (isWritableServerPlace(place)) setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, shared: place });
               }}>{t("Rename")}</Button>}
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
@@ -4262,7 +4257,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             }}>{t("Rename")}</Button>}
             {item.place.kind === "ssh" && entry && !toCollection && !state.search && !state.loading && !busy &&
               <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
-            {item.place.kind === "ftp" && target.place?.kind === "local" && !target.search && entry &&
+            {item.place.kind === "ftp" && (target.place?.kind === "local" || isFileServer(target.place)) && !target.search && entry &&
               !toCollection && !state.search && !state.loading && !busy &&
               <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
             {item.place.kind === "archive" && item.place.writable && entry && !state.search && !state.loading && !busy && (() => {
@@ -4375,7 +4370,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       {modal?.kind === "mkdir" && <NewFolderDialog directory={placePath(modal.place)} showHidden={preferences.hidden}
         archive={modal.place.kind === "archive" ? modal.place : undefined}
         kswitcher={modal.place.kind === "kswitcher" ? modal.place : undefined}
-        remote={isFileServer(modal.place) || isLanGroupPlace(modal.place) ? modal.place : undefined}
+        remote={isFileServer(modal.place) || isWritableServerPlace(modal.place) ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
           await selectChangedItem(modal.side, modal.place, name);
@@ -4397,7 +4392,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
-          hasNonemptyFolders={(modal.remote || modal.kswitcher || modal.lan) && modal.kind === "delete" ? async () => {
+          hasNonemptyFolders={(modal.remote || modal.kswitcher || modal.shared) && modal.kind === "delete" ? async () => {
             for (const name of modal.directories ?? []) {
               const segments = modal.relativePaths?.[modal.names.indexOf(name)] ?? [name];
               const remote = modal.remote;
@@ -4409,7 +4404,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                   throw error;
                 })
                 : api.listFtp(remote.id, [...remote.segments, ...segments]))
-                : modal.lan ? await api.listServer(modal.lan.id, [...modal.lan.segments, ...segments])
+                : modal.shared ? await api.listServer(modal.shared.id, [...modal.shared.segments, ...segments])
                 : await api.listKSwitcher(modal.kswitcher!.directory, modal.kswitcher!.peer, kswitcherPath(modal.path, segments.join("\\")));
               if (listing.entries.length || listing.omitted) return true;
             }
@@ -4417,14 +4412,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           } : undefined}
           onSubmit={async (operation, recursive, progress, sudoPassword) => {
           const remote = modal.remote;
-          if (modal.lan) {
-            const lan = modal.lan;
+          if (modal.shared) {
+            const shared = modal.shared;
             try {
               if ("names" in modal) {
                 let removed = 0;
                 try {
                   await batch(modal.names, async (name, index) => {
-                    await api.changeLanItem(lan, modal.relativePaths?.[index] ?? [name], {
+                    await api.changeServerItem(shared, modal.relativePaths?.[index] ?? [name], {
                       kind: "delete", recursive: recursive && Boolean(modal.directories?.includes(name)),
                     });
                     removed += 1;
@@ -4435,12 +4430,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 }
                 if (progress?.signal.aborted) setStatus({ text: t("{0} of {1} completed", removed, modal.names.length) });
               } else if (operation?.kind === "create_file") {
-                await api.changeLanItem(lan, [operation.name], { kind: "create_text", encoding: operation.encoding ?? "utf8" });
-                if (modal.side) await selectChangedItem(modal.side, lan, operation.name);
-                openDocument({ place: lan, name: operation.name }, true, { fromPane: modal.side });
+                await api.changeServerItem(shared, [operation.name], { kind: "create_text", encoding: operation.encoding ?? "utf8" });
+                if (modal.side) await selectChangedItem(modal.side, shared, operation.name);
+                openDocument({ place: shared, name: operation.name }, true, { fromPane: modal.side });
               } else if (operation?.kind === "rename") {
-                await api.changeLanItem(lan, [operation.name], { kind: "rename", name: operation.new_name });
-                if (modal.side) await selectChangedItem(modal.side, lan, operation.new_name);
+                await api.changeServerItem(shared, [operation.name], { kind: "rename", name: operation.new_name });
+                if (modal.side) await selectChangedItem(modal.side, shared, operation.new_name);
               }
             } finally {
               fileLocationsChanged();
@@ -4682,10 +4677,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const renameInArchive = modal.kind === "rename" && modal.archive;
   const createInArchive = modal.kind === "newFile" && modal.archive;
   const updatesArchive = renameInArchive || createInArchive;
-  const remoteAddress = (modal.remote ?? modal.lan ?? modal.kswitcher)?.address;
+  const remoteAddress = (modal.remote ?? modal.shared ?? modal.kswitcher)?.address;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const remoteRecycle = modal.kind === "recycle" && !!(modal.remote || modal.kswitcher);
-  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.lan || modal.remote?.kind === "ssh");
+  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.shared || modal.remote?.kind === "ssh");
   const title = t(remoteRecycle ? "Move to remote recycle bin" : titles[modal.kind]);
   const removing = "names" in modal;
   const permanent = modal.kind === "delete";
@@ -4755,7 +4750,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   return (
     <>
-    <Dialog key={String(recursive)} title={recursive ? t(modal.kswitcher || modal.lan ? "Delete contents" :
+    <Dialog key={String(recursive)} title={recursive ? t(modal.kswitcher || modal.shared ? "Delete contents" :
       modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "warning" : undefined}
       onClose={close}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
@@ -4764,7 +4759,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ? <div className={permanent ? "permanent-delete-message" : "trash-confirmation"}>
               {permanent ? <Trash2 aria-hidden="true" /> : <CircleHelp aria-hidden="true" />}
               <div>
-                <p>{recursive ? t(modal.kswitcher || modal.lan ? "Permanently delete the selected folders and all their contents?" :
+                <p>{recursive ? t(modal.kswitcher || modal.shared ? "Permanently delete the selected folders and all their contents?" :
                   modal.remote?.kind === "ssh" ? "Permanently delete the selected SSH folders and all their contents?" :
                   "Permanently delete the selected FTP folders and all their contents?") :
                   <Message text={permanent ? "Permanently delete {0}?" : remoteRecycle ? "Move {0} to the remote recycle bin?" : "Move {0} to Trash?"}>
@@ -4792,9 +4787,9 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             <progress aria-label={t(remoteRecycle ? "Moving to the remote recycle bin" : "Deleting…")} max={modal.names.length} value={completed} />
             <p role="status">{t("{0} of {1} completed", completed, modal.names.length)}</p>
           </>}
-          {!modal.remote && !modal.archive && !modal.kswitcher && !modal.lan && windowsClient && isPermissionError(error) &&
+          {!modal.remote && !modal.archive && !modal.kswitcher && !modal.shared && windowsClient && isPermissionError(error) &&
             <ElevationButton directory={modal.path} selected={modal.kind === "rename" ? modal.name : undefined} />}
-          {!modal.remote && !modal.archive && !modal.kswitcher && !modal.lan && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
+          {!modal.remote && !modal.archive && !modal.kswitcher && !modal.shared && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button></div>}
         </div>

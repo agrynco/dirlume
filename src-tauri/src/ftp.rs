@@ -652,6 +652,10 @@ async fn open_control(
 }
 
 impl Connection {
+    pub(crate) fn host(&self) -> &str {
+        &self.profile.host
+    }
+
     pub fn open(&self) -> Result<Session> {
         self.open_with_cancel(None)
     }
@@ -1698,6 +1702,11 @@ mod compatibility_tests;
 mod tls_tests;
 
 #[cfg(test)]
+pub(crate) fn move_test_connection(port: u16) -> Connection {
+    tls_tests::connection(port, Encryption::Plain)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::net::TcpListener;
@@ -1708,7 +1717,7 @@ mod tests {
             return;
         };
         let root = std::env::var_os("DIRLUME_FTP_MOVE_TEST_ROOT").unwrap();
-        let connection = super::tls_tests::connection(port.parse().unwrap(), Encryption::Plain);
+        let connection = move_test_connection(port.parse().unwrap());
         let mut session = connection.open().unwrap();
         crate::desktop::verify_ftp_folder_moves(&mut session, Path::new(&root));
     }

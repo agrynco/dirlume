@@ -7,27 +7,41 @@ pub const MAX_INVITATION_LENGTH: usize = 8192;
 #[cfg(feature = "desktop")]
 pub(crate) const COMPUTER_NAME_HEADER: &str = "x-dirlume-computer-name";
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
+pub(crate) const SHARE_WRITABLE_HEADER: &str = "x-dirlume-share-writable";
+
+#[cfg(any(feature = "desktop", feature = "server"))]
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum LanChange {
     Folder,
-    CreateText { encoding: crate::desktop::Encoding },
-    Delete { recursive: bool },
-    DeleteCompared { expected: LanStat, digest: String },
-    Rename { name: String },
-    Move { destination: Vec<String> },
+    CreateText {
+        encoding: crate::text_format::Encoding,
+    },
+    Delete {
+        recursive: bool,
+    },
+    DeleteCompared {
+        expected: LanStat,
+        digest: String,
+    },
+    Rename {
+        name: String,
+    },
+    Move {
+        destination: Vec<String>,
+    },
     RemoveEmptyFolder,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 #[derive(Deserialize, Serialize)]
 pub(crate) struct LanChangeRequest {
     pub segments: Vec<String>,
     pub change: LanChange,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 #[derive(Deserialize, Serialize)]
 pub(crate) struct LanTextSave {
     pub segments: Vec<String>,
@@ -35,13 +49,13 @@ pub(crate) struct LanTextSave {
     pub text: String,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) const LAN_UPLOAD_CHUNK: usize = 256 * 1024;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) const LAN_MOVE_CROSSES_VOLUMES: &str =
     "The item and destination are on different volumes.";
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum LanUpload {
@@ -65,7 +79,7 @@ pub(crate) enum LanUpload {
     },
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum LanUploadReply {
@@ -74,7 +88,7 @@ pub(crate) enum LanUploadReply {
     Ok,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 pub(crate) struct LanStat {
     pub name: String,
@@ -84,12 +98,12 @@ pub(crate) struct LanStat {
     pub modified: Option<(u64, u32)>,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) fn lan_text_revision(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, bytes).as_ref())
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) fn lan_file_digest(
     mut reader: impl std::io::Read,
     mut check: impl FnMut() -> std::io::Result<()>,

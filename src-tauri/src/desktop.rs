@@ -27,10 +27,15 @@ use crate::{
     remote_transfer, ssh, terminal, watch,
 };
 
+pub(crate) use crate::text_format::{encode as encode_text, Encoding, TEXT_LIMIT};
 pub(crate) use crate::{message, Result};
 
 #[path = "desktop_lan_transfer.rs"]
 mod lan_transfer;
+#[path = "desktop_netbox_transfer.rs"]
+mod netbox_transfer;
+#[cfg(test)]
+pub(crate) use netbox_transfer::verify_file_server_relays;
 #[path = "desktop_ssh_transfer.rs"]
 mod ssh_transfer;
 
@@ -568,6 +573,12 @@ impl Connection {
     }
 
     async fn list(&self, segments: Vec<String>) -> Result<RemoteListing> {
+        self.list_with_access(segments)
+            .await
+            .map(|(listing, _)| listing)
+    }
+
+    async fn list_with_access(&self, segments: Vec<String>) -> Result<(RemoteListing, bool)> {
         let mut request = crate::protocol::ListRequest {
             path: RemotePath { segments },
             paged: true,
@@ -581,6 +592,10 @@ impl Connection {
             let response = self
                 .request("v1/list", &request, Duration::from_secs(20))
                 .await?;
+            let writable = response
+                .headers()
+                .get(crate::protocol::SHARE_WRITABLE_HEADER)
+                .is_some_and(|value| value == "true");
             const MAX_LISTING: usize = 32 * 1024 * 1024;
             let bytes = collect_response(response, MAX_LISTING + 1).await?;
             if bytes.len() > MAX_LISTING {
@@ -615,7 +630,7 @@ impl Connection {
             result.entries.extend(page.listing.entries);
             request.after = page.next;
             if request.after.is_none() {
-                return Ok(result);
+                return Ok((result, writable));
             }
         }
     }
@@ -1094,7 +1109,7 @@ enum TransferSource {
         folder: bool,
         modified: Option<i64>,
         #[serde(default)]
-        lan_group: bool,
+        writable_server: bool,
     },
     Kswitcher {
         peer: String,
@@ -1132,7 +1147,7 @@ struct TransferRequest {
     destination: String,
     ftp_destination: Option<u32>,
     ssh_destination: Option<u32>,
-    lan_destination: Option<u32>,
+    server_destination: Option<u32>,
     archive_destination: Option<ArchiveDestination>,
     kswitcher_destination: Option<String>,
     #[serde(default)]
@@ -1658,6 +1673,97 @@ fn move_local_to_archive(
     Ok(TransferOutcome::Completed)
 }
 
+fn transfer_archive_member(
+    source: &Arc<Mutex<crate::archives::Archive>>,
+    target: &Arc<Mutex<crate::archives::Archive>>,
+    segments: &[String],
+    request: &TransferRequest,
+    mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    mut ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let parent = &request
+        .archive_destination
+        .as_ref()
+        .ok_or("Choose a destination archive.")?
+        .segments;
+    let name = segments.last().ok_or("Choose an archive entry.")?;
+    let destination = remote_transfer::child(parent, name);
+    if Arc::ptr_eq(source, target) {
+        if destination == segments {
+            return Ok(TransferOutcome::Skipped);
+        }
+        if destination.starts_with(segments) || segments.starts_with(&destination) {
+            return Err("Choose an archive destination outside the source folder.".to_owned());
+        }
+        if request.moving {
+            let mut archive = source.lock().map_err(message)?;
+            if request.policy == local_transfer::Policy::Skip
+                && archive
+                    .list(parent)?
+                    .entries
+                    .iter()
+                    .any(|entry| &entry.name == name)
+            {
+                return Ok(TransferOutcome::Skipped);
+            }
+            archive.relocate_entry(segments, parent, name, |_| {
+                progress(Path::new(name), 0, None)
+            })?;
+            return Ok(TransferOutcome::Completed);
+        }
+    }
+    let temp = tempfile::tempdir().map_err(message)?;
+    let staged = temp
+        .path()
+        .join(local::name_component(name).map_err(message)?);
+    let version = {
+        let archive = source.lock().map_err(message)?;
+        if request.moving && !archive.is_writable() {
+            return Err("The archive is read-only.".to_owned());
+        }
+        let options = local_transfer::Options {
+            moving: false,
+            policy: local_transfer::Policy::Skip,
+            ask_read_only: true,
+            copy: local::CopyOptions::default(),
+        };
+        if !archive.copy_to(
+            segments,
+            &staged,
+            &options,
+            &mut progress,
+            &mut ask,
+            |_, _| {},
+        )? {
+            return Ok(TransferOutcome::Skipped);
+        }
+        archive.generation().to_owned()
+    };
+    let copied = target.lock().map_err(message)?.copy_into(
+        parent,
+        &[(staged, name.clone())],
+        request.policy,
+        &mut progress,
+        &mut ask,
+    )?;
+    if copied.first() != Some(&true) {
+        return Ok(TransferOutcome::Skipped);
+    }
+    if request.moving {
+        let removed = source.lock().map_err(message).and_then(|mut archive| {
+            archive.remove_moved_member(segments, &version, || progress(Path::new(name), 0, None))
+        });
+        if let Err(error) = removed {
+            return Ok(TransferOutcome::SourceRetained {
+                source: format!("/{}", segments.join("/")),
+                destination: format!("{}/{name}", request.destination.trim_end_matches('/')),
+                error,
+            });
+        }
+    }
+    Ok(TransferOutcome::Completed)
+}
+
 #[cfg(test)]
 pub(crate) fn verify_ftp_folder_moves(ftp: &mut ftp::Session, host: &Path) {
     use crate::local_transfer::{Decision, Policy};
@@ -1740,7 +1846,7 @@ fn move_uploaded_file<S: VerifiedUpload>(
 ) -> Result<TransferOutcome> {
     let connection = request
         .ssh_destination
-        .or(request.lan_destination)
+        .or(request.server_destination)
         .or(request.ftp_destination)
         .ok_or("Choose a remote destination.")?;
     let mut attempt = session.upload_move.lock().map_err(message)?;
@@ -2009,7 +2115,7 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
         destination: "/".to_owned(),
         ftp_destination: None,
         ssh_destination: Some(12),
-        lan_destination: None,
+        server_destination: None,
         archive_destination: None,
         kswitcher_destination: None,
         kswitcher_broker: false,
@@ -2129,7 +2235,7 @@ async fn transfer_item(
     ssh_state: State<'_, ssh::SshState>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
-    if request.lan_destination.is_none()
+    if request.server_destination.is_none()
         && (request.kswitcher_broker || request.kswitcher_destination.is_some())
     {
         return session
@@ -2160,8 +2266,8 @@ async fn transfer_item(
         .ssh_destination
         .map(|id| ssh_state.connection(id))
         .transpose()?;
-    let lan_destination = request
-        .lan_destination
+    let server_destination = request
+        .server_destination
         .map(|id| connections.get(id))
         .transpose()?;
     let archive_destination = request
@@ -2172,7 +2278,7 @@ async fn transfer_item(
     if [
         ftp_destination.is_some(),
         ssh_destination.is_some(),
-        lan_destination.is_some(),
+        server_destination.is_some(),
         archive_destination.is_some(),
     ]
     .into_iter()
@@ -2223,13 +2329,24 @@ async fn transfer_item(
             progress(Path::new(name), 0, None).map_err(message)?;
 
             let mut ask = |conflict| session.ask(conflict, &output);
-            if let Some(archive) = archive_destination {
+            if let Some(destination) = archive_destination {
+                if let TransferSource::Archive { segments, .. } = &request.source {
+                    let archive = archive.as_ref().ok_or("Open the source archive first.")?;
+                    return transfer_archive_member(
+                        archive,
+                        &destination,
+                        segments,
+                        &request,
+                        progress,
+                        ask,
+                    );
+                }
                 let source = source
                     .as_deref()
                     .filter(|_| request.moving)
                     .ok_or("Choose local files or folders to move into the archive.")?;
                 actual_source = display(source);
-                let mut archive = archive.lock().map_err(message)?;
+                let mut archive = destination.lock().map_err(message)?;
                 return move_local_to_archive(
                     &mut archive,
                     source,
@@ -2240,9 +2357,9 @@ async fn transfer_item(
                     ask,
                 );
             }
-            if let Some(destination) = lan_destination {
+            if let Some(destination) = server_destination {
                 if let TransferSource::Server {
-                    lan_group: true,
+                    writable_server: true,
                     segments,
                     ..
                 } = &request.source
@@ -2319,15 +2436,19 @@ async fn transfer_item(
                 }
                 let remote_move = if request.moving {
                     let TransferSource::Server {
-                        lan_group: true,
+                        writable_server: true,
                         segments,
                         ..
                     } = &request.source
                     else {
-                        return Err("Choose Dirlume LAN files or folders to move.".to_owned());
+                        return Err(
+                            "Choose files or folders on a writable Dirlume share.".to_owned()
+                        );
                     };
                     let client = lan_transfer::LanTransfer {
-                        connection: connection.as_ref().ok_or("Connect to Dirlume LAN first.")?,
+                        connection: connection
+                            .as_ref()
+                            .ok_or("Connect to the Dirlume share first.")?,
                         transfer: &session,
                     };
                     Some((client, segments))
@@ -2523,6 +2644,49 @@ async fn transfer_item(
                         | local_transfer::Policy::Overwrite
                 ) {
                     return Err(format!("Choose a supported {protocol} copy option."));
+                }
+                if source.is_none() {
+                    use netbox_transfer::{Endpoint, Relay};
+                    let source = match &request.source {
+                        TransferSource::Ftp { segments, .. } => (
+                            Endpoint::Ftp(
+                                ftp_source
+                                    .as_deref()
+                                    .ok_or("Connect to the FTP server first.")?,
+                            ),
+                            segments,
+                        ),
+                        TransferSource::Ssh { segments, .. } => (
+                            Endpoint::Ssh(
+                                ssh_source
+                                    .as_ref()
+                                    .ok_or("Connect to the SSH server first.")?,
+                            ),
+                            segments,
+                        ),
+                        _ => {
+                            return Err(format!(
+                                "Choose a local, FTP, or SFTP source for the {protocol} upload."
+                            ))
+                        }
+                    };
+                    let destination = match (ftp_destination.as_deref(), ssh_destination.as_ref()) {
+                        (Some(connection), None) => Endpoint::Ftp(connection),
+                        (None, Some(connection)) => Endpoint::Ssh(connection),
+                        _ => return Err("Choose one destination connection.".to_owned()),
+                    };
+                    return Relay {
+                        request: &request,
+                        transfer: &session,
+                        output: &output,
+                    }
+                    .run(
+                        source.0,
+                        source.1,
+                        destination,
+                        &mut progress,
+                        &mut ask,
+                    );
                 }
                 let source = source
                     .as_deref()
@@ -2729,10 +2893,10 @@ async fn transfer_item(
                     segments,
                     folder,
                     modified,
-                    lan_group,
+                    writable_server,
                     ..
                 } => {
-                    if request.moving && !lan_group {
+                    if request.moving && !writable_server {
                         return Err("This source is read-only.".to_owned());
                     }
                     let connection = connection.ok_or("Connect to the server first.")?;
@@ -2864,7 +3028,7 @@ async fn transfer_kswitcher(
     use local_transfer::Policy;
     if request.ftp_destination.is_some()
         || request.ssh_destination.is_some()
-        || request.lan_destination.is_some()
+        || request.server_destination.is_some()
     {
         return Err("Choose a local or KSwitcher LAN destination.".into());
     }
@@ -3002,6 +3166,7 @@ struct Connected {
     address: String,
     origin: String,
     share: String,
+    writable: bool,
     listing: RemoteListing,
 }
 
@@ -3188,7 +3353,7 @@ async fn open_server(
     state: &Connections,
 ) -> Result<Connected> {
     let connection = Connection::connect(invitation)?;
-    let listing = connection.list(segments).await?;
+    let (listing, writable) = connection.list_with_access(segments).await?;
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     let address = connection
         .invitation
@@ -3213,6 +3378,7 @@ async fn open_server(
         address,
         origin,
         share,
+        writable,
         listing,
     })
 }
@@ -3494,18 +3660,6 @@ mod server_download_tests {
     }
 }
 
-pub(crate) const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
-
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Encoding {
-    #[default]
-    Utf8,
-    Utf8Bom,
-    Utf16Le,
-    Utf16Be,
-}
-
 #[derive(Deserialize, Serialize)]
 pub(crate) struct TextDocument {
     pub(crate) text: String,
@@ -3581,9 +3735,6 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
 }
 
 fn decode_local_text(reader: impl Read) -> std::result::Result<TextDocument, TextReadFailure> {
-    let unsupported = |message: String| {
-        TextReadFailure::new(ReadStage::Decode, ReadReason::UnsupportedEncoding, message)
-    };
     let mut bytes = Vec::new();
     reader
         .take(TEXT_LIMIT + 1)
@@ -3596,54 +3747,17 @@ fn decode_local_text(reader: impl Read) -> std::result::Result<TextDocument, Tex
             "Text files can be at most 8 MiB.",
         ));
     }
-    let (text, encoding) = if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
-        (
-            String::from_utf8(bytes.to_vec()).map_err(|error| unsupported(message(error)))?,
-            Encoding::Utf8Bom,
-        )
-    } else if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
-        let little = bytes[0] == 0xff;
-        let (chunks, remainder) = bytes[2..].as_chunks::<2>();
-        if !remainder.is_empty() {
-            return Err(unsupported(
-                "The UTF-16 file ends with an incomplete character.".to_owned(),
-            ));
+    use crate::text_format::DecodeError;
+    let (text, encoding) = crate::text_format::decode(bytes).map_err(|error| match error {
+        DecodeError::Unsupported(message) => {
+            TextReadFailure::new(ReadStage::Decode, ReadReason::UnsupportedEncoding, message)
         }
-        let words: Vec<_> = chunks
-            .iter()
-            .map(|&pair| {
-                if little {
-                    u16::from_le_bytes(pair)
-                } else {
-                    u16::from_be_bytes(pair)
-                }
-            })
-            .collect();
-        (
-            String::from_utf16(&words).map_err(|error| unsupported(message(error)))?,
-            if little {
-                Encoding::Utf16Le
-            } else {
-                Encoding::Utf16Be
-            },
-        )
-    } else {
-        (
-            String::from_utf8(bytes).map_err(|_| {
-                unsupported(
-                    "The file is outside the supported UTF-8 and UTF-16 text formats.".to_owned(),
-                )
-            })?,
-            Encoding::Utf8,
-        )
-    };
-    if text.contains('\0') {
-        return Err(TextReadFailure::new(
+        DecodeError::Binary => TextReadFailure::new(
             ReadStage::Decode,
             ReadReason::BinaryContent,
             "The file contains binary data.",
-        ));
-    }
+        ),
+    })?;
     Ok(TextDocument {
         text,
         encoding,
@@ -4110,29 +4224,6 @@ async fn read_server_bytes(
     let max_response = crate::protocol::BYTE_PAGE_SIZE as usize * 4 + 128;
     let bytes = collect_response(response, max_response).await?;
     serde_json::from_slice(&bytes).map_err(message)
-}
-
-pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    match encoding {
-        Encoding::Utf8 => buffer.extend_from_slice(text.as_bytes()),
-        Encoding::Utf8Bom => {
-            buffer.extend_from_slice(&[0xef, 0xbb, 0xbf]);
-            buffer.extend_from_slice(text.as_bytes());
-        }
-        Encoding::Utf16Be | Encoding::Utf16Le => {
-            let little = matches!(encoding, Encoding::Utf16Le);
-            buffer.extend_from_slice(if little { &[0xff, 0xfe] } else { &[0xfe, 0xff] });
-            for word in text.encode_utf16() {
-                buffer.extend_from_slice(&if little {
-                    word.to_le_bytes()
-                } else {
-                    word.to_be_bytes()
-                });
-            }
-        }
-    }
-    buffer
 }
 
 fn create_encoded_file(path: &Path, encoding: Encoding) -> Result<()> {

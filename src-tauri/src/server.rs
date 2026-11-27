@@ -32,7 +32,6 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[cfg(feature = "desktop")]
 #[path = "server_lan_upload.rs"]
 mod lan_upload;
 
@@ -92,11 +91,8 @@ impl Identity {
 struct Share {
     roots: ShareRoots,
     authorization: String,
-    #[cfg(feature = "desktop")]
     writable: Option<Arc<std::sync::atomic::AtomicBool>>,
-    #[cfg(feature = "desktop")]
     lan_writes: std::sync::Mutex<()>,
-    #[cfg(feature = "desktop")]
     lan_uploads: lan_upload::Uploads,
 }
 
@@ -130,6 +126,12 @@ pub(crate) struct ComputerDrive {
 }
 
 impl Share {
+    fn allows_write(&self) -> bool {
+        self.writable
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
+    }
+
     fn authorize(&self, headers: &HeaderMap) -> std::result::Result<(), StatusCode> {
         match headers.get(header::AUTHORIZATION) {
             Some(value) if bool::from(value.as_bytes().ct_eq(self.authorization.as_bytes())) => {
@@ -315,13 +317,22 @@ async fn list_directory(
     State(share): State<Arc<Share>>,
     headers: HeaderMap,
     Json(path): Json<ListRequest>,
-) -> std::result::Result<Json<ListPage>, StatusCode> {
+) -> std::result::Result<(HeaderMap, Json<ListPage>), StatusCode> {
     share.authorize(&headers)?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(
+        crate::protocol::SHARE_WRITABLE_HEADER,
+        axum::http::HeaderValue::from_static(if share.allows_write() {
+            "true"
+        } else {
+            "false"
+        }),
+    );
     let listing = spawn_blocking(move || list(&share, path))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map_err(response_error)?;
-    Ok(Json(listing))
+    Ok((response_headers, Json(listing)))
 }
 
 async fn download(
@@ -386,15 +397,12 @@ async fn read_bytes(
     Ok(Json(page))
 }
 
-fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
+fn make_share(root: &Path, token: &str, allow_write: bool) -> io::Result<Arc<Share>> {
     Ok(Arc::new(Share {
         roots: ShareRoots::Folder(Arc::new(Dir::open_ambient_dir(root, ambient_authority())?)),
         authorization: format!("Bearer {token}"),
-        #[cfg(feature = "desktop")]
-        writable: None,
-        #[cfg(feature = "desktop")]
+        writable: allow_write.then(|| Arc::new(std::sync::atomic::AtomicBool::new(true))),
         lan_writes: std::sync::Mutex::new(()),
-        #[cfg(feature = "desktop")]
         lan_uploads: lan_upload::Uploads::default(),
     }))
 }
@@ -428,7 +436,13 @@ fn advertised_url(host: &str, port: u16) -> Result<Url> {
     Ok(address)
 }
 
-pub async fn serve(root: &Path, directory: &Path, bind: SocketAddr, host: &str) -> Result<()> {
+pub async fn serve(
+    root: &Path,
+    directory: &Path,
+    bind: SocketAddr,
+    host: &str,
+    allow_write: bool,
+) -> Result<()> {
     let address = advertised_url(host, bind.port())?;
     if bind.port() == 0 {
         return Err("Choose a fixed port to use in invitations.".into());
@@ -448,7 +462,10 @@ pub async fn serve(root: &Path, directory: &Path, bind: SocketAddr, host: &str) 
     if identity.invitation.address != address {
         return Err("This state directory belongs to a different advertised address. Choose another state directory.".into());
     }
-    let share = make_share(root, &identity.invitation.token)?;
+    let share = make_share(root, &identity.invitation.token, allow_write)?;
+    if allow_write {
+        lan_upload::reap_stale_uploads(&share.lan_uploads);
+    }
     let tls = identity.tls().await?;
     let listener = std::net::TcpListener::bind(bind)?;
     listener.set_nonblocking(true)?;
@@ -566,19 +583,17 @@ fn router(share: Arc<Share>) -> Router {
     let router = Router::new()
         .route("/v1/list", post(list_directory))
         .route("/v1/download", post(download))
-        .route("/v1/bytes", post(read_bytes));
-    #[cfg(feature = "desktop")]
-    let router = router
-        .route("/v1/drives", post(computer_drives))
+        .route("/v1/bytes", post(read_bytes))
         .route("/v1/lan/change", post(change_computer))
         .route("/v1/lan/save-text", post(save_computer_text))
         .route("/v1/lan/upload", post(lan_upload::handle));
+    #[cfg(feature = "desktop")]
+    let router = router.route("/v1/drives", post(computer_drives));
     router
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(share)
 }
 
-#[cfg(feature = "desktop")]
 async fn change_computer(
     State(share): State<Arc<Share>>,
     headers: HeaderMap,
@@ -592,7 +607,6 @@ async fn change_computer(
     ))
 }
 
-#[cfg(feature = "desktop")]
 fn apply_lan_change(
     share: &Share,
     operation: crate::protocol::LanChangeRequest,
@@ -635,7 +649,6 @@ fn apply_lan_change(
     .map_err(|error| error.to_string())
 }
 
-#[cfg(feature = "desktop")]
 fn remove_compared_lan_file(
     directory: &Dir,
     path: &Path,
@@ -662,7 +675,7 @@ fn remove_compared_lan_file(
     directory.remove_file(path)
 }
 
-#[cfg(all(feature = "desktop", windows))]
+#[cfg(windows)]
 fn rename_lan_exclusive(
     directory: &Dir,
     source: &Path,
@@ -723,7 +736,7 @@ fn rename_lan_exclusive(
     }
 }
 
-#[cfg(all(feature = "desktop", unix))]
+#[cfg(unix)]
 fn rename_lan_exclusive(
     directory: &Dir,
     source: &Path,
@@ -764,13 +777,16 @@ fn rename_lan_exclusive(
     }
 }
 
-#[cfg(feature = "desktop")]
 fn writable_lan_item(
     share: &Share,
     segments: Vec<String>,
 ) -> std::result::Result<(Dir, PathBuf), String> {
     require_lan_write(share)?;
-    if segments.len() < 2 {
+    if segments.is_empty() {
+        return Err("Choose an item inside the shared folder.".to_owned());
+    }
+    #[cfg(feature = "desktop")]
+    if matches!(&share.roots, ShareRoots::Computer(_)) && segments.len() < 2 {
         return Err("Choose a location inside a remote drive.".to_owned());
     }
     let (root, path) = share
@@ -785,26 +801,20 @@ fn writable_lan_item(
     Ok((parent, PathBuf::from(name)))
 }
 
-#[cfg(feature = "desktop")]
 fn require_lan_write(share: &Share) -> std::result::Result<(), String> {
-    if share
-        .writable
-        .as_ref()
-        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
-    {
+    if share.allows_write() {
         Ok(())
     } else {
         Err("The remote computer allows read access only.".to_owned())
     }
 }
 
-#[cfg(feature = "desktop")]
 fn lan_create_text(
     directory: &Dir,
     path: &Path,
-    encoding: crate::desktop::Encoding,
+    encoding: crate::text_format::Encoding,
 ) -> io::Result<()> {
-    let bytes = crate::desktop::encode_text(encoding, "");
+    let bytes = crate::text_format::encode(encoding, "");
     if bytes.is_empty() {
         let mut options = cap_std::fs::OpenOptions::new();
         return directory
@@ -816,7 +826,6 @@ fn lan_create_text(
     })
 }
 
-#[cfg(feature = "desktop")]
 fn stage_lan_text(
     directory: &Dir,
     bytes: &[u8],
@@ -847,7 +856,7 @@ fn stage_lan_text(
     result
 }
 
-#[cfg(all(feature = "desktop", windows))]
+#[cfg(windows)]
 fn preserve_lan_access(original: &cap_std::fs::File, staged: &cap_std::fs::File) -> io::Result<()> {
     use std::{
         os::windows::io::AsRawHandle,
@@ -896,7 +905,7 @@ fn preserve_lan_access(original: &cap_std::fs::File, staged: &cap_std::fs::File)
     staged.set_permissions(original.metadata()?.permissions())
 }
 
-#[cfg(all(feature = "desktop", unix))]
+#[cfg(unix)]
 fn preserve_lan_access(original: &cap_std::fs::File, staged: &cap_std::fs::File) -> io::Result<()> {
     use cap_std::fs::{MetadataExt, PermissionsExt};
     use std::os::fd::AsRawFd;
@@ -915,7 +924,6 @@ fn preserve_lan_access(original: &cap_std::fs::File, staged: &cap_std::fs::File)
     staged.set_permissions(source.permissions())
 }
 
-#[cfg(feature = "desktop")]
 async fn save_computer_text(
     State(share): State<Arc<Share>>,
     request: axum::extract::Request,
@@ -923,7 +931,7 @@ async fn save_computer_text(
     share.authorize(request.headers())?;
     let bytes = axum::body::to_bytes(
         request.into_body(),
-        6 * crate::desktop::TEXT_LIMIT as usize + 65_536,
+        6 * crate::text_format::TEXT_LIMIT as usize + 65_536,
     )
     .await
     .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
@@ -935,14 +943,13 @@ async fn save_computer_text(
     ))
 }
 
-#[cfg(feature = "desktop")]
 fn save_lan_text(
     share: &Share,
     request: crate::protocol::LanTextSave,
 ) -> std::result::Result<String, String> {
     use crate::{
-        desktop::{decode_text, encode_text, TEXT_LIMIT},
         protocol::lan_text_revision,
+        text_format::{self, DecodeError, TEXT_LIMIT},
     };
     use std::io::Read as _;
 
@@ -966,8 +973,14 @@ fn save_lan_text(
     if lan_text_revision(&source) != request.revision {
         return Err("The file changed outside Dirlume. Reopen it before saving.".to_owned());
     }
-    let encoding = decode_text(source.as_slice())?.encoding;
-    let bytes = encode_text(encoding, &request.text);
+    if source.len() as u64 > TEXT_LIMIT {
+        return Err("Text files can be at most 8 MiB.".to_owned());
+    }
+    let (_, encoding) = text_format::decode(source.clone()).map_err(|error| match error {
+        DecodeError::Unsupported(message) => message,
+        DecodeError::Binary => "The file contains binary data.".to_owned(),
+    })?;
+    let bytes = text_format::encode(encoding, &request.text);
     if bytes.len() as u64 > TEXT_LIMIT {
         return Err("The file is too large to edit in this remote editor.".to_owned());
     }
@@ -1036,12 +1049,74 @@ mod tests {
     use super::*;
 
     #[test]
+    fn writable_folder_shares_require_opt_in_and_stay_inside_the_root() {
+        use crate::{
+            protocol::{lan_text_revision, LanChange, LanChangeRequest, LanTextSave},
+            text_format::{self, Encoding},
+        };
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("share");
+        fs::create_dir(&root).unwrap();
+        let outside = parent.path().join("outside.txt");
+        fs::write(&outside, "private").unwrap();
+        let name = vec!["note.txt".to_owned()];
+        let create = || LanChangeRequest {
+            segments: name.clone(),
+            change: LanChange::CreateText {
+                encoding: Encoding::Utf16Le,
+            },
+        };
+        let readonly = make_share(&root, "read-token", false).unwrap();
+        assert!(!readonly.allows_write());
+        assert!(apply_lan_change(&readonly, create())
+            .unwrap_err()
+            .contains("read access only"));
+        let share = make_share(&root, "write-token", true).unwrap();
+        assert!(share.allows_write());
+        apply_lan_change(&share, create()).unwrap();
+        let original = fs::read(root.join("note.txt")).unwrap();
+        save_lan_text(
+            &share,
+            LanTextSave {
+                segments: name.clone(),
+                revision: lan_text_revision(&original),
+                text: "updated text".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(root.join("note.txt")).unwrap(),
+            text_format::encode(Encoding::Utf16Le, "updated text")
+        );
+        for segments in [vec![], vec!["..".to_owned(), "outside.txt".to_owned()]] {
+            assert!(apply_lan_change(
+                &share,
+                LanChangeRequest {
+                    segments,
+                    change: LanChange::Delete { recursive: true },
+                }
+            )
+            .is_err());
+        }
+        apply_lan_change(
+            &share,
+            LanChangeRequest {
+                segments: name,
+                change: LanChange::Delete { recursive: false },
+            },
+        )
+        .unwrap();
+        assert!(!root.join("note.txt").exists());
+        assert_eq!(fs::read(outside).unwrap(), b"private");
+    }
+
+    #[test]
     fn lists_every_entry_across_page_boundaries() {
         let temp = tempfile::tempdir().unwrap();
         for i in 0..515 {
             fs::write(temp.path().join(format!("item-{i:04}")), []).unwrap();
         }
-        let share = make_share(temp.path(), "token").unwrap();
+        let share = make_share(temp.path(), "token", false).unwrap();
         let request = |after| ListRequest {
             path: RemotePath { segments: vec![] },
             paged: true,
@@ -1090,7 +1165,7 @@ mod tests {
         let root = temp.path().join("share");
         fs::create_dir(&root).unwrap();
         std::os::unix::fs::symlink(temp.path(), root.join("outside")).unwrap();
-        let share = make_share(&root, "token").unwrap();
+        let share = make_share(&root, "token", false).unwrap();
         assert!(list(
             &share,
             ListRequest {
