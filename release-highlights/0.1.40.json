@@ -2,6 +2,7 @@
   "version": "0.1.40",
   "highlights": [
     "Find newly attached drives when reopening the source menu for a paired Dirlume computer.",
-    "Clear the error log from the diagnostic viewer’s File menu."
+    "Clear the error log from the diagnostic viewer’s File menu.",
+    "Open the creator’s website from the About dialog."
   ]
 }
