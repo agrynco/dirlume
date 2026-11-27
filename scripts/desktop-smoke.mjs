@@ -2224,7 +2224,7 @@ try {
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowDown");
   const helpItems = menu("Help").getByRole("menuitem");
-  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log", "Clear error log"]);
+  assert.deepEqual(await helpItems.locator("span").allTextContents(), ["Help", "What's new", "About", "Open error log"]);
   const errorLogAction = helpItems.filter({ hasText: "Open error log" });
   assert.equal(await errorLogAction.evaluate((item) => item.previousElementSibling?.getAttribute("role")), "separator");
   await page.keyboard.press("Enter");
