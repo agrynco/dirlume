@@ -13,7 +13,7 @@ import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
 import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
-import { replaceTerminalRange, replaceTerminalSnippet, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
+import { createTerminalSnippetTicket, replaceTerminalRange, replaceTerminalSnippet, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
 import { showTooltipAtPointer } from "./tooltips";
 import "@xterm/xterm/css/xterm.css";
 
@@ -273,7 +273,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     function syncSnippetInput() {
       if (!snippetInput) return;
       if (!snippetDraft()) snippetTicket = "";
-      else if (!snippetTicket) snippetTicket = "dirlume-terminal-snippet-v1:" + crypto.randomUUID();
+      else if (!snippetTicket) snippetTicket = createTerminalSnippetTicket();
       snippetInput.hidden = !snippetTicket;
       snippetInput.value = snippetTicket;
     }
