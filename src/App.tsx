@@ -2252,14 +2252,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     const sameLanComputer = lanDestination && isLanGroupPlace(source) && source.groupPeer === lanDestination.groupPeer;
     if (lanDestination && items.some(({ place, entry }) => entry.link ||
-      kind === "move" && !sameLanComputer && (entry.directory || place.kind !== "local" && !isLanGroupPlace(place)))) {
-      setStatus({ text: kind === "move" ? "Choose regular files for moves between computers." :
+      kind === "move" && !sameLanComputer && place.kind !== "local" && !isLanGroupPlace(place))) {
+      setStatus({ text: kind === "move" ? "Choose local or Dirlume LAN files and folders without links." :
         "Choose files or folders without links to copy to Dirlume LAN.", error: true });
       return;
     }
     if (kind === "move" && isLanGroupPlace(source) && !sameLanComputer &&
-      (!lanDestination && target && target.kind !== "local" || items.some(({ entry }) => entry.directory || entry.link))) {
-      setStatus({ text: "Choose regular Dirlume LAN files and a local destination.", error: true });
+      (!lanDestination && target && target.kind !== "local" || items.some(({ entry }) => entry.link))) {
+      setStatus({ text: "Choose Dirlume LAN files or folders without links and a local or Dirlume LAN destination.", error: true });
       return;
     }
     if (kswitcherDestination && source.kind !== "local" && !fromKSwitcher) {

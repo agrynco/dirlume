@@ -17,6 +17,7 @@ pub(crate) enum LanChange {
     DeleteCompared { expected: LanStat, digest: String },
     Rename { name: String },
     Move { destination: Vec<String> },
+    RemoveEmptyFolder,
 }
 
 #[cfg(feature = "desktop")]
@@ -36,6 +37,9 @@ pub(crate) struct LanTextSave {
 
 #[cfg(feature = "desktop")]
 pub(crate) const LAN_UPLOAD_CHUNK: usize = 256 * 1024;
+#[cfg(feature = "desktop")]
+pub(crate) const LAN_MOVE_CROSSES_VOLUMES: &str =
+    "The item and destination are on different volumes.";
 
 #[cfg(feature = "desktop")]
 #[derive(Deserialize, Serialize)]

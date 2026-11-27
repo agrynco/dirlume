@@ -1445,6 +1445,52 @@ fn move_uploaded_file<S: VerifiedUpload>(
 }
 
 #[cfg(test)]
+pub(crate) fn verify_lan_folder_move(invitation: &str, drive: &str, host: &Path) {
+    let connection = Connection::connect(invitation).unwrap();
+    let transfer = TransferSession::default();
+    let mut client = lan_transfer::LanTransfer {
+        connection: &connection,
+        transfer: &transfer,
+    };
+    let fixture = tempfile::tempdir().unwrap();
+    let source = fixture.path().join("Move fixture");
+    fs::create_dir_all(source.join("nested")).unwrap();
+    fs::write(source.join("nested/note.txt"), b"Move the tree").unwrap();
+    let target = [drive.to_owned(), "Move fixture".to_owned()];
+    let mut progress = |_: &Path, _, _| Ok(());
+    let result = lan_transfer::move_local_folder(
+        &mut client,
+        &source,
+        &target,
+        local_transfer::Policy::Ask,
+        &mut progress,
+        &mut |_| panic!("Unexpected conflict"),
+    )
+    .unwrap();
+    assert!(matches!(result, TransferOutcome::Completed));
+    assert!(!source.exists());
+    let remote = host.join("Move fixture/nested");
+    assert_eq!(fs::read(remote.join("note.txt")).unwrap(), b"Move the tree");
+
+    connection
+        .download_tree(target.to_vec(), &source, &transfer, &mut progress)
+        .unwrap();
+    let cleanup = lan_transfer::MoveCleanup::capture(&mut client, &source, &target).unwrap();
+    fs::write(remote.join("new.txt"), b"Created after copying").unwrap();
+    let result = cleanup.finish(&client, &target, crate::file_history::display(&source));
+    assert!(matches!(result, TransferOutcome::SourceRetained { .. }));
+    assert!(!remote.join("note.txt").exists());
+    assert_eq!(
+        fs::read(source.join("nested/note.txt")).unwrap(),
+        b"Move the tree"
+    );
+    assert_eq!(
+        fs::read(remote.join("new.txt")).unwrap(),
+        b"Created after copying"
+    );
+}
+
+#[cfg(test)]
 pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, remote_root: &Path) {
     use local_transfer::{FileRevision, Policy};
     type Progress<'a> = dyn FnMut(&Path, u64, Option<u64>) -> io::Result<()> + 'a;
@@ -1695,21 +1741,43 @@ async fn transfer_item(
                         {
                             return Ok(TransferOutcome::Skipped);
                         }
-                        client.change(
+                        let result = client.change(
                             segments,
                             crate::protocol::LanChange::Move {
                                 destination: target,
                             },
-                        )?;
-                        return Ok(TransferOutcome::Completed);
+                        );
+                        match result {
+                            Ok(()) => return Ok(TransferOutcome::Completed),
+                            Err(error) if error == crate::protocol::LAN_MOVE_CROSSES_VOLUMES => {}
+                            Err(error) => return Err(error),
+                        }
                     }
                 }
                 if let Some(source) = source.as_deref().filter(|_| request.moving) {
+                    let mut client = lan_transfer::LanTransfer {
+                        connection: &destination,
+                        transfer: &session,
+                    };
+                    let metadata = fs::symlink_metadata(source).map_err(message)?;
+                    if metadata.is_dir() && !local::is_link(&metadata) {
+                        let target = remote_transfer::upload_destination(
+                            &mut client,
+                            &request.destination,
+                            name,
+                            request.multiple,
+                        )?;
+                        return lan_transfer::move_local_folder(
+                            &mut client,
+                            source,
+                            &target,
+                            request.policy,
+                            &mut progress,
+                            &mut ask,
+                        );
+                    }
                     return move_uploaded_file(
-                        &mut lan_transfer::LanTransfer {
-                            connection: &destination,
-                            transfer: &session,
-                        },
+                        &mut client,
                         &request,
                         source,
                         name,
@@ -1721,22 +1789,17 @@ async fn transfer_item(
                 let remote_move = if request.moving {
                     let TransferSource::Server {
                         lan_group: true,
-                        folder: false,
                         segments,
                         ..
                     } = &request.source
                     else {
-                        return Err(
-                            "Choose regular files to move between Dirlume LAN computers."
-                                .to_owned(),
-                        );
+                        return Err("Choose Dirlume LAN files or folders to move.".to_owned());
                     };
-                    let mut client = lan_transfer::LanTransfer {
+                    let client = lan_transfer::LanTransfer {
                         connection: connection.as_ref().ok_or("Connect to Dirlume LAN first.")?,
                         transfer: &session,
                     };
-                    let expected = client.file_snapshot(segments)?;
-                    Some((client, segments, expected))
+                    Some((client, segments))
                 } else {
                     None
                 };
@@ -1881,12 +1944,9 @@ async fn transfer_item(
                     connection: &destination,
                     transfer: &session,
                 };
-                if let Some((remote, segments, expected)) = remote_move {
-                    let digest = crate::protocol::lan_file_digest(
-                        fs::File::open(source).map_err(message)?,
-                        || session.ensure_running(),
-                    )
-                    .map_err(message)?;
+                if let Some((mut remote, segments)) = remote_move {
+                    let cleanup =
+                        lan_transfer::MoveCleanup::capture(&mut remote, source, segments)?;
                     let target = remote_transfer::upload_destination(
                         &mut client,
                         &request.destination,
@@ -1904,12 +1964,7 @@ async fn transfer_item(
                     )? {
                         return Ok(TransferOutcome::Skipped);
                     }
-                    return Ok(remote.finish_move(
-                        segments,
-                        expected,
-                        digest,
-                        format!("/{}", target.join("/")),
-                    ));
+                    return Ok(cleanup.finish(&remote, segments, format!("/{}", target.join("/"))));
                 }
                 return upload_remote(
                     client,
@@ -2080,11 +2135,11 @@ async fn transfer_item(
                     lan_group,
                     ..
                 } => {
-                    if request.moving && (!lan_group || folder) {
+                    if request.moving && !lan_group {
                         return Err("This source is read-only.".to_owned());
                     }
                     let connection = connection.ok_or("Connect to the server first.")?;
-                    if folder {
+                    if folder && !request.moving {
                         return connection
                             .copy_folder(segments, &target, &session, &options, progress, ask);
                     }
@@ -2092,11 +2147,7 @@ async fn transfer_item(
                         connection: &connection,
                         transfer: &session,
                     };
-                    let expected = request
-                        .moving
-                        .then(|| client.file_snapshot(&segments))
-                        .transpose()?;
-                    let mut digest = None;
+                    let mut cleanup = None;
                     let outcome = copy_downloaded_item(
                         &target,
                         &session,
@@ -2104,35 +2155,36 @@ async fn transfer_item(
                         progress,
                         ask,
                         |staged, progress| {
-                            let mut file = fs::File::create_new(staged).map_err(message)?;
-                            connection.download_file(
-                                segments.clone(),
-                                &mut file,
-                                &session,
-                                progress,
-                            )?;
-                            finish_downloaded_file(&file, modified).map_err(message)?;
-                            drop(file);
-                            if expected.is_some() {
-                                digest = Some(
-                                    crate::protocol::lan_file_digest(
-                                        fs::File::open(staged).map_err(message)?,
-                                        || session.ensure_running(),
-                                    )
-                                    .map_err(message)?,
-                                );
+                            if folder {
+                                connection.download_tree(
+                                    segments.clone(),
+                                    staged,
+                                    &session,
+                                    progress,
+                                )?;
+                            } else {
+                                let mut file = fs::File::create_new(staged).map_err(message)?;
+                                connection.download_file(
+                                    segments.clone(),
+                                    &mut file,
+                                    &session,
+                                    progress,
+                                )?;
+                                finish_downloaded_file(&file, modified).map_err(message)?;
+                            }
+                            if request.moving {
+                                cleanup = Some(lan_transfer::MoveCleanup::capture(
+                                    &mut client,
+                                    staged,
+                                    &segments,
+                                )?);
                             }
                             Ok(())
                         },
                     )?;
                     if matches!(outcome, TransferOutcome::Completed) {
-                        if let (Some(expected), Some(digest)) = (expected, digest) {
-                            return Ok(client.finish_move(
-                                &segments,
-                                expected,
-                                digest,
-                                display(&target),
-                            ));
+                        if let Some(cleanup) = cleanup {
+                            return Ok(cleanup.finish(&client, &segments, display(&target)));
                         }
                     }
                     Ok(outcome)

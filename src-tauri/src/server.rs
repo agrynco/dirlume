@@ -609,8 +609,15 @@ fn apply_lan_change(
         }
         LanChange::Move { destination } => {
             let (parent, target) = writable_lan_item(share, destination)?;
-            rename_lan_exclusive(&directory, &path, &parent, &target)
+            if let Err(error) = rename_lan_exclusive(&directory, &path, &parent, &target) {
+                if error.kind() == io::ErrorKind::CrossesDevices {
+                    return Err(crate::protocol::LAN_MOVE_CROSSES_VOLUMES.to_owned());
+                }
+                return Err(error.to_string());
+            }
+            Ok(())
         }
+        LanChange::RemoveEmptyFolder => directory.remove_dir(path),
         LanChange::DeleteCompared { expected, digest } => {
             remove_compared_lan_file(&directory, &path, &expected, &digest)
         }

@@ -596,6 +596,20 @@ mod tests {
                         std::fs::read(occupied.join("Relocated/note.txt")).unwrap(),
                         new_contents
                     );
+                    for (path, accepted) in [
+                        (&["Occupied", "Relocated", "note.txt"][..], false),
+                        (&["Occupied", "Relocated"][..], false),
+                    ] {
+                        let result: Result<()> = post("v1/lan/change")
+                            .json(&request(path, LanChange::RemoveEmptyFolder))
+                            .send()
+                            .await
+                            .unwrap()
+                            .json()
+                            .await
+                            .unwrap();
+                        assert_eq!(result.is_ok(), accepted);
+                    }
                     for recursive in [false, true] {
                         let deletion =
                             request(&["Occupied", "Relocated"], LanChange::Delete { recursive });
@@ -709,6 +723,11 @@ mod tests {
                         assert_eq!(outcome.is_ok(), accepted);
                         assert_ne!(host.join("copied.bin").exists(), accepted);
                     }
+                    tokio::task::spawn_blocking(move || {
+                        crate::desktop::verify_lan_folder_move(&code, drive, &host)
+                    })
+                    .await
+                    .unwrap();
                     b.set_writable(false);
                 }
             }

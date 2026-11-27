@@ -1,6 +1,7 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, Read, Write},
+    path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -9,7 +10,7 @@ use uuid::Uuid;
 
 use super::{collect_response, Connection, TransferOutcome, TransferSession, VerifiedUpload};
 use crate::{
-    message,
+    local, local_transfer, message,
     protocol::{LanChange, LanChangeRequest, LanStat, LanUpload, LanUploadReply, LAN_UPLOAD_CHUNK},
     remote_transfer, Result,
 };
@@ -17,6 +18,179 @@ use crate::{
 pub(super) struct LanTransfer<'a> {
     pub connection: &'a Connection,
     pub transfer: &'a TransferSession,
+}
+
+pub(super) struct MoveCleanup {
+    actions: Vec<(Vec<String>, LanChange)>,
+}
+
+impl MoveCleanup {
+    pub(super) fn capture(
+        client: &mut LanTransfer<'_>,
+        staged: &Path,
+        segments: &[String],
+    ) -> Result<Self> {
+        let mut cleanup = Self {
+            actions: Vec::new(),
+        };
+        cleanup.record(client, staged, segments)?;
+        Ok(cleanup)
+    }
+
+    fn record(
+        &mut self,
+        client: &mut LanTransfer<'_>,
+        staged: &Path,
+        segments: &[String],
+    ) -> Result<()> {
+        client.transfer.ensure_running().map_err(message)?;
+        let change = if staged.is_dir() {
+            for entry in fs::read_dir(staged).map_err(message)? {
+                let entry = entry.map_err(message)?;
+                let mut child = segments.to_vec();
+                child.push(
+                    entry
+                        .file_name()
+                        .into_string()
+                        .map_err(|_| "A filename cannot be represented as Unicode.")?,
+                );
+                self.record(client, &entry.path(), &child)?;
+            }
+            LanChange::RemoveEmptyFolder
+        } else {
+            let expected = client.file_snapshot(segments)?;
+            let digest =
+                crate::protocol::lan_file_digest(File::open(staged).map_err(message)?, || {
+                    client.transfer.ensure_running()
+                })
+                .map_err(message)?;
+            LanChange::DeleteCompared { expected, digest }
+        };
+        self.actions.push((segments.to_vec(), change));
+        Ok(())
+    }
+
+    pub(super) fn finish(
+        self,
+        client: &LanTransfer<'_>,
+        source: &[String],
+        destination: String,
+    ) -> TransferOutcome {
+        for (segments, change) in self.actions {
+            if let Err(error) = client
+                .transfer
+                .ensure_running()
+                .map_err(message)
+                .and_then(|()| client.change(&segments, change))
+            {
+                return TransferOutcome::SourceRetained {
+                    source: format!("/{}", source.join("/")),
+                    destination,
+                    error,
+                };
+            }
+        }
+        TransferOutcome::Completed
+    }
+}
+
+enum LocalOriginal {
+    Folder(same_file::Handle),
+    File(local_transfer::FileRevision),
+}
+
+struct LocalMoveItem {
+    path: PathBuf,
+    target: Vec<String>,
+    original: LocalOriginal,
+}
+
+fn collect_local_move(
+    source: &Path,
+    target: &[String],
+    transfer: &TransferSession,
+    items: &mut Vec<LocalMoveItem>,
+) -> Result<()> {
+    transfer.ensure_running().map_err(message)?;
+    let metadata = fs::symlink_metadata(source).map_err(message)?;
+    if local::is_link(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err("Choose local files and folders without symbolic links.".to_owned());
+    }
+    let original = if metadata.is_dir() {
+        let folder = same_file::Handle::from_path(source).map_err(message)?;
+        for entry in fs::read_dir(source).map_err(message)? {
+            local_transfer::verify_folder(source, &folder).map_err(message)?;
+            let entry = entry.map_err(message)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| "A filename cannot be represented as Unicode.")?;
+            let child = [target, &[name]].concat();
+            collect_local_move(&entry.path(), &child, transfer, items)?;
+        }
+        LocalOriginal::Folder(folder)
+    } else {
+        LocalOriginal::File(
+            local_transfer::FileRevision::capture(source, &metadata).map_err(message)?,
+        )
+    };
+    items.push(LocalMoveItem {
+        path: source.to_owned(),
+        target: target.to_vec(),
+        original,
+    });
+    Ok(())
+}
+
+pub(super) fn move_local_folder(
+    client: &mut LanTransfer<'_>,
+    source: &Path,
+    target: &[String],
+    policy: local_transfer::Policy,
+    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let transfer = client.transfer;
+    let mut items = Vec::new();
+    collect_local_move(source, target, transfer, &mut items)?;
+    if !remote_transfer::upload(
+        client,
+        source,
+        target,
+        policy,
+        progress,
+        ask,
+        &mut |_, _| {},
+    )? {
+        return Ok(TransferOutcome::Skipped);
+    }
+    for item in items {
+        let result = (|| {
+            transfer.ensure_running().map_err(message)?;
+            match item.original {
+                LocalOriginal::Folder(original) => {
+                    local_transfer::verify_folder(&item.path, &original).map_err(message)?;
+                    fs::remove_dir(&item.path).map_err(message)
+                }
+                LocalOriginal::File(original) => {
+                    original.verify(&item.path).map_err(message)?;
+                    let mut input = File::open(&item.path).map_err(message)?;
+                    client.verify_uploaded(&item.target, &mut input, transfer)?;
+                    drop(input);
+                    transfer.ensure_running().map_err(message)?;
+                    local_transfer::remove_original(&item.path, &original).map_err(message)
+                }
+            }
+        })();
+        if let Err(error) = result {
+            return Ok(TransferOutcome::SourceRetained {
+                source: crate::file_history::display(source),
+                destination: format!("/{}", target.join("/")),
+                error,
+            });
+        }
+    }
+    Ok(TransferOutcome::Completed)
 }
 
 impl LanTransfer<'_> {
@@ -45,28 +219,6 @@ impl LanTransfer<'_> {
         self.stat(segments)?
             .filter(|entry| entry.file)
             .ok_or_else(|| "Choose a regular Dirlume LAN file to move.".to_owned())
-    }
-
-    pub(super) fn finish_move(
-        &self,
-        segments: &[String],
-        expected: LanStat,
-        digest: String,
-        destination: String,
-    ) -> TransferOutcome {
-        match self
-            .transfer
-            .ensure_running()
-            .map_err(message)
-            .and_then(|()| self.change(segments, LanChange::DeleteCompared { expected, digest }))
-        {
-            Ok(()) => TransferOutcome::Completed,
-            Err(error) => TransferOutcome::SourceRetained {
-                source: format!("/{}", segments.join("/")),
-                destination,
-                error,
-            },
-        }
     }
 
     fn upload_action(&self, request: LanUpload) -> Result<LanUploadReply> {
