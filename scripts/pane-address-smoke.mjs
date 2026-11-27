@@ -10,7 +10,9 @@ export async function editPaneAddress(page, side = "left") {
     if (!await page.evaluate(() => document.hasFocus())) {
       await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("plugin:window|set_focus", { label: "main" }));
     }
-    await page.locator("#" + side + "-files").focus();
+    const files = page.locator("#" + side + "-files");
+    await files.dispatchEvent("pointerdown", { button: 0, pointerType: "mouse", isPrimary: true });
+    await files.focus();
     await page.waitForFunction((side) => document.activeElement?.id === side + "-files" &&
       document.getElementById(side + "-pane")?.classList.contains("active"), side);
     const mac = await page.evaluate(() => /Macintosh/.test(navigator.userAgent));
