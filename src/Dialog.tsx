@@ -3,6 +3,7 @@ import { Button } from "./Button";
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEventHandler, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { ResizeMarker, WindowResizeMarker } from "./ResizeGrip";
+import { useDialogAccessKeys } from "./DialogAccessKeys";
 import type { HelpTopic } from "./helpTopics";
 
 type Dimensions = { width: number; height: number };
@@ -66,6 +67,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
   contextHelp?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const { handleAccessKey, accessKeyHints } = useDialogAccessKeys(ref, suspended);
   const heading = useId();
   const [size, setSize] = useState(() => readDialogSize(resizeKey));
   const drag = useRef<(Dimensions & { x: number; y: number; horizontal: number; vertical: number }) | null>(null);
@@ -147,6 +149,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
       data-help-topic={helpTopic} data-context-help={contextHelp || undefined} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") !== event.currentTarget) return;
         onKeyDown?.(event);
+        handleAccessKey(event);
         moveActionFocus(event);
         if (modeless && event.key === "Escape" && !event.defaultPrevented) {
           event.preventDefault();
@@ -211,6 +214,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
       </header>
       {children}
       {footer && <footer className="dialog-footer">{footer}</footer>}
+      {accessKeyHints}
       {resizeKey && <ResizeMarker edge="se" />}
       {standalone && <WindowResizeMarker />}
       {resizeKey && resizeEdges.map((edge) =>

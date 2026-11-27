@@ -1257,6 +1257,14 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   overflow: hidden;
 }
 .dialog[open] { display: flex; flex-direction: column; }
+.dialog-access-keys { position: absolute; inset: 0; pointer-events: none; }
+.dialog-access-keys > span {
+  position: fixed;
+  z-index: 12;
+  pointer-events: none;
+  height: 1px;
+  background: currentColor;
+}
 .dialog[data-font="options"] { font-family: var(--options-font); font-size: var(--font-zoom-options, var(--options-size)); }
 .dialog[data-font-zoom="compare"] { font-size: var(--font-zoom-compare, var(--font-zoom-dialog, var(--dialog-size))); }
 .terminal-card { font-size: var(--font-zoom-terminal, var(--font-zoom-ui, var(--ui-size))); }
@@ -1710,6 +1718,7 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .preview-shortcuts { padding: 8px; }
 .preview-shortcuts kbd { margin-left: 5px; }
 .setting { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+.transfer-conflict-policy { justify-content: flex-end; gap: 8px; }
 .field-checkbox { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .field-checkbox > input[type=checkbox] { order: -1; flex: none; margin: 0; }
 .field-checkbox > :is(span, small) { min-width: 0; overflow-wrap: anywhere; }
