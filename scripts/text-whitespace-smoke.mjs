@@ -98,6 +98,10 @@ try {
   }
   const waitMarkers = () => content.locator(".cm-highlightTab").first().waitFor();
   const markerColor = () => content.locator(".cm-highlightTab").first().evaluate((node) => getComputedStyle(node).backgroundImage);
+  const waitScrollPosition = async (position) => {
+    const element = await scroller.elementHandle();
+    await page.waitForFunction(({ element, position }) => Math.abs(element.scrollTop - position) <= 1, { element, position });
+  };
 
   await openFile("sample.rs");
   await checkTabStop(4);
@@ -127,14 +131,18 @@ try {
   await document.getByText("Modified", { exact: true }).waitFor();
   await content.press("Shift+ArrowLeft");
   await content.press("Shift+ArrowLeft");
-  await scroller.evaluate((node) => { node.scrollTop = 260; });
+  // Let the selection update finish, then scroll as a reader would with the caret left behind.
+  await scroller.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await scroller.hover({ position: { x: 300, y: 150 } });
+  await page.mouse.wheel(0, 260);
+  await page.waitForFunction((element) => element.scrollTop > 100, await scroller.elementHandle());
   const top = await scroller.evaluate((node) => node.scrollTop);
   await toggle(true);
   await content.locator(".cm-highlightTab").first().waitFor({ state: "detached" });
-  assert.equal(await scroller.evaluate((node) => node.scrollTop), top);
+  await waitScrollPosition(top);
   await setTabWidth("Editor", 8, 4);
   await page.waitForFunction(() => getComputedStyle(window.document.querySelector(".text-window:not([hidden]) .cm-content")).tabSize === "4");
-  assert.equal(await scroller.evaluate((node) => node.scrollTop), top);
+  await waitScrollPosition(top);
   await (await action("Edit", "Copy")).press("Enter");
   assert.equal(await page.evaluate(() => window.copiedText), "d ");
   await setTabWidth("Editor", 4, 8);
