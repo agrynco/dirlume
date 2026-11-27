@@ -10,7 +10,7 @@ import {
   maxFontSize, maxSchemeNameLength, mermaidColors, minFontSize, readSystemScheme, resolveAppearance, selectAppearance, systemTheme, useSystemTheme, viewerColors,
   type Color, type FileTypeGroup, type Font, type FontGroup, type Palette, type Scheme, type Surface,
 } from "./appearance";
-import { maxMermaidScale, maxViewerContentWidth, minMermaidScale, minViewerContentWidth, type Preferences } from "./preferences";
+import { defaultTextTabWidth, maxMermaidScale, maxTextTabWidth, maxViewerContentWidth, minMermaidScale, minViewerContentWidth, type Preferences } from "./preferences";
 import { api, describeError } from "./api";
 import { ColorPicker } from "./ColorPicker";
 import { Dialog } from "./Dialog";
@@ -294,6 +294,11 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
       {selection && !picked && <div className="color-settings">
         {colorFields(selection.colors)}
       </div>}
+      {!selection && (fontGroup === "viewer" || fontGroup === "editor") &&
+        <label className="setting"><SettingSearchLabel label="Tab width" />
+          <OptionalNumberInput label={t("Tab width")} size={preferences.textTabWidth} fallback={String(defaultTextTabWidth)}
+            min={1} max={maxTextTabWidth} onChange={(value) => onChange({ ...preferences, textTabWidth: value ?? defaultTextTabWidth })} />
+        </label>}
       {!selection && fontGroup === "viewer" && <>
         <fieldset className="view-font-group reading-area-settings">
           <legend><SettingSearchLabel label="Reading area" /></legend>

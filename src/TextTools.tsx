@@ -83,6 +83,7 @@ export function TextWindow(props: Omit<Parameters<typeof WholeTextWindow>[0], "o
 }
 
 function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
+  textTabWidth, showTextWhitespace, onToggleTextWhitespace,
   onOptions, onCopyPath, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
   fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks, openPaged }: {
   file: NamedFile;
@@ -91,6 +92,9 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
   theme: BaseTheme;
   shortcuts: Bindings;
   fontSizes: ViewFontSizes;
+  textTabWidth: number;
+  showTextWhitespace: boolean;
+  onToggleTextWhitespace: () => void;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
   mermaidScale?: number;
@@ -467,6 +471,9 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
     ...(navigationActions.length || !editing ? [
       { label: "Navigate", items: [...navigationActions, ...(!editing && !markdownViewer ? [hexAction] : [])] },
     ] : []),
+    ...(sourceVisible ? [{ label: "Display", items: [
+      { label: "Show whitespace", checked: showTextWhitespace, checkbox: true, run: onToggleTextWhitespace },
+    ] }] : []),
     ...(sourceVisible ? [{ label: "Syntax", items: [
       { label: "Automatic", run: () => setSyntax("auto") },
       { label: "Plain text", run: () => setSyntax("plain") },
@@ -615,6 +622,7 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
             <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
+              textTabWidth={textTabWidth} showTextWhitespace={showTextWhitespace}
               bookmarkLines={bookmarkLines} bookmarkJump={bookmarkJump && "line" in bookmarkJump ? bookmarkJump : undefined} onBookmarkResult={setBookmarkResult}
               onBookmarkLine={localBookmarkPath ? (line, lineText) =>
                 onBookmark({ path: localBookmarkPath, line, fingerprint: lineFingerprint(lineText) }) : undefined}
