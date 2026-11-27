@@ -9,6 +9,7 @@ const dialog = (page, name) => page.getByRole("dialog", { name, exact: true });
 async function fixture(browser, remote = false, { platform = "Windows NT 10.0; Win64; x64", language, mockClock = true } = {}) {
   const page = await browser.newPage({ userAgent: `Mozilla/5.0 (${platform})`, locale: "en-US" });
   page.setDefaultTimeout(15_000);
+  page.on("pageerror", (error) => console.error(error.stack ?? error.message));
   if (mockClock) await page.clock.install();
   await page.route("http://dirlume.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -89,9 +90,22 @@ async function start(page, names, { move = false, policy = "ask", fromActionBar 
   if (names.length > 1) for (const name of names) await row(name).dispatchEvent("click", { button: 0, ctrlKey: true });
   await row(names.at(-1), '[data-current="true"]').waitFor();
   await page.locator("#left-pane.active").waitFor();
-  if (fromActionBar) await page.locator(`.actionbar [data-command="${move ? "move" : "copy"}"]`).click();
-  else await source.press(move ? "F6" : "F5");
-  const setup = dialog(page, move ? "Rename or move" : "Copy");
+  const verb = move ? "Rename or move" : "Copy";
+  const setup = dialog(page, verb);
+  try {
+    if (fromActionBar) await page.locator(`.actionbar [data-command="${move ? "move" : "copy"}"]`).click();
+    else await source.press(move ? "F6" : "F5");
+    await setup.waitFor();
+  } catch (error) {
+    const workspace = await page.evaluate(() => ({
+      activePane: document.querySelector(".pane.active")?.id,
+      current: document.querySelector('.pane.active [data-current="true"]')?.getAttribute("data-tooltip"),
+      dialogs: [...document.querySelectorAll("dialog[open] h2")].map((heading) => heading.textContent),
+      actions: [...document.querySelectorAll(".actionbar [data-command]")].map((button) => [button.dataset.command, button.disabled]),
+      status: document.querySelector(".statusbar")?.textContent,
+    }));
+    throw new Error(`Could not open ${verb} for ${names.join(", ")}: ${JSON.stringify(workspace)}`, { cause: error });
+  }
   if (policy !== "ask") {
     const choice = setup.getByRole("combobox", { name: "Existing files", exact: true });
     await choice.selectOption({ label: "Overwrite all" });
