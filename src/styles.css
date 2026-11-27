@@ -417,7 +417,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .main-menu-action-check { grid-column: 6; justify-self: end; width: 13px; height: 13px; }
 .main-menu-submenu { z-index: 26; }
 .main-menu-separator { margin: 4px 2px; border-top: 1px solid var(--line); }
-.sudo-body { display: grid; gap: 8px; }
+.sudo-body { display: grid; gap: var(--dialog-control-gap); }
 .sudo-body small { color: var(--dialog-muted); }
 .brand { gap: 9px; }
 .brand h1 { margin: 0; font-size: 1.23em; font-weight: 650; letter-spacing: -.03em; }
@@ -1239,6 +1239,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 @keyframes spin { to { transform: rotate(1turn); } }
 
 .dialog {
+  --dialog-control-gap: 8px;
   --surface: var(--dialog-bg);
   --raised: var(--dialog-header);
   --canvas: var(--dialog-input);
@@ -1360,7 +1361,11 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .dialog-heading h2 { margin: 0; font-size: 1.15em; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-form { display: flex; flex-direction: column; min-height: 0; }
 .dialog-body { padding: 16px; overflow: auto; }
-.new-folder-body { display: grid; align-content: start; gap: 8px; }
+.dialog-body:where(:has(> .field, > .setting, > .field-checkbox)) {
+  display: grid;
+  align-content: start;
+  row-gap: var(--dialog-control-gap);
+}
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
 .release-notes { display: grid; gap: 10px; overflow-wrap: anywhere; }
 .release-notes ul { margin: 0; padding-inline-start: 1.4em; }
@@ -1376,6 +1381,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .attribute-metadata > div { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
 .attribute-metadata dd { margin: 0; }
 .transfer-body, .command-menu { display: grid; gap: 10px; }
+.transfer-options { row-gap: var(--dialog-control-gap); }
 .help-layout {
   display: grid; grid-template-columns: minmax(130px, 29%) minmax(0, 1fr); min-height: 0;
   height: min(62vh, 570px); color: var(--dialog-ink);
@@ -1465,7 +1471,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-history-group { display: grid; gap: 4px; min-width: 0; }
 .command-history-group h3 { margin: 0; font-size: inherit; color: var(--muted); }
 .command-history-group button { justify-content: flex-start; text-align: left; border-color: var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
-.folder-shortcut-editor, .folder-shortcut-picker { display: grid; gap: 8px; }
+.folder-shortcut-editor, .folder-shortcut-picker { display: grid; gap: var(--dialog-control-gap); }
 .folder-shortcut-list {
   max-height: min(40vh, 320px);
   overflow: auto;
@@ -1558,7 +1564,7 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .quick-search-results th { padding: 4px 8px; text-align: start; }
 .quick-search-results td { padding: 1px; border-top: 1px solid var(--line); }
 .quick-search-results button { width: 100%; justify-content: flex-start; overflow-wrap: anywhere; white-space: normal; text-align: start; }
-.ftp-fields { display: grid; gap: 10px; }
+.ftp-fields { display: grid; gap: var(--dialog-control-gap); }
 .ftp-fields input { min-width: 0; }
 .netbox-page-header {
   display: flex;
@@ -1596,7 +1602,7 @@ button.negative, button.negative:hover:not(:disabled) { color: var(--danger); ba
 .ssh-jump-editor { min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; }
 .ssh-route { display: grid; gap: 3px; }
 .ssh-route output { overflow-wrap: anywhere; color: var(--dialog-muted); }
-.search-body { display: grid; gap: 10px; }
+.search-body { display: grid; gap: var(--dialog-control-gap); }
 .search-hint { color: var(--dialog-muted); }
 .search-location { display: grid; gap: 2px; }
 .search-location span, .search-body select { font-family: var(--mono); }
