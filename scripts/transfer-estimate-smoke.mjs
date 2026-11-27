@@ -79,7 +79,7 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
   return page;
 }
 
-async function start(page, names, move = false, policy = "ask") {
+async function start(page, names, { move = false, policy = "ask", fromActionBar = false } = {}) {
   const source = page.locator('#left-files[aria-busy="false"]');
   await page.locator("dialog[open]").waitFor({ state: "hidden" });
   const row = (name, attributes = "") => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]${attributes}`);
@@ -89,8 +89,8 @@ async function start(page, names, move = false, policy = "ask") {
   if (names.length > 1) for (const name of names) await row(name).dispatchEvent("click", { button: 0, ctrlKey: true });
   await row(names.at(-1), '[data-current="true"]').waitFor();
   await page.locator("#left-pane.active").waitFor();
-  const action = page.getByRole("navigation", { name: "File actions" }).locator(`[data-command="${move ? "move" : "copy"}"]:enabled`);
-  await action.dispatchEvent("click");
+  if (fromActionBar) await page.locator(`.actionbar [data-command="${move ? "move" : "copy"}"]`).click();
+  else await source.press(move ? "F6" : "F5");
   const setup = dialog(page, move ? "Rename or move" : "Copy");
   if (policy !== "ask") {
     const choice = setup.getByRole("combobox", { name: "Existing files", exact: true });
@@ -161,11 +161,11 @@ try {
   await verifyCopyCheckboxes(browser);
   console.log("Verified aligned Copy checkboxes, translated wrapping, and label and keyboard activation.");
   const overwritePage = await fixture(browser, false, { mockClock: false });
-  await start(overwritePage, ["a.bin"], false, "overwrite");
+  await start(overwritePage, ["a.bin"], { policy: "overwrite", fromActionBar: true });
   assert.equal(await overwritePage.evaluate(() => window.transferFixture.current.request.policy), "overwrite");
   await complete(overwritePage);
   await dialog(overwritePage, "Copying…").waitFor({ state: "hidden" });
-  await start(overwritePage, ["b.bin"]);
+  await start(overwritePage, ["b.bin"], { fromActionBar: true });
   assert.equal(await overwritePage.evaluate(() => window.transferFixture.current.request.policy), "ask");
   await overwritePage.evaluate(() => window.transferFixture.conflict(true));
   const readOnly = dialog(overwritePage, "File already exists");
@@ -235,7 +235,7 @@ try {
   await destinationsPage.close();
 
   const movePage = await fixture(browser);
-  await start(movePage, ["a.bin", "b.bin"], true);
+  await start(movePage, ["a.bin", "b.bin"], { move: true });
   await complete(movePage);
   await waitForSource(movePage, "b.bin");
   await movePage.evaluate(() => window.transferFixture.current.reject(new Error("Fixture failed.")));
