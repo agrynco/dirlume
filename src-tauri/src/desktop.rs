@@ -305,25 +305,10 @@ async fn installed_fonts() -> Result<Vec<String>> {
 
 #[tauri::command]
 async fn computer_name() -> Option<String> {
-    if let Some(name) = std::env::var("COMPUTERNAME")
+    blocking(|| Ok(crate::protocol::computer_name()))
+        .await
         .ok()
-        .filter(|name| !name.trim().is_empty())
-    {
-        return Some(name);
-    }
-    blocking(|| {
-        let output = std::process::Command::new("hostname")
-            .output()
-            .map_err(message)?;
-        Ok(output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-            .filter(|name| !name.is_empty()))
-    })
-    .await
-    .ok()
-    .flatten()
+        .flatten()
 }
 
 #[tauri::command]
@@ -2067,9 +2052,11 @@ async fn read_server_invitation(credential: uuid::Uuid) -> Result<zeroize::Zeroi
 #[tauri::command]
 async fn list_saved_computer_drives(
     credential: uuid::Uuid,
+    sharing: State<'_, crate::desktop_share::DesktopShare>,
 ) -> Result<Vec<crate::server::ComputerDrive>> {
     let invitation = read_server_invitation(credential).await?;
     let connection = Connection::connect(&invitation)?;
+    sharing.check_pairing_target(&connection.invitation).await?;
     computer_drive_metadata(&connection).await
 }
 
@@ -2092,13 +2079,35 @@ async fn computer_drive_metadata(
 }
 
 #[tauri::command]
-async fn verify_computer_pairing(invitation: String) -> Result<()> {
+async fn verify_computer_pairing(
+    invitation: String,
+    sharing: State<'_, crate::desktop_share::DesktopShare>,
+) -> Result<String> {
     let invitation = zeroize::Zeroizing::new(invitation);
     let connection = Connection::connect(&invitation)?;
-    connection
+    sharing.check_pairing_target(&connection.invitation).await?;
+    let response = connection
         .request("v1/drives", (), Duration::from_secs(5))
         .await?;
-    Ok(())
+    Ok(pairing_computer_name(&connection, &response))
+}
+
+fn pairing_computer_name(connection: &Connection, response: &Response) -> String {
+    response
+        .headers()
+        .get(crate::protocol::COMPUTER_NAME_HEADER)
+        .filter(|value| value.len() <= 340)
+        .and_then(|value| URL_SAFE_NO_PAD.decode(value.as_bytes()).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .filter(|name| !name.trim().is_empty() && !name.chars().any(char::is_control))
+        .unwrap_or_else(|| {
+            connection
+                .invitation
+                .address
+                .host_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
 }
 
 #[tauri::command]
@@ -2249,6 +2258,10 @@ mod server_download_tests {
             .request("v1/drives", (), Duration::from_secs(5))
             .await
             .unwrap();
+        assert_eq!(
+            pairing_computer_name(&guest, &response),
+            crate::protocol::computer_name().unwrap_or_else(|| "127.0.0.1".into())
+        );
         let drives: serde_json::Value =
             serde_json::from_slice(&collect_response(response, 4096).await.unwrap()).unwrap();
         assert_eq!(drives[0]["name"], "C:");

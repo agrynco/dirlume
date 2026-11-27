@@ -4,6 +4,17 @@ use url::Url;
 
 pub const INVITATION_PREFIX: &str = "dirlume-v1:";
 pub const MAX_INVITATION_LENGTH: usize = 8192;
+#[cfg(feature = "desktop")]
+pub(crate) const COMPUTER_NAME_HEADER: &str = "x-dirlume-computer-name";
+
+#[cfg(feature = "desktop")]
+pub(crate) fn computer_name() -> Option<String> {
+    sysinfo::System::host_name().ok().and_then(|name| {
+        let name = name.trim();
+        (!name.is_empty() && name.len() <= 255 && !name.chars().any(char::is_control))
+            .then(|| name.to_owned())
+    })
+}
 
 #[cfg(feature = "desktop")]
 pub(crate) fn file_server_origin(scheme: &str, host: &str, port: u16, default_port: u16) -> String {

@@ -1,13 +1,47 @@
-use std::net::{IpAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 use serde::Serialize;
 use tauri::State;
 use tokio::sync::Mutex;
 
-use crate::{local, message, server::DesktopServer, Result};
+use crate::{local, message, protocol::Invitation, server::DesktopServer, Result};
 
 #[derive(Default)]
 pub(crate) struct DesktopShare(Mutex<Option<DesktopServer>>);
+
+impl DesktopShare {
+    pub(crate) async fn check_pairing_target(&self, target: &Invitation) -> Result<()> {
+        let same_share = self
+            .0
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|server| Invitation::parse(&server.invitation).ok())
+            .is_some_and(|own| own.certificate == target.certificate);
+        let local_ip = match target.address.host() {
+            Some(url::Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+            Some(url::Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+            _ => None,
+        };
+        let fixture = cfg!(feature = "ui-automation")
+            && local_ip.is_some_and(|ip| ip.is_loopback())
+            && std::env::var_os("DIRLUME_CDP_PORT").is_some();
+        if same_share
+            || !fixture
+                && local_ip.is_some_and(|ip| {
+                    ip.is_loopback()
+                        || ip.is_unspecified()
+                        || UdpSocket::bind(SocketAddr::new(ip, 0)).is_ok()
+                })
+        {
+            return Err(
+                "This pairing code belongs to this computer. Use a code from the other computer."
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+}
 
 #[derive(Serialize)]
 pub(crate) struct ShareDetails {

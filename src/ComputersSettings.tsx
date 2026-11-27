@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, describeError, type ComputerSharing, type SavedConnection } from "./api";
 import { Button } from "./Button";
-import { t } from "./i18n";
+import { errorText, t } from "./i18n";
 import { RemoveConnectionDialog } from "./SavedConnectionDialog";
 import { readRemoteProfiles, saveRemoteConnection } from "./savedConnections";
 
@@ -10,7 +10,6 @@ export function ComputersSettings() {
   const [computers, setComputers] = useState(readRemoteProfiles);
   const [removing, setRemoving] = useState<SavedConnection | null>(null);
   const [activeSharing, setActiveSharing] = useState<ComputerSharing | null>(null);
-  const [pairName, setPairName] = useState("");
   const [pairCode, setPairCode] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -45,10 +44,9 @@ export function ComputersSettings() {
     event.preventDefault();
     void runPairing(async () => {
       const code = pairCode.trim();
-      await api.verifyComputerPairing(code);
-      await saveRemoteConnection(pairName.trim(), "server", code, undefined, true);
+      const remoteName = await api.verifyComputerPairing(code);
+      await saveRemoteConnection(remoteName, "server", code, undefined, true);
       setComputers(readRemoteProfiles());
-      setPairName("");
       setPairCode("");
     });
   }
@@ -87,16 +85,13 @@ export function ComputersSettings() {
       </div>
       {copied && <p role="status">{t("Pairing code copied.")}</p>}
       <form onSubmit={addComputer}>
-        <label className="field">{t("Computer name")}
-          <input value={pairName} onChange={(event) => setPairName(event.target.value)} required />
-        </label>
         <label className="field">{t("Pairing code")}
           <input type="password" autoComplete="off" spellCheck={false} value={pairCode}
             onChange={(event) => setPairCode(event.target.value)} required />
         </label>
-        <Button type="submit" disabled={!pairName.trim() || !pairCode.trim()}>{t("Pair computer")}</Button>
+        <Button type="submit" disabled={!pairCode.trim()}>{t("Pair computer")}</Button>
       </form>
-      {error && <p role="alert" className="dialog-error">{error}</p>}
+      {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
     </fieldset>
     {removing && <RemoveConnectionDialog profile={removing} onRemoved={() => {
       setComputers(readRemoteProfiles());

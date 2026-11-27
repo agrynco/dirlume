@@ -1046,6 +1046,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "This location cannot be added as a folder reference.": ["Це розташування неможливо додати як посилання на папку.", "Это расположение нельзя добавить как ссылку на папку."],
   "Invalid saved collections.": ["Збережені колекції пошкоджено.", "Сохранённые коллекции повреждены."],
   "Enter a valid name.": ["Введіть припустиму назву.", "Введите допустимое имя."],
+  "This pairing code belongs to this computer. Use a code from the other computer.": ["Цей код спарювання належить цьому комп’ютеру. Використайте код з іншого комп’ютера.", "Этот код сопряжения принадлежит этому компьютеру. Используйте код с другого компьютера."],
   "A folder with this name already exists here.": ["Папка з такою назвою вже є тут.", "Папка с таким именем здесь уже существует."],
   "Recent locations": ["Недавні папки", "Недавние папки"],
   "Recent locations in left pane": ["Недавні папки в лівій панелі", "Недавние папки в левой панели"],

@@ -535,28 +535,37 @@ fn router(share: Arc<Share>) -> Router {
 async fn computer_drives(
     State(share): State<Arc<Share>>,
     headers: HeaderMap,
-) -> std::result::Result<Json<Vec<ComputerDrive>>, StatusCode> {
+) -> std::result::Result<(HeaderMap, Json<Vec<ComputerDrive>>), StatusCode> {
     share.authorize(&headers)?;
     spawn_blocking(move || {
         let ShareRoots::Computer(roots) = &share.roots else {
             return Err(StatusCode::NOT_FOUND);
         };
-        Ok(Json(
-            available_computer_locations(roots)
-                .iter()
-                .map(|(name, path)| {
-                    let space = crate::disk_space::query(path).ok();
-                    ComputerDrive {
-                        name: name.clone(),
-                        #[cfg(windows)]
-                        kind: local::drive_type(path),
-                        #[cfg(not(windows))]
-                        kind: None,
-                        total: space.map(|space| space.total),
-                        available: space.map(|space| space.available),
-                    }
-                })
-                .collect(),
+        let mut headers = HeaderMap::new();
+        if let Some(name) = crate::protocol::computer_name() {
+            if let Ok(name) = URL_SAFE_NO_PAD.encode(name).parse() {
+                headers.insert(crate::protocol::COMPUTER_NAME_HEADER, name);
+            }
+        }
+        Ok((
+            headers,
+            Json(
+                available_computer_locations(roots)
+                    .iter()
+                    .map(|(name, path)| {
+                        let space = crate::disk_space::query(path).ok();
+                        ComputerDrive {
+                            name: name.clone(),
+                            #[cfg(windows)]
+                            kind: local::drive_type(path),
+                            #[cfg(not(windows))]
+                            kind: None,
+                            total: space.map(|space| space.total),
+                            available: space.map(|space| space.available),
+                        }
+                    })
+                    .collect(),
+            ),
         ))
     })
     .await

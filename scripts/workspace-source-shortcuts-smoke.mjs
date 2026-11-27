@@ -76,6 +76,8 @@ try {
               if (command.startsWith("create_ssh") && args.sudoPassword === undefined) throw "SSH permission denied.";
               return null;
             case "computer_name": return "This test PC";
+            case "verify_computer_pairing": return "Name from the remote host";
+            case "save_server_invitation": return "new-fixture-credential";
             case "list_saved_computer_drives": return pairedDrives();
             case "connect_saved_server":
               window.dirlumeDrive = args.segments;
@@ -264,6 +266,10 @@ try {
     await options.getByRole("heading", { name: "Computers", exact: true }).waitFor();
     await options.getByText("This test PC", { exact: true }).waitFor();
     await options.getByText("Dirlume test PC", { exact: true }).waitFor();
+    assert.equal(await options.getByLabel("Computer name", { exact: true }).count(), 0);
+    await options.getByLabel("Pairing code", { exact: true }).fill("test-invitation");
+    await button(options, "Pair computer").click();
+    await options.getByText("Name from the remote host", { exact: true }).waitFor();
     await button(options, "Done").click();
 
     async function enter(view, side) {
