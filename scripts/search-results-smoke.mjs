@@ -124,6 +124,11 @@ try {
   };
   const destination = (modal) => modal.getByRole("combobox", { name: "Destination", exact: true });
   const removeRow = (name) => row(name).waitFor({ state: "detached" });
+  const expectCompactLabel = async (control) => {
+    const spacing = await control.evaluate((select) => select.getBoundingClientRect().left -
+      select.closest("label").querySelector("span").getBoundingClientRect().right);
+    assert.ok(spacing >= 0 && spacing <= 12, `Expected the label beside the control, got ${spacing}px`);
+  };
 
   await page.goto("http://dirlume.test/");
   await button(right, "Locations for right pane").click();
@@ -134,6 +139,8 @@ try {
   await list().press("F5");
   const copy = dialog("Copy");
   assert.equal(await destination(copy).inputValue(), "/destination");
+  await expectCompactLabel(copy.getByRole("combobox", { name: "Access rights" }));
+  await expectCompactLabel(copy.getByRole("combobox", { name: "Existing files" }));
   await button(copy, "Copy").click();
   await button(dialog("File already exists"), "Skip").click();
   await button(dialog("Transfer complete"), "Done").click();
@@ -152,9 +159,7 @@ try {
   const focused = page.locator(":focus");
   await button(move, "Move").and(focused).waitFor();
   const policy = move.getByRole("combobox", { name: "Existing files" });
-  const spacing = await policy.evaluate((select) => select.getBoundingClientRect().left -
-    select.closest("label").querySelector("span").getBoundingClientRect().right);
-  assert.ok(spacing >= 0 && spacing <= 12, `Expected the label beside the control, got ${spacing}px`);
+  await expectCompactLabel(policy);
   for (const key of ["e", "c", "m"]) await move.locator(`.dialog-access-keys [data-access-key="${key}"]`).waitFor();
   await page.keyboard.press("Alt+e");
   await policy.and(focused).waitFor();

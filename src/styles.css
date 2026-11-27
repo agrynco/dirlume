@@ -1240,6 +1240,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 
 .dialog {
   --dialog-control-gap: 8px;
+  --dialog-label-gap: 8px;
   --surface: var(--dialog-bg);
   --raised: var(--dialog-header);
   --canvas: var(--dialog-input);
@@ -1724,17 +1725,19 @@ html:has(.appearance-picker) #dirlume-tooltip { display: none; }
 .preview-dialog-actions .preview-primary { color: var(--on-accent); background: var(--accent-fill); border-color: var(--accent-fill); }
 .preview-shortcuts { padding: 8px; }
 .preview-shortcuts kbd { margin-left: 5px; }
-.setting { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
-.transfer-conflict-policy { justify-content: flex-end; gap: 8px; }
+.setting {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+  gap: 5px var(--dialog-label-gap); min-width: 0;
+}
 .field-checkbox { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .field-checkbox > input[type=checkbox] { order: -1; flex: none; margin: 0; }
 .field-checkbox > :is(span, small) { min-width: 0; overflow-wrap: anywhere; }
-.setting select { min-width: 156px; }
-.settings-layout label.setting,
+.setting select { min-width: min(100%, 156px); max-width: 100%; }
+.settings-layout .setting,
 .settings-layout label.field:has(> :is(select, .editable-dropdown)),
 .settings-layout .view-font-setting,
 .settings-layout .settings-path-field {
-  display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 5px 8px; min-width: 0;
+  display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 5px var(--dialog-label-gap); min-width: 0;
 }
 .settings-layout :is(.setting, .field, .view-font-setting) > :is(input, select) {
   min-width: 0; max-width: 100%;
