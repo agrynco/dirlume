@@ -108,7 +108,7 @@ try {
               window.kswitcherDrive = args.path;
               window.kswitcherListings = (window.kswitcherListings ?? 0) + 1;
               if (window.kswitcherFailure) throw window.kswitcherFailure;
-              return { ...listing, parent: "" };
+              return { ...(window.collectionKSwitcher ? remoteListing(["drive"]) : listing), parent: "" };
             case "report_diagnostic":
               if (args.operation === "list_kswitcher") (window.kswitcherDiagnostics ??= []).push(args);
               return null;
@@ -497,6 +497,45 @@ try {
     assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
       kind: "ftp", connection: 1, segments: ["nested", "note.txt"],
     });
+    await openPairedDrive("Files");
+    await files("left").getByRole("option", { name: /^nested/ }).click();
+    await files("left").press("F5");
+    const addCollection = page.getByRole("dialog", { name: "Add to collection", exact: true });
+    await button(addCollection, "Add to collection").click();
+    const directFolder = reopened.getByRole("option", { name: /^nested.*Dirlume test PC/ });
+    await directFolder.waitFor();
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "Home").click();
+    await waitForPath("left", home);
+    await directFolder.click();
+    await reopened.press("F5");
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "server", connection: 8, segments: ["Files", "nested"], folder: true,
+    });
+    if (windows) {
+      await page.evaluate(() => { window.collectionKSwitcher = true; });
+      await files("left").press("Alt+F1");
+      const lan = sources("left").getByRole("group", { name: "KSwitcher LAN", exact: true });
+      await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
+      await files("left").getByRole("option", { name: /^nested/ }).click();
+      await files("left").press("F5");
+      await button(addCollection, "Add to collection").click();
+      const kswitcherFolder = reopened.getByRole("option", { name: /^nested.*C:/ });
+      await kswitcherFolder.waitFor();
+      await files("left").press("Alt+F1");
+      await button(sources("left"), "Home").click();
+      await waitForPath("left", home);
+      await kswitcherFolder.click();
+      await reopened.press("F5");
+      await button(exportDialog, "Copy").click();
+      await exportDialog.waitFor({ state: "hidden" });
+      assert.deepEqual(await page.evaluate(() => {
+        const { kind, peer, path, folder } = window.lastTransfer.source;
+        return { kind, peer, path, folder };
+      }), { kind: "kswitcher", peer: "online", path: "C:\\nested", folder: true });
+    }
     const localized = {
       Windows: { language: "en", title: "Folder shortcuts", up: "Move up", down: "Move down" },
       Ubuntu: { language: "uk", title: "Закладки папок", up: "Перемістити вгору", down: "Перемістити вниз" },
