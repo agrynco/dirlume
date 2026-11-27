@@ -8,6 +8,30 @@ import type { HelpTopic } from "./helpTopics";
 type Dimensions = { width: number; height: number };
 const sizePrefix = "dirlume.dialog-size.";
 const resizeEdges = ["n", "ne", "e", "s", "sw", "w", "nw"] as const;
+const dialogActions = ".dialog-footer, .dialog-actions, .dialog-action-strip";
+const actionButton = "button:not([role]), button[role='button']";
+
+const moveActionFocus: KeyboardEventHandler<HTMLDialogElement> = (event) => {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 :
+    event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : 0;
+  if (!direction || !(event.target instanceof Element)) return;
+
+  const current = event.target.closest<HTMLButtonElement>(actionButton);
+  const actions = current?.closest(dialogActions);
+  if (!current || !actions || actions.closest("dialog") !== event.currentTarget) return;
+
+  const buttons = Array.from(actions.querySelectorAll<HTMLButtonElement>(actionButton)).filter((button) =>
+    button.closest(dialogActions) === actions && button.closest("dialog") === event.currentTarget &&
+    button.tabIndex >= 0 && !button.closest(":disabled, [aria-disabled='true'], [hidden], [inert]") &&
+    button.getClientRects().length > 0 && getComputedStyle(button).visibility === "visible");
+  const index = buttons.indexOf(current);
+  if (index < 0 || buttons.length < 2) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  buttons[index + direction]?.focus();
+};
 
 export function readDialogSize(key: string | undefined): Dimensions | undefined {
   if (!key) return;
@@ -123,6 +147,7 @@ export function Dialog({ title, children, footer, onClose, onKeyDown, onKeyDownC
       data-help-topic={helpTopic} data-context-help={contextHelp || undefined} aria-labelledby={heading} onKeyDown={(event) => {
         if ((event.target as HTMLElement).closest("dialog") !== event.currentTarget) return;
         onKeyDown?.(event);
+        moveActionFocus(event);
         if (modeless && event.key === "Escape" && !event.defaultPrevented) {
           event.preventDefault();
           onClose?.();
