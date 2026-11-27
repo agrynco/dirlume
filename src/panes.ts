@@ -1,4 +1,4 @@
-import { api, isFileServer, isLanGroupPlace, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { api, isFileServer, supportsFileTree, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
 import { connectionEntries } from "./savedConnections";
 
@@ -358,7 +358,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   const retained = (key: string) => {
     if (current.has(key)) return true;
     const slash = key.indexOf("/");
-    if (slash < 0 || place.kind !== "local" && !isLanGroupPlace(place)) return false;
+    if (slash < 0 || !supportsFileTree(place)) return false;
     const branch = current.get(key.slice(0, slash));
     return !!branch?.directory && !branch.link;
   };

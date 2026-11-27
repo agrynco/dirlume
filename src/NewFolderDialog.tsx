@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type KSwitcherPlace, type LanGroupPlace } from "./api";
+import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type KSwitcherPlace, type WritableServerPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EditableDropdown } from "./EditableDropdown";
@@ -29,7 +29,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
   directory: string;
   archive?: ArchivePlace;
   kswitcher?: KSwitcherPlace;
-  remote?: FileServerPlace | LanGroupPlace;
+  remote?: FileServerPlace | WritableServerPlace;
   showHidden: boolean;
   historyShortcut: readonly string[];
   onCreated: (name: string) => Promise<void>;
@@ -84,7 +84,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
     setError("");
     setFailedName("");
     try {
-      if (remote?.kind === "server") await api.changeLanItem(remote, [name], { kind: "folder" });
+      if (remote?.kind === "server") await api.changeServerItem(remote, [name], { kind: "folder" });
       else if (remote) await api.createRemoteFolder(remote, name);
       if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
       if (kswitcher) {

@@ -555,6 +555,15 @@ try {
   await button(permissions, "Continue with sudo").click();
   await permissions.waitFor({ state: "hidden" });
   await list(sudoPage, "right").getByText("4 B", { exact: true }).last().waitFor();
+  await button(pane(sudoPage, "right"), "Tree").click();
+  const tree = sudoPage.locator("#right-files");
+  const branch = tree.getByRole("treeitem", { name: /^locked/ });
+  await button(branch, "Expand folder").click();
+  await permissions.getByText("/destination/locked", { exact: true }).waitFor();
+  await password.fill("fixture-password");
+  await button(permissions, "Continue with sudo").click();
+  await tree.getByRole("treeitem", { name: /measured\.txt/ }).waitFor();
+  await button(pane(sudoPage, "right"), "List").click();
   await row(sudoPage, "right", "renamed.txt").click();
   await list(sudoPage, "right").press("F6");
   const downloadMove = sudoPage.getByRole("dialog", { name: "Rename or move", exact: true });

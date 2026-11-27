@@ -24,6 +24,9 @@ enum Command {
         bind: SocketAddr,
         #[arg(long, default_value = "localhost")]
         host: String,
+        /// Allow holders of this share's private invitation to change files in the shared folder.
+        #[arg(long)]
+        allow_write: bool,
     },
     /// Print the private invitation for a server already initialized by serve.
     Invite {
@@ -40,7 +43,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             state_dir,
             bind,
             host,
-        } => dirlume_lib::server::serve(&root, &std::path::absolute(state_dir)?, bind, &host).await,
+            allow_write,
+        } => {
+            dirlume_lib::server::serve(
+                &root,
+                &std::path::absolute(state_dir)?,
+                bind,
+                &host,
+                allow_write,
+            )
+            .await
+        }
         Command::Invite { state_dir } => {
             println!("{}", dirlume_lib::server::invitation(&state_dir)?);
             Ok(())

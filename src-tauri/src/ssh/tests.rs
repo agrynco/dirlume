@@ -188,6 +188,41 @@ fn reads_a_saved_ssh_profile_without_jump_hosts() {
 }
 
 #[test]
+fn relays_nested_folders_between_real_ftp_and_sftp_servers() {
+    let (Ok(port), Ok(ftp_port), Some(ftp_root)) = (
+        std::env::var("DIRLUME_SSH_SUDO_TEST_PORT"),
+        std::env::var("DIRLUME_FTP_MOVE_TEST_PORT"),
+        std::env::var_os("DIRLUME_FTP_MOVE_TEST_ROOT"),
+    ) else {
+        return;
+    };
+    let input = json!({
+        "label": "Disposable SFTP relay fixture",
+        "host": "127.0.0.1",
+        "port": port.parse::<u16>().unwrap(),
+        "username": "dirlume-fixture",
+        "auth": {"kind":"password"},
+        "secret": "fixture-login"
+    });
+    let approval = route(input.clone(), &[], &[]).unwrap().err().unwrap();
+    let (client, keys) = route(input.clone(), &[approval], &[])
+        .unwrap()
+        .ok()
+        .unwrap();
+    let mut saved = input.clone();
+    saved["id"] = json!(Uuid::new_v4());
+    let connection = Arc::new(Connection {
+        profile: serde_json::from_value(saved).unwrap(),
+        host_keys: keys,
+        listing: Mutex::new(open_sftp(client).unwrap()),
+        sudo: sudo::Access::default(),
+        fixture_login: Some(input),
+    });
+    let ftp = crate::ftp::move_test_connection(ftp_port.parse().unwrap());
+    crate::desktop::verify_file_server_relays(&ftp, &connection, std::path::Path::new(&ftp_root));
+}
+
+#[test]
 fn resumes_transfers_and_deletion_with_an_openssh_sudo_session() {
     let Some(port) = std::env::var("DIRLUME_SSH_SUDO_TEST_PORT")
         .ok()

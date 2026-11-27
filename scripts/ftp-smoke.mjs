@@ -337,10 +337,10 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await stopped.waitFor({ state: "hidden" });
 
     await remoteRow("guide.md").click();
-    await page.keyboard.press("F6");
-    const rename = page.getByRole("dialog", { name: "Rename", exact: true });
-    await rename.getByLabel("Name", { exact: true }).fill("renamed.md");
-    await button(rename, "Rename").click();
+    await page.keyboard.press("F2");
+    const rename = right.getByRole("textbox", { name: "New name for guide.md", exact: true });
+    await rename.fill("renamed.md");
+    await rename.press("Enter");
     await remoteRow("renamed.md").waitFor();
     await left.getByRole("option", { name: /^notes.txt/ }).click();
     await remoteRow("renamed.md").click();
@@ -355,6 +355,24 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await button(copy, "Copy").click();
     await transferred();
     assert.equal(await readFile(join(source, "ftp-alias.md"), "utf8"), "# Changed externally\n");
+
+    const movedFolder = join(source, "ftp-move");
+    await mkdir(join(movedFolder, "nested"), { recursive: true });
+    await writeFile(join(movedFolder, "nested", "note.txt"), "Move through FTP");
+    await button(page.getByRole("region", { name: "left pane" }), "Refresh folder").click();
+    await left.getByRole("option", { name: /^ftp-move/ }).click();
+    await page.keyboard.press("F6");
+    const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+    await button(move, "Move").click();
+    await transferred();
+    assert.equal(await readFile(join(remoteFolder, "ftp-move", "nested", "note.txt"), "utf8"), "Move through FTP");
+    await assert.rejects(readdir(movedFolder), { code: "ENOENT" });
+    await remoteRow("ftp-move").click();
+    await page.keyboard.press("F6");
+    await button(move, "Move").click();
+    await transferred();
+    assert.equal(await readFile(join(movedFolder, "nested", "note.txt"), "utf8"), "Move through FTP");
+    await assert.rejects(readdir(join(remoteFolder, "ftp-move")), { code: "ENOENT" });
 
     await remoteRow("ftp-copy").click();
     await page.keyboard.press("F8");

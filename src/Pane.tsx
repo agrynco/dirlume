@@ -8,7 +8,7 @@ import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, isLanGroupPlace, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, supportsFileTree, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
@@ -470,7 +470,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
   }, undefined) : undefined;
   const localView = pane.place?.kind === "local" && !pane.loading;
-  const treeView = localView || isLanGroupPlace(pane.place) && !pane.loading;
+  const treeView = !pane.search && !pane.loading && supportsFileTree(pane.place);
   const viewControls = !catalog && !processView && !search && pane.place && <div className="pane-view-toolbar" data-help-topic="paneViews">
       <div className="pane-view-modes" role="group" aria-label={t("File pane view")}>
           <Button type="button" aria-pressed={!tree} disabled={!treeView} onClick={() => onFileView("list")}>{t("List")}</Button>

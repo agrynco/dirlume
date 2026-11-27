@@ -10,7 +10,7 @@ type Request = {
   reject: () => void;
 };
 
-export function useSudoFolderScan() {
+export function useSudoFolderScan(operation: "measure" | "browse" = "measure") {
   const nextId = useRef(0);
   const [queue, setQueue] = useState<Request[]>([]);
   const request = queue[0];
@@ -38,7 +38,7 @@ export function useSudoFolderScan() {
     }]);
   }), []);
 
-  const prompt = request && <SudoDialog key={request.id} operation="measure" address={request.place.address}
+  const prompt = request && <SudoDialog key={request.id} operation={operation} address={request.place.address}
     path={placePath(request.place)} onClose={request.reject} onConfirm={async (password) => {
       const listing = await api.listSsh(request.place.id, request.place.segments, password, undefined, request.signal);
       request.resolve(listing);

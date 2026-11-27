@@ -75,6 +75,8 @@ mod space_analyzer;
 mod ssh;
 #[cfg(feature = "desktop")]
 mod terminal;
+#[cfg(any(feature = "desktop", feature = "server"))]
+mod text_format;
 #[cfg(feature = "desktop")]
 mod text_pages;
 #[cfg(feature = "desktop")]
@@ -99,10 +101,10 @@ pub use desktop::run;
 
 pub const BUILD_VERSION: &str = env!("DIRLUME_BUILD_VERSION");
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "server"))]
 pub(crate) fn message(error: impl std::fmt::Display) -> String {
     error.to_string()
 }

@@ -27,10 +27,15 @@ use crate::{
     remote_transfer, ssh, terminal, watch,
 };
 
+pub(crate) use crate::text_format::{encode as encode_text, Encoding, TEXT_LIMIT};
 pub(crate) use crate::{message, Result};
 
 #[path = "desktop_lan_transfer.rs"]
 mod lan_transfer;
+#[path = "desktop_remote_transfer.rs"]
+mod remote_provider_transfer;
+#[cfg(test)]
+pub(crate) use remote_provider_transfer::verify_file_server_relays;
 #[path = "desktop_ssh_transfer.rs"]
 mod ssh_transfer;
 
@@ -568,6 +573,12 @@ impl Connection {
     }
 
     async fn list(&self, segments: Vec<String>) -> Result<RemoteListing> {
+        self.list_with_access(segments)
+            .await
+            .map(|(listing, _)| listing)
+    }
+
+    async fn list_with_access(&self, segments: Vec<String>) -> Result<(RemoteListing, bool)> {
         let mut request = crate::protocol::ListRequest {
             path: RemotePath { segments },
             paged: true,
@@ -581,6 +592,10 @@ impl Connection {
             let response = self
                 .request("v1/list", &request, Duration::from_secs(20))
                 .await?;
+            let writable = response
+                .headers()
+                .get(crate::protocol::SHARE_WRITABLE_HEADER)
+                .is_some_and(|value| value == "true");
             const MAX_LISTING: usize = 32 * 1024 * 1024;
             let bytes = collect_response(response, MAX_LISTING + 1).await?;
             if bytes.len() > MAX_LISTING {
@@ -615,7 +630,7 @@ impl Connection {
             result.entries.extend(page.listing.entries);
             request.after = page.next;
             if request.after.is_none() {
-                return Ok(result);
+                return Ok((result, writable));
             }
         }
     }
@@ -1094,7 +1109,7 @@ enum TransferSource {
         folder: bool,
         modified: Option<i64>,
         #[serde(default)]
-        lan_group: bool,
+        writable_server: bool,
     },
     Kswitcher {
         peer: String,
@@ -1120,12 +1135,20 @@ enum TransferSource {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ArchiveDestination {
+    id: u32,
+    segments: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TransferRequest {
     source: TransferSource,
     destination: String,
     ftp_destination: Option<u32>,
     ssh_destination: Option<u32>,
-    lan_destination: Option<u32>,
+    server_destination: Option<u32>,
+    archive_destination: Option<ArchiveDestination>,
     kswitcher_destination: Option<String>,
     #[serde(default)]
     kswitcher_broker: bool,
@@ -1164,8 +1187,19 @@ struct ArchiveCopySource {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ArchiveChange {
-    Folder { parent: Vec<String>, name: String },
-    Rename { segments: Vec<String>, name: String },
+    Folder {
+        parent: Vec<String>,
+        name: String,
+    },
+    Text {
+        parent: Vec<String>,
+        name: String,
+        encoding: Encoding,
+    },
+    Rename {
+        segments: Vec<String>,
+        name: String,
+    },
 }
 
 #[tauri::command]
@@ -1190,6 +1224,11 @@ async fn change_archive(
             ArchiveChange::Folder { parent, name } => {
                 archive.create_folder(&parent, &name, progress)
             }
+            ArchiveChange::Text {
+                parent,
+                name,
+                encoding,
+            } => archive.create_text(&parent, &name, encoding, progress),
             ArchiveChange::Rename { segments, name } => {
                 archive.rename_entry(&segments, &name, progress)
             }
@@ -1413,6 +1452,77 @@ impl VerifiedUpload for ssh::Session {
     }
 }
 
+impl VerifiedUpload for ftp::Session {
+    fn verify_uploaded(
+        &mut self,
+        target: &[String],
+        input: &mut fs::File,
+        session: &TransferSession,
+    ) -> Result<()> {
+        let original = crate::ftp_transfer::local_digest(input, || session.ensure_running())?;
+        let uploaded = crate::ftp_transfer::file_digest(self, target, || session.ensure_running())?;
+        if original.as_ref() != uploaded.as_ref() {
+            return Err("The local file differs from the uploaded FTP copy.".to_owned());
+        }
+        Ok(())
+    }
+}
+
+fn move_ftp_to_local(
+    ftp: &mut ftp::Session,
+    source: &[String],
+    target: &Path,
+    transfer: &TransferSession,
+    options: &local_transfer::Options,
+    progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let mut cleanup = None;
+    let outcome = copy_downloaded_item(
+        target,
+        transfer,
+        options,
+        progress,
+        ask,
+        |staged, progress| {
+            let temporary = local_transfer::Options {
+                moving: false,
+                policy: local_transfer::Policy::Skip,
+                ask_read_only: true,
+                copy: local::CopyOptions::default(),
+            };
+            if !remote_transfer::download(
+                ftp,
+                source,
+                staged,
+                &temporary,
+                progress,
+                |_| Ok(local_transfer::Decision::Skip),
+                |_, _| {},
+            )? {
+                return Err("Could not stage the complete FTP move source.".to_owned());
+            }
+            cleanup = Some(crate::ftp_transfer::MoveCleanup::capture(
+                ftp,
+                source,
+                staged,
+                || transfer.ensure_running(),
+            )?);
+            Ok(())
+        },
+    )?;
+    if let (TransferOutcome::Completed, Some(cleanup)) = (&outcome, cleanup) {
+        if let Err(error) = cleanup.finish(ftp, || transfer.ensure_running()) {
+            return Ok(TransferOutcome::SourceRetained {
+                source: format!("/{}", source.join("/")),
+                destination: crate::file_history::display(target),
+                error,
+            });
+        }
+    }
+    Ok(outcome)
+}
+
 enum LocalOriginal {
     Folder(same_file::Handle),
     File(local_transfer::FileRevision),
@@ -1484,23 +1594,9 @@ fn move_local_folder<S: VerifiedUpload>(
         return Ok(TransferOutcome::Skipped);
     }
     for item in items {
-        let result = (|| {
-            transfer.ensure_running().map_err(message)?;
-            match item.original {
-                LocalOriginal::Folder(original) => {
-                    local_transfer::verify_folder(&item.path, &original).map_err(message)?;
-                    fs::remove_dir(&item.path).map_err(message)
-                }
-                LocalOriginal::File(original) => {
-                    original.verify(&item.path).map_err(message)?;
-                    let mut input = fs::File::open(&item.path).map_err(message)?;
-                    client.verify_uploaded(&item.target, &mut input, transfer)?;
-                    drop(input);
-                    transfer.ensure_running().map_err(message)?;
-                    local_transfer::remove_original(&item.path, &original).map_err(message)
-                }
-            }
-        })();
+        let result = remove_local_move_item(item, transfer, |target, mut input| {
+            client.verify_uploaded(target, &mut input, transfer)
+        });
         if let Err(error) = result {
             return Ok(TransferOutcome::SourceRetained {
                 source: crate::file_history::display(source),
@@ -1510,6 +1606,233 @@ fn move_local_folder<S: VerifiedUpload>(
         }
     }
     Ok(TransferOutcome::Completed)
+}
+
+fn remove_local_move_item(
+    item: LocalMoveItem,
+    transfer: &TransferSession,
+    verify_copy: impl FnOnce(&[String], fs::File) -> Result<()>,
+) -> Result<()> {
+    transfer.ensure_running().map_err(message)?;
+    match item.original {
+        LocalOriginal::Folder(original) => {
+            local_transfer::verify_folder(&item.path, &original).map_err(message)?;
+            fs::remove_dir(&item.path).map_err(message)
+        }
+        LocalOriginal::File(original) => {
+            original.verify(&item.path).map_err(message)?;
+            verify_copy(&item.target, fs::File::open(&item.path).map_err(message)?)?;
+            transfer.ensure_running().map_err(message)?;
+            local_transfer::remove_original(&item.path, &original).map_err(message)
+        }
+    }
+}
+
+fn move_local_to_archive(
+    archive: &mut crate::archives::Archive,
+    source: &Path,
+    name: &str,
+    request: &TransferRequest,
+    transfer: &TransferSession,
+    progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let segments = &request
+        .archive_destination
+        .as_ref()
+        .ok_or("Choose a destination archive.")?
+        .segments;
+    let target = remote_transfer::child(segments, name);
+    let mut items = Vec::new();
+    collect_local_move(source, &target, transfer, &mut items)?;
+    let Some(copy) = archive.copy_for_move(
+        segments,
+        (source.to_owned(), name.to_owned()),
+        request.policy,
+        progress,
+        ask,
+    )?
+    else {
+        return Ok(TransferOutcome::Skipped);
+    };
+    for item in items {
+        let result = archive.verify().and_then(|()| {
+            remove_local_move_item(item, transfer, |target, input| {
+                copy.verify_file(target, input, || transfer.ensure_running())?;
+                archive.verify()
+            })
+        });
+        if let Err(error) = result {
+            return Ok(TransferOutcome::SourceRetained {
+                source: crate::file_history::display(source),
+                destination: format!("{}/{name}", request.destination.trim_end_matches('/')),
+                error,
+            });
+        }
+    }
+    Ok(TransferOutcome::Completed)
+}
+
+fn transfer_archive_member(
+    source: &Arc<Mutex<crate::archives::Archive>>,
+    target: &Arc<Mutex<crate::archives::Archive>>,
+    segments: &[String],
+    request: &TransferRequest,
+    mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    mut ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let parent = &request
+        .archive_destination
+        .as_ref()
+        .ok_or("Choose a destination archive.")?
+        .segments;
+    let name = segments.last().ok_or("Choose an archive entry.")?;
+    let destination = remote_transfer::child(parent, name);
+    if Arc::ptr_eq(source, target) {
+        if destination == segments {
+            return Ok(TransferOutcome::Skipped);
+        }
+        if destination.starts_with(segments) || segments.starts_with(&destination) {
+            return Err("Choose an archive destination outside the source folder.".to_owned());
+        }
+        if request.moving {
+            let mut archive = source.lock().map_err(message)?;
+            if request.policy == local_transfer::Policy::Skip
+                && archive
+                    .list(parent)?
+                    .entries
+                    .iter()
+                    .any(|entry| &entry.name == name)
+            {
+                return Ok(TransferOutcome::Skipped);
+            }
+            archive.relocate_entry(segments, parent, name, |_| {
+                progress(Path::new(name), 0, None)
+            })?;
+            return Ok(TransferOutcome::Completed);
+        }
+    }
+    let temp = tempfile::tempdir().map_err(message)?;
+    let staged = temp
+        .path()
+        .join(local::name_component(name).map_err(message)?);
+    let version = {
+        let archive = source.lock().map_err(message)?;
+        if request.moving && !archive.is_writable() {
+            return Err("The archive is read-only.".to_owned());
+        }
+        let options = local_transfer::Options {
+            moving: false,
+            policy: local_transfer::Policy::Skip,
+            ask_read_only: true,
+            copy: local::CopyOptions::default(),
+        };
+        if !archive.copy_to(
+            segments,
+            &staged,
+            &options,
+            &mut progress,
+            &mut ask,
+            |_, _| {},
+        )? {
+            return Ok(TransferOutcome::Skipped);
+        }
+        archive.generation().to_owned()
+    };
+    let copied = target.lock().map_err(message)?.copy_into(
+        parent,
+        &[(staged, name.clone())],
+        request.policy,
+        &mut progress,
+        &mut ask,
+    )?;
+    if copied.first() != Some(&true) {
+        return Ok(TransferOutcome::Skipped);
+    }
+    if request.moving {
+        let removed = source.lock().map_err(message).and_then(|mut archive| {
+            archive.remove_moved_member(segments, &version, || progress(Path::new(name), 0, None))
+        });
+        if let Err(error) = removed {
+            return Ok(TransferOutcome::SourceRetained {
+                source: format!("/{}", segments.join("/")),
+                destination: format!("{}/{name}", request.destination.trim_end_matches('/')),
+                error,
+            });
+        }
+    }
+    Ok(TransferOutcome::Completed)
+}
+
+#[cfg(test)]
+pub(crate) fn verify_ftp_folder_moves(ftp: &mut ftp::Session, host: &Path) {
+    use crate::local_transfer::{Decision, Policy};
+    let transfer = TransferSession::default();
+    let fixture = tempfile::tempdir().unwrap();
+    let input = fixture.path().join("Move fixture");
+    fs::create_dir_all(input.join("nested/empty")).unwrap();
+    fs::write(input.join("nested/note.txt"), b"FTP contents").unwrap();
+    let remote = ["Move fixture".to_owned()];
+    let mut progress = |_: &Path, _, _| Ok(());
+    let mut ask = |_| panic!("unexpected conflict");
+    assert!(matches!(
+        move_local_folder(
+            ftp,
+            &input,
+            &remote,
+            Policy::Ask,
+            &transfer,
+            &mut progress,
+            &mut ask
+        )
+        .unwrap(),
+        TransferOutcome::Completed,
+    ));
+    assert!(!input.exists());
+    assert_eq!(
+        fs::read(host.join("Move fixture/nested/note.txt")).unwrap(),
+        b"FTP contents"
+    );
+    fs::create_dir_all(input.join("nested")).unwrap();
+    fs::write(input.join("nested/note.txt"), b"Keep the existing file").unwrap();
+    let options = local_transfer::Options {
+        moving: true,
+        policy: Policy::Ask,
+        ask_read_only: true,
+        copy: Default::default(),
+    };
+    assert!(matches!(
+        move_ftp_to_local(
+            ftp,
+            &remote,
+            &input,
+            &transfer,
+            &options,
+            &mut progress,
+            |_| Ok(Decision::Skip)
+        )
+        .unwrap(),
+        TransferOutcome::Skipped,
+    ));
+    assert_eq!(
+        fs::read(host.join("Move fixture/nested/note.txt")).unwrap(),
+        b"FTP contents"
+    );
+    assert_eq!(
+        fs::read(input.join("nested/note.txt")).unwrap(),
+        b"Keep the existing file"
+    );
+    let output = fixture.path().join("Move output");
+    assert!(matches!(
+        move_ftp_to_local(ftp, &remote, &output, &transfer, &options, progress, ask).unwrap(),
+        TransferOutcome::Completed,
+    ));
+    assert!(!host.join("Move fixture").exists());
+    assert_eq!(
+        fs::read(output.join("nested/note.txt")).unwrap(),
+        b"FTP contents"
+    );
+    assert!(output.join("nested/empty").is_dir());
 }
 
 fn move_uploaded_file<S: VerifiedUpload>(
@@ -1523,7 +1846,8 @@ fn move_uploaded_file<S: VerifiedUpload>(
 ) -> Result<TransferOutcome> {
     let connection = request
         .ssh_destination
-        .or(request.lan_destination)
+        .or(request.server_destination)
+        .or(request.ftp_destination)
         .ok_or("Choose a remote destination.")?;
     let mut attempt = session.upload_move.lock().map_err(message)?;
     if !request.retry {
@@ -1580,7 +1904,7 @@ fn move_uploaded_file<S: VerifiedUpload>(
     }
     let completed = attempt.as_ref().expect("successful remote upload");
     let result = (|| {
-        if retry_cleanup {
+        if retry_cleanup || S::SOURCE == "FTP" {
             session.ensure_running().map_err(message)?;
             completed.original.verify(source).map_err(message)?;
             let mut input = fs::File::open(source).map_err(message)?;
@@ -1791,7 +2115,8 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
         destination: "/".to_owned(),
         ftp_destination: None,
         ssh_destination: Some(12),
-        lan_destination: None,
+        server_destination: None,
+        archive_destination: None,
         kswitcher_destination: None,
         kswitcher_broker: false,
         multiple: false,
@@ -1910,7 +2235,7 @@ async fn transfer_item(
     ssh_state: State<'_, ssh::SshState>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
-    if request.lan_destination.is_none()
+    if request.server_destination.is_none()
         && (request.kswitcher_broker || request.kswitcher_destination.is_some())
     {
         return session
@@ -1941,14 +2266,20 @@ async fn transfer_item(
         .ssh_destination
         .map(|id| ssh_state.connection(id))
         .transpose()?;
-    let lan_destination = request
-        .lan_destination
+    let server_destination = request
+        .server_destination
         .map(|id| connections.get(id))
+        .transpose()?;
+    let archive_destination = request
+        .archive_destination
+        .as_ref()
+        .map(|destination| archives.get(destination.id))
         .transpose()?;
     if [
         ftp_destination.is_some(),
         ssh_destination.is_some(),
-        lan_destination.is_some(),
+        server_destination.is_some(),
+        archive_destination.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -1998,9 +2329,80 @@ async fn transfer_item(
             progress(Path::new(name), 0, None).map_err(message)?;
 
             let mut ask = |conflict| session.ask(conflict, &output);
-            if let Some(destination) = lan_destination {
+            use remote_provider_transfer::{Endpoint, Relay};
+            let relay_source: Option<(Endpoint<'_>, &[String])> = match &request.source {
+                TransferSource::Ftp { segments, .. } => ftp_source
+                    .as_deref()
+                    .map(|item| (Endpoint::Ftp(item), segments.as_slice())),
+                TransferSource::Ssh { segments, .. } => ssh_source
+                    .as_ref()
+                    .map(|item| (Endpoint::Ssh(item), segments.as_slice())),
+                TransferSource::Server { segments, .. } => connection
+                    .as_deref()
+                    .map(|item| (Endpoint::Server(item), segments.as_slice())),
+                TransferSource::Archive { segments, .. } => archive
+                    .as_deref()
+                    .map(|item| (Endpoint::Archive(item), segments.as_slice())),
+                _ => None,
+            };
+            let relay_destination = ftp_destination
+                .as_deref()
+                .map(Endpoint::Ftp)
+                .or_else(|| ssh_destination.as_ref().map(Endpoint::Ssh))
+                .or_else(|| server_destination.as_deref().map(Endpoint::Server))
+                .or_else(|| archive_destination.as_deref().map(Endpoint::Archive));
+            if let (Some((source, segments)), Some(destination)) = (relay_source, relay_destination)
+            {
+                if !matches!(
+                    (&source, &destination),
+                    (Endpoint::Server(_), Endpoint::Server(_))
+                        | (Endpoint::Archive(_), Endpoint::Archive(_))
+                ) {
+                    return Relay {
+                        request: &request,
+                        transfer: &session,
+                        output: &output,
+                    }
+                    .run(
+                        source,
+                        segments,
+                        destination,
+                        &mut progress,
+                        &mut ask,
+                    );
+                }
+            }
+            if let Some(destination) = archive_destination {
+                if let TransferSource::Archive { segments, .. } = &request.source {
+                    let archive = archive.as_ref().ok_or("Open the source archive first.")?;
+                    return transfer_archive_member(
+                        archive,
+                        &destination,
+                        segments,
+                        &request,
+                        progress,
+                        ask,
+                    );
+                }
+                let source = source
+                    .as_deref()
+                    .filter(|_| request.moving)
+                    .ok_or("Choose local files or folders to move into the archive.")?;
+                actual_source = display(source);
+                let mut archive = destination.lock().map_err(message)?;
+                return move_local_to_archive(
+                    &mut archive,
+                    source,
+                    name,
+                    &request,
+                    &session,
+                    progress,
+                    ask,
+                );
+            }
+            if let Some(destination) = server_destination {
                 if let TransferSource::Server {
-                    lan_group: true,
+                    writable_server: true,
                     segments,
                     ..
                 } = &request.source
@@ -2077,15 +2479,19 @@ async fn transfer_item(
                 }
                 let remote_move = if request.moving {
                     let TransferSource::Server {
-                        lan_group: true,
+                        writable_server: true,
                         segments,
                         ..
                     } = &request.source
                     else {
-                        return Err("Choose Dirlume LAN files or folders to move.".to_owned());
+                        return Err(
+                            "Choose files or folders on a writable Dirlume share.".to_owned()
+                        );
                     };
                     let client = lan_transfer::LanTransfer {
-                        connection: connection.as_ref().ok_or("Connect to Dirlume LAN first.")?,
+                        connection: connection
+                            .as_ref()
+                            .ok_or("Connect to the Dirlume share first.")?,
                         transfer: &session,
                     };
                     Some((client, segments))
@@ -2101,13 +2507,6 @@ async fn transfer_item(
                     staged = staging
                         .path()
                         .join(local::name_component(name).map_err(message)?);
-                    let options = local_transfer::Options {
-                        moving: false,
-                        policy: local_transfer::Policy::Ask,
-                        ask_read_only: true,
-                        copy: local::CopyOptions::default(),
-                    };
-                    let mut no_commit = |_: &Path, _: &Path| {};
                     match &request.source {
                         TransferSource::Server {
                             segments,
@@ -2158,51 +2557,6 @@ async fn transfer_item(
                                 finish_downloaded_file(&file, *modified).map_err(message)?;
                             }
                         }
-                        TransferSource::Ftp { segments, .. } => {
-                            let mut source = ftp_source
-                                .ok_or("Connect to the FTP server first.")?
-                                .open_with_cancel(Some(session.cancelled.clone()))?;
-                            remote_transfer::download(
-                                &mut source,
-                                segments,
-                                &staged,
-                                &options,
-                                &mut progress,
-                                &mut ask,
-                                &mut no_commit,
-                            )?;
-                        }
-                        TransferSource::Ssh { segments, .. } => {
-                            let connection = ssh_source
-                                .as_ref()
-                                .ok_or("Connect to the SSH server first.")?;
-                            let mut source = ssh_transfer::SshTransfer::open(
-                                connection, true, &session, &output,
-                            )?;
-                            remote_transfer::download(
-                                &mut source,
-                                segments,
-                                &staged,
-                                &options,
-                                &mut progress,
-                                &mut ask,
-                                &mut no_commit,
-                            )?;
-                        }
-                        TransferSource::Archive { segments, .. } => {
-                            archive
-                                .ok_or("Open the archive first.")?
-                                .lock()
-                                .map_err(message)?
-                                .copy_to(
-                                    segments,
-                                    &staged,
-                                    &options,
-                                    &mut progress,
-                                    &mut ask,
-                                    &mut no_commit,
-                                )?;
-                        }
                         TransferSource::Kswitcher {
                             peer, path, folder, ..
                         } => {
@@ -2226,9 +2580,7 @@ async fn transfer_item(
                                 ))?;
                             }
                         }
-                        TransferSource::Local { .. } => {
-                            unreachable!("local source is resolved before staging")
-                        }
+                        _ => return Err("Choose a supported transfer source.".to_owned()),
                     }
                     &staged
                 };
@@ -2274,19 +2626,17 @@ async fn transfer_item(
                 } else {
                     "FTP"
                 };
-                if (request.moving && ftp_destination.is_some())
-                    || !matches!(
-                        request.policy,
-                        local_transfer::Policy::Ask
-                            | local_transfer::Policy::Skip
-                            | local_transfer::Policy::Overwrite
-                    )
-                {
+                if !matches!(
+                    request.policy,
+                    local_transfer::Policy::Ask
+                        | local_transfer::Policy::Skip
+                        | local_transfer::Policy::Overwrite
+                ) {
                     return Err(format!("Choose a supported {protocol} copy option."));
                 }
-                let source = source
-                    .as_deref()
-                    .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
+                let source = source.as_deref().ok_or_else(|| {
+                    format!("Choose a supported source for the {protocol} upload.")
+                })?;
                 if let Some(connection) = ssh_destination {
                     let mut remote =
                         ssh_transfer::SshTransfer::open(&connection, false, &session, &output)?;
@@ -2330,8 +2680,39 @@ async fn transfer_item(
                     );
                 }
                 if let Some(connection) = ftp_destination {
+                    let mut remote =
+                        connection.open_with_cancel(Some(session.cancelled.clone()))?;
+                    if request.moving {
+                        let metadata = fs::symlink_metadata(source).map_err(message)?;
+                        if metadata.is_dir() && !local::is_link(&metadata) {
+                            let target = remote_transfer::upload_destination(
+                                &mut remote,
+                                &request.destination,
+                                name,
+                                request.multiple,
+                            )?;
+                            return move_local_folder(
+                                &mut remote,
+                                source,
+                                &target,
+                                request.policy,
+                                &session,
+                                &mut progress,
+                                &mut ask,
+                            );
+                        }
+                        return move_uploaded_file(
+                            &mut remote,
+                            &request,
+                            source,
+                            name,
+                            &session,
+                            &mut progress,
+                            &mut ask,
+                        );
+                    }
                     return upload_remote(
-                        connection.open_with_cancel(Some(session.cancelled.clone()))?,
+                        remote,
                         &request,
                         name,
                         source,
@@ -2381,23 +2762,35 @@ async fn transfer_item(
                 },
             };
             if let TransferSource::Archive { segments, .. } = &request.source {
-                if request.moving {
-                    return Err("Use Copy to extract an archive item.".to_owned());
-                }
                 let archive = archive.ok_or("Open the archive first.")?;
+                let mut archive = archive.lock().map_err(message)?;
+                if request.moving {
+                    use crate::archives::MoveOutcome;
+                    return archive
+                        .move_to(segments, &target, &options, progress, ask, committed)
+                        .map(|outcome| match outcome {
+                            MoveOutcome::Completed => TransferOutcome::Completed,
+                            MoveOutcome::Skipped => TransferOutcome::Skipped,
+                            MoveOutcome::SourceRetained(error) => TransferOutcome::SourceRetained {
+                                destination: display(&target),
+                                source: format!("/{}", segments.join("/")),
+                                error,
+                            },
+                        });
+                }
                 return archive
-                    .lock()
-                    .map_err(message)?
                     .copy_to(segments, &target, &options, progress, ask, committed)
                     .map(transfer_outcome);
             }
             if let TransferSource::Ftp { segments, .. } = &request.source {
-                if request.moving {
-                    return Err("Use Copy to download FTP items.".to_owned());
-                }
                 let mut ftp = ftp_source
                     .ok_or("Connect to the FTP server first.")?
                     .open_with_cancel(Some(session.cancelled.clone()))?;
+                if request.moving {
+                    return move_ftp_to_local(
+                        &mut ftp, segments, &target, &session, &options, progress, ask,
+                    );
+                }
                 return remote_transfer::download(
                     &mut ftp, segments, &target, &options, progress, ask, committed,
                 )
@@ -2446,10 +2839,10 @@ async fn transfer_item(
                     segments,
                     folder,
                     modified,
-                    lan_group,
+                    writable_server,
                     ..
                 } => {
-                    if request.moving && !lan_group {
+                    if request.moving && !writable_server {
                         return Err("This source is read-only.".to_owned());
                     }
                     let connection = connection.ok_or("Connect to the server first.")?;
@@ -2581,7 +2974,7 @@ async fn transfer_kswitcher(
     use local_transfer::Policy;
     if request.ftp_destination.is_some()
         || request.ssh_destination.is_some()
-        || request.lan_destination.is_some()
+        || request.server_destination.is_some()
     {
         return Err("Choose a local or KSwitcher LAN destination.".into());
     }
@@ -2719,6 +3112,7 @@ struct Connected {
     address: String,
     origin: String,
     share: String,
+    writable: bool,
     listing: RemoteListing,
 }
 
@@ -2905,7 +3299,7 @@ async fn open_server(
     state: &Connections,
 ) -> Result<Connected> {
     let connection = Connection::connect(invitation)?;
-    let listing = connection.list(segments).await?;
+    let (listing, writable) = connection.list_with_access(segments).await?;
     let id = state.next.fetch_add(1, Ordering::Relaxed);
     let address = connection
         .invitation
@@ -2930,6 +3324,7 @@ async fn open_server(
         address,
         origin,
         share,
+        writable,
         listing,
     })
 }
@@ -3211,18 +3606,6 @@ mod server_download_tests {
     }
 }
 
-pub(crate) const TEXT_LIMIT: u64 = 8 * 1024 * 1024;
-
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Encoding {
-    #[default]
-    Utf8,
-    Utf8Bom,
-    Utf16Le,
-    Utf16Be,
-}
-
 #[derive(Deserialize, Serialize)]
 pub(crate) struct TextDocument {
     pub(crate) text: String,
@@ -3298,9 +3681,6 @@ pub(crate) fn decode_text(reader: impl Read) -> Result<TextDocument> {
 }
 
 fn decode_local_text(reader: impl Read) -> std::result::Result<TextDocument, TextReadFailure> {
-    let unsupported = |message: String| {
-        TextReadFailure::new(ReadStage::Decode, ReadReason::UnsupportedEncoding, message)
-    };
     let mut bytes = Vec::new();
     reader
         .take(TEXT_LIMIT + 1)
@@ -3313,54 +3693,17 @@ fn decode_local_text(reader: impl Read) -> std::result::Result<TextDocument, Tex
             "Text files can be at most 8 MiB.",
         ));
     }
-    let (text, encoding) = if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
-        (
-            String::from_utf8(bytes.to_vec()).map_err(|error| unsupported(message(error)))?,
-            Encoding::Utf8Bom,
-        )
-    } else if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
-        let little = bytes[0] == 0xff;
-        let (chunks, remainder) = bytes[2..].as_chunks::<2>();
-        if !remainder.is_empty() {
-            return Err(unsupported(
-                "The UTF-16 file ends with an incomplete character.".to_owned(),
-            ));
+    use crate::text_format::DecodeError;
+    let (text, encoding) = crate::text_format::decode(bytes).map_err(|error| match error {
+        DecodeError::Unsupported(message) => {
+            TextReadFailure::new(ReadStage::Decode, ReadReason::UnsupportedEncoding, message)
         }
-        let words: Vec<_> = chunks
-            .iter()
-            .map(|&pair| {
-                if little {
-                    u16::from_le_bytes(pair)
-                } else {
-                    u16::from_be_bytes(pair)
-                }
-            })
-            .collect();
-        (
-            String::from_utf16(&words).map_err(|error| unsupported(message(error)))?,
-            if little {
-                Encoding::Utf16Le
-            } else {
-                Encoding::Utf16Be
-            },
-        )
-    } else {
-        (
-            String::from_utf8(bytes).map_err(|_| {
-                unsupported(
-                    "The file is outside the supported UTF-8 and UTF-16 text formats.".to_owned(),
-                )
-            })?,
-            Encoding::Utf8,
-        )
-    };
-    if text.contains('\0') {
-        return Err(TextReadFailure::new(
+        DecodeError::Binary => TextReadFailure::new(
             ReadStage::Decode,
             ReadReason::BinaryContent,
             "The file contains binary data.",
-        ));
-    }
+        ),
+    })?;
     Ok(TextDocument {
         text,
         encoding,
@@ -3827,29 +4170,6 @@ async fn read_server_bytes(
     let max_response = crate::protocol::BYTE_PAGE_SIZE as usize * 4 + 128;
     let bytes = collect_response(response, max_response).await?;
     serde_json::from_slice(&bytes).map_err(message)
-}
-
-pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    match encoding {
-        Encoding::Utf8 => buffer.extend_from_slice(text.as_bytes()),
-        Encoding::Utf8Bom => {
-            buffer.extend_from_slice(&[0xef, 0xbb, 0xbf]);
-            buffer.extend_from_slice(text.as_bytes());
-        }
-        Encoding::Utf16Be | Encoding::Utf16Le => {
-            let little = matches!(encoding, Encoding::Utf16Le);
-            buffer.extend_from_slice(if little { &[0xff, 0xfe] } else { &[0xfe, 0xff] });
-            for word in text.encode_utf16() {
-                buffer.extend_from_slice(&if little {
-                    word.to_le_bytes()
-                } else {
-                    word.to_be_bytes()
-                });
-            }
-        }
-    }
-    buffer
 }
 
 fn create_encoded_file(path: &Path, encoding: Encoding) -> Result<()> {

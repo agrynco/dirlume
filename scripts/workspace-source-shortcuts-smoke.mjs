@@ -370,7 +370,7 @@ try {
     assert.equal(await uploadDialog.getByRole("textbox", { name: "Destination", exact: true }).inputValue(), "/Files/nested");
     await button(uploadDialog, "Copy").click();
     await uploadDialog.waitFor({ state: "hidden" });
-    assert.equal(await page.evaluate(() => window.lastTransfer.lanDestination), 10);
+    assert.equal(await page.evaluate(() => window.lastTransfer.serverDestination), 10);
     await files("left").getByRole("option", { name: /^note\.txt/ }).click();
     await files("left").press("F6");
     const lanMove = page.getByRole("dialog", { name: "Rename or move", exact: true });
@@ -381,7 +381,7 @@ try {
       source: window.lastTransfer.source,
     })), {
       moving: true,
-      source: { kind: "server", connection: 10, segments: ["Files", "nested", "note.txt"], folder: false, lan_group: true },
+      source: { kind: "server", connection: 10, segments: ["Files", "nested", "note.txt"], folder: false, writable_server: true },
     });
     await button(page, "Options").click();
     await button(options, "Computers").click();

@@ -177,6 +177,7 @@ impl SshMoveCleanup {
         source: &[String],
         destination: String,
     ) -> TransferOutcome {
+        remote.read_only = false;
         let check = || "The SSH source item changed during the move.".to_owned();
         for (segments, original) in self.0 {
             let result = remote.operation(&segments, |session| {
@@ -282,7 +283,6 @@ impl<'a> SshTransfer<'a> {
         )?;
         if matches!(outcome, TransferOutcome::Completed) {
             if let Some(cleanup) = cleanup {
-                self.read_only = false;
                 return Ok(cleanup.finish(self, source, crate::file_history::display(target)));
             }
         }
