@@ -2248,7 +2248,7 @@ try {
   await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
   await about.getByRole("button", { name: "Donate via monobank", exact: true }).waitFor();
   assert.ok(await about.locator("img").evaluate((image) => image.complete && image.naturalWidth > 0));
-  await about.locator(".about-details").getByText("Anatolii Hrynchuk", { exact: true }).waitFor();
+  assert.equal(await about.getByRole("link", { name: "Anatolii Hrynchuk", exact: true }).getAttribute("href"), "https://hrynco.com/");
   await about.getByRole("button", { name: "Report an issue", exact: true }).waitFor();
   await about.getByRole("button", { name: "Releases", exact: true }).waitFor();
   await about.getByRole("button", { name: "User guide", exact: true }).click();

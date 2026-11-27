@@ -10,6 +10,7 @@ import appIcon from "../src-tauri/icons/128x128.png";
 export const donationUrl = "https://send.monobank.ua/jar/6ZninEa3R4";
 const repositoryUrl = "https://github.com/agrynco/dirlume";
 const licenseUrl = `${repositoryUrl}/blob/main/LICENSE`;
+const creatorUrl = "https://hrynco.com/";
 const aboutLinks = [
   { label: "Source code", href: repositoryUrl, Icon: CodeXml },
   { label: "Report an issue", href: `${repositoryUrl}/issues/new`, Icon: Bug },
@@ -268,6 +269,13 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
     void api.openWebLink(href).catch((failure: unknown) => setLinkError(describeError(failure)));
   }
 
+  function aboutLink(href: string, label: string) {
+    return <a href={href} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
+      event.preventDefault();
+      openLink(href);
+    }}>{label}</a>;
+  }
+
   return <Dialog title={t("About")} onClose={onClose} footer={<>
     <DonationButton onClick={() => openLink(donationUrl)} />
     <Button data-initial-focus type="button" onClick={onClose}><X aria-hidden="true" />{t("Close")}</Button>
@@ -285,12 +293,9 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
         <dd>{version ? <code>{version}</code> :
           error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}</dd>
         <dt>{t("Created by")}</dt>
-        <dd>Anatolii Hrynchuk</dd>
+        <dd>{aboutLink(creatorUrl, "Anatolii Hrynchuk")}</dd>
         <dt>{t("License")}</dt>
-        <dd><a href={licenseUrl} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
-          event.preventDefault();
-          openLink(licenseUrl);
-        }}>MIT</a></dd>
+        <dd>{aboutLink(licenseUrl, "MIT")}</dd>
       </dl>
       <p className="about-stack">{t("Built with Rust, Tauri, React, and TypeScript.")}</p>
       <div className="about-actions">
