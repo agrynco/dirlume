@@ -4,7 +4,7 @@ use portable_pty::CommandBuilder;
 use serde::Deserialize;
 
 use super::{directory, Entry, SourceVersion, Visibility};
-use crate::{local, terminal, Result};
+use crate::{local, Result};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -216,7 +216,19 @@ pub(super) fn prepare(
         values.insert(key, vec![value.clone()]);
     }
 
-    let shell = terminal::shell_program();
+    #[cfg(windows)]
+    let shell = {
+        let root = std::env::var_os("SystemRoot")
+            .ok_or("The Windows PowerShell location is unavailable.")?;
+        let path =
+            std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        if !path.is_absolute() || !path.is_file() {
+            return Err("The Windows PowerShell location is unavailable.".into());
+        }
+        path
+    };
+    #[cfg(unix)]
+    let shell = crate::terminal::shell_program();
     #[cfg(unix)]
     if !matches!(
         Path::new(&shell).file_name().and_then(|name| name.to_str()),
@@ -349,7 +361,7 @@ mod tests {
         assert!(menus.prepare(request(), &personal, false).is_err());
         fs::write(&local_file, &bytes).unwrap();
         let (command, _) = menus.prepare(request(), &personal, false).unwrap();
-        let (code, transcript) = terminal::run_menu_fixture(command);
+        let (code, transcript) = crate::terminal::run_menu_fixture(command);
         assert_eq!(code, 7, "{transcript}");
         assert!(transcript.contains("Step 2"), "{transcript}");
         let output = fs::read_to_string(folder.join("args.txt")).unwrap();
