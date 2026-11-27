@@ -2343,12 +2343,16 @@ try {
     await otherRow.click();
     const original = await colors();
     await row.click();
-    assert.deepEqual(await colors(), ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
+    const selected = await colors();
+    assert.deepEqual(selected, ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
     await row.click({ modifiers: ["Control"] });
     await attributeList.press("Home");
+    assert.match(await row.getAttribute("class"), /\bmarked\b/);
+    assert.notEqual(await row.getAttribute("data-current"), "true");
     const marked = await colors();
     assert.notEqual(marked[0], original[0]);
-    assert.equal(marked[1], original[1]);
+    assert.notEqual(marked[1], original[1]);
+    assert.equal(marked[1], selected[1]);
   }
   if (process.env.DIRLUME_CLASSIC_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CLASSIC_SCREENSHOT, scale: "css" });
   await exitDesktop(page);
