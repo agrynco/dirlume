@@ -41,3 +41,27 @@ export function replaceTerminalRange(draft: TerminalDraft, index: number, length
     draft: { text: draft.text.slice(0, index) + text + draft.text.slice(end), caret: index + text.length },
   };
 }
+
+export function replaceTerminalSnippet(draft: TerminalDraft, ticket: string, request: string,
+  applicationCursor: boolean, bracketed: boolean) {
+  if (request.length > 65536) return null;
+  let fields: unknown;
+  try { fields = JSON.parse(request); }
+  catch { return null; }
+  if (!Array.isArray(fields) || fields.length !== 4) return null;
+  const [actualTicket, prefix, text, cursor] = fields;
+  if (actualTicket !== ticket || typeof prefix !== "string" || !prefix || typeof text !== "string" ||
+      typeof cursor !== "number" || !Number.isInteger(cursor) || cursor < 0 || cursor > text.length ||
+      /[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/u.test(text) ||
+      /\p{Cs}/u.test(text.slice(cursor))) return null;
+  const index = draft.caret - prefix.length;
+  if (index < 0 || draft.text.slice(index, draft.caret) !== prefix ||
+      /[\p{L}\p{N}_]$/u.test(draft.text.slice(0, index))) return null;
+  const replacement = replaceTerminalRange(draft, index, prefix.length, text, applicationCursor, bracketed);
+  if (!replacement) return null;
+  const left = applicationCursor ? "\x1bOD" : "\x1b[D";
+  return {
+    data: replacement.data + left.repeat(Array.from(text.slice(cursor)).length),
+    draft: { text: replacement.draft.text, caret: index + cursor },
+  };
+}
