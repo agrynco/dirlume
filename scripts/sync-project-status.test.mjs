@@ -23,7 +23,8 @@ test("moves work through the project based on its issue, branch, and pull reques
 test("does not treat leftover branches from promoted or closed work as active", () => {
   assert.equal(state({ pulls: [merged], refs: [branch], promoted: new Set(["staged"]) }), "Ready");
   assert.equal(state({ pulls: [{ ...pr, state: "closed" }], refs: [branch] }), "Ready");
-  assert.equal(state({ pulls: [merged], refs: [branch + "-followup"] }), "In progress");
+  assert.equal(state({ pulls: [merged], refs: [branch + "-followup"] }), "prerelease");
+  assert.equal(state({ pulls: [merged], refs: [branch + "-followup"], promoted: new Set(["staged"]) }), "In progress");
 });
 
 test("keeps blocked work in Backlog while branches and pull requests remain open", () => {
