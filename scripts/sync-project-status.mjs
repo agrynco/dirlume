@@ -20,9 +20,9 @@ export function projectStatus({ issue, pulls, refs, promoted }) {
   if (issue.labels.includes("blocked")) return "Backlog";
   const open = pulls.find((pull) => pull.state === "open");
   if (open) return open.draft ? "In progress" : "In review";
+  if (pulls.some((pull) => pull.merged_at && !promoted.has(pull.merge_commit_sha))) return "prerelease";
   const oldBranches = new Set(pulls.map((pull) => pull.head.ref));
   if (refs.some((ref) => workBranch(ref) === issue.number && !oldBranches.has(ref))) return "In progress";
-  if (pulls.some((pull) => pull.merged_at && !promoted.has(pull.merge_commit_sha))) return "prerelease";
   return eligible(issue.labels) ? "Ready" : "Backlog";
 }
 
