@@ -1360,6 +1360,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .dialog-heading h2 { margin: 0; font-size: 1.15em; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-form { display: flex; flex-direction: column; min-height: 0; }
 .dialog-body { padding: 16px; overflow: auto; }
+.new-folder-body { display: grid; align-content: start; gap: 8px; }
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
 .release-notes { display: grid; gap: 10px; overflow-wrap: anywhere; }
 .release-notes ul { margin: 0; padding-inline-start: 1.4em; }

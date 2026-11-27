@@ -127,7 +127,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
     }
   }}>
     <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
-      <div className="dialog-body">
+      <div className="dialog-body new-folder-body">
         <div className="field">
           <label htmlFor={nameId}>{t("Name")}</label>
           <EditableDropdown trigger={{
