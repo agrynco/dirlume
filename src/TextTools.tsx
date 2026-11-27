@@ -119,6 +119,8 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
   const [htmlFormatting, setHtmlFormatting] = useState(true);
   const [hex, setHex] = useState(false);
   const [diagnosticSource, setDiagnosticSource] = useState(false);
+  const [clearLog, setClearLog] = useState<{ clearing?: boolean; error?: string } | null>(null);
+  const [clearRevision, setClearRevision] = useState(0);
   const [syntax, setSyntax] = useState("auto");
   const [syntaxInfo, setSyntaxInfo] = useState<{ detected: string | undefined; unavailable: boolean }>();
   const [choosingSyntax, setChoosingSyntax] = useState(false);
@@ -298,7 +300,24 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
       window.clearInterval(fallback);
       watch?.stop();
     };
-  }, [file, editing]);
+  }, [file, editing, clearRevision]);
+
+  async function clearErrorLog() {
+    if (!clearLog || clearLog.clearing) return;
+    setClearLog({ clearing: true });
+    try {
+      await api.clearErrorLog();
+      ++diskOperation.current;
+      replaceDocument({ text: "", encoding: "utf8" });
+      setDiagnosticSource(false);
+      setHex(false);
+      setHexSize(undefined);
+      setClearRevision((revision) => revision + 1);
+      setClearLog(null);
+    } catch (error) {
+      setClearLog({ error: describeError(error) });
+    }
+  }
 
   function keepEditing() {
     if (diskBusy.current) return;
@@ -426,7 +445,8 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
   const bookmarksAction = action("File bookmarks", "fileBookmarks", onFileBookmarks);
   const switchMode = action(editing ? "Open in Viewer" : "Open in Editor", "switchDocumentMode", onSwitchMode,
     saving || sudoAction !== null || (!editing && (!writable || !document)));
-  const fileActions = [...(editing ? [saveAction] : []), switchMode, closeAction];
+  const fileActions: Action[] = [...(editing ? [saveAction] : []), switchMode,
+    ...(diagnosticLog ? [{ label: "Clear error log", run: () => setClearLog({}) }] : []), closeAction];
   const selectionActions = [
     ...(editing && sourceVisible ? [
       action("Undo", "documentUndo", () => sourceActions.current?.undo(), saving || !sourceStatus.canUndo),
@@ -622,6 +642,18 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus onClick={() => setConfirm(false)}>{t("Keep editing")}</Button>
           <Button type="button" className="alert-confirm" onClick={onClose}>{t("Discard changes")}</Button>
+        </footer>
+      </Dialog>}
+      {active && clearLog && <Dialog title={t("Clear error log")} tone="warning"
+        onClose={() => { if (!clearLog.clearing) setClearLog(null); }}>
+        <div className="dialog-body">
+          <p>{t("Permanently clear all entries in the error log?")}</p>
+          {clearLog.error && <p role="alert" className="dialog-error">{errorText(clearLog.error)}</p>}
+        </div>
+        <footer className="dialog-footer">
+          <Button type="button" data-initial-focus disabled={clearLog.clearing} onClick={() => setClearLog(null)}>{t("Cancel")}</Button>
+          <Button type="button" className="alert-confirm" disabled={clearLog.clearing}
+            onClick={() => void clearErrorLog()}>{t("Clear error log")}</Button>
         </footer>
       </Dialog>}
       {active && externalChange && !confirm && !saving && <Dialog title={t("File changed on disk")} tone="warning" onClose={keepEditing}

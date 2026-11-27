@@ -150,6 +150,9 @@ jobs:
       - name: Verify the optional status bar
         if: github.event.action != 'closed'
         run: node scripts/status-bar-smoke.mjs
+      - name: Verify clearing the error log from the viewer
+        if: github.event.action != 'closed'
+        run: node scripts/diagnostic-log-smoke.mjs
       - name: Verify terminal directory synchronization
         if: github.event.action != 'closed'
         run: node scripts/terminal-directory-smoke.mjs
