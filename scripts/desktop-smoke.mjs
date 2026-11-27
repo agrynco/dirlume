@@ -2034,6 +2034,9 @@ try {
       page = await startDesktop();
       return page;
     });
+    const sources = leftPane.locator(".location-menu");
+    await sources.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+    await sources.getByRole("button", { name: "Home", exact: true }).click();
     await navigate("left", src);
     await navigate("right", dst);
   }
