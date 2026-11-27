@@ -5,7 +5,7 @@
     "Open SMB shares on Windows, macOS, and Ubuntu, and configure proxy routing, SFTP server commands, legacy timestamps, and SSH shells in NetBox.",
     "Use the color scheme’s selection text color for current and marked file names, including hidden and system entries.",
     "Use the refreshed main menu, two-pane app icon, high-contrast Windows Administrator badge, and consistent checkbox placement in dialogs.",
-    "Switch from Tree to List when a folder lookup fails, and merge matching folders during Copy and Move with file-level overwrite choices.",
+    "Scan local folders faster on APFS and ext4. Switch from Tree to List when a folder lookup fails, and merge matching folders during Copy and Move with file-level overwrite choices.",
     "Share the settings file beside Dirlume.exe between ordinary and administrator launches of the same Windows copy.",
     "Start local zsh in the active pane’s folder without showing its setup command.",
     "Browse and edit large text files in pages, with streaming saves that preserve the untouched contents."
