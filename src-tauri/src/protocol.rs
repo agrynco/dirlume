@@ -14,6 +14,7 @@ pub(crate) enum LanChange {
     Folder,
     CreateText { encoding: crate::desktop::Encoding },
     Delete { recursive: bool },
+    DeleteCompared { expected: LanStat, digest: String },
     Rename { name: String },
 }
 
@@ -33,8 +34,72 @@ pub(crate) struct LanTextSave {
 }
 
 #[cfg(feature = "desktop")]
+pub(crate) const LAN_UPLOAD_CHUNK: usize = 256 * 1024;
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum LanUpload {
+    Stat {
+        segments: Vec<String>,
+    },
+    Begin {
+        segments: Vec<String>,
+    },
+    Chunk {
+        stage: uuid::Uuid,
+        offset: u64,
+        encoded: String,
+    },
+    Commit {
+        stage: uuid::Uuid,
+        overwrite: bool,
+    },
+    Cancel {
+        stage: uuid::Uuid,
+    },
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum LanUploadReply {
+    Stat { entry: Option<LanStat> },
+    Begun { stage: uuid::Uuid },
+    Ok,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize, PartialEq)]
+pub(crate) struct LanStat {
+    pub name: String,
+    pub directory: bool,
+    pub file: bool,
+    pub size: u64,
+    pub modified: Option<(u64, u32)>,
+}
+
+#[cfg(feature = "desktop")]
 pub(crate) fn lan_text_revision(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, bytes).as_ref())
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn lan_file_digest(
+    mut reader: impl std::io::Read,
+    mut check: impl FnMut() -> std::io::Result<()>,
+) -> std::io::Result<String> {
+    let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buffer = vec![0; LAN_UPLOAD_CHUNK];
+    loop {
+        check()?;
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        context.update(&buffer[..count]);
+    }
+    Ok(URL_SAFE_NO_PAD.encode(context.finish().as_ref()))
 }
 
 #[cfg(feature = "desktop")]

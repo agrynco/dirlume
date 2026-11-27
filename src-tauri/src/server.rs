@@ -32,6 +32,10 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[cfg(feature = "desktop")]
+#[path = "server_lan_upload.rs"]
+mod lan_upload;
+
 #[derive(Deserialize, Serialize)]
 struct Identity {
     invitation: Invitation,
@@ -92,6 +96,8 @@ struct Share {
     writable: Option<Arc<std::sync::atomic::AtomicBool>>,
     #[cfg(feature = "desktop")]
     lan_writes: std::sync::Mutex<()>,
+    #[cfg(feature = "desktop")]
+    lan_uploads: lan_upload::Uploads,
 }
 
 enum ShareRoots {
@@ -388,6 +394,8 @@ fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
         writable: None,
         #[cfg(feature = "desktop")]
         lan_writes: std::sync::Mutex::new(()),
+        #[cfg(feature = "desktop")]
+        lan_uploads: lan_upload::Uploads::default(),
     }))
 }
 
@@ -510,7 +518,11 @@ impl DesktopServer {
             authorization: format!("Bearer {}", identity.invitation.token),
             writable: group.map(|(_, writable)| writable),
             lan_writes: std::sync::Mutex::new(()),
+            lan_uploads: lan_upload::Uploads::default(),
         });
+        if share.writable.is_some() {
+            lan_upload::reap_stale_uploads(&share.lan_uploads);
+        }
         let invitation = identity.invitation.encode()?;
         let shutdown = axum_server::Handle::new();
         let server =
@@ -559,7 +571,8 @@ fn router(share: Arc<Share>) -> Router {
     let router = router
         .route("/v1/drives", post(computer_drives))
         .route("/v1/lan/change", post(change_computer))
-        .route("/v1/lan/save-text", post(save_computer_text));
+        .route("/v1/lan/save-text", post(save_computer_text))
+        .route("/v1/lan/upload", post(lan_upload::handle));
     router
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(share)
@@ -594,6 +607,9 @@ fn apply_lan_change(
             let target = local::name_component(&name).map_err(crate::message)?;
             rename_lan_exclusive(&directory, &path, target)
         }
+        LanChange::DeleteCompared { expected, digest } => {
+            remove_compared_lan_file(&directory, &path, &expected, &digest)
+        }
         LanChange::Delete { recursive } => {
             let metadata = directory.symlink_metadata(&path).map_err(crate::message)?;
             if metadata.is_symlink() || !metadata.is_dir() {
@@ -606,6 +622,33 @@ fn apply_lan_change(
         }
     }
     .map_err(|error| error.to_string())
+}
+
+#[cfg(feature = "desktop")]
+fn remove_compared_lan_file(
+    directory: &Dir,
+    path: &Path,
+    expected: &crate::protocol::LanStat,
+    digest: &str,
+) -> io::Result<()> {
+    let changed = || io::Error::other("The Dirlume LAN source changed after copying.");
+    let metadata = directory.symlink_metadata(path)?;
+    if !metadata.is_file() || &lan_upload::file_stat(expected.name.clone(), &metadata) != expected {
+        return Err(changed());
+    }
+    let file = directory.open(path)?;
+    let identity = same_file::Handle::from_file(file.try_clone()?.into_std())?;
+    if crate::protocol::lan_file_digest(file, || Ok(()))? != digest {
+        return Err(changed());
+    }
+    let metadata = directory.symlink_metadata(path)?;
+    if !metadata.is_file()
+        || &lan_upload::file_stat(expected.name.clone(), &metadata) != expected
+        || same_file::Handle::from_file(directory.open(path)?.into_std())? != identity
+    {
+        return Err(changed());
+    }
+    directory.remove_file(path)
 }
 
 #[cfg(all(feature = "desktop", windows))]
@@ -705,14 +748,7 @@ fn writable_lan_item(
     share: &Share,
     segments: Vec<String>,
 ) -> std::result::Result<(Dir, PathBuf), String> {
-    use std::sync::atomic::Ordering;
-    if !share
-        .writable
-        .as_ref()
-        .is_some_and(|write| write.load(Ordering::Acquire))
-    {
-        return Err("The remote computer allows read access only.".to_owned());
-    }
+    require_lan_write(share)?;
     if segments.len() < 2 {
         return Err("Choose a location inside a remote drive.".to_owned());
     }
@@ -726,6 +762,19 @@ fn writable_lan_item(
         .file_name()
         .ok_or("Choose an item inside a remote drive.")?;
     Ok((parent, PathBuf::from(name)))
+}
+
+#[cfg(feature = "desktop")]
+fn require_lan_write(share: &Share) -> std::result::Result<(), String> {
+    if share
+        .writable
+        .as_ref()
+        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
+    {
+        Ok(())
+    } else {
+        Err("The remote computer allows read access only.".to_owned())
+    }
 }
 
 #[cfg(feature = "desktop")]

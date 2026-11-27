@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type KSwitcherPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isLanGroupPlace, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type KSwitcherPlace, type LanGroupPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath, type Side } from "./panes";
@@ -19,6 +19,7 @@ export interface Transfer {
   items: { place: FilePlace; entry: Entry; searchPath?: string; collectionDestination?: string[] }[];
   target: string;
   remoteDestination?: FtpPlace | SshPlace;
+  lanDestination?: LanGroupPlace;
   kswitcherDestination?: KSwitcherPlace;
   kswitcherBroker?: boolean;
   archiveDestination?: ArchivePlace;
@@ -54,7 +55,8 @@ export function itemSource(place: FilePlace, item: Entry): TransferSource {
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
   const metadata = item.modified === null ? {} : { modified: item.modified };
   if (place.kind === "server") {
-    return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory, ...metadata };
+    return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory, ...metadata,
+      ...(isLanGroupPlace(place) ? { lan_group: true } : {}) };
   }
   const target = childPlace(place, item.name) as typeof place;
   return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name,
@@ -101,15 +103,17 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const action = useRef<HTMLButtonElement>(null);
   const [moving, setMoving] = useState(transfer.kind === "move");
   const archiveTarget = transfer.archiveDestination;
+  const lanTarget = transfer.lanDestination;
+  const lanMove = moving && (lanTarget || transfer.items.some(({ place }) => isLanGroupPlace(place)));
   const kswitcherTarget = transfer.kswitcherDestination;
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
     (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
-  const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget;
-  const replaceable = transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
+  const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget && !lanTarget;
+  const replaceable = lanTarget || transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
     transfer.kswitcherBroker || transfer.items.every(({ place }) => place.kind === "server" || place.kind === "kswitcher");
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
-  const manyDestinations = multipleDestinations && !moving;
+  const manyDestinations = multipleDestinations && !moving && !lanTarget;
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
@@ -263,6 +267,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           source: itemSource(place, entry), destination: target, moving,
           ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
           sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
+          lanDestination: lanTarget?.id,
           kswitcherDestination: kswitcherTarget?.peer, kswitcherBroker: transfer.kswitcherBroker,
           multiple: !!transfer.collection || itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
@@ -333,7 +338,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 {remoteDestinationLabel(transfer.remoteDestination)}
               </span>}
               {kswitcherTarget && <span className="muted" id="transfer-connection">{kswitcherTarget.address}</span>}
+              {lanTarget && <span className="muted" id="transfer-connection">{lanTarget.address}</span>}
               {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus value={destination} /> :
+              lanTarget ? <input id="transfer-destination" type="text" aria-label={t("Destination")} aria-describedby="transfer-connection"
+                required data-initial-focus value={destination} onChange={(event) => setDestination(event.target.value)} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
                 describedBy={transfer.remoteDestination || kswitcherTarget ? "transfer-connection" : undefined}
                 required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination}
@@ -371,7 +379,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <option value="ask">{t(transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
                 <option value="skip">{t("Skip")}</option>
                 {replaceable && <option value="overwrite">{t("Overwrite all")}</option>}
-                {replaceable && localTarget && !transfer.kswitcherBroker && <>
+                {replaceable && localTarget && !transfer.kswitcherBroker && !lanMove && <>
                   <option value="rename">{t("Rename incoming item")}</option>
                   <option value="newer">{t("Overwrite older files only")}</option>
                 </>}
@@ -391,7 +399,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <span>{t("Copy contents of symbolic links")}</span>
               </label>
             </>}
-            {!moving && !archiveTarget && <label className="field-checkbox">
+            {!moving && !archiveTarget && !lanTarget && <label className="field-checkbox">
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
               <span>{t("Process multiple destinations")}</span>
             </label>}

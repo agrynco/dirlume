@@ -478,7 +478,7 @@ export type DeletionDecision = "retry" | "skip" | "skipRemaining";
 
 export type TransferSource =
   | { kind: "local"; directory: string; name: string }
-  | { kind: "server"; connection: number; segments: string[]; folder: boolean; modified?: number }
+  | { kind: "server"; connection: number; segments: string[]; folder: boolean; modified?: number; lan_group?: true }
   | { kind: "ftp"; connection: number; segments: string[] }
   | { kind: "archive"; archive: number; segments: string[] }
   | { kind: "ssh"; connection: number; segments: string[] }
@@ -829,7 +829,7 @@ export const api = {
   resolveTransfer: (id: number, decision: "overwrite" | "overwrite_all" | "skip", remember: boolean) =>
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
-    source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number;
+    source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; lanDestination?: number;
     kswitcherDestination?: string; kswitcherBroker?: boolean; multiple: boolean; moving: boolean;
     policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),

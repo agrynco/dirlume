@@ -29,6 +29,9 @@ use crate::{
 
 pub(crate) use crate::{message, Result};
 
+#[path = "desktop_lan_transfer.rs"]
+mod lan_transfer;
+
 #[derive(Deserialize, Serialize)]
 struct DiagramWindowData {
     image: String,
@@ -618,7 +621,7 @@ impl Connection {
     fn download_file(
         &self,
         segments: Vec<String>,
-        file: &mut fs::File,
+        file: &mut impl Write,
         session: &TransferSession,
         mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ) -> Result<()> {
@@ -811,11 +814,11 @@ struct TransferSession {
     pending: Mutex<Option<PendingConflict>>,
     remembered: Mutex<[Option<local_transfer::Decision>; 2]>,
     local: Mutex<LocalTransferAttempt>,
-    ssh_move: Mutex<Option<SshMoveAttempt>>,
+    upload_move: Mutex<Option<UploadMoveAttempt>>,
     history: Option<crate::file_history::Tracker>,
 }
 
-struct SshMoveAttempt {
+struct UploadMoveAttempt {
     source: PathBuf,
     original: local_transfer::FileRevision,
     target: Vec<String>,
@@ -1037,6 +1040,8 @@ enum TransferSource {
         segments: Vec<String>,
         folder: bool,
         modified: Option<i64>,
+        #[serde(default)]
+        lan_group: bool,
     },
     Kswitcher {
         peer: String,
@@ -1067,6 +1072,7 @@ struct TransferRequest {
     destination: String,
     ftp_destination: Option<u32>,
     ssh_destination: Option<u32>,
+    lan_destination: Option<u32>,
     kswitcher_destination: Option<String>,
     #[serde(default)]
     kswitcher_broker: bool,
@@ -1329,8 +1335,28 @@ fn upload_remote<S: remote_transfer::UploadSession>(
     .map(transfer_outcome)
 }
 
-fn move_to_ssh(
-    remote: &mut ssh::Session,
+trait VerifiedUpload: remote_transfer::UploadSession {
+    fn verify_uploaded(
+        &mut self,
+        target: &[String],
+        input: &mut fs::File,
+        session: &TransferSession,
+    ) -> Result<()>;
+}
+
+impl VerifiedUpload for ssh::Session {
+    fn verify_uploaded(
+        &mut self,
+        target: &[String],
+        input: &mut fs::File,
+        session: &TransferSession,
+    ) -> Result<()> {
+        self.verify_uploaded_contents(target, input, || session.ensure_running().map_err(message))
+    }
+}
+
+fn move_uploaded_file<S: VerifiedUpload>(
+    remote: &mut S,
     request: &TransferRequest,
     source: &Path,
     target_name: &str,
@@ -1340,8 +1366,9 @@ fn move_to_ssh(
 ) -> Result<TransferOutcome> {
     let connection = request
         .ssh_destination
-        .ok_or("Choose an SSH destination.")?;
-    let mut attempt = session.ssh_move.lock().map_err(message)?;
+        .or(request.lan_destination)
+        .ok_or("Choose a remote destination.")?;
+    let mut attempt = session.upload_move.lock().map_err(message)?;
     if !request.retry {
         *attempt = None;
     }
@@ -1351,12 +1378,22 @@ fn move_to_ssh(
             || previous.connection != connection
             || previous.destination != request.destination
         {
-            return Err("The transfer no longer matches the completed SSH upload.".to_owned());
+            return Err(format!(
+                "The transfer no longer matches the completed {} upload.",
+                S::SOURCE
+            ));
         }
     } else {
         let metadata = fs::symlink_metadata(source).map_err(message)?;
         if !metadata.is_file() || local::is_link(&metadata) {
-            return Err("Choose regular local files to move to an SSH/SFTP folder.".to_owned());
+            return Err(if S::SOURCE == "SSH" {
+                "Choose regular local files to move to an SSH/SFTP folder.".to_owned()
+            } else {
+                format!(
+                    "Choose regular local files to move to a {} folder.",
+                    S::SOURCE
+                )
+            });
         }
         let original = local_transfer::FileRevision::capture(source, &metadata).map_err(message)?;
         let target = remote_transfer::upload_destination(
@@ -1376,7 +1413,7 @@ fn move_to_ssh(
         )? {
             return Ok(TransferOutcome::Skipped);
         }
-        *attempt = Some(SshMoveAttempt {
+        *attempt = Some(UploadMoveAttempt {
             source: source.to_owned(),
             original,
             target,
@@ -1384,15 +1421,13 @@ fn move_to_ssh(
             destination: request.destination.clone(),
         });
     }
-    let completed = attempt.as_ref().expect("successful SSH upload");
+    let completed = attempt.as_ref().expect("successful remote upload");
     let result = (|| {
         if retry_cleanup {
             session.ensure_running().map_err(message)?;
             completed.original.verify(source).map_err(message)?;
             let mut input = fs::File::open(source).map_err(message)?;
-            remote.verify_uploaded_contents(&completed.target, &mut input, || {
-                session.ensure_running().map_err(message)
-            })?;
+            remote.verify_uploaded(&completed.target, &mut input, session)?;
             session.ensure_running().map_err(message)?;
         }
         // Once the remote upload commits, finish this item before moving on.
@@ -1422,6 +1457,7 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
         destination: "/".to_owned(),
         ftp_destination: None,
         ssh_destination: Some(12),
+        lan_destination: None,
         kswitcher_destination: None,
         kswitcher_broker: false,
         multiple: false,
@@ -1438,7 +1474,7 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
                request: &TransferRequest,
                progress: &mut Progress<'_>,
                ask: &mut _| {
-        move_to_ssh(
+        move_uploaded_file(
             remote,
             request,
             &source,
@@ -1488,7 +1524,7 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
 
     request.retry = true;
     let record_attempt = || {
-        *session.ssh_move.lock().unwrap() = Some(SshMoveAttempt {
+        *session.upload_move.lock().unwrap() = Some(UploadMoveAttempt {
             source: source.clone(),
             original: FileRevision::capture(&source, &fs::symlink_metadata(&source).unwrap())
                 .unwrap(),
@@ -1540,7 +1576,9 @@ async fn transfer_item(
     ssh_state: State<'_, ssh::SshState>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
-    if request.kswitcher_broker || request.kswitcher_destination.is_some() {
+    if request.lan_destination.is_none()
+        && (request.kswitcher_broker || request.kswitcher_destination.is_some())
+    {
         return session
             .interrupt(transfer_kswitcher(&request, &session, &output))
             .await;
@@ -1569,7 +1607,20 @@ async fn transfer_item(
         .ssh_destination
         .map(|id| ssh_state.connection(id))
         .transpose()?;
-    if ftp_destination.is_some() && ssh_destination.is_some() {
+    let lan_destination = request
+        .lan_destination
+        .map(|id| connections.get(id))
+        .transpose()?;
+    if [
+        ftp_destination.is_some(),
+        ssh_destination.is_some(),
+        lan_destination.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count()
+        > 1
+    {
         return Err("Choose a single remote connection for the copy.".to_owned());
     }
     blocking(move || {
@@ -1613,6 +1664,170 @@ async fn transfer_item(
             progress(Path::new(name), 0, None).map_err(message)?;
 
             let mut ask = |conflict| session.ask(conflict, &output);
+            if let Some(destination) = lan_destination {
+                if request.moving {
+                    let source = source
+                        .as_deref()
+                        .ok_or("Choose a regular local file to move to a Dirlume LAN folder.")?;
+                    return move_uploaded_file(
+                        &mut lan_transfer::LanTransfer {
+                            connection: &destination,
+                            transfer: &session,
+                        },
+                        &request,
+                        source,
+                        name,
+                        &session,
+                        &mut progress,
+                        &mut ask,
+                    );
+                }
+                let staging;
+                let staged;
+                let source = if let Some(path) = source.as_deref() {
+                    path
+                } else {
+                    staging = tempfile::tempdir().map_err(message)?;
+                    staged = staging
+                        .path()
+                        .join(local::name_component(name).map_err(message)?);
+                    let options = local_transfer::Options {
+                        moving: false,
+                        policy: local_transfer::Policy::Ask,
+                        ask_read_only: true,
+                        copy: local::CopyOptions::default(),
+                    };
+                    let mut no_commit = |_: &Path, _: &Path| {};
+                    match &request.source {
+                        TransferSource::Server {
+                            segments, folder, ..
+                        } => {
+                            let server = connection
+                                .as_ref()
+                                .ok_or("Connect to the Dirlume server first.")?;
+                            if server.invitation.certificate == destination.invitation.certificate {
+                                let mut client = lan_transfer::LanTransfer {
+                                    connection: &destination,
+                                    transfer: &session,
+                                };
+                                let target = remote_transfer::upload_destination(
+                                    &mut client,
+                                    &request.destination,
+                                    name,
+                                    request.multiple,
+                                )?;
+                                if segments
+                                    .iter()
+                                    .zip(&target)
+                                    .all(|(source, target)| source.eq_ignore_ascii_case(target))
+                                    && target.len() >= segments.len()
+                                {
+                                    return Err(
+                                        "Choose a destination outside the source item.".to_owned()
+                                    );
+                                }
+                            }
+                            if *folder {
+                                server.download_tree(
+                                    segments.clone(),
+                                    &staged,
+                                    &session,
+                                    &mut progress,
+                                )?;
+                            } else {
+                                let mut file = fs::File::create_new(&staged).map_err(message)?;
+                                server.download_file(
+                                    segments.clone(),
+                                    &mut file,
+                                    &session,
+                                    &mut progress,
+                                )?;
+                            }
+                        }
+                        TransferSource::Ftp { segments, .. } => {
+                            let mut source = ftp_source
+                                .ok_or("Connect to the FTP server first.")?
+                                .open_with_cancel(Some(session.cancelled.clone()))?;
+                            remote_transfer::download(
+                                &mut source,
+                                segments,
+                                &staged,
+                                &options,
+                                &mut progress,
+                                &mut ask,
+                                &mut no_commit,
+                            )?;
+                        }
+                        TransferSource::Ssh { segments, .. } => {
+                            let mut source = ssh_source
+                                .ok_or("Connect to the SSH server first.")?
+                                .open_with_cancel(Some(session.cancelled.clone()))?;
+                            remote_transfer::download(
+                                &mut source,
+                                segments,
+                                &staged,
+                                &options,
+                                &mut progress,
+                                &mut ask,
+                                &mut no_commit,
+                            )?;
+                        }
+                        TransferSource::Archive { segments, .. } => {
+                            archive
+                                .ok_or("Open the archive first.")?
+                                .lock()
+                                .map_err(message)?
+                                .copy_to(
+                                    segments,
+                                    &staged,
+                                    &options,
+                                    &mut progress,
+                                    &mut ask,
+                                    &mut no_commit,
+                                )?;
+                        }
+                        TransferSource::Kswitcher {
+                            peer, path, folder, ..
+                        } => {
+                            if *folder {
+                                download_kswitcher_tree(
+                                    peer,
+                                    path,
+                                    &staged,
+                                    &session,
+                                    &mut progress,
+                                )?;
+                            } else {
+                                let mut file = fs::File::create_new(&staged).map_err(message)?;
+                                tauri::async_runtime::block_on(session.interrupt(
+                                    crate::kswitcher_lan::download(
+                                        peer,
+                                        path,
+                                        &mut file,
+                                        |bytes, total| progress(Path::new(name), bytes, total),
+                                    ),
+                                ))?;
+                            }
+                        }
+                        TransferSource::Local { .. } => {
+                            unreachable!("local source is resolved before staging")
+                        }
+                    }
+                    &staged
+                };
+                return upload_remote(
+                    lan_transfer::LanTransfer {
+                        connection: &destination,
+                        transfer: &session,
+                    },
+                    &request,
+                    name,
+                    source,
+                    &mut progress,
+                    &mut ask,
+                    &mut committed,
+                );
+            }
             if ftp_destination.is_some() || ssh_destination.is_some() {
                 let protocol = if ssh_destination.is_some() {
                     "SSH"
@@ -1634,7 +1849,7 @@ async fn transfer_item(
                     .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
                 if let Some(connection) = ssh_destination {
                     if request.moving {
-                        return move_to_ssh(
+                        return move_uploaded_file(
                             &mut connection.open_with_cancel(Some(session.cancelled.clone()))?,
                             &request,
                             source,
@@ -1769,9 +1984,10 @@ async fn transfer_item(
                     segments,
                     folder,
                     modified,
+                    lan_group,
                     ..
                 } => {
-                    if request.moving {
+                    if request.moving && (!lan_group || folder) {
                         return Err("This source is read-only.".to_owned());
                     }
                     let connection = connection.ok_or("Connect to the server first.")?;
@@ -1779,7 +1995,16 @@ async fn transfer_item(
                         return connection
                             .copy_folder(segments, &target, &session, &options, progress, ask);
                     }
-                    copy_downloaded_item(
+                    let mut client = lan_transfer::LanTransfer {
+                        connection: &connection,
+                        transfer: &session,
+                    };
+                    let expected = request
+                        .moving
+                        .then(|| client.file_snapshot(&segments))
+                        .transpose()?;
+                    let mut digest = None;
+                    let outcome = copy_downloaded_item(
                         &target,
                         &session,
                         &options,
@@ -1787,10 +2012,48 @@ async fn transfer_item(
                         ask,
                         |staged, progress| {
                             let mut file = fs::File::create_new(staged).map_err(message)?;
-                            connection.download_file(segments, &mut file, &session, progress)?;
-                            finish_downloaded_file(&file, modified).map_err(message)
+                            connection.download_file(
+                                segments.clone(),
+                                &mut file,
+                                &session,
+                                progress,
+                            )?;
+                            finish_downloaded_file(&file, modified).map_err(message)?;
+                            drop(file);
+                            if expected.is_some() {
+                                digest = Some(
+                                    crate::protocol::lan_file_digest(
+                                        fs::File::open(staged).map_err(message)?,
+                                        || session.ensure_running(),
+                                    )
+                                    .map_err(message)?,
+                                );
+                            }
+                            Ok(())
                         },
-                    )
+                    )?;
+                    if matches!(outcome, TransferOutcome::Completed) {
+                        if let (Some(expected), Some(digest)) = (expected, digest) {
+                            if let Err(error) =
+                                session.ensure_running().map_err(message).and_then(|()| {
+                                    client.change(
+                                        &segments,
+                                        crate::protocol::LanChange::DeleteCompared {
+                                            expected,
+                                            digest,
+                                        },
+                                    )
+                                })
+                            {
+                                return Ok(TransferOutcome::SourceRetained {
+                                    source: format!("/{}", segments.join("/")),
+                                    destination: display(&target),
+                                    error,
+                                });
+                            }
+                        }
+                    }
+                    Ok(outcome)
                 }
                 TransferSource::Kswitcher {
                     peer,
@@ -1868,7 +2131,10 @@ async fn transfer_kswitcher(
 ) -> Result<TransferOutcome> {
     use crate::kswitcher_lan::Endpoint;
     use local_transfer::Policy;
-    if request.ftp_destination.is_some() || request.ssh_destination.is_some() {
+    if request.ftp_destination.is_some()
+        || request.ssh_destination.is_some()
+        || request.lan_destination.is_some()
+    {
         return Err("Choose a local or KSwitcher LAN destination.".into());
     }
     let (source_peer, source_path, name) = match &request.source {

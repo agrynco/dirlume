@@ -32,7 +32,7 @@ export function workspaceResources(owners: WorkspaceOwners) {
   for (const pair of owners.comparisons) { retain(pair.left.place); retain(pair.right.place); }
   owners.analyzers?.forEach(retain);
   if (owners.transfer) {
-    retain(owners.transfer.source); retain(owners.transfer.remoteDestination);
+    retain(owners.transfer.source); retain(owners.transfer.remoteDestination); retain(owners.transfer.lanDestination);
     owners.transfer.items.forEach(({ place }) => retain(place));
   }
   return resources;

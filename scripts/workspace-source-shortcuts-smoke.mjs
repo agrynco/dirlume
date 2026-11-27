@@ -353,6 +353,13 @@ try {
       id: 10, segments: ["Files", "nested", "note.txt"], change: { kind: "delete", recursive: false },
     });
     await button(pane("left"), "List").click();
+    await files("right").getByRole("option", { name: /^note\.txt/ }).click();
+    await files("right").press("F5");
+    const uploadDialog = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await uploadDialog.getByRole("textbox", { name: "Destination", exact: true }).inputValue(), "/Files");
+    await button(uploadDialog, "Copy").click();
+    await uploadDialog.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.lastTransfer.lanDestination), 10);
     await button(page, "Options").click();
     await button(options, "Computers").click();
     await button(group, "Leave group").click();

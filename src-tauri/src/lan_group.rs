@@ -559,6 +559,105 @@ mod tests {
                         assert_eq!(result.is_ok(), recursive);
                     }
                     assert!(!host.join("Renamed").exists());
+                    use crate::protocol::{LanUpload, LanUploadReply, LAN_UPLOAD_CHUNK};
+                    let upload =
+                        |operation: &LanUpload| post("v1/lan/upload").json(operation).send();
+                    let begin = LanUpload::Begin {
+                        segments: vec![drive.into(), "copied.bin".into()],
+                    };
+                    let result: Result<LanUploadReply> =
+                        upload(&begin).await.unwrap().json().await.unwrap();
+                    let LanUploadReply::Begun { stage } = result.unwrap() else {
+                        panic!("Expected an upload stage")
+                    };
+                    let uploaded = vec![91; LAN_UPLOAD_CHUNK * 2 + 5];
+                    let mut offset = 0;
+                    for chunk in uploaded.chunks(LAN_UPLOAD_CHUNK) {
+                        let result: Result<LanUploadReply> = upload(&LanUpload::Chunk {
+                            stage,
+                            offset,
+                            encoded: URL_SAFE_NO_PAD.encode(chunk),
+                        })
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                        assert!(matches!(result, Ok(LanUploadReply::Ok)));
+                        offset += chunk.len() as u64;
+                    }
+                    assert!(!host.join("copied.bin").exists());
+                    let result: Result<LanUploadReply> = upload(&LanUpload::Commit {
+                        stage,
+                        overwrite: false,
+                    })
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                    assert!(matches!(result, Ok(LanUploadReply::Ok)));
+                    assert_eq!(std::fs::read(host.join("copied.bin")).unwrap(), uploaded);
+
+                    let result: Result<LanUploadReply> =
+                        upload(&begin).await.unwrap().json().await.unwrap();
+                    let LanUploadReply::Begun { stage } = result.unwrap() else {
+                        panic!("Expected a replacement stage")
+                    };
+                    std::fs::write(host.join("copied.bin"), "Edited outside Dirlume").unwrap();
+                    let result: Result<LanUploadReply> = upload(&LanUpload::Commit {
+                        stage,
+                        overwrite: true,
+                    })
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                    assert!(result.err().unwrap().contains("destination changed"));
+                    assert_eq!(
+                        std::fs::read(host.join("copied.bin")).unwrap(),
+                        b"Edited outside Dirlume"
+                    );
+                    assert_eq!(std::fs::read_dir(host).unwrap().count(), 2);
+                    let path = vec![drive.to_owned(), "copied.bin".to_owned()];
+                    let stat: Result<LanUploadReply> = upload(&LanUpload::Stat {
+                        segments: path.clone(),
+                    })
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                    let LanUploadReply::Stat {
+                        entry: Some(expected),
+                    } = stat.unwrap()
+                    else {
+                        panic!("Expected an uploaded file");
+                    };
+                    for (contents, accepted) in [
+                        (b"Stale copy".as_slice(), false),
+                        (b"Edited outside Dirlume".as_slice(), true),
+                    ] {
+                        let digest = crate::protocol::lan_file_digest(contents, || Ok(())).unwrap();
+                        let deletion = request(
+                            &["copied.bin"],
+                            LanChange::DeleteCompared {
+                                expected: expected.clone(),
+                                digest,
+                            },
+                        );
+                        let outcome: Result<()> = post("v1/lan/change")
+                            .json(&deletion)
+                            .send()
+                            .await
+                            .unwrap()
+                            .json()
+                            .await
+                            .unwrap();
+                        assert_eq!(outcome.is_ok(), accepted);
+                        assert_ne!(host.join("copied.bin").exists(), accepted);
+                    }
                     b.set_writable(false);
                 }
             }

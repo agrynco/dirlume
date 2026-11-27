@@ -2242,9 +2242,24 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     chooseOperation = false, side = active) {
     if (!items.length) return;
     const remoteDestination = isFileServer(target) ? target : undefined;
+    const lanDestination = isLanGroupPlace(target) && target.segments.length ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
     const fromKSwitcher = source.kind === "kswitcher";
-    const kswitcherBroker = Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
+    const kswitcherBroker = !lanDestination && Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
+    if (isLanGroupPlace(target) && !lanDestination) {
+      setStatus({ text: "Choose a location inside a remote drive.", error: true });
+      return;
+    }
+    if (lanDestination && items.some(({ place, entry }) => entry.link || kind === "move" && (place.kind !== "local" || entry.directory))) {
+      setStatus({ text: kind === "move" ? "Choose regular local files to move to a Dirlume LAN folder." :
+        "Choose files or folders without links to copy to Dirlume LAN.", error: true });
+      return;
+    }
+    if (kind === "move" && isLanGroupPlace(source) &&
+      (target && target.kind !== "local" || items.some(({ entry }) => entry.directory || entry.link))) {
+      setStatus({ text: "Choose regular Dirlume LAN files and a local destination.", error: true });
+      return;
+    }
     if (kswitcherDestination && source.kind !== "local" && !fromKSwitcher) {
       setStatus({ text: "Choose a local or KSwitcher LAN source.", error: true });
       return;
@@ -2278,8 +2293,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     setModal({ kind: "transfer", side, transfer: {
       kind, source, items, chooseOperation,
-      target: target && (archiveDestination || kswitcherDestination || target.kind === "local" || isFileServer(target)) ? placePath(target) : "",
-      remoteDestination, archiveDestination, kswitcherDestination, kswitcherBroker,
+      target: target && (archiveDestination || kswitcherDestination || lanDestination || target.kind === "local" || isFileServer(target)) ? placePath(target) : "",
+      remoteDestination, lanDestination, archiveDestination, kswitcherDestination, kswitcherBroker,
     } });
   }
 
@@ -2387,7 +2402,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (kind === "copy") collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
       return;
     }
-    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "ftp" &&
+    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "ftp" && !isLanGroupPlace(source) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     if (kind === "move" && source.kind === "ftp") {
       setModal({ kind: "rename", path: placePath(source), name: selected.name, remote: source });
@@ -2396,7 +2411,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const otherPane = panes[targetSide];
     const target = otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
-        processPanels[targetSide] || otherPane.loading) ? null : otherPane.place;
+        processPanels[targetSide] || otherPane.loading) ? null :
+      isLanGroupPlace(otherPane.place) ? treeFolder(targetSide) ?? otherPane.place : otherPane.place;
     if (kind === "move" && target?.kind === "ftp") {
       setStatus({ text: "Choose a local destination. FTP does not support moving local files." });
     }
@@ -3459,7 +3475,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
-      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !ftp && !(kswitcherWrite && kswitcherDelete)) ||
+      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !ftp && !lanGroupPlace && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || lanGroupPlace) && current.link) || busy },
