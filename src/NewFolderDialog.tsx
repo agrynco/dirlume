@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, isPermissionError, placePath, windowsClient, type ArchivePlace, type FolderLinkType } from "./api";
+import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FolderLinkType, type KSwitcherPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EditableDropdown } from "./EditableDropdown";
@@ -24,9 +24,10 @@ function folderHistory(): HistoryEntry[] {
   }
 }
 
-export function NewFolderDialog({ directory, archive, showHidden, historyShortcut, onCreated, onClose }: {
+export function NewFolderDialog({ directory, archive, kswitcher, showHidden, historyShortcut, onCreated, onClose }: {
   directory: string;
   archive?: ArchivePlace;
+  kswitcher?: KSwitcherPlace;
   showHidden: boolean;
   historyShortcut: readonly string[];
   onCreated: (name: string) => Promise<void>;
@@ -73,7 +74,11 @@ export function NewFolderDialog({ directory, archive, showHidden, historyShortcu
     setFailedName("");
     try {
       if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
-      const result = archive ? { last: name, failure: null } : await api.createFolders(directory, { name, multiple, linkType, target });
+      if (kswitcher) {
+        if (!name || /[\\/]/.test(name) || name === "." || name === "..") throw new Error(t("Enter a valid folder name."));
+        await api.changeKSwitcher(kswitcher.peer, kswitcherPath(directory, name), { kind: "create_folder" });
+      }
+      const result = archive || kswitcher ? { last: name, failure: null } : await api.createFolders(directory, { name, multiple, linkType, target });
       if (result.last) await onCreated(result.last);
       if (result.failure) {
         setError(result.failure.error);
@@ -139,7 +144,8 @@ export function NewFolderDialog({ directory, archive, showHidden, historyShortcu
           </div>}
         </div>
         {archive && <p>{placePath(archive)}</p>}
-        {!archive && <>
+        {kswitcher && <p>{kswitcher.address} · {directory}</p>}
+        {!archive && !kswitcher && <>
         <label className="field">{t("Link type")}
           <select value={linkType} aria-label={t("Link type")} disabled={waiting} onChange={(event) => setLinkType(event.target.value as FolderLinkType)}>
             <option value="none">{t("None")}</option>
@@ -159,7 +165,7 @@ export function NewFolderDialog({ directory, archive, showHidden, historyShortcu
         </>}
         {error && <p className="dialog-error" role="alert">{failedName ? t("Could not create {0}. {1}", failedName, errorText(error)) : errorText(error)}</p>}
         {archive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
-        {!archive && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
+        {!archive && !kswitcher && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
       </div>
       <div className="dialog-footer">
         <Button type="button" disabled={waiting && (!archive || archiveChange.canceling)} onClick={close}>

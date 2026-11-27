@@ -122,7 +122,7 @@ export type FileLocation =
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; canAdd: boolean; address: string }
   | { kind: "ssh"; id: number; profileId: string; address: string; origin: string; segments: string[];
       directories?: DirectoryPreferences; environment?: EnvironmentPreferences }
-  | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null };
+  | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null; capabilities?: KSwitcherCapabilities };
 
 export const connectionSourceNames = { netbox: "NetBox", smb: "SMB", remote: "Remote machine" } as const;
 export type ConnectionSource = keyof typeof connectionSourceNames;
@@ -148,7 +148,8 @@ export function isFileServer(place: Place | null | undefined): place is FileServ
 export type ArchivePlace = Extract<Place, { kind: "archive" }>;
 export type ArchiveChange = { kind: "folder"; parent: string[]; name: string }
   | { kind: "rename"; segments: string[]; name: string };
-export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" | "ssh" | "archive" }>;
+export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" | "ssh" | "archive" | "kswitcher" }>;
+export type KSwitcherPlace = Extract<Place, { kind: "kswitcher" }>;
 
 export type ArchiveSettings = {
   format: string; appendExtension: boolean; level: number; method: string; solid: boolean; encrypted: boolean;
@@ -309,6 +310,22 @@ export interface KSwitcherPeer {
   id: string;
   name: string;
   online?: boolean;
+}
+
+export interface KSwitcherCapabilities {
+  write: boolean;
+  delete: boolean;
+  revisionRead: boolean;
+  onHostTransfer: boolean;
+  localEndpoint: boolean;
+  conflictPrompt?: boolean;
+}
+
+type KSwitcherChange = { kind: "create_file"; encoding: TextEncoding } | { kind: "create_folder" | "recycle" } |
+  { kind: "rename"; name: string } | { kind: "delete"; recursive: boolean };
+
+export function kswitcherPath(directory: string, name: string) {
+  return directory.replace(/[\\/]+$/, "") + "\\" + name;
 }
 
 export const textEncodingLabels = {
@@ -741,6 +758,9 @@ export const api = {
   kswitcherPeers: (directory: string) => invoke<KSwitcherPeer[]>("kswitcher_peers", { directory }),
   listKSwitcher: (directory: string, peer: string, path: string) =>
     invoke<Listing & { parent: string | null; drives?: ComputerDrive[] | null }>("list_kswitcher", { directory, peer, path }),
+  kswitcherCapabilities: (peer: string) => invoke<KSwitcherCapabilities>("kswitcher_capabilities", { peer }),
+  changeKSwitcher: (peer: string, path: string, change: KSwitcherChange) =>
+    invoke<void>("change_kswitcher", { peer, path, change }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
   computerName: () => invoke<string | null>("computer_name"),
   userMenuSources: (folder: string) => invoke<MenuSource[]>("user_menu_sources", { folder }),
@@ -780,7 +800,8 @@ export const api = {
   resolveTransfer: (id: number, decision: "overwrite" | "overwrite_all" | "skip", remember: boolean) =>
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
-    source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; multiple: boolean; moving: boolean;
+    source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number;
+    kswitcherDestination?: string; kswitcherBroker?: boolean; multiple: boolean; moving: boolean;
     policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
 };
@@ -799,6 +820,8 @@ export function documentPath({ place, name }: NamedFile) {
   if (place.kind === "server" || isFileServer(place)) {
     return place.origin + "/" + [...place.segments, name].map(encodeURIComponent).join("/");
   }
+  if (place.kind === "kswitcher") return "kswitcher://" + encodeURIComponent(place.peer) + "/" +
+    kswitcherPath(place.path, name).split(/[/\\]/).map(encodeURIComponent).join("/");
   if (place.kind === "local") {
     if (place.smb) return mountedSmbPath(place.path, place.smb) + "/" + encodeURIComponent(name);
     const [host, ...segments] = uncParts(place.path);
@@ -833,6 +856,7 @@ type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp"
 
 export function openPlaceTextPages({ place, name }: NamedFile, editing: boolean, sudoPassword?: string) {
   if (place.kind === "local") return api.openLocalTextPages(place.path, name, editing);
+  if (place.kind === "kswitcher") return Promise.resolve(null);
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.openArchiveTextPages(place.id, segments, editing);
   if (place.kind === "ftp") return api.openFtpTextPages(place.id, segments, editing);
@@ -843,6 +867,9 @@ export function openPlaceTextPages({ place, name }: NamedFile, editing: boolean,
 export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: TextReadSurface) {
   const { place, name } = file;
   if (place.kind === "local") return api.readText(place.path, name, surface);
+  if (place.kind === "kswitcher") return invoke<TextDocument>("read_kswitcher_text", {
+    peer: place.peer, path: kswitcherPath(place.path, name),
+  });
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.readArchiveText(place.id, segments);
   if (place.kind === "ssh") return api.readSshText(place.id, segments, sudoPassword);
@@ -856,12 +883,18 @@ export function readPlacePreviewText({ place, name }: NamedFile) {
 }
 
 export function readPlacePreviewImage({ place, name }: NamedFile) {
+  if (place.kind === "kswitcher") return invoke<ArrayBuffer>("read_kswitcher_preview", { peer: place.peer, path: kswitcherPath(place.path, name) });
   const source = place.kind === "local" ? { kind: place.kind, directory: place.path, name }
     : { kind: place.kind, id: place.id, segments: [...place.segments, name] };
   return invoke<ArrayBuffer>("read_preview_image", { source });
 }
 
 export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {
+  if (place.kind === "kswitcher") {
+    if (!document.revision) throw new Error("Reopen the KSwitcher file before saving again.");
+    return invoke<TextDocument>("save_kswitcher_text", { peer: place.peer, path: kswitcherPath(place.path, name),
+      revision: document.revision, encoding: document.encoding, text });
+  }
   if (place.kind === "archive") {
     if (!place.writable || !document.revision) throw new Error("The archive is read-only.");
     return api.saveArchiveText(place.id, [...place.segments, name], document.revision, text, document.encoding);
@@ -881,6 +914,7 @@ export async function savePlaceText({ place, name }: NamedFile, document: TextDo
 
 export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
   if (place.kind === "local") return api.readBytes(place.path, name, offset);
+  if (place.kind === "kswitcher") return invoke<BytePage>("read_kswitcher_bytes", { peer: place.peer, path: kswitcherPath(place.path, name), offset });
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.readArchiveBytes(place.id, segments, offset);
   if (place.kind === "ssh") return api.readSshBytes(place.id, segments, offset);
@@ -888,6 +922,7 @@ export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
 }
 
 export function writableTextPlace(place: TextPlace) {
+  if (place.kind === "kswitcher") return Boolean(place.capabilities?.write);
   return place.kind !== "server" && (place.kind !== "archive" || place.writable);
 }
 

@@ -29,6 +29,7 @@ export async function testFolderMeasurement() {
         };
         localStorage.setItem("dirlume.preferences.v1", JSON.stringify(preferences));
         const home = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
+        const homeParent = /Windows/.test(navigator.userAgent) ? "C:\\" : "/";
         const downloads = home + (/Windows/.test(navigator.userAgent) ? "\\downloads" : "/downloads");
         const entries = [{ name: "Measured folder", directory: true }, { name: "Second folder", directory: true },
           { name: "Neighbor.txt", directory: false }]
@@ -40,7 +41,7 @@ export async function testFolderMeasurement() {
           transformCallback: () => 1,
           invoke: async (command, args) => {
             if (command === "locations") return [{ label: "Home", path: home }, { label: "Downloads", path: downloads }];
-            if (command === "list_directory") return { path: args.path, parent: null,
+            if (command === "list_directory") return { path: args.path, parent: args.path === home ? homeParent : null,
               entries: args.path === home ? entries : entries.map((entry) => ({ ...entry, modified: null })), omitted: 0 };
             if (command === "file_icons") return args.items.map(() => null);
             if (command === "format_timestamps") {
@@ -51,6 +52,7 @@ export async function testFolderMeasurement() {
               return args.timestamps.map(() => "13:40");
             }
             if (command === "measure_folders") {
+              window.measuredFolderNames = args.names;
               return new Promise((done) => {
                 const remaining = [...args.names];
                 window.completeFolderMeasurement = (only) => {
@@ -160,6 +162,47 @@ export async function testFolderMeasurement() {
       await page.evaluate(() => window.lateFolderMeasurement());
       await second.getByText(layout === "twin" ? "1,024" : "1 KiB", { exact: true }).waitFor();
       assert.equal(await folder.getByText(measured, { exact: true }).count(), 1);
+
+      if (layout === "standard" && width === "0") {
+        const parentRow = pane.locator('[role="option"][data-tooltip=".."]');
+        await parentRow.click();
+        await pane.getByRole("listbox").press("F3");
+        await reading.waitFor();
+        assert.deepEqual((await page.evaluate(() => window.measuredFolderNames)).sort(), ["Measured folder", "Second folder"]);
+        await page.evaluate(() => window.completeFolderMeasurement());
+        await reading.waitFor({ state: "hidden" });
+        assert.equal(await parentRow.getAttribute("data-current"), "true");
+
+        await pane.getByRole("button", { name: "Filter folder", exact: true }).click();
+        const filter = pane.getByRole("textbox", { name: "Filter left folder", exact: true });
+        const action = page.getByRole("navigation", { name: "File actions", exact: true })
+          .getByRole("button", { name: "Measure", exact: true });
+        await filter.fill("Measured");
+        await parentRow.click();
+        await action.click();
+        await reading.waitFor();
+        assert.deepEqual(await page.evaluate(() => window.measuredFolderNames), ["Measured folder"]);
+        await page.evaluate(() => window.completeFolderMeasurement());
+        await reading.waitFor({ state: "hidden" });
+        await filter.fill("Neighbor");
+        await parentRow.click();
+        assert.equal(await action.isDisabled(), true);
+        await pane.getByRole("button", { name: "Close filter", exact: true }).click();
+
+        await pane.getByRole("button", { name: "Tree", exact: true }).click();
+        const tree = pane.getByRole("tree");
+        const branch = tree.getByRole("treeitem", { name: /^Measured folder/ }).first();
+        await branch.getByRole("button", { name: "Expand folder", exact: true }).click();
+        await tree.getByRole("treeitem", { level: 2 }).first().waitFor();
+        await tree.locator('[role="treeitem"][data-tooltip=".."]').click();
+        await tree.press("F3");
+        await reading.waitFor();
+        assert.deepEqual((await page.evaluate(() => window.measuredFolderNames)).sort(), ["Measured folder", "Second folder"]);
+        await page.evaluate(() => window.completeFolderMeasurement());
+        await reading.waitFor({ state: "hidden" });
+        assert.equal(await pane.getByRole("button", { name: "Folder sizes", exact: true }).getAttribute("aria-pressed"), "false");
+        await pane.getByRole("button", { name: "List", exact: true }).click();
+      }
 
       await folder.dblclick();
       await page.waitForFunction(() => document.querySelector("#left-path")?.dataset.path.endsWith("Measured folder") &&

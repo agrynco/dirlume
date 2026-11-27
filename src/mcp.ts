@@ -32,7 +32,7 @@ export type McpRevisions = Map<string, { file: NamedFile; contents: TextDocument
 
 function sameFile(a: NamedFile, b: NamedFile) {
   return a.name === b.name && a.place.kind === b.place.kind && placePath(a.place) === placePath(b.place) &&
-    (a.place.kind === "local" || "id" in b.place && a.place.id === b.place.id);
+    (a.place.kind === "local" || "id" in a.place && "id" in b.place && a.place.id === b.place.id);
 }
 
 function textFile(place: FileLocation, entry: Entry): NamedFile {
