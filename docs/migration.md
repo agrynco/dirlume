@@ -24,13 +24,17 @@ The baseline is [KSwitcher Files v0.6.119](https://gitea.hrynco.com/hrynco/hrync
 
 The Space Analyzer reads Windows UNC shares through Windows and OS-mounted SMB shares through the local filesystem on Ubuntu and macOS. Filesystems and servers that expose allocated bytes can report size on disk. FTP, SSH/SFTP, KSwitcher, and Windows-hosted Dirlume Server listings use file size. A Unix-hosted Dirlume Server reports allocated bytes and hard-link identities. Older server versions can report allocation without identity, so shared allocations may be counted more than once. Remote scans skip links that the provider identifies in its listings.
 
-In a file pane, Measure on the parent row totals the logical sizes of visible immediate child folders across local paths, SMB, FTP, SSH/SFTP, Dirlume shares, KSwitcher LAN, and archives. In Tree, expanded descendants contribute to their top-level totals.
+In a file pane, Measure on the parent row totals the logical sizes of visible immediate child folders across local paths, SMB, FTP, SSH/SFTP, Dirlume shares, KSwitcher LAN, Google Drive, and archives. In Tree, expanded descendants contribute to their top-level totals. Google Drive totals include nested items using file sizes reported by Drive.
 
 Direct Dirlume pairing uses a host-approved read-only session. Opening the pane sources refreshes the host's current local locations, including attached drives. Choose a drive from either pane to browse, view, or download files. Stopping access on the host revokes the active session.
 
 The session file operation history records Copy and Move results. Undo and Redo cover verified regular local files transferred to one destination without overwrites. Move reversal stays on the same volume.
 
-F6 focuses Move when a default destination is available. Enter starts the move. Dialog labels and text buttons have underlined access keys. Alt and the underlined letter focus the corresponding control.
+F6 starts with the other pane's location and focuses Move when a default destination is available. Enter starts the move. Editing the field can switch the destination between a local path and a supported connected source. A single new name renames the selected item in its current folder. Dialog labels and text buttons have underlined access keys. Alt and the underlined letter focus the corresponding control.
+
+Google Drive My Drive supports List and Tree navigation, creation of folders and text files, text editing, rename, Trash, and permanent deletion. File and folder transfers use the same Copy and Move dialogs between Drive and the local filesystem. Drive grants and item permissions determine which operations can write.
+
+Google Drive transfers to local disks export supported Workspace documents and save reference-only items as `.url` links. Moving a reference or a folder containing references keeps its Drive source. Bulk transfers report individual failures and continue through the selection.
 
 Space Analyzer, Scan volume, and folder sizing in List and Tree share a scanner. Local APFS uses batched metadata reads, and ext4 uses one metadata lookup per entry when mount IDs are available. The scanner uses ordinary directory reads and metadata when these optimizations are unavailable.
 

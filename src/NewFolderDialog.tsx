@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type KSwitcherPlace, type WritableServerPlace } from "./api";
+import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type GoogleDrivePlace, type KSwitcherPlace, type WritableServerPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EditableDropdown } from "./EditableDropdown";
@@ -25,14 +25,15 @@ function folderHistory(): HistoryEntry[] {
   }
 }
 
-export function NewFolderDialog({ directory, archive, kswitcher, remote, showHidden, historyShortcut, onCreated, onClose }: {
+export function NewFolderDialog({ directory, archive, kswitcher, remote, googleDrive, showHidden, historyShortcut, onCreated, onClose }: {
   directory: string;
   archive?: ArchivePlace;
   kswitcher?: KSwitcherPlace;
   remote?: FileServerPlace | WritableServerPlace;
+  googleDrive?: GoogleDrivePlace;
   showHidden: boolean;
   historyShortcut: readonly string[];
-  onCreated: (name: string) => Promise<void>;
+  onCreated: (name: string, itemId?: string) => Promise<void>;
   onClose: () => void;
 }) {
   const nameId = useId();
@@ -84,6 +85,14 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
     setError("");
     setFailedName("");
     try {
+      if (googleDrive) {
+        const itemId = await api.changeGoogleDrive(googleDrive.id, {
+          kind: "createFolder", parent: googleDrive.folders.at(-1)?.id ?? "root", name,
+        });
+        await onCreated(name, itemId ?? undefined);
+        complete(name);
+        return;
+      }
       if (remote?.kind === "server") await api.changeServerItem(remote, [name], { kind: "folder" });
       else if (remote) await api.createRemoteFolder(remote, name);
       if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
@@ -157,7 +166,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
         </div>
         {archive && <p>{placePath(archive)}</p>}
         {(kswitcher || remote) && <p>{(kswitcher ?? remote)?.address} · {directory}</p>}
-        {!archive && !kswitcher && !remote && <>
+        {!archive && !kswitcher && !remote && !googleDrive && <>
         <label className="field">{t("Link type")}
           <select value={linkType} aria-label={t("Link type")} disabled={waiting} onChange={(event) => setLinkType(event.target.value as FolderLinkType)}>
             <option value="none">{t("None")}</option>
@@ -177,7 +186,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
         </>}
         {error && <p className="dialog-error" role="alert">{failedName ? t("Could not create {0}. {1}", failedName, errorText(error)) : errorText(error)}</p>}
         {archive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
-        {!archive && !kswitcher && !remote && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
+        {!archive && !kswitcher && !remote && !googleDrive && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
       </div>
       <div className="dialog-footer">
         <Button type="button" disabled={waiting && (!archive || archiveChange.canceling)} onClick={close}>

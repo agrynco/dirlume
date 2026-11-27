@@ -472,13 +472,15 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
     return inside && (!best || base.length > comparablePath(best.path).length) ? location : best;
   }, undefined) : undefined;
   const localView = pane.place?.kind === "local" && !pane.loading;
+  const driveView = pane.place?.kind === "googleDrive" && !pane.loading;
   const treeView = !pane.search && !pane.loading && supportsFileTree(pane.place);
   const viewControls = !catalog && !processView && !search && pane.place && <div className="pane-view-toolbar" data-help-topic="paneViews">
       <div className="pane-view-modes" role="group" aria-label={t("File pane view")}>
           <Button type="button" aria-pressed={!tree} disabled={!treeView} onClick={() => onFileView("list")}>{t("List")}</Button>
           <Button type="button" aria-pressed={tree} disabled={!treeView} onClick={() => onFileView("tree")}>{t("Tree")}</Button>
         </div>
-        <Button type="button" aria-pressed={folderSizes.active} disabled={!localView} onClick={onFolderSizes}>
+        <Button type="button" aria-pressed={driveView ? undefined : folderSizes.active}
+          disabled={!localView && (!driveView || !availableEntries.some(({ googleDrive }) => googleDrive?.directory))} onClick={onFolderSizes}>
           <Ruler aria-hidden="true" />{t("Folder sizes")}
         </Button>
         {folderSizes.active && (folderSizes.support

@@ -127,7 +127,11 @@ export type GoogleDriveItem = {
   webViewLink: string | null; download: boolean;
 };
 export type GoogleDriveProfile = { kind: "googleDrive"; id: string; label: string; email: string; signInNeeded: boolean };
-export type GoogleDrivePlace = { kind: "googleDrive"; id: string; address: string; folders: { id: string; name: string }[] };
+export type GoogleDrivePlace = { kind: "googleDrive"; id: string; address: string; email?: string; folders: { id: string; name: string }[] };
+export type GoogleDriveChange =
+  | { kind: "createFolder" | "createFile"; parent: string; name: string }
+  | { kind: "rename"; item: string; name: string }
+  | { kind: "trash" | "delete"; item: string };
 export const googleDriveSignInRequired = "Sign in to this Google Drive account again.";
 
 export type FileLocation =
@@ -162,7 +166,7 @@ export type SshPlace = Extract<Place, { kind: "ssh" }>;
 export type FileServerPlace = FtpPlace | SshPlace;
 export type LanGroupPlace = Extract<Place, { kind: "server" }> & { groupPeer: string };
 export type WritableServerPlace = LanGroupPlace | (Extract<Place, { kind: "server" }> & { writable: true });
-export type TreePlace = Exclude<FilePlace, GoogleDrivePlace>;
+export type TreePlace = FilePlace;
 export type LanChange = { kind: "folder" } | { kind: "create_text"; encoding: TextEncoding } |
   { kind: "delete"; recursive: boolean } | { kind: "rename"; name: string };
 export function isLanGroupPlace(place: Place | null | undefined): place is LanGroupPlace {
@@ -177,14 +181,14 @@ export function isFileServer(place: Place | null | undefined): place is FileServ
   return place?.kind === "ftp" || place?.kind === "ssh";
 }
 export function supportsFileTree(place: Place | null | undefined): place is TreePlace {
-  return !!place && place.kind !== "connections" && place.kind !== "smbRoot" && place.kind !== "googleDrive" &&
+  return !!place && place.kind !== "connections" && place.kind !== "smbRoot" &&
     (place.kind !== "kswitcher" || !!place.path) && (!isLanGroupPlace(place) || !!place.segments.length);
 }
 export type ArchivePlace = Extract<Place, { kind: "archive" }>;
 export type ArchiveChange = { kind: "folder"; parent: string[]; name: string }
   | { kind: "text"; parent: string[]; name: string; encoding: TextEncoding }
   | { kind: "rename"; segments: string[]; name: string };
-export type TextPlace = Extract<Place, { kind: "local" | "server" | "ftp" | "ssh" | "archive" | "kswitcher" }>;
+export type TextPlace = FilePlace;
 export type KSwitcherPlace = Extract<Place, { kind: "kswitcher" }>;
 
 export type ArchiveSettings = {
@@ -340,6 +344,7 @@ type SshProfileInput = SshHostInput & {
 export interface NamedFile {
   place: TextPlace;
   name: string;
+  driveItem?: string;
 }
 
 export interface KSwitcherPeer {
@@ -506,7 +511,7 @@ export type DeletionResult = { selection: DeletionSelection; counts: DeletionCou
 export type DeletionDecision = "retry" | "skip" | "skipRemaining";
 
 export type TransferSource =
-  | { kind: "google_drive"; profile: string; item: string; name: string }
+  | { kind: "google_drive"; profile: string; item: string; name: string; parent: string; folder: boolean }
   | { kind: "local"; directory: string; name: string }
   | { kind: "server"; connection: number; segments: string[]; folder: boolean; modified?: number; writable_server?: true }
   | { kind: "ftp"; connection: number; segments: string[] }
@@ -614,6 +619,7 @@ export const api = {
   renameGoogleDrive: (id: string, label: string) => invoke<void>("rename_google_drive", { id, label }),
   removeGoogleDrive: (id: string) => invoke<void>("remove_google_drive", { id }),
   listGoogleDrive: (id: string, folder: string) => invoke<GoogleDriveItem[]>("list_google_drive", { id, folder }),
+  changeGoogleDrive: (id: string, change: GoogleDriveChange) => invoke<string | null>("change_google_drive", { id, change }),
   startMcp: () => invoke<McpConnection>("start_mcp"),
   stopMcp: () => invoke<void>("stop_mcp"),
   mcpConnection: () => invoke<McpConnection | null>("mcp_connection"),
@@ -851,7 +857,8 @@ export const api = {
   resizeTerminal: (id: number, rows: number, cols: number) => invoke<void>("resize_terminal", { id, rows, cols }),
   closeTerminal: (id: number) => invoke<void>("close_terminal", { id }),
   measureFolders: (id: number, source: { kind: "local"; directory: string } |
-    { kind: "ftp"; connection: number; segments: string[] }, names: string[], output: Channel<SizeResult>) =>
+    { kind: "ftp"; connection: number; segments: string[] } |
+    { kind: "google_drive"; profile: string; folders: Record<string, string> }, names: string[], output: Channel<SizeResult>) =>
     invoke<void>("measure_folders", { id, source, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
   beginTransfer: (id: number, history?: { moving: boolean; source: string; destination: string; multipleDestinations: boolean }) =>
@@ -875,6 +882,7 @@ export const api = {
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; serverDestination?: number;
     archiveDestination?: Pick<ArchivePlace, "id" | "segments">;
+    googleDriveDestination?: { profile: string; parent: string };
     kswitcherDestination?: string; kswitcherBroker?: boolean; multiple: boolean; moving: boolean;
     policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
@@ -931,7 +939,7 @@ type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp"
 
 export function openPlaceTextPages({ place, name }: NamedFile, editing: boolean, sudoPassword?: string) {
   if (place.kind === "local") return api.openLocalTextPages(place.path, name, editing);
-  if (place.kind === "kswitcher") return Promise.resolve(null);
+  if (place.kind === "kswitcher" || place.kind === "googleDrive") return Promise.resolve(null);
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.openArchiveTextPages(place.id, segments, editing);
   if (place.kind === "ftp") return api.openFtpTextPages(place.id, segments, editing);
@@ -942,6 +950,7 @@ export function openPlaceTextPages({ place, name }: NamedFile, editing: boolean,
 export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: TextReadSurface) {
   const { place, name } = file;
   if (place.kind === "local") return api.readText(place.path, name, surface);
+  if (place.kind === "googleDrive") return invoke<TextDocument>("read_google_drive_text", { id: place.id, item: file.driveItem });
   if (place.kind === "kswitcher") return invoke<TextDocument>("read_kswitcher_text", {
     peer: place.peer, path: kswitcherPath(place.path, name),
   });
@@ -951,20 +960,26 @@ export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: 
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
 }
 
-export function readPlacePreviewText({ place, name }: NamedFile, sudoPassword?: string) {
+export function readPlacePreviewText(file: NamedFile, sudoPassword?: string) {
+  const { place, name } = file;
   return place.kind === "local" ? invoke<TextDocument | { page: BytePage }>("read_text", {
     directory: place.path, name, surface: "quick_view",
-  }) : readPlaceText({ place, name }, sudoPassword);
+  }) : readPlaceText(file, sudoPassword);
 }
 
-export function readPlacePreviewImage({ place, name }: NamedFile, sudoPassword?: string) {
+export function readPlacePreviewImage({ place, name, driveItem }: NamedFile, sudoPassword?: string) {
+  if (place.kind === "googleDrive") return invoke<ArrayBuffer>("read_google_drive_image", { id: place.id, item: driveItem });
   if (place.kind === "kswitcher") return invoke<ArrayBuffer>("read_kswitcher_preview", { peer: place.peer, path: kswitcherPath(place.path, name) });
   const source = place.kind === "local" ? { kind: place.kind, directory: place.path, name }
     : { kind: place.kind, id: place.id, segments: [...place.segments, name] };
   return invoke<ArrayBuffer>("read_preview_image", { source, sudoPassword });
 }
 
-export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {
+export async function savePlaceText({ place, name, driveItem }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {
+  if (place.kind === "googleDrive") {
+    if (!document.revision) throw new Error("Reopen the Google Drive file before saving again.");
+    return invoke<TextDocument>("save_google_drive_text", { id: place.id, item: driveItem, revision: document.revision, encoding: document.encoding, text });
+  }
   if (place.kind === "kswitcher") {
     if (!document.revision) throw new Error("Reopen the KSwitcher file before saving again.");
     return invoke<TextDocument>("save_kswitcher_text", { peer: place.peer, path: kswitcherPath(place.path, name),
@@ -992,7 +1007,8 @@ export async function savePlaceText({ place, name }: NamedFile, document: TextDo
   return { ...document, text };
 }
 
-export function readPlaceBytes({ place, name }: NamedFile, offset: number, sudoPassword?: string) {
+export function readPlaceBytes({ place, name, driveItem }: NamedFile, offset: number, sudoPassword?: string) {
+  if (place.kind === "googleDrive") return invoke<BytePage>("read_google_drive_bytes", { id: place.id, item: driveItem, offset });
   if (place.kind === "local") return api.readBytes(place.path, name, offset);
   if (place.kind === "kswitcher") return invoke<BytePage>("read_kswitcher_bytes", { peer: place.peer, path: kswitcherPath(place.path, name), offset });
   const segments = [...place.segments, name];

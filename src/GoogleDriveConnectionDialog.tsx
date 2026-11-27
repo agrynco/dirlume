@@ -90,7 +90,7 @@ export function GoogleDriveConnectionDialog({ profile, onSaved, onRemove, onClos
             <strong>{t("Waiting for Google")}</strong>
             <p>{t("Finish signing in to Google in your browser.")}</p>
           </div>
-        </div> : !profile && <p>{t("Dirlume opens your browser to request read-only access to My Drive.")}</p>}
+        </div> : !profile && <p>{t("Dirlume opens your browser to request access to view and manage files in My Drive.")}</p>}
         {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
       </div>
       <footer className="dialog-footer">

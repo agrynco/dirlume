@@ -46,7 +46,7 @@ export const helpTopics = {
   remote: { title: "Remote connection", keys: ["leftLocations", "rightLocations", "netboxSources", "addNetBoxProfile", "editNetBoxProfile",
     "netboxPreviousPage", "netboxNextPage", "remoteSources"] },
   googleDrive: { title: "Google Drive", keys: ["leftLocations", "rightLocations", "googleDriveSources",
-    "addGoogleDriveProfile", "editGoogleDriveProfile", "copy"] },
+    "addGoogleDriveProfile", "editGoogleDriveProfile", "newFile", "mkdir", "view", "edit", "rename", "copy", "move", "recycle", "delete"] },
   processes: { title: "Processes", keys: ["leftLocations", "rightLocations"] },
   general: { title: "General", keys: ["settings"] },
   profiles: { title: "Profiles", keys: [] },

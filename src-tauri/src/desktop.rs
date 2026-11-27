@@ -31,6 +31,13 @@ use crate::{
 pub(crate) use crate::text_format::{encode as encode_text, Encoding, TEXT_LIMIT};
 pub(crate) use crate::{message, Result};
 
+#[path = "desktop_google_drive_transfer.rs"]
+mod google_drive_transfer;
+use google_drive_transfer::{
+    copy_drive_tree, download_drive_tree, drive_local_name, drive_transfer_plan,
+    transfer_drive_folder,
+};
+
 #[path = "desktop_lan_transfer.rs"]
 mod lan_transfer;
 #[path = "desktop_remote_transfer.rs"]
@@ -1104,6 +1111,10 @@ enum TransferSource {
         profile: uuid::Uuid,
         item: String,
         name: String,
+        #[serde(default = "drive_root")]
+        parent: String,
+        #[serde(default)]
+        folder: bool,
     },
     Local {
         directory: String,
@@ -1139,6 +1150,16 @@ enum TransferSource {
     },
 }
 
+fn drive_root() -> String {
+    "root".into()
+}
+
+#[derive(Deserialize)]
+struct GoogleDriveDestination {
+    profile: uuid::Uuid,
+    parent: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ArchiveDestination {
@@ -1156,6 +1177,7 @@ struct TransferRequest {
     server_destination: Option<u32>,
     archive_destination: Option<ArchiveDestination>,
     kswitcher_destination: Option<String>,
+    google_drive_destination: Option<GoogleDriveDestination>,
     #[serde(default)]
     kswitcher_broker: bool,
     multiple: bool,
@@ -2124,6 +2146,7 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
         server_destination: None,
         archive_destination: None,
         kswitcher_destination: None,
+        google_drive_destination: None,
         kswitcher_broker: false,
         multiple: false,
         moving: true,
@@ -2242,11 +2265,241 @@ async fn transfer_item(
     app: AppHandle,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
+    if let Some(destination) = &request.google_drive_destination {
+        if request.ftp_destination.is_some()
+            || request.ssh_destination.is_some()
+            || request.server_destination.is_some()
+            || request.archive_destination.is_some()
+            || request.kswitcher_destination.is_some()
+            || request.kswitcher_broker
+        {
+            return Err("Choose a single remote connection for the copy.".into());
+        }
+        let drive = crate::google_drive::TransferDrive::writable(&app, destination.profile).await?;
+        return match &request.source {
+            TransferSource::Local { directory, name } => {
+                let source =
+                    Path::new(directory).join(local::name_component(name).map_err(message)?);
+                let meta = fs::symlink_metadata(&source).map_err(message)?;
+                if local::is_link(&meta) || !meta.is_file() && !meta.is_dir() {
+                    return Err("Choose files or folders without symbolic links.".into());
+                }
+                let incoming = local_transfer::EntryDetails::network(
+                    Some(meta.len()),
+                    meta.modified().ok(),
+                    meta.is_dir(),
+                );
+                let Some(plan) = drive_transfer_plan(
+                    &drive,
+                    destination,
+                    name,
+                    incoming,
+                    None,
+                    &request,
+                    &session,
+                    &output,
+                )
+                .await?
+                else {
+                    return Ok(TransferOutcome::Skipped);
+                };
+                if meta.is_dir() && !local::is_link(&meta) {
+                    return transfer_drive_folder(
+                        &drive,
+                        &source,
+                        &destination.parent,
+                        &plan,
+                        &session,
+                        &output,
+                        request.moving,
+                        &request.destination,
+                    )
+                    .await;
+                }
+                let revision =
+                    local_transfer::FileRevision::capture(&source, &meta).map_err(message)?;
+                session
+                    .interrupt(drive.upload(
+                        &source,
+                        &destination.parent,
+                        &plan.name,
+                        |bytes, total| {
+                            report_transfer_progress(&output, &source, bytes, Some(total));
+                            session.ensure_running()
+                        },
+                    ))
+                    .await?;
+                if let Some(existing) = plan.replace {
+                    drive.trash(&existing).await?;
+                }
+                if request.moving {
+                    if let Err(error) = session
+                        .ensure_running()
+                        .and_then(|()| local_transfer::remove_original(&source, &revision))
+                    {
+                        return Ok(TransferOutcome::SourceRetained {
+                            destination: request.destination,
+                            source: source.display().to_string(),
+                            error: message(error),
+                        });
+                    }
+                }
+                Ok(TransferOutcome::Completed)
+            }
+            TransferSource::GoogleDrive {
+                profile,
+                item,
+                name,
+                parent,
+                folder,
+            } if *profile == destination.profile => {
+                if request.moving && parent == &destination.parent {
+                    return Ok(TransferOutcome::Skipped);
+                }
+                let incoming = local_transfer::EntryDetails::network(None, None, *folder);
+                let Some(plan) = drive_transfer_plan(
+                    &drive,
+                    destination,
+                    name,
+                    incoming,
+                    Some(item),
+                    &request,
+                    &session,
+                    &output,
+                )
+                .await?
+                else {
+                    return Ok(TransferOutcome::Skipped);
+                };
+                if request.moving {
+                    session
+                        .interrupt(drive.move_item(item, parent, &destination.parent, &plan.name))
+                        .await?;
+                } else if *folder {
+                    copy_drive_tree(&drive, item, &destination.parent, &plan.name, &session)
+                        .await?;
+                } else {
+                    session
+                        .interrupt(drive.copy_item(item, &destination.parent, &plan.name))
+                        .await?;
+                }
+                if let Some(existing) = plan.replace {
+                    drive.trash(&existing).await?;
+                }
+                Ok(TransferOutcome::Completed)
+            }
+            TransferSource::GoogleDrive {
+                profile,
+                item,
+                name,
+                folder,
+                ..
+            } => {
+                let incoming = local_transfer::EntryDetails::network(None, None, *folder);
+                let Some(plan) = drive_transfer_plan(
+                    &drive,
+                    destination,
+                    name,
+                    incoming,
+                    None,
+                    &request,
+                    &session,
+                    &output,
+                )
+                .await?
+                else {
+                    return Ok(TransferOutcome::Skipped);
+                };
+                let source = if request.moving {
+                    Some(crate::google_drive::TransferDrive::writable(&app, *profile).await?)
+                } else {
+                    None
+                };
+                let revisions = match &source {
+                    Some(source) => Some(session.interrupt(source.snapshot(item, *folder)).await?),
+                    None => None,
+                };
+                let workspace = tempfile::tempdir().map_err(message)?;
+                let staged = workspace.path().join("download");
+                if *folder {
+                    let reader = session
+                        .interrupt(crate::google_drive::TransferDrive::readable(&app, *profile))
+                        .await?;
+                    download_drive_tree(
+                        &reader,
+                        item,
+                        &staged,
+                        &session,
+                        false,
+                        |path, bytes, total| {
+                            report_transfer_progress(&output, path, bytes, total);
+                            session.ensure_running()
+                        },
+                    )
+                    .await?;
+                    transfer_drive_folder(
+                        &drive,
+                        &staged,
+                        &destination.parent,
+                        &plan,
+                        &session,
+                        &output,
+                        false,
+                        &request.destination,
+                    )
+                    .await?;
+                } else {
+                    session
+                        .interrupt(crate::google_drive::download(
+                            &app,
+                            *profile,
+                            item,
+                            &staged,
+                            |_, _| session.ensure_running(),
+                        ))
+                        .await?;
+                    session
+                        .interrupt(drive.upload(
+                            &staged,
+                            &destination.parent,
+                            &plan.name,
+                            |bytes, total| {
+                                report_transfer_progress(
+                                    &output,
+                                    Path::new(name),
+                                    bytes,
+                                    Some(total),
+                                );
+                                session.ensure_running()
+                            },
+                        ))
+                        .await?;
+                    if let Some(existing) = plan.replace {
+                        drive.trash(&existing).await?;
+                    }
+                }
+                if let (Some(source), Some(revisions)) = (source, revisions) {
+                    if let Err(error) = session
+                        .interrupt(source.trash_unchanged(item, *folder, &revisions))
+                        .await
+                    {
+                        return Ok(TransferOutcome::SourceRetained {
+                            destination: request.destination,
+                            source: name.clone(),
+                            error,
+                        });
+                    }
+                }
+                Ok(TransferOutcome::Completed)
+            }
+            _ => Err(
+                "Choose a local file or use the same Google Drive account in both panes.".into(),
+            ),
+        };
+    }
     let from_drive = matches!(request.source, TransferSource::GoogleDrive { .. });
     if from_drive
-        && (request.moving
-            || request.multiple
-            || request.kswitcher_broker
+        && (request.kswitcher_broker
             || request.server_destination.is_some()
             || request.ftp_destination.is_some()
             || request.ssh_destination.is_some()
@@ -2775,11 +3028,12 @@ async fn transfer_item(
                 TransferSource::Server { folder: true, .. }
                     | TransferSource::Kswitcher { folder: true, .. }
             );
+            let local_name = from_drive.then(|| drive_local_name(name));
             let target = match local.as_ref().and_then(|local| local.destination.clone()) {
                 Some(path) => path,
                 None => transfer_target(
                     &request.destination,
-                    name,
+                    local_name.as_deref().unwrap_or(name),
                     source.as_deref(),
                     request.multiple,
                     source.is_some()
@@ -2880,29 +3134,92 @@ async fn transfer_item(
                     profile,
                     item,
                     name,
-                } => copy_downloaded_item(
-                    &target,
-                    &session,
-                    &options,
-                    progress,
-                    ask,
-                    |staged, progress| {
-                        let modified = tauri::async_runtime::block_on(session.interrupt(
-                            crate::google_drive::download(
-                                &app,
-                                profile,
-                                &item,
-                                staged,
-                                |bytes, total| progress(Path::new(&name), bytes, total),
-                            ),
-                        ))?;
-                        let file = fs::File::options()
-                            .write(true)
-                            .open(staged)
-                            .map_err(message)?;
-                        finish_downloaded_file(&file, modified).map_err(message)
-                    },
-                ),
+                    folder,
+                    ..
+                } => {
+                    let drive = tauri::async_runtime::block_on(
+                        session
+                            .interrupt(crate::google_drive::TransferDrive::readable(&app, profile)),
+                    )?;
+                    let revisions = if request.moving {
+                        Some(tauri::async_runtime::block_on(
+                            session.interrupt(drive.snapshot(&item, folder)),
+                        )?)
+                    } else {
+                        None
+                    };
+                    let prepared = if folder {
+                        None
+                    } else {
+                        Some(tauri::async_runtime::block_on(
+                            session.interrupt(drive.prepare_local_file(&item)),
+                        )?)
+                    };
+                    let mut references = prepared.as_ref().is_some_and(|file| file.is_reference());
+                    let target = if let Some(file) = &prepared {
+                        let name = target
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .ok_or("Enter a valid destination name.")?;
+                        target.with_file_name(file.local_name(name))
+                    } else {
+                        target
+                    };
+                    actual_destination = display(&target);
+                    let result = copy_downloaded_item(
+                        &target,
+                        &session,
+                        &options,
+                        progress,
+                        ask,
+                        |staged, progress| {
+                            let Some(file) = prepared else {
+                                references = tauri::async_runtime::block_on(download_drive_tree(
+                                    &drive, &item, staged, &session, true, progress,
+                                ))?;
+                                return Ok(());
+                            };
+                            let modified = tauri::async_runtime::block_on(session.interrupt(
+                                file.write(staged, |bytes, total| {
+                                    progress(Path::new(&name), bytes, total)
+                                }),
+                            ))?;
+                            let file = fs::File::options()
+                                .write(true)
+                                .open(staged)
+                                .map_err(message)?;
+                            finish_downloaded_file(&file, modified).map_err(message)
+                        },
+                    )?;
+                    if matches!(result, TransferOutcome::Completed) {
+                        if request.moving && references {
+                            return Ok(TransferOutcome::SourceRetained {
+                                destination: target.display().to_string(),
+                                source: name,
+                                error: "Saved local links. The source was kept in Google Drive."
+                                    .into(),
+                            });
+                        }
+                        if let Some(revisions) = revisions {
+                            let trash = async {
+                                let source =
+                                    crate::google_drive::TransferDrive::writable(&app, profile)
+                                        .await?;
+                                source.trash_unchanged(&item, folder, &revisions).await
+                            };
+                            if let Err(error) =
+                                tauri::async_runtime::block_on(session.interrupt(trash))
+                            {
+                                return Ok(TransferOutcome::SourceRetained {
+                                    destination: target.display().to_string(),
+                                    source: name,
+                                    error,
+                                });
+                            }
+                        }
+                    }
+                    Ok(result)
+                }
                 TransferSource::Server {
                     segments,
                     folder,
@@ -4913,6 +5230,11 @@ pub fn run() {
         crate::google_drive::rename_google_drive,
         crate::google_drive::remove_google_drive,
         crate::google_drive::list_google_drive,
+        crate::google_drive::change_google_drive,
+        crate::google_drive::read_google_drive_text,
+        crate::google_drive::read_google_drive_image,
+        crate::google_drive::read_google_drive_bytes,
+        crate::google_drive::save_google_drive_text,
         ftp::ftp_profiles,
         ftp::ftp_windows_code_page,
         ftp::test_ftp_connection,
