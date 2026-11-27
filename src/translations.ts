@@ -1585,6 +1585,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Grant the required file permission in Trusted clients.": ["Надайте потрібний дозвіл для файлів у Trusted clients.", "Предоставьте нужное разрешение для файлов в Trusted clients."],
   "Choose a local or KSwitcher LAN source.": ["Виберіть локальне джерело або KSwitcher LAN.", "Выберите локальный источник или KSwitcher LAN."],
   "Choose a local or KSwitcher LAN destination.": ["Виберіть локальну папку призначення або KSwitcher LAN.", "Выберите локальную папку назначения или KSwitcher LAN."],
+  "Could not reach the Dirlume server.": ["Не вдалося підключитися до сервера Dirlume.", "Не удалось подключиться к серверу Dirlume."],
+  "The requested remote drive, folder, or file is unavailable.": ["Запитаний віддалений диск, папка або файл недоступні.", "Запрошенный удалённый диск, папка или файл недоступны."],
   "Choose a remote item.": ["Виберіть віддалений елемент.", "Выберите удалённый элемент."],
   "Choose a supported FTP copy option.": ["Виберіть підтримуваний параметр копіювання FTP.", "Выберите поддерживаемый параметр копирования FTP."],
   "Use Copy to download FTP items.": ["Щоб завантажити елементи FTP, скористайтеся дією «Копіювати».", "Чтобы загрузить элементы FTP, используйте действие «Копировать»."],

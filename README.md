@@ -288,7 +288,7 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder with read access over TLS. Browse and download files and directories, or open and compare text in Dirlume. [Server setup and autostart](docs/server.md).
 
-**Dirlume LAN** lists available remote drives under their computer name in either pane's sources. To pair with another Dirlume instance, open **Options → Computers** on the host, generate and copy its pairing code, then save the computer in **Options → Computers** on the guest. The guest can browse and download from the host's local locations while the host keeps access enabled. Stopping access or exiting the host invalidates the current code.
+**Dirlume LAN** lists available remote drives under their computer name in either pane's sources. To pair with another Dirlume instance, open **Options → Computers** on the host, generate and copy its pairing code, then save the computer in **Options → Computers** on the guest. The guest can browse and download from the host's local locations while the host keeps access enabled. Reopen the pane sources to refresh attached drives. Stopping access or exiting the host invalidates the current code.
 
 On Windows, authorize `Dirlume.exe` in **KSwitcher → Computers → Trusted clients** to use the resident KSwitcher LAN service. Each online paired computer appears under **Dirlume LAN** in either pane's sources. Choose a drive to open it directly. Dirlume can browse and download regular files using the existing LAN pair’s permissions. If the executable changes, add it again in KSwitcher.
 

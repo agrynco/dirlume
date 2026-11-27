@@ -25,6 +25,8 @@ The Space Analyzer reads Windows UNC shares through Windows and OS-mounted SMB s
 
 In a file pane, Measure on the parent row totals the logical sizes of visible immediate child folders across local paths, SMB, FTP, SSH/SFTP, Dirlume shares, KSwitcher LAN, and archives. In Tree, expanded descendants contribute to their top-level totals.
 
+Direct Dirlume pairing uses a host-approved read-only session. Opening the pane sources refreshes the host's current local locations, including attached drives. Choose a drive from either pane to browse, view, or download files. Stopping access on the host revokes the active session.
+
 The session file operation history records Copy and Move results. Undo and Redo cover verified regular local files transferred to one destination without overwrites. Move reversal stays on the same volume.
 
 Space Analyzer, Scan volume, and folder sizing in List and Tree share a scanner. Local APFS uses batched metadata reads, and ext4 uses one metadata lookup per entry when mount IDs are available. The scanner uses ordinary directory reads and metadata when these optimizations are unavailable.
