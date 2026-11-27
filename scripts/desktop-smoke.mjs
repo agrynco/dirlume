@@ -2034,6 +2034,8 @@ try {
       page = await startDesktop();
       return page;
     });
+    await navigate("left", src);
+    await navigate("right", dst);
   }
   await showOptions();
   const featureDialog = optionsDialog;
@@ -2107,7 +2109,7 @@ try {
   featureFonts.forEach(([, family], index) => assert.ok(featureValues[index][0].replaceAll("\\", "").startsWith(family)));
   const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: "Files", exact: true });
   if (await filesTab.isVisible()) await filesTab.click();
-  const sampleForFonts = page.getByRole("option", { name: /^sample\.rs/ }).first();
+  const sampleForFonts = leftPane.getByRole("option", { name: /^sample\.rs/ });
   const sampleSurface = page.getByRole("region", { name: "sample.rs", exact: true }).locator(".code-surface");
   for (const [shortcut, expected] of [["F3", "21px"], ["F4", "19px"]]) {
     await sampleForFonts.click();
