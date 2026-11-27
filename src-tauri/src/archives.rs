@@ -441,6 +441,7 @@ impl Archive {
         options: &Options,
         progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
         ask: impl FnMut(Conflict) -> io::Result<Decision>,
+        committed: impl FnMut(&Path, &Path),
     ) -> Result<bool> {
         crate::remote_transfer::download(
             &mut ArchiveReader(self),
@@ -449,6 +450,7 @@ impl Archive {
             options,
             progress,
             ask,
+            committed,
         )
     }
 
@@ -918,7 +920,8 @@ mod tests {
                     &target,
                     &options,
                     |_, _, _| panic!("must skip before extraction"),
-                    |_| panic!("unexpected question")
+                    |_| panic!("unexpected question"),
+                    |_, _| {}
                 )
                 .unwrap());
             archive.write_member(&note, b"updated text").unwrap();

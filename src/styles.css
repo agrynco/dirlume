@@ -1275,6 +1275,16 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 [data-theme="classic-blue"] .dialog input::placeholder { color: var(--dialog-field-ink); opacity: .85; }
 .dialog::backdrop { background: var(--overlay); }
 .dialog-wide { width: min(1100px, calc(100vw - 36px)); }
+.file-operation-history-grid { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr); gap: 14px; align-items: start; }
+.file-operation-history-grid select { width: 100%; }
+.file-operation-history-details { min-width: 0; overflow-wrap: anywhere; }
+.file-operation-history-details h3, .file-operation-history-details dl, .file-operation-history-details dd { margin: 0; }
+.file-operation-history-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; padding-block: 8px; }
+.file-operation-history-details ul { max-height: 42vh; overflow: auto; margin: 8px 0 0; padding: 0; list-style: none; }
+.file-operation-history-details li { padding-block: 7px; border-top: 1px solid var(--line); }
+@media (max-width: 560px) {
+  .file-operation-history-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .dialog-modeless { position: fixed; inset: 52px 12px auto auto; margin: 0; z-index: 20;
   width: min(580px, calc(100vw - 36px)); }
 .dialog-modeless > .dialog-heading { cursor: move; touch-action: none; user-select: none; }

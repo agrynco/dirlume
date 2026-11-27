@@ -34,6 +34,7 @@ import { ReleaseNotes } from "./ReleaseNotes";
 import { KSwitcherUnavailableError, reportFrontendError, SshConnectionLostError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
+import { FileHistoryDialog } from "./FileHistoryDialog";
 import { VerifyHostDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
@@ -167,6 +168,7 @@ type Modal =
   | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; side: Side; transfer: Transfer }
+  | { kind: "fileHistory"; direction?: "undo" | "redo" }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" }> }
@@ -2999,6 +3001,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
+      case "fileOperationHistory": if (!modal) setModal({ kind: "fileHistory" }); break;
+      case "undoFileOperation": if (!modal) setModal({ kind: "fileHistory", direction: "undo" }); break;
+      case "redoFileOperation": if (!modal) setModal({ kind: "fileHistory", direction: "redo" }); break;
       case "copyClipboard": if (current) void copyClipboard(active, current); break;
       case "lockingProcesses": if (current) showLockingProcesses(active, currentItem); break;
       case "pasteClipboard": void pasteClipboard(active); break;
@@ -3313,6 +3318,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
       commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
       commandWithIcon(History, "commandHistory", activeDocument !== null),
+      commandWithIcon(History, "fileOperationHistory", !!modal || activeDocument !== null),
+      menuCommand("undoFileOperation", !!modal || activeDocument !== null),
+      menuCommand("redoFileOperation", !!modal || activeDocument !== null),
       commandWithIcon(Bookmark, "folderShortcuts", !panesAvailable),
       commandWithIcon(TerminalIcon, "toggleTerminal", activeDocument !== null),
       ...(isTauri() ? [
@@ -3818,6 +3826,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             } else fileLocationsChanged();
             if (success) setStatus({ text: "Transfer complete" });
           }} />
+      )}
+      {modal?.kind === "fileHistory" && (
+        <FileHistoryDialog initial={modal.direction} onClose={() => { setModal(null); requestAnimationFrame(() => focus(active)); }}
+          onChanged={fileLocationsChanged} />
       )}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}

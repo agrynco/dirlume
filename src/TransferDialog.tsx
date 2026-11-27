@@ -210,7 +210,10 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     const movedPaths: string[] = [];
     try {
       if (!initialized) {
-        await api.beginTransfer(id);
+        await api.beginTransfer(id, {
+          moving, source: placePath(transfer.source), destination: targets.join(", "),
+          multipleDestinations: manyDestinations && targets.length > 1,
+        });
         initialized = true;
       }
       if (archiveTarget && !cancelled.current) {
