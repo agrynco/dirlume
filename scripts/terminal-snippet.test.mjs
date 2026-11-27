@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { replaceTerminalSnippet } from "../src/terminalDraft.ts";
+import { createTerminalSnippetTicket, replaceTerminalSnippet } from "../src/terminalDraft.ts";
 
 const ticket = "current-prompt";
 const draft = { text: "echo ;l tail", caret: 7 };
 const request = (prefix, text, cursor = text.length, token = ticket) =>
   JSON.stringify([token, prefix, text, cursor]);
+
+test("the terminal snippet ticket uses the UUID format expected by KSwitcher", () => {
+  assert.match(createTerminalSnippetTicket(), /^dirlume-terminal-snippet-v1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
 
 test("a snippet replaces the prefix at the caret and preserves the rest of the shell draft", () => {
   assert.deepEqual(replaceTerminalSnippet(draft, ticket, request(";l", "two words", 3), false, true), {
