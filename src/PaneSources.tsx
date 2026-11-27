@@ -3,7 +3,7 @@ import { Activity, ChevronDown, Clock3, Folder, HardDrive, Server } from "lucide
 import { api, describeError, windowsClient, type ComputerDrive, type ConnectionSource, type QuickLocation } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
-import { t } from "./i18n";
+import { errorText, t } from "./i18n";
 import { formatSize, type Side } from "./panes";
 import { bindingMatches, driveSourceCommand, eventShortcut, showShortcut, type Bindings } from "./preferences";
 import { readRemoteProfiles } from "./savedConnections";
@@ -89,6 +89,9 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
   const firstDrive = folders.findIndex(({ value }) => driveSourceCommand(value));
   const recentIndex = downloads >= 0 ? downloads + 1 : firstDrive >= 0 ? firstDrive : folders.length;
   const folderSources = [...folders.slice(0, recentIndex), recent, ...folders.slice(recentIndex)];
+  const kswitcherStatus = kswitcherError === "Authorize this executable in KSwitcher → Computers → Trusted clients."
+    ? t("To browse KSwitcher computers, add Dirlume.exe under KSwitcher → Computers → Trusted clients.")
+    : errorText(kswitcherError);
   function sourceButton({ label, bindings, Icon, value }: (typeof sources)[number] | (typeof folderSources)[number]) {
     const path = typeof value === "object" ? value.path : undefined;
     return <Button key={path ?? label} tooltip={path} shortcut={showShortcut(bindings[0])} onClick={() => onPick(value)}>
@@ -123,16 +126,24 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
         buttons[next]?.focus();
       }
     }}>
-      {folderSources.map(sourceButton)}
+      <div className="lan-sources" role="group" aria-label={t("This computer")}>
+        <strong>{t("This computer")}</strong>
+        {folderSources.map(sourceButton)}
+      </div>
       <div className="location-source-group" role="group" aria-label={t("Sources")}>{sources.map(sourceButton)}</div>
-      {(computers.length > 0 || kswitcherError) && <div className="location-source-group lan-sources" role="group" aria-label={t("Dirlume LAN")}>
-        <strong>{t("Dirlume LAN")}</strong>
-        {kswitcherError && <p role="status">{kswitcherError}</p>}
-        {computers.map(({ host, drives, error }) =>
+      {(["dirlume", "kswitcher"] as const).map((kind) => {
+        const hosts = computers.filter(({ host }) => host.kind === kind);
+        const status = kind === "kswitcher" && kswitcherStatus;
+        if (!hosts.length && !status) return null;
+        const heading = t(kind === "dirlume" ? "Dirlume LAN" : "KSwitcher LAN");
+        return <div key={kind} className="location-source-group lan-sources" role="group" aria-label={heading}>
+          <strong>{heading}</strong>
+          {status && <p role="status">{status}</p>}
+          {hosts.map(({ host, drives, error }) =>
             <div key={host.kind + host.id} role="group" aria-label={host.name}>
               <span>{host.name}</span>
               {host.kind === "kswitcher" && host.online === false ? <p>{t("Offline")}</p> :
-                error ? <p role="status">{error}</p> :
+                error ? <p role="status">{errorText(error)}</p> :
                 !drives ? <p role="status">{t("Loading drives…")}</p> :
                 drives.length === 0 ? <p>{t("No drives.")}</p> : drives.map(({ name, type, total, available }) =>
                   <Button key={name} type="button" onClick={() => onPick({ host, drive: name })}>
@@ -141,7 +152,8 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
                     {total !== null && total > 0 && available !== null && <small>{t("{0} free of {1}", formatSize(available), formatSize(total))}</small>}
                   </Button>)}
             </div>)}
-      </div>}
+        </div>;
+      })}
     </div>}
   </div>;
 }
