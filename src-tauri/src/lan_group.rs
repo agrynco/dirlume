@@ -200,6 +200,9 @@ fn valid_ip(ip: Ipv4Addr) -> bool {
 fn discovery_socket(ip: Ipv4Addr) -> Result<UdpSocket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).map_err(message)?;
     socket.set_reuse_address(true).map_err(message)?;
+    // macOS requires SO_REUSEPORT for multiple listeners on the multicast port.
+    #[cfg(target_os = "macos")]
+    socket.set_reuse_port(true).map_err(message)?;
     socket
         .bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, PORT).into())
         .map_err(message)?;
