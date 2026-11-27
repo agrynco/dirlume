@@ -26,7 +26,7 @@ pub struct Entry {
     hidden: bool,
     #[serde(default)]
     system: bool,
-    pub(crate) size: Option<u64>,
+    size: Option<u64>,
     pub(crate) modified: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) owner: Option<String>,

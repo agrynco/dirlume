@@ -23,7 +23,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
+import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type FilePlace, type WritableServerPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -483,7 +483,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     return folder.kind === "local" ? { ...folder, parent: parentPath(folder.path, windowsClient) } :
       supportsFileTree(folder) ? folder : null;
   }
-  async function selectChangedItem(side: Side, directory: TreePlace, name: string) {
+  async function selectChangedItem(side: Side, directory: FilePlace, name: string) {
     const pane = latest.current[side];
     const root = pane.place;
     const segments = trees[side].enabled && root ? treeRelativePath(root, directory) : null;
@@ -2268,17 +2268,23 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const archiveDestination = target?.kind === "archive" ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
     const fromKSwitcher = source.kind === "kswitcher";
-    const kswitcherBroker = Boolean(
-      kswitcherDestination && source.kind === "local" ||
-      fromKSwitcher && (source.capabilities?.write || kind === "move" && source.capabilities?.delete) &&
-        (!target || target.kind === "local" || kswitcherDestination),
-    );
+    const kswitcherBroker = !serverDestination && Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
     if (target?.kind === "server" && !serverDestination) {
       setStatus({ text: isLanGroupPlace(target) ? "Choose a location inside a remote drive." : "This source is read-only.", error: true });
       return;
     }
+    if (fromKSwitcher && (remoteDestination || archiveDestination || serverDestination && kind === "move")) {
+      setStatus({ text: "Choose a local or KSwitcher LAN destination.", error: true });
+      return;
+    }
+    if (kswitcherDestination && source.kind !== "local" && !fromKSwitcher) {
+      setStatus({ text: "Choose a local or KSwitcher LAN source.", error: true });
+      return;
+    }
     if (kswitcherDestination && !kswitcherDestination.capabilities?.write ||
-      kind === "move" && fromKSwitcher && !source.capabilities?.delete) {
+      fromKSwitcher && kswitcherDestination && !source.capabilities?.write ||
+      kind === "move" && (kswitcherDestination && !kswitcherDestination.capabilities?.delete ||
+        fromKSwitcher && !source.capabilities?.delete)) {
       setStatus({ text: "Grant the required file permission in Trusted clients.", error: true });
       return;
     }
@@ -2404,7 +2410,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isWritableServerPlace(source) &&
       !(source.kind === "archive" && source.writable) &&
-      (source.kind !== "kswitcher" || !source.capabilities?.delete))) return;
+      (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     const otherPane = panes[targetSide];
     const target = otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
@@ -3471,7 +3477,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: "Move", Icon: ArrowLeftRight,
       disabled: Boolean(collectionPanes[opposite(active)]) ||
-        (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete) ||
+        (!local && !fileServer && !writableServer && !archive?.writable && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !writableServer && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || writableServer) && current.link) || busy },
@@ -4210,11 +4216,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
             {kswitcherItem?.path && !state.search && !state.loading && !busy && <>
-              {!item.entry.link && kswitcherItem.capabilities?.delete && !toCollection && <Button role="menuitem" onClick={() => {
-                setFileMenu(null);
-                transfer("move", side, entry);
-              }}>{t("Move")}</Button>}
               {!item.entry.link && kswitcherItem.capabilities?.write && <>
+                {kswitcherItem.capabilities.delete && !toCollection && <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  transfer("move", side, entry);
+                }}>{t("Move")}</Button>}
                 <Button role="menuitem" onClick={() => {
                   setFileMenu(null);
                   setModal({ kind: "rename", side, path: kswitcherItem.path, name: item.entry.name, kswitcher: kswitcherItem });
@@ -4428,11 +4434,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 }, progress);
               } else if (operation?.kind === "rename") {
                 await api.changeKSwitcher(peer, kswitcherPath(modal.path, operation.name), { kind: "rename", name: operation.new_name });
-                if (modal.side) await selectChangedItem(modal.side, modal.kswitcher, operation.new_name);
               } else if (operation?.kind === "create_file") {
                 if (/[\\/]/.test(operation.name) || operation.name === "." || operation.name === "..") throw new Error(t("Enter a valid destination name."));
                 await api.changeKSwitcher(peer, kswitcherPath(modal.path, operation.name), { kind: "create_file", encoding: operation.encoding ?? "utf8" });
-                if (modal.side) await selectChangedItem(modal.side, modal.kswitcher, operation.name);
                 openDocument({ place: modal.kswitcher, name: operation.name }, true, { fromPane: modal.side });
               }
             } finally {

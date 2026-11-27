@@ -2236,19 +2236,11 @@ async fn transfer_item(
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
     if request.server_destination.is_none()
-        && request.ftp_destination.is_none()
-        && request.ssh_destination.is_none()
-        && request.archive_destination.is_none()
-        && request.kswitcher_broker
-        && matches!(
-            &request.source,
-            TransferSource::Local { .. } | TransferSource::Kswitcher { .. }
-        )
+        && (request.kswitcher_broker || request.kswitcher_destination.is_some())
     {
         return session
             .interrupt(transfer_kswitcher(&request, &session, &output))
-            .await
-            .map(|(outcome, _)| outcome);
+            .await;
     }
     let connection = match &request.source {
         TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
@@ -2288,7 +2280,6 @@ async fn transfer_item(
         ssh_destination.is_some(),
         server_destination.is_some(),
         archive_destination.is_some(),
-        request.kswitcher_destination.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -2352,9 +2343,6 @@ async fn transfer_item(
                 TransferSource::Archive { segments, .. } => archive
                     .as_deref()
                     .map(|item| (Endpoint::Archive(item), segments.as_slice())),
-                TransferSource::Kswitcher { peer, name, .. } => {
-                    Some((Endpoint::Kswitcher(peer), std::slice::from_ref(name)))
-                }
                 _ => None,
             };
             let relay_destination = ftp_destination
@@ -2362,13 +2350,7 @@ async fn transfer_item(
                 .map(Endpoint::Ftp)
                 .or_else(|| ssh_destination.as_ref().map(Endpoint::Ssh))
                 .or_else(|| server_destination.as_deref().map(Endpoint::Server))
-                .or_else(|| archive_destination.as_deref().map(Endpoint::Archive))
-                .or_else(|| {
-                    request
-                        .kswitcher_destination
-                        .as_deref()
-                        .map(Endpoint::Kswitcher)
-                });
+                .or_else(|| archive_destination.as_deref().map(Endpoint::Archive));
             if let (Some((source, segments)), Some(destination)) = (relay_source, relay_destination)
             {
                 if !matches!(
@@ -2987,13 +2969,12 @@ async fn transfer_kswitcher(
     request: &TransferRequest,
     session: &Arc<TransferSession>,
     output: &Channel<TransferEvent>,
-) -> Result<(TransferOutcome, PathBuf)> {
+) -> Result<TransferOutcome> {
     use crate::kswitcher_lan::Endpoint;
     use local_transfer::Policy;
     if request.ftp_destination.is_some()
         || request.ssh_destination.is_some()
         || request.server_destination.is_some()
-        || request.archive_destination.is_some()
     {
         return Err("Choose a local or KSwitcher LAN destination.".into());
     }
@@ -3096,17 +3077,16 @@ async fn transfer_kswitcher(
         },
     )
     .await?;
-    let outcome = match result {
-        crate::kswitcher_lan::TransferResult::Finished(copied) => transfer_outcome(copied),
+    match result {
+        crate::kswitcher_lan::TransferResult::Finished(copied) => Ok(transfer_outcome(copied)),
         crate::kswitcher_lan::TransferResult::SourceCleanupFailed(error) => {
-            TransferOutcome::SourceRetained {
+            Ok(TransferOutcome::SourceRetained {
                 destination: target_path.to_string_lossy().into_owned(),
                 source: source_path.to_string_lossy().into_owned(),
                 error,
-            }
+            })
         }
-    };
-    Ok((outcome, target_path))
+    }
 }
 
 #[derive(Default)]

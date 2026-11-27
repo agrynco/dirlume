@@ -1551,8 +1551,6 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Choose regular local files to move to an SSH/SFTP folder.": ["Виберіть звичайні локальні файли для перенесення до папки SSH/SFTP.", "Выберите обычные локальные файлы для перемещения в папку SSH/SFTP."],
   "Choose a remote destination that does not overlap the source.": ["Виберіть віддалене призначення, що не перетинається з вихідним шляхом.", "Выберите удалённое назначение, которое не пересекается с исходным путём."],
   "Choose an unused destination for a move between protocols on the same host.": ["Для переміщення між протоколами на одному хості виберіть вільний шлях призначення.", "Для перемещения между протоколами на одном хосте выберите свободный путь назначения."],
-  "The KSwitcher LAN item changed during the move.": ["Елемент KSwitcher LAN змінився під час переміщення.", "Элемент KSwitcher LAN изменился во время перемещения."],
-  "The KSwitcher LAN item differs from the verified copy.": ["Елемент KSwitcher LAN відрізняється від перевіреної копії.", "Элемент KSwitcher LAN отличается от проверенной копии."],
   "Choose files or folders without symbolic links.": ["Виберіть файли або папки без символічних посилань.", "Выберите файлы или папки без символических ссылок."],
   "The FTP file changed during the move.": ["Файл FTP змінився під час переміщення.", "Файл FTP изменился во время перемещения."],
   "The FTP folder changed during the move.": ["Папка FTP змінилася під час переміщення.", "Папка FTP изменилась во время перемещения."],
