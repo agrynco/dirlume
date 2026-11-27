@@ -1018,6 +1018,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Use sudo on {0} to create this file?": ["Створити цей файл на {0} з правами sudo?", "Создать этот файл на {0} с правами sudo?"],
   "Use sudo on {0} to continue this transfer?": ["Використати sudo на {0}, щоб продовжити передавання?", "Использовать sudo на {0}, чтобы продолжить передачу?"],
   "Use sudo on {0} to continue removing this item?": ["Використати sudo на {0}, щоб продовжити видалення?", "Использовать sudo на {0}, чтобы продолжить удаление?"],
+  "Use sudo on {0} to measure this folder?": ["Використати sudo на {0}, щоб виміряти цю папку?", "Использовать sudo на {0}, чтобы измерить эту папку?"],
+  "Use sudo on {0} to rename this item?": ["Використати sudo на {0}, щоб перейменувати цей елемент?", "Использовать sudo на {0}, чтобы переименовать этот элемент?"],
   "Delete": ["Видалити", "Удалить"],
   "Trash": ["До кошика", "В корзину"],
   "Compare": ["Порівняти", "Сравнить"],

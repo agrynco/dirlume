@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { describeError, fileBytePageSize, readPlaceBytes, type BytePage, type NamedFile } from "./api";
+import { describeError, documentPath, fileBytePageSize, readPlaceBytes, type BytePage, type NamedFile } from "./api";
+import { Button } from "./Button";
+import { SudoDialog } from "./SudoDialog";
 import { errorText, t } from "./i18n";
 
 const controls = " ☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼";
@@ -30,6 +32,8 @@ export function BinaryPreview({ file, initial }: { file: NamedFile; initial: Byt
   const [offset, setOffset] = useState(0);
   const [pages, setPages] = useState(() => new Map([[0, initial]]));
   const [error, setError] = useState("");
+  const [denied, setDenied] = useState<number | null>(null);
+  const [sudo, setSudo] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const viewport = scroll.current;
@@ -65,26 +69,36 @@ export function BinaryPreview({ file, initial }: { file: NamedFile; initial: Byt
   useEffect(() => {
     if (!columns) return;
     setError("");
+    setDenied(null);
     const missing: number[] = [];
     for (let start = firstPage; start <= lastPage; start += fileBytePageSize) {
       if (!pages.has(start)) missing.push(start);
     }
     if (!missing.length) return;
     let current = true;
-    void Promise.all(missing.map(async (start) => [start, await readPlaceBytes(file, start)] as const)).then(
+    void Promise.allSettled(missing.map(async (start) => [start, await readPlaceBytes(file, start)] as const)).then(
       (results) => {
         if (!current) return;
-        if (results.some(([start, page]) => page.length !== initial.length || page.data.length !== Math.min(fileBytePageSize, page.length - start))) {
-          setError(t("The file changed on disk."));
-          return;
+        const next = new Map(pages);
+        for (const [index, result] of results.entries()) {
+          if (result.status === "rejected") {
+            const reason = describeError(result.reason);
+            if (file.place.kind === "ssh" && reason === "SSH permission denied.") setDenied(missing[index]);
+            setError(errorText(reason));
+            return;
+          }
+          const [start, page] = result.value;
+          if (page.length !== initial.length || page.data.length !== Math.min(fileBytePageSize, page.length - start)) {
+            setError(t("The file changed on disk."));
+            return;
+          }
+          next.set(start, page);
         }
-        const next = new Map([...pages, ...results]);
         for (const start of next.keys()) {
           if (start < firstPage - 4 * fileBytePageSize || start > lastPage + 4 * fileBytePageSize) next.delete(start);
         }
         setPages(next);
       },
-      (failure: unknown) => { if (current) setError(errorText(describeError(failure))); },
     );
     return () => { current = false; };
   }, [file, initial.length, columns, firstPage, lastPage, pages]);
@@ -102,7 +116,10 @@ export function BinaryPreview({ file, initial }: { file: NamedFile; initial: Byt
     onScroll={(event) => setOffset(event.currentTarget.scrollTop)}>
     <span ref={sample} className="binary-preview-cell" aria-hidden="true">0</span>
     <div style={{ height: scrollHeight, position: "relative" }}>
-      {error ? <p className="binary-preview-error pane-empty" role="status">{t("Could not read this file: {0}", error)}</p> :
+      {error ? <div className="binary-preview-error pane-empty">
+        <p role="status">{t("Could not read this file: {0}", error)}</p>
+        {denied !== null && <Button onClick={() => setSudo(denied)}>{t("Open with sudo…")}</Button>}
+      </div> :
         !pages.has(firstPage) ? <p className="binary-preview-error pane-empty" role="status">{t("Reading bytes…")}</p> :
         <div className="binary-preview-rows" style={{ top: offset - (logicalOffset % (rowHeight || 1)) }}>
           {Array.from({ length: visibleRows }, (_, index) => {
@@ -113,5 +130,13 @@ export function BinaryPreview({ file, initial }: { file: NamedFile; initial: Byt
           })}
         </div>}
     </div>
+    {sudo !== null && file.place.kind === "ssh" && <SudoDialog operation="read" address={file.place.address} path={documentPath(file)}
+      onClose={() => setSudo(null)} onConfirm={async (password) => {
+        const result = await readPlaceBytes(file, sudo, password);
+        if (result.length !== initial.length || result.data.length !== Math.min(fileBytePageSize, initial.length - sudo)) {
+          throw new Error(t("The file changed on disk."));
+        }
+        setPages((current) => new Map(current).set(sudo, result));
+      }} />}
   </div>;
 }

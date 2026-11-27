@@ -11,6 +11,7 @@ import { formatSize, type Side } from "./panes";
 import { bindingMatches, eventShortcut, type Bindings, type PanelLayout, type SpaceAnalyzerView } from "./preferences";
 import { SpaceSunburst } from "./SpaceSunburst";
 import { useRightClickSelection } from "./useRightClickSelection";
+import { useSudoFolderScan } from "./useSudoFolderScan";
 import {
   canAnalyze, initialSpaceResult, nearestSpaceNode, scanSpace, sortedSpaceChildren, spaceLocalItem, spaceLocation, spacePath, spaceSegments,
   spaceShare, unavailable, type Metric, type SpaceItemCommand, type SpaceLocalItem, type SpaceNode, type SpacePlace, type SpaceResult,
@@ -325,6 +326,7 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
   resolvePlace: (place: SpacePlace) => SpacePlace;
 }) {
   const [result, setResult] = useState(() => initialSpaceResult(place));
+  const { authorize, prompt } = useSudoFolderScan();
   const scan = useRef<AbortController | null>(null);
   const tree = useRef<HTMLDivElement>(null);
   const viewModes = useRef<HTMLDivElement>(null);
@@ -376,9 +378,9 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
     void scanSpace(resolvePlace(place), controller.signal, (next) => {
       if (controller.signal.aborted) return;
       setResult(next);
-    });
+    }, authorize);
     return () => { controller.abort(); revealRequest.current += 1; };
-  }, [revision, localRevision, place, resolvePlace]);
+  }, [revision, localRevision, place, resolvePlace, authorize]);
 
   useEffect(() => {
     if (!isTauri() || !watchPath) return;
@@ -618,5 +620,6 @@ export default function SpaceAnalyzer({ ref, side, place, currentFolder, navigat
         <Button role="menuitem" onClick={() => runMenuAction("delete")}>{t("Delete permanently")}</Button>
       </>}
     </FileContextMenu>}
+    {prompt}
   </section>;
 }

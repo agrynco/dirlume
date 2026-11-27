@@ -4,13 +4,15 @@ import { describeError, readPlaceBytes, readPlacePreviewImage, readPlacePreviewT
 import { BinaryPreview, looksBinary } from "./BinaryPreview";
 import { ImageViewport, imageType, useImageViewport } from "./ImageViewport";
 import { Button } from "./Button";
+import { SudoDialog } from "./SudoDialog";
+import { documentPath } from "./api";
 import { errorText, t } from "./i18n";
 import { isMarkdownFile } from "./markdown";
 import { ReadOnlyMarkdown } from "./MarkdownPreview";
 import type { Side } from "./panes";
 
 type PreviewContent = { kind: "image"; url: string } | { kind: "text"; text: string } |
-  { kind: "binary"; page: BytePage } | { kind: "error"; message: string };
+  { kind: "binary"; page: BytePage } | { kind: "error"; message: string; denied: boolean };
 
 function renderedHtml(source: string, light: boolean) {
   const template = document.createElement("template");
@@ -82,21 +84,22 @@ function PreviewFile({ file, source, light, markdownSize, mermaidScale, onFocusF
 }) {
   const [target] = useState(file);
   const [content, setContent] = useState<PreviewContent>();
+  const [sudo, setSudo] = useState(false);
+  const retry = useRef<(password: string) => Promise<void>>(null);
 
   useEffect(() => {
     let disposed = false;
     let url: string | undefined;
     const type = imageType(target.name);
-    // Delay the read slightly while the cursor moves through several files in succession.
-    const timer = window.setTimeout(async () => {
+    async function load(password?: string) {
       try {
         if (type) {
-          const bytes = await readPlacePreviewImage(target);
+          const bytes = await readPlacePreviewImage(target, password);
           if (disposed) return;
           url = URL.createObjectURL(new Blob([bytes], { type }));
           setContent({ kind: "image", url });
         } else {
-          const preview = await readPlacePreviewText(target);
+          const preview = await readPlacePreviewText(target, password);
           if (!disposed) setContent("page" in preview ? { kind: "binary", page: preview.page } : { kind: "text", text: preview.text });
         }
       } catch (failure) {
@@ -106,7 +109,7 @@ function PreviewFile({ file, source, light, markdownSize, mermaidScale, onFocusF
           message === "The file is outside the supported UTF-8 and UTF-16 text formats.";
         if (!type && target.place.kind !== "local" && (undecodable || message === "Text files can be at most 8 MiB.")) {
           try {
-            const page = await readPlaceBytes(target, 0);
+            const page = await readPlaceBytes(target, 0, password);
             if (disposed) return;
             if (!page.length) { setContent({ kind: "text", text: "" }); return; }
             if (undecodable || looksBinary(page)) { setContent({ kind: "binary", page }); return; }
@@ -114,18 +117,30 @@ function PreviewFile({ file, source, light, markdownSize, mermaidScale, onFocusF
             message = describeError(readError);
           }
         }
-        if (!disposed) setContent({ kind: "error", message: t("Could not read this file: {0}", errorText(message)) });
+        if (disposed) return;
+        if (password !== undefined) throw failure;
+        setContent({ kind: "error", message: t("Could not read this file: {0}", errorText(message)),
+          denied: target.place.kind === "ssh" && message === "SSH permission denied." });
       }
-    }, 80);
+    }
+    retry.current = load;
+    // Delay the read slightly while the cursor moves through several files in succession.
+    const timer = window.setTimeout(() => { void load(); }, 80);
     return () => {
       disposed = true;
+      retry.current = null;
       window.clearTimeout(timer);
       if (url) URL.revokeObjectURL(url);
     };
   }, [target]);
 
   if (!content) return <p className="pane-empty" role="status">{t("Loading preview…")}</p>;
-  if (content.kind === "error") return <p className="pane-empty" role="status">{content.message}</p>;
+  if (content.kind === "error") return <>
+    <p className="pane-empty" role="status">{content.message}</p>
+    {content.denied && <Button onClick={() => setSudo(true)}>{t("Open with sudo…")}</Button>}
+    {sudo && target.place.kind === "ssh" && <SudoDialog address={target.place.address} path={documentPath(target)} operation="read"
+      onClose={() => setSudo(false)} onConfirm={(password) => retry.current?.(password) ?? Promise.resolve()} />}
+  </>;
   if (content.kind === "image") return <ImagePreview name={target.name} url={content.url} />;
   if (content.kind === "binary") return <BinaryPreview file={target} initial={content.page} />;
   if (!source && isMarkdownFile(target.name)) return <ReadOnlyMarkdown source={content.text} light={light}

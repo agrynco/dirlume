@@ -1549,6 +1549,94 @@ pub(crate) fn verify_lan_folder_move(invitation: &str, drive: &str, host: &Path)
 }
 
 #[cfg(test)]
+pub(crate) fn verify_sftp_sudo_transfer(connection: Arc<ssh::Connection>) {
+    use remote_transfer::Session as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use zeroize::Zeroizing;
+
+    let transfer = Arc::new(TransferSession::default());
+    let denied = Arc::new(AtomicUsize::new(0));
+    let output = {
+        let transfer = Arc::clone(&transfer);
+        let denied = Arc::clone(&denied);
+        Channel::new(move |body| {
+            let event: serde_json::Value = body.deserialize().unwrap();
+            assert_eq!(event["kind"], "sudo_required");
+            assert_eq!(
+                event["path"],
+                "/srv/dirlume-target/batch/protected/protected.txt"
+            );
+            let ticket = serde_json::from_value(event["ticket"].clone()).unwrap();
+            denied.fetch_add(1, Ordering::Relaxed);
+            assert!(transfer
+                .sudo
+                .authorize(
+                    ticket,
+                    Zeroizing::new("fixture-incorrect".to_owned()),
+                    &transfer,
+                )
+                .is_err());
+            transfer
+                .sudo
+                .authorize(
+                    ticket,
+                    Zeroizing::new("fixture-login".to_owned()),
+                    &transfer,
+                )
+                .unwrap();
+            Ok(())
+        })
+    };
+    let fixture = tempfile::tempdir().unwrap();
+    let source = fixture.path().join("batch");
+    fs::create_dir_all(source.join("protected")).unwrap();
+    fs::write(source.join("ordinary.txt"), b"ordinary upload").unwrap();
+    fs::write(source.join("protected/protected.txt"), b"protected upload").unwrap();
+    let target = ["srv", "dirlume-target", "batch"].map(str::to_owned);
+    let mut remote =
+        ssh_transfer::SshTransfer::open(&connection, false, &transfer, &output).unwrap();
+    let mut commits = Vec::new();
+    assert!(remote_transfer::upload(
+        &mut remote,
+        &source,
+        &target,
+        local_transfer::Policy::Ask,
+        &mut |_, _, _| Ok(()),
+        &mut |_| panic!("An unexpected overwrite was requested"),
+        &mut |_, path| commits.push(path.to_owned()),
+    )
+    .unwrap());
+    assert_eq!(commits.len(), 2);
+    assert_eq!(denied.load(Ordering::Relaxed), 1);
+
+    let protected = ["srv", "dirlume-read.txt"].map(str::to_owned);
+    let output_path = fixture.path().join("download.txt");
+    let options = local_transfer::Options {
+        moving: false,
+        policy: local_transfer::Policy::Ask,
+        ask_read_only: true,
+        copy: local::CopyOptions::default(),
+    };
+    let mut reader =
+        ssh_transfer::SshTransfer::open(&connection, true, &transfer, &output).unwrap();
+    assert!(remote_transfer::download(
+        &mut reader,
+        &protected,
+        &output_path,
+        &options,
+        |_, _, _| Ok(()),
+        |_| panic!("An unexpected overwrite was requested"),
+        |_, _| {},
+    )
+    .unwrap());
+    assert_eq!(fs::read(output_path).unwrap(), b"protected read\n");
+    let deletion = ["srv", "dirlume-delete"].map(str::to_owned);
+    remote.remove(&deletion, true, false).unwrap();
+    assert!(remote.stat(&deletion).unwrap().is_none());
+    assert_eq!(denied.load(Ordering::Relaxed), 1);
+}
+
+#[cfg(test)]
 pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, remote_root: &Path) {
     use local_transfer::{FileRevision, Policy};
     type Progress<'a> = dyn FnMut(&Path, u64, Option<u64>) -> io::Result<()> + 'a;
@@ -3490,6 +3578,7 @@ enum PreviewImageSource {
 #[tauri::command]
 async fn read_preview_image(
     source: PreviewImageSource,
+    sudo_password: Option<String>,
     servers: State<'_, Connections>,
     ftp: State<'_, ftp::FtpState>,
     ssh: State<'_, ssh::SshState>,
@@ -3523,15 +3612,19 @@ async fn read_preview_image(
         }
         PreviewImageSource::Ssh { id, segments } => {
             let connection = ssh.connection(id)?;
+            let password = sudo_password.map(zeroize::Zeroizing::new);
             blocking(move || {
-                let mut session = connection.open()?;
-                let entry = session.regular(&segments)?;
-                let length = remote_transfer::Entry::size(&entry)
-                    .ok_or("The SSH server did not report the file size.")?;
-                check_preview_image_size(length)?;
-                session
-                    .read_limited(&segments, 0, length)
-                    .map_err(Into::into)
+                connection.text_operation(password, true, |session| {
+                    let entry = session.regular(&segments)?;
+                    let length = remote_transfer::Entry::size(&entry)
+                        .ok_or("The SSH server did not report the file size.")?;
+                    check_preview_image_size(length)?;
+                    let bytes = session.read_limited(&segments, 0, length)?;
+                    if session.regular(&segments)? != entry {
+                        return Err("The SSH file changed during the read.".into());
+                    }
+                    Ok(bytes)
+                })
             })
             .await?
         }
@@ -4283,6 +4376,7 @@ pub fn run() {
         ssh::list_ssh,
         delete_ssh,
         ssh::create_ssh_folder,
+        ssh::rename_ssh,
         create_ssh_text_file,
         read_ftp_text,
         read_ftp_bytes,

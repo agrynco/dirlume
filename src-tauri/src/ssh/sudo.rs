@@ -101,9 +101,24 @@ async fn expire(cache: Weak<Mutex<Option<Authorization>>>) {
 
 fn open_sftp(
     client: AuthenticatedRoute,
-    mut password: Zeroizing<String>,
+    password: Zeroizing<String>,
     read_only: bool,
 ) -> Result<Session> {
+    let sftp = client.1.wait(async {
+        let channel = open_channel(&client, password, read_only).await?;
+        let (reader, writer) = tokio::io::split(channel.into_stream());
+        Sftp::new(writer, reader, Default::default())
+            .await
+            .map_err(message)
+    })?;
+    Ok(Session::new(client, sftp))
+}
+
+pub(super) async fn open_channel(
+    client: &AuthenticatedRoute,
+    mut password: Zeroizing<String>,
+    read_only: bool,
+) -> Result<russh::Channel<russh::client::Msg>> {
     if password.contains(['\0', '\r', '\n']) {
         return Err("Enter a single-line sudo password.".to_owned());
     }
@@ -118,67 +133,59 @@ fn open_sftp(
         done\nexit 127"
     );
     let command = format!("exec /bin/sh -c {}", super::quote(&script));
-    let sftp = client.1.wait(async {
-        let mut channel = client.channel_open_session().await.map_err(message)?;
-        channel.exec(true, command).await.map_err(message)?;
-        let mut supplied = false;
-        let mut stderr = Vec::new();
-        loop {
-            match channel.wait().await {
-                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => {
-                    stderr.extend_from_slice(&data);
-                    let contains = |needle: &str| {
-                        stderr
-                            .windows(needle.len())
-                            .any(|part| part == needle.as_bytes())
-                    };
-                    if contains("session opened for local user ") {
-                        break;
+    let mut channel = client.channel_open_session().await.map_err(message)?;
+    channel.exec(true, command).await.map_err(message)?;
+    let mut supplied = false;
+    let mut stderr = Vec::new();
+    loop {
+        match channel.wait().await {
+            Some(ChannelMsg::ExtendedData { data, ext: 1 }) => {
+                stderr.extend_from_slice(&data);
+                let contains = |needle: &str| {
+                    stderr
+                        .windows(needle.len())
+                        .any(|part| part == needle.as_bytes())
+                };
+                if contains("session opened for local user ") {
+                    break;
+                }
+                if contains(&prompt) {
+                    if supplied {
+                        return Err("The server rejected the sudo password.".to_owned());
                     }
-                    if contains(&prompt) {
-                        if supplied {
-                            return Err("The server rejected the sudo password.".to_owned());
-                        }
-                        if password.is_empty() {
-                            return Err("Enter the sudo password for this SSH account.".to_owned());
-                        }
-                        password.push('\n');
-                        channel
-                            .make_writer()
-                            .write_all(password.as_bytes())
-                            .await
-                            .map_err(message)?;
-                        password.zeroize();
-                        supplied = true;
-                        stderr.clear();
-                    } else if stderr.len() > 4096 {
-                        stderr.drain(..stderr.len() - 4096);
+                    if password.is_empty() {
+                        return Err("Enter the sudo password for this SSH account.".to_owned());
                     }
+                    password.push('\n');
+                    channel
+                        .make_writer()
+                        .write_all(password.as_bytes())
+                        .await
+                        .map_err(message)?;
+                    password.zeroize();
+                    supplied = true;
+                    stderr.clear();
+                } else if stderr.len() > 4096 {
+                    stderr.drain(..stderr.len() - 4096);
                 }
-                Some(ChannelMsg::ExitStatus { exit_status: 127 }) => {
-                    return Err(
-                        "The SSH server could not find sudo or the OpenSSH SFTP server.".to_owned(),
-                    );
-                }
-                Some(
-                    ChannelMsg::Failure
-                    | ChannelMsg::Data { .. }
-                    | ChannelMsg::ExitStatus { .. }
-                    | ChannelMsg::Eof
-                    | ChannelMsg::Close,
-                )
-                | None => {
-                    return Err(
-                        "The SSH server did not allow an SFTP session through sudo.".to_owned()
-                    );
-                }
-                _ => {}
             }
+            Some(ChannelMsg::ExitStatus { exit_status: 127 }) => {
+                return Err(
+                    "The SSH server could not find sudo or the OpenSSH SFTP server.".to_owned(),
+                );
+            }
+            Some(
+                ChannelMsg::Failure
+                | ChannelMsg::Data { .. }
+                | ChannelMsg::ExitStatus { .. }
+                | ChannelMsg::Eof
+                | ChannelMsg::Close,
+            )
+            | None => {
+                return Err("The SSH server did not allow an SFTP session through sudo.".to_owned());
+            }
+            _ => {}
         }
-        let (reader, writer) = tokio::io::split(channel.into_stream());
-        Sftp::new(writer, reader, Default::default())
-            .await
-            .map_err(message)
-    })?;
-    Ok(Session::new(client, sftp))
+    }
+    Ok(channel)
 }

@@ -744,6 +744,8 @@ export const api = {
   deleteSsh: (id: number, segments: string[], recursive: boolean, recycle: boolean, job: number, output: Channel<TransferEvent>) =>
     invoke<void>("delete_ssh", { id, request: { segments, recursive, recycle }, job, output }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
+  renameSsh: (id: number, segments: string[], name: string, sudoPassword?: string) =>
+    invoke<void>("rename_ssh", { id, segments, name, sudoPassword }),
   deleteFtp: (id: number, segments: string[], recursive: boolean, recycle = false) =>
     invoke<void>("delete_ftp", { id, segments, recursive, recycle }),
   readFtpText: (id: number, segments: string[]) => invoke<TextDocument>("read_ftp_text", { id, segments }),
@@ -918,17 +920,17 @@ export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: 
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
 }
 
-export function readPlacePreviewText({ place, name }: NamedFile) {
+export function readPlacePreviewText({ place, name }: NamedFile, sudoPassword?: string) {
   return place.kind === "local" ? invoke<TextDocument | { page: BytePage }>("read_text", {
     directory: place.path, name, surface: "quick_view",
-  }) : readPlaceText({ place, name });
+  }) : readPlaceText({ place, name }, sudoPassword);
 }
 
-export function readPlacePreviewImage({ place, name }: NamedFile) {
+export function readPlacePreviewImage({ place, name }: NamedFile, sudoPassword?: string) {
   if (place.kind === "kswitcher") return invoke<ArrayBuffer>("read_kswitcher_preview", { peer: place.peer, path: kswitcherPath(place.path, name) });
   const source = place.kind === "local" ? { kind: place.kind, directory: place.path, name }
     : { kind: place.kind, id: place.id, segments: [...place.segments, name] };
-  return invoke<ArrayBuffer>("read_preview_image", { source });
+  return invoke<ArrayBuffer>("read_preview_image", { source, sudoPassword });
 }
 
 export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {

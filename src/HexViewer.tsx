@@ -47,6 +47,7 @@ export function HexViewer({ file, revision, onSize }: { file: NamedFile; revisio
     setPages(new Map());
     setInitialError("");
     setDeniedPage(null);
+    setSudo(false);
     void readPlaceBytes(file, 0).then(
       (result) => {
         if (canceled) return;

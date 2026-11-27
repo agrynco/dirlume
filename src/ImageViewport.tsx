@@ -17,18 +17,23 @@ export function canEditImage({ name, place }: NamedFile) {
 
 export function useImageSource(file: NamedFile, revision = 0) {
   const [content, setContent] = useState<{ url: string } | { error: string }>();
+  const retry = useRef<(password: string) => Promise<void>>(null);
   useEffect(() => {
     let active = true;
     let url: string | undefined;
     setContent(undefined);
-    void readPlacePreviewImage(file).then((bytes) => {
+    async function load(password?: string) {
+      const bytes = await readPlacePreviewImage(file, password);
       if (!active) return;
+      if (url) URL.revokeObjectURL(url);
       url = URL.createObjectURL(new Blob([bytes], { type: imageType(file.name) }));
       setContent({ url });
-    }, (failure: unknown) => { if (active) setContent({ error: describeError(failure) }); });
-    return () => { active = false; if (url) URL.revokeObjectURL(url); };
+    }
+    retry.current = load;
+    void load().catch((failure: unknown) => { if (active) setContent({ error: describeError(failure) }); });
+    return () => { active = false; retry.current = null; if (url) URL.revokeObjectURL(url); };
   }, [file, revision]);
-  return content;
+  return { content, authorize: (password: string) => retry.current?.(password) ?? Promise.resolve() };
 }
 
 type Size = { width: number; height: number };

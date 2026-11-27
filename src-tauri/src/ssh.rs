@@ -364,6 +364,8 @@ pub struct Connection {
     host_keys: Vec<HostKey>,
     listing: Mutex<Session>,
     sudo: sudo::Access,
+    #[cfg(test)]
+    fixture_login: Option<serde_json::Value>,
 }
 
 impl Connection {
@@ -386,6 +388,31 @@ impl Connection {
             .transpose()
     }
 
+    fn rename_exclusive(
+        &self,
+        source: &[String],
+        name: &str,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<()> {
+        use crate::remote_transfer::UploadSession;
+        let (_, parent) = source.split_last().ok_or("Choose an SSH file or folder.")?;
+        let target = crate::remote_transfer::child(parent, name);
+        let from = Session::absolute(source)?;
+        let to = Session::absolute(&target)?;
+        if from == to {
+            return Ok(());
+        }
+        let client = self.authenticated_client()?;
+        client.1.wait(async {
+            if let Some(password) = password {
+                let channel = sudo::open_channel(&client, password, false).await?;
+                standard_rename::run_on_channel(channel, &from, &to).await
+            } else {
+                standard_rename::run(&client, &from, &to).await
+            }
+        })
+    }
+
     pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {
         let client = self
             .listing
@@ -403,6 +430,25 @@ impl Connection {
         &self,
         stop: Option<CancellationToken>,
     ) -> Result<AuthenticatedRoute> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture_login {
+            let input: ProfileInput = serde_json::from_value(fixture.clone()).map_err(message)?;
+            let config = Config::default();
+            let compatibility = input.compatibility(&config)?;
+            let mut hosts = input.test_route(&config)?;
+            return open_route(
+                hosts.iter_mut().map(RouteHost::Draft).collect(),
+                |endpoint| stored_key(&self.host_keys, endpoint),
+                &[],
+                RouteOptions {
+                    stop,
+                    compatibility,
+                    ..RouteOptions::default()
+                },
+            )?
+            .map(|(client, _)| client)
+            .map_err(|_| "Fixture SSH host key changed.".to_owned());
+        }
         match open_route(
             self.profile.route().map(RouteHost::Saved).collect(),
             |endpoint| stored_key(&self.host_keys, endpoint),
@@ -836,6 +882,8 @@ pub async fn connect_ssh(
                     session
                 }),
                 sudo: sudo::Access::default(),
+                #[cfg(test)]
+                fixture_login: None,
             },
             start,
         )))
@@ -961,4 +1009,17 @@ pub async fn create_ssh_folder(
         connection.text_operation(password, false, |session| session.create_folder(&segments))
     })
     .await
+}
+
+#[tauri::command]
+pub async fn rename_ssh(
+    id: u32,
+    segments: Vec<String>,
+    name: String,
+    sudo_password: Option<String>,
+    state: State<'_, SshState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    let password = sudo_password.map(Zeroizing::new);
+    blocking(move || connection.rename_exclusive(&segments, &name, password)).await
 }

@@ -38,6 +38,14 @@ impl PendingPackets {
 
 pub(super) async fn run(client: &AuthenticatedRoute, from: &str, to: &str) -> Result<()> {
     let channel = sftp_channel(client).await?;
+    run_on_channel(channel, from, to).await
+}
+
+pub(super) async fn run_on_channel(
+    channel: russh::Channel<russh::client::Msg>,
+    from: &str,
+    to: &str,
+) -> Result<()> {
     let (reader, mut writer) = tokio::io::split(channel.into_stream());
     let mut requests = connect::<Vec<u8>, _, _>(PendingPackets::default(), ()).map_err(message)?;
     let mut replies = ReadEnd::new(
@@ -59,7 +67,10 @@ pub(super) async fn run(client: &AuthenticatedRoute, from: &str, to: &str) -> Re
         .map_err(message)?;
     requests.queue().flush(&mut writer).await?;
     replies.read_in_one_packet().await.map_err(message)?;
-    reply.wait().await.map_err(message)?;
+    reply
+        .wait()
+        .await
+        .map_err(|error| String::from(super::SftpFailure::from(error)))?;
     let _ = writer.shutdown().await;
     Ok(())
 }
