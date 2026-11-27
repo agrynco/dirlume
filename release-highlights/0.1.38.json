@@ -2,7 +2,7 @@
   "version": "0.1.38",
   "highlights": [
     "Stage or unstage files in Git View and review all staged paths before creating a local commit.",
-    "Configure NetBox proxy routing, a custom SFTP server command, legacy timestamps, and the SSH terminal shell.",
+    "Open SMB shares on Windows, macOS, and Ubuntu, and configure proxy routing, SFTP server commands, legacy timestamps, and SSH shells in NetBox.",
     "Checkboxes are consistently placed to the left of their labels in dialogs.",
     "Use the color scheme’s selection text color for current and marked file names, including hidden and system entries.",
     "Use the refreshed main menu, two-pane app icon, and high-contrast Windows Administrator badge in the title bar.",

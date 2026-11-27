@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { ChevronRight, Copy, Pencil, Server } from "lucide-react";
-import { connectionSourceNames, folderLabel, isFileServer, placePath, windowsClient, type ConnectionSource, type FileLocation, type Place } from "./api";
+import { connectionSourceNames, folderLabel, isFileServer, placeAddress, windowsClient, type ConnectionSource, type FileLocation, type Place } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
 import { t } from "./i18n";
@@ -87,7 +87,7 @@ function BreadcrumbTrack({ clip, track, ancestors, current, goTo, hidden, descen
         {descendants.map((folder, index) => <div key={placeKey(folder)} className="address-ancestor"
           hidden={index >= descendants.length - hiddenForward}>
           <ChevronRight aria-hidden="true" />
-          <Button type="button" tooltip={placePath(folder)} data-tooltip-placement="above"
+          <Button type="button" tooltip={placeAddress(folder)} data-tooltip-placement="above"
             onClick={() => goTo(folder)}>{folderLabel(folder)}</Button>
         </div>)}
       </div>}
@@ -151,7 +151,7 @@ export function AddressBreadcrumbs({ place: shown, path, label, trail, onNavigat
         onClick={() => setOverflow(open ? null : kind)}>…</Button>
       {leading && <ChevronRight aria-hidden="true" />}
       {open && <div className={`location-popup address-${kind}`}>
-        {folders.map((folder) => <Button type="button" key={placeKey(folder)} tooltip={placePath(folder)}
+        {folders.map((folder) => <Button type="button" key={placeKey(folder)} tooltip={placeAddress(folder)}
           onClick={() => goTo(folder)}>{folderLabel(folder)}</Button>)}
       </div>}
     </div>;
@@ -214,7 +214,7 @@ export function AddressField({ side, place: shown, trail, showHidden, onNavigate
 }) {
   const catalog = shown?.kind === "connections" ? shown : null;
   const place = shown?.kind !== "connections" ? shown : null;
-  const path = shown ? placePath(shown) : "";
+  const path = shown ? placeAddress(shown) : "";
   const server = isFileServer(place) ? place : undefined;
   const editable = !catalog && (!place || place.kind === "local" || place.kind === "smbRoot" || !!server);
   const location = place ? placeKey(place) : "";

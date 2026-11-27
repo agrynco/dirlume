@@ -7,7 +7,7 @@ import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testNativeJumpHosts } from "./ssh-jump-native-smoke.mjs";
-import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
+import { testMountedSmbNavigation, testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testSystemTheme } from "./system-theme-smoke.mjs";
 import { testMarkdown, testViewerReadingArea } from "./markdown-smoke.mjs";
@@ -54,6 +54,7 @@ if (process.platform !== "win32") throw new Error("This smoke test uses Windows 
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 if (process.env.CI) {
   await testSmbNavigation();
+  await testMountedSmbNavigation();
   await testFolderMeasurement();
   await testFolderNavigationHeader();
   await testSyntaxMenu();

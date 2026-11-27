@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, placePath, smbLocation, type Listing, type SmbPlace } from "./api";
+import { api, describeError, placeAddress, smbLocation, type Listing, type SmbPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { t } from "./i18n";
@@ -42,7 +42,7 @@ export function SmbDialog({ path, onClose, onConnect }: {
         return;
       }
       const { place, listing } = smbLocation(result);
-      const location = placePath(place);
+      const location = placeAddress(place);
       if (saveLocation && !saved) saveSmbLocation(location, location);
       onConnect(place, listing, result.warning);
     } catch (failure) {

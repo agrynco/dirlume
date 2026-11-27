@@ -60,6 +60,11 @@ mod remote_transfer;
 mod screen_color;
 #[cfg(any(feature = "server", feature = "desktop"))]
 pub mod server;
+#[cfg(all(
+    feature = "desktop",
+    any(windows, target_os = "linux", target_os = "macos")
+))]
+mod smb;
 #[cfg(feature = "desktop")]
 mod space_analyzer;
 #[cfg(feature = "desktop")]
