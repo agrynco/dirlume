@@ -188,6 +188,73 @@ fn reads_a_saved_ssh_profile_without_jump_hosts() {
 }
 
 #[test]
+fn resumes_transfers_and_deletion_with_an_openssh_sudo_session() {
+    let Some(port) = std::env::var("DIRLUME_SSH_SUDO_TEST_PORT")
+        .ok()
+        .and_then(|port| port.parse::<u16>().ok())
+    else {
+        return;
+    };
+    let input = json!({
+        "label": "Disposable SFTP sudo fixture",
+        "host": "127.0.0.1",
+        "port": port,
+        "username": "dirlume-fixture",
+        "auth": {"kind":"password"},
+        "secret": "fixture-login"
+    });
+    let approval = route(input.clone(), &[], &[]).unwrap().err().unwrap();
+    let (client, keys) = route(input.clone(), &[approval], &[])
+        .unwrap()
+        .ok()
+        .unwrap();
+    let mut saved = input.clone();
+    saved["id"] = json!(Uuid::new_v4());
+    let connection = Arc::new(Connection {
+        profile: serde_json::from_value(saved).unwrap(),
+        host_keys: keys,
+        listing: Mutex::new(open_sftp(client).unwrap()),
+        sudo: sudo::Access::default(),
+        fixture_login: Some(input),
+    });
+    let occupied = [
+        "srv",
+        "dirlume-target",
+        "batch",
+        "protected",
+        "occupied.txt",
+    ]
+    .map(str::to_owned);
+    assert_eq!(
+        connection
+            .rename_exclusive(&occupied, "no-access.txt", None)
+            .unwrap_err(),
+        PERMISSION_DENIED
+    );
+    crate::desktop::verify_sftp_sudo_transfer(connection.clone());
+    let original = [
+        "srv",
+        "dirlume-target",
+        "batch",
+        "protected",
+        "protected.txt",
+    ]
+    .map(str::to_owned);
+    assert!(connection
+        .rename_exclusive(&original, "occupied.txt", None)
+        .is_err());
+    connection
+        .rename_exclusive(&original, "renamed.txt", None)
+        .unwrap();
+    use crate::remote_transfer::Session as _;
+    let mut reader = connection.open().unwrap();
+    assert!(reader.stat(&original).unwrap().is_none());
+    let mut renamed = original;
+    *renamed.last_mut().unwrap() = "renamed.txt".to_owned();
+    assert!(reader.stat(&renamed).unwrap().is_some());
+}
+
+#[test]
 fn opens_a_two_hop_sftp_route() {
     let Some(python) = std::env::var_os("DIRLUME_SSH_FIXTURE_PYTHON") else {
         return;
@@ -377,6 +444,7 @@ fn opens_a_two_hop_sftp_route() {
         host_keys: keys.clone(),
         listing: Mutex::new(open_sftp(client).expect("start the listing subsystem")),
         sudo: sudo::Access::default(),
+        fixture_login: None,
     };
     let missing = connection
         .list(&["missing".to_owned()], None)

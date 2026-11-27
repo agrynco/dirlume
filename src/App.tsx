@@ -25,6 +25,7 @@ import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLo
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { isLanGroupPlace, type LanGroupPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
+import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
 import { useFilePaneTree, usePaneTreeRevision } from "./filePaneTree";
 import { usePaneFolderSizes } from "./paneFolderSizes";
@@ -86,7 +87,8 @@ import { ImageDocument } from "./ImageDocument";
 import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
 import { canEditImage, imageType } from "./ImageViewport";
 import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
-import { TransferDialog, type Transfer } from "./TransferDialog";
+import { TransferDialog, nextTransferId, TransferSudoPrompt, type Transfer } from "./TransferDialog";
+import type { TransferEvent, TransferSudoRequest } from "./api";
 import { useArchiveChange } from "./useArchiveChange";
 import {
   applyListing, breadcrumbTrail, childPlace, closeSearchResults, connectionSource, filesystemPlace, formatSize, localPath, opposite,
@@ -167,6 +169,7 @@ type ActionModal = (
 type RemoteDeletionProgress = {
   signal: AbortSignal;
   completed: (count: number) => void;
+  ssh?: { id: number; output: Channel<TransferEvent> };
 };
 
 type Modal =
@@ -286,6 +289,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [fileRevision, setFileRevision] = useState(0);
   const [sshUploadRefresh, setSshUploadRefresh] = useState<number | null>(null);
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
+  const folderScanSudo = useSudoFolderScan();
   const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
@@ -2241,6 +2245,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
+    if (kind === "move" && source.kind === "ssh" && target && target.kind !== "local") {
+      setStatus({ text: "Choose a local destination for the SSH/SFTP move.", error: true });
+      return;
+    }
     const remoteDestination = isFileServer(target) ? target : undefined;
     const lanDestination = isLanGroupPlace(target) && target.segments.length ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
@@ -2280,8 +2288,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       return;
     }
     if (kind === "move" && remoteDestination && (remoteDestination.kind !== "ssh" ||
-      items.some(({ place, entry }) => place.kind !== "local" || entry.directory || entry.link))) {
-      setStatus({ text: "Choose regular local files to move to an SSH/SFTP folder.", error: true });
+      items.some(({ place, entry }) => place.kind !== "local" || entry.link))) {
+      setStatus({ text: "Choose local files and folders without links for the SSH/SFTP move.", error: true });
       return;
     }
     if (remoteDestination && source.kind !== "local") {
@@ -2404,7 +2412,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (kind === "copy") collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
       return;
     }
-    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "ftp" && !isLanGroupPlace(source) &&
+    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isLanGroupPlace(source) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     if (kind === "move" && source.kind === "ftp") {
       setModal({ kind: "rename", path: placePath(source), name: selected.name, remote: source });
@@ -2937,7 +2945,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           if (result.phase === "scanning") return;
           storeResult({ name, bytes: result.root.logical,
             incomplete: result.phase !== "complete" || result.root.missingLogical > 0 });
-        });
+        }, folderScanSudo.authorize);
       }
     }
     void run().catch((error: unknown) => {
@@ -3282,6 +3290,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         const place = current?.tree && currentItem?.place.kind === "local" ? currentItem.place : local ?? ftp;
         if (place && current && !pane.search && !busy && !pane.loading) {
           setRowRename({ side: active, place, name: currentItem?.entry.name ?? current.name, treeKey: current.tree ? current.name : undefined });
+        } else if (currentItem?.place.kind === "ssh" && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, remote: currentItem.place });
         } else if (lanGroupPlace && currentItem && isLanGroupPlace(currentItem.place) &&
           !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, lan: currentItem.place });
@@ -3477,9 +3487,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
-      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !ftp && !lanGroupPlace && !(kswitcherWrite && kswitcherDelete)) ||
+      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !fileServer && !lanGroupPlace && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || lanGroupPlace) && current.link) || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !fileServer && !lanGroupPlace && !kswitcher) || !!pane.search || busy },
     { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcher) || !!pane.search || busy },
@@ -4144,6 +4154,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         setModal(null);
         setHelpTopic("files");
       }} />}
+      {folderScanSudo.prompt}
       {modal?.kind === "sudoBrowse" && <SudoDialog operation="browse" address={modal.target.place.address}
         path={placePath(modal.target.place)} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
         onConfirm={async (password) => {
@@ -4227,6 +4238,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
+            {item.place.kind === "ssh" && !state.search && !state.loading && !busy && <Button role="menuitem" onClick={() => {
+              setFileMenu(null);
+              const place = item.place;
+              if (place.kind === "ssh") setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, remote: place });
+            }}>{t("Rename")}</Button>}
+            {item.place.kind === "ssh" && entry && !toCollection && !state.search && !state.loading && !busy &&
+              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
             {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
@@ -4347,7 +4365,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             for (const name of modal.directories ?? []) {
               const segments = modal.relativePaths?.[modal.names.indexOf(name)] ?? [name];
               const remote = modal.remote;
-              const listing = remote ? await (remote.kind === "ssh" ? api.listSsh : api.listFtp)(remote.id, [...remote.segments, ...segments])
+              const listing = remote ? await (remote.kind === "ssh"
+                ? api.listSsh(remote.id, [...remote.segments, ...segments], undefined, true).catch((error: unknown) => {
+                  if ((error instanceof Error ? error.message : String(error)) === "SSH permission denied.") {
+                    return { entries: [], omitted: 1 };
+                  }
+                  throw error;
+                })
+                : api.listFtp(remote.id, [...remote.segments, ...segments]))
                 : modal.lan ? await api.listServer(modal.lan.id, [...modal.lan.segments, ...segments])
                 : await api.listKSwitcher(modal.kswitcher!.directory, modal.kswitcher!.peer, kswitcherPath(modal.path, segments.join("\\")));
               if (listing.entries.length || listing.omitted) return true;
@@ -4410,10 +4435,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           } else if ("names" in modal && remote) {
             const completed: string[][] = [];
             try {
-              const remove = remote.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
               await batch(modal.names, async (name, index) => {
                 const segments = [...remote.segments, ...(modal.relativePaths?.[index] ?? [name])];
-                await remove(remote.id, segments, recursive && (modal.directories?.includes(name) ?? false), modal.kind === "recycle");
+                const directory = recursive && (modal.directories?.includes(name) ?? false);
+                const recycle = modal.kind === "recycle";
+                if (remote.kind === "ssh") {
+                  if (!progress?.ssh) throw new Error("The SSH deletion request has closed.");
+                  await api.deleteSsh(remote.id, segments, directory, recycle, progress.ssh.id, progress.ssh.output);
+                } else await api.deleteFtp(remote.id, segments, directory, recycle);
                 completed.push(segments);
               }, progress);
               if (progress?.signal.aborted) {
@@ -4470,6 +4499,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             if (operation.kind === "create_file" && remote) {
               await api.createRemoteTextFile(remote, operation.name, operation.encoding ?? "utf8", sudoPassword);
               invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+            } else if (operation.kind === "rename" && remote?.kind === "ssh") {
+              await api.renameSsh(remote.id, [...remote.segments, operation.name], operation.new_name, sudoPassword);
+              invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+              if (modal.side) await load(modal.side, remote, "refresh", operation.new_name);
             } else if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);
             fileLocationsChanged();
@@ -4580,7 +4613,8 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
   const [encoding, setEncoding] = useState<TextEncoding>("utf8");
   const [error, setError] = useState("");
-  const [sudoCreation, setSudoCreation] = useState<{ name: string; encoding: TextEncoding }>();
+  const [sudoOperation, setSudoOperation] = useState<Extract<Operation, { kind: "rename" | "create_file" }>>();
+  const [sshApproval, setSshApproval] = useState<{ id: number; request: TransferSudoRequest }>();
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
@@ -4591,7 +4625,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const renameInArchive = modal.kind === "rename" && modal.archive;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const remoteRecycle = modal.kind === "recycle" && !!(modal.remote || modal.kswitcher);
-  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.lan);
+  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.lan || modal.remote?.kind === "ssh");
   const title = t(remoteRecycle ? "Move to remote recycle bin" : titles[modal.kind]);
   const removing = "names" in modal;
   const permanent = modal.kind === "delete";
@@ -4605,6 +4639,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     cancelRemote.current = controller;
     setCancelingRemote(false);
     setCompleted(0);
+    let ssh: RemoteDeletionProgress["ssh"];
     try {
       if (hasNonemptyFolders && !recursive && await hasNonemptyFolders()) {
         setRecursive(true);
@@ -4613,16 +4648,35 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
       if (renameInArchive) {
         await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
       }
+      if (removing && controller && modal.remote?.kind === "ssh") {
+        const id = nextTransferId();
+        const output = new Channel<TransferEvent>((request) => {
+          if (request.kind === "sudo_required" && !controller.signal.aborted) setSshApproval({ id, request });
+        });
+        await api.beginTransfer(id);
+        ssh = { id, output };
+        if (controller.signal.aborted) return;
+        controller.signal.addEventListener("abort", () => {
+          setSshApproval(undefined);
+          void api.cancelTransfer(id).catch(() => {});
+        }, { once: true });
+      }
       await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive,
-        controller ? { signal: controller.signal, completed: setCompleted } : undefined);
+        controller ? { signal: controller.signal, completed: setCompleted, ssh } : undefined);
     } catch (error) {
       const reason = describeError(error);
       setError(reason);
-      if (modal.kind === "newFile" && modal.remote?.kind === "ssh" && isPermissionError(reason)) {
-        setSudoCreation({ name, encoding });
+      if (modal.remote?.kind === "ssh" && reason === "SSH permission denied.") {
+        if (modal.kind === "newFile") setSudoOperation({ kind: "create_file", name, encoding });
+        if (modal.kind === "rename") setSudoOperation({ kind: "rename", name: modal.name, new_name: name });
       }
     } finally {
+      if (ssh) {
+        ssh.output.onmessage = () => {};
+        await api.finishTransfer(ssh.id).catch(() => {});
+      }
+      setSshApproval(undefined);
       setWaiting(false);
       cancelRemote.current = null;
     }
@@ -4694,10 +4748,12 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </footer>
       </form>
     </Dialog>
-    {sudoCreation && modal.remote?.kind === "ssh" && <SudoDialog address={modal.remote.address}
-      path={`/${[...modal.remote.segments, sudoCreation.name].join("/")}`} operation="createFile"
-      onClose={() => setSudoCreation(undefined)} onConfirm={(password) =>
-        onSubmit({ kind: "create_file", ...sudoCreation }, false, undefined, password)} />}
+    {sshApproval && <TransferSudoPrompt key={sshApproval.request.ticket} id={sshApproval.id} request={sshApproval.request}
+      operation="delete" onClose={() => setSshApproval((current) => current?.request.ticket === sshApproval.request.ticket ? undefined : current)} />}
+    {sudoOperation && modal.remote?.kind === "ssh" && <SudoDialog address={modal.remote.address}
+      path={`/${[...modal.remote.segments, sudoOperation.name].join("/")}`} operation={sudoOperation.kind === "rename" ? "rename" : "createFile"}
+      onClose={() => setSudoOperation(undefined)} onConfirm={(password) =>
+        onSubmit(sudoOperation, false, undefined, password)} />}
     {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
     </>
   );

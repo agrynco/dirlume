@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::{collect_response, Connection, TransferOutcome, TransferSession, VerifiedUpload};
 use crate::{
-    local, local_transfer, message,
+    message,
     protocol::{LanChange, LanChangeRequest, LanStat, LanUpload, LanUploadReply, LAN_UPLOAD_CHUNK},
     remote_transfer, Result,
 };
@@ -92,105 +92,6 @@ impl MoveCleanup {
         }
         TransferOutcome::Completed
     }
-}
-
-enum LocalOriginal {
-    Folder(same_file::Handle),
-    File(local_transfer::FileRevision),
-}
-
-struct LocalMoveItem {
-    path: PathBuf,
-    target: Vec<String>,
-    original: LocalOriginal,
-}
-
-fn collect_local_move(
-    source: &Path,
-    target: &[String],
-    transfer: &TransferSession,
-    items: &mut Vec<LocalMoveItem>,
-) -> Result<()> {
-    transfer.ensure_running().map_err(message)?;
-    let metadata = fs::symlink_metadata(source).map_err(message)?;
-    if local::is_link(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
-        return Err("Choose local files and folders without symbolic links.".to_owned());
-    }
-    let original = if metadata.is_dir() {
-        let folder = same_file::Handle::from_path(source).map_err(message)?;
-        for entry in fs::read_dir(source).map_err(message)? {
-            local_transfer::verify_folder(source, &folder).map_err(message)?;
-            let entry = entry.map_err(message)?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| "A filename cannot be represented as Unicode.")?;
-            let child = [target, &[name]].concat();
-            collect_local_move(&entry.path(), &child, transfer, items)?;
-        }
-        LocalOriginal::Folder(folder)
-    } else {
-        LocalOriginal::File(
-            local_transfer::FileRevision::capture(source, &metadata).map_err(message)?,
-        )
-    };
-    items.push(LocalMoveItem {
-        path: source.to_owned(),
-        target: target.to_vec(),
-        original,
-    });
-    Ok(())
-}
-
-pub(super) fn move_local_folder(
-    client: &mut LanTransfer<'_>,
-    source: &Path,
-    target: &[String],
-    policy: local_transfer::Policy,
-    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
-    ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
-) -> Result<TransferOutcome> {
-    let transfer = client.transfer;
-    let mut items = Vec::new();
-    collect_local_move(source, target, transfer, &mut items)?;
-    if !remote_transfer::upload(
-        client,
-        source,
-        target,
-        policy,
-        progress,
-        ask,
-        &mut |_, _| {},
-    )? {
-        return Ok(TransferOutcome::Skipped);
-    }
-    for item in items {
-        let result = (|| {
-            transfer.ensure_running().map_err(message)?;
-            match item.original {
-                LocalOriginal::Folder(original) => {
-                    local_transfer::verify_folder(&item.path, &original).map_err(message)?;
-                    fs::remove_dir(&item.path).map_err(message)
-                }
-                LocalOriginal::File(original) => {
-                    original.verify(&item.path).map_err(message)?;
-                    let mut input = File::open(&item.path).map_err(message)?;
-                    client.verify_uploaded(&item.target, &mut input, transfer)?;
-                    drop(input);
-                    transfer.ensure_running().map_err(message)?;
-                    local_transfer::remove_original(&item.path, &original).map_err(message)
-                }
-            }
-        })();
-        if let Err(error) = result {
-            return Ok(TransferOutcome::SourceRetained {
-                source: crate::file_history::display(source),
-                destination: format!("/{}", target.join("/")),
-                error,
-            });
-        }
-    }
-    Ok(TransferOutcome::Completed)
 }
 
 impl LanTransfer<'_> {
@@ -312,7 +213,7 @@ impl remote_transfer::UploadSession for LanTransfer<'_> {
     fn upload_to_stage(
         &mut self,
         target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + io::Seek),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String> {
         let LanUploadReply::Begun { stage } = self.upload_action(LanUpload::Begin {

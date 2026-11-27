@@ -1,5 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SpaceChange, type SpaceScanEvent } from "./api";
+import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SpaceChange, type SpaceScanEvent, type SshPlace } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
 export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
@@ -249,6 +249,7 @@ export async function scanSpace(
   rootPlace: FilePlace,
   signal: AbortSignal,
   report: (result: SpaceResult) => void,
+  authorize?: (place: SshPlace, signal: AbortSignal) => Promise<Listing>,
 ) {
   if (rootPlace.kind === "local") return scanLocalSpace(rootPlace, signal, report);
   const result = initialSpaceResult(rootPlace);
@@ -273,7 +274,13 @@ export async function scanSpace(
     const { entry, place } = job;
     const children: typeof jobs = [];
     try {
-      const listing: Listing = (await readPlace(place, undefined, undefined, signal)).listing;
+      const listing: Listing = await readPlace(place, undefined, undefined, signal).then(({ listing }) => listing).catch((error: unknown) => {
+        if (!signal.aborted && place.kind === "ssh" && authorize &&
+            (error instanceof Error ? error.message : String(error)) === "SSH permission denied.") {
+          return authorize(place, signal);
+        }
+        throw error;
+      });
       if (signal.aborted) return;
       entry.partial = listing.omitted > 0;
       const names = new Set<string>();

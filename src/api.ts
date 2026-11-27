@@ -500,7 +500,10 @@ export type TransferConflict = {
 export type TransferOutcome = { kind: "completed" | "skipped" }
   | { kind: "source_retained"; destination: string; source: string; error: string };
 export type TransferProgress = { file: string; path?: string; bytes: number; total: number | null };
-export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
+export type TransferSudoRequest = { kind: "sudo_required"; ticket: string; address: string; path: string };
+export type TransferEvent = ({ kind: "progress" } & TransferProgress) |
+  { kind: "conflict"; conflict: TransferConflict } |
+  TransferSudoRequest;
 
 export type FileHistoryDirection = "undo" | "redo";
 export interface FileHistory {
@@ -738,9 +741,11 @@ export const api = {
   listSsh: (id: number, segments: string[], sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal) =>
     netBoxRequest(signal, (request) =>
       invoke<Listing & { elevated: boolean; segments?: string[] }>("list_ssh", { id, segments, sudoPassword, reuseSudo, request })),
-  deleteSsh: (id: number, segments: string[], recursive: boolean, recycle = false) =>
-    invoke<void>("delete_ssh", { id, segments, recursive, recycle }),
+  deleteSsh: (id: number, segments: string[], recursive: boolean, recycle: boolean, job: number, output: Channel<TransferEvent>) =>
+    invoke<void>("delete_ssh", { id, request: { segments, recursive, recycle }, job, output }),
   renameFtp: (id: number, segments: string[], name: string) => invoke<void>("rename_ftp", { id, segments, name }),
+  renameSsh: (id: number, segments: string[], name: string, sudoPassword?: string) =>
+    invoke<void>("rename_ssh", { id, segments, name, sudoPassword }),
   deleteFtp: (id: number, segments: string[], recursive: boolean, recycle = false) =>
     invoke<void>("delete_ftp", { id, segments, recursive, recycle }),
   readFtpText: (id: number, segments: string[]) => invoke<TextDocument>("read_ftp_text", { id, segments }),
@@ -749,8 +754,8 @@ export const api = {
   saveFtpText: (id: number, segments: string[], revision: string, text: string) =>
     invoke<TextDocument>("save_ftp_text", { id, segments, revision, text }),
   readSshText: (id: number, segments: string[], sudoPassword?: string) => invoke<TextDocument>("read_ssh_text", { id, segments, sudoPassword }),
-  readSshBytes: (id: number, segments: string[], offset: number) =>
-    invoke<BytePage>("read_ssh_bytes", { id, segments, offset }),
+  readSshBytes: (id: number, segments: string[], offset: number, sudoPassword?: string) =>
+    invoke<BytePage>("read_ssh_bytes", { id, segments, offset, sudoPassword }),
   saveSshText: (id: number, segments: string[], revision: string, text: string, sudoPassword?: string) =>
     invoke<TextDocument>("save_ssh_text", { id, segments, revision, text, sudoPassword }),
   listServer: (id: number, segments: string[]) =>
@@ -834,6 +839,10 @@ export const api = {
   finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
   resolveTransfer: (id: number, decision: "overwrite" | "overwrite_all" | "skip", remember: boolean) =>
     invoke<void>("resolve_transfer", { id, decision, remember }),
+  authorizeTransferSudo: (id: number, ticket: string, password: string) =>
+    invoke<void>("authorize_transfer_sudo", { id, ticket, password }),
+  declineTransferSudo: (id: number, ticket: string) =>
+    invoke<void>("decline_transfer_sudo", { id, ticket }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; lanDestination?: number;
     kswitcherDestination?: string; kswitcherBroker?: boolean; multiple: boolean; moving: boolean;
@@ -911,17 +920,17 @@ export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: 
   return place.kind === "ftp" ? api.readFtpText(place.id, segments) : api.readServerText(place.id, segments);
 }
 
-export function readPlacePreviewText({ place, name }: NamedFile) {
+export function readPlacePreviewText({ place, name }: NamedFile, sudoPassword?: string) {
   return place.kind === "local" ? invoke<TextDocument | { page: BytePage }>("read_text", {
     directory: place.path, name, surface: "quick_view",
-  }) : readPlaceText({ place, name });
+  }) : readPlaceText({ place, name }, sudoPassword);
 }
 
-export function readPlacePreviewImage({ place, name }: NamedFile) {
+export function readPlacePreviewImage({ place, name }: NamedFile, sudoPassword?: string) {
   if (place.kind === "kswitcher") return invoke<ArrayBuffer>("read_kswitcher_preview", { peer: place.peer, path: kswitcherPath(place.path, name) });
   const source = place.kind === "local" ? { kind: place.kind, directory: place.path, name }
     : { kind: place.kind, id: place.id, segments: [...place.segments, name] };
-  return invoke<ArrayBuffer>("read_preview_image", { source });
+  return invoke<ArrayBuffer>("read_preview_image", { source, sudoPassword });
 }
 
 export async function savePlaceText({ place, name }: NamedFile, document: TextDocument, text: string, sudoPassword?: string): Promise<TextDocument> {
@@ -952,12 +961,12 @@ export async function savePlaceText({ place, name }: NamedFile, document: TextDo
   return { ...document, text };
 }
 
-export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
+export function readPlaceBytes({ place, name }: NamedFile, offset: number, sudoPassword?: string) {
   if (place.kind === "local") return api.readBytes(place.path, name, offset);
   if (place.kind === "kswitcher") return invoke<BytePage>("read_kswitcher_bytes", { peer: place.peer, path: kswitcherPath(place.path, name), offset });
   const segments = [...place.segments, name];
   if (place.kind === "archive") return api.readArchiveBytes(place.id, segments, offset);
-  if (place.kind === "ssh") return api.readSshBytes(place.id, segments, offset);
+  if (place.kind === "ssh") return api.readSshBytes(place.id, segments, offset, sudoPassword);
   return place.kind === "ftp" ? api.readFtpBytes(place.id, segments, offset) : api.readServerBytes(place.id, segments, offset);
 }
 
