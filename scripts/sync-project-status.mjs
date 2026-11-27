@@ -1,7 +1,7 @@
 const statuses = ["Backlog", "Ready", "In progress", "In review", "prerelease", "Done"];
 
 export function eligible(labels) {
-  return labels.includes("ready for dev") && !labels.includes("needs refinement");
+  return labels.includes("ready for dev") && !labels.includes("needs refinement") && !labels.includes("blocked");
 }
 
 function workBranch(ref) {
@@ -17,6 +17,7 @@ export function taskIssues(pull) {
 
 export function projectStatus({ issue, pulls, refs, promoted }) {
   if (issue.state === "CLOSED") return "Done";
+  if (issue.labels.includes("blocked")) return "Backlog";
   const open = pulls.find((pull) => pull.state === "open");
   if (open) return open.draft ? "In progress" : "In review";
   const oldBranches = new Set(pulls.map((pull) => pull.head.ref));

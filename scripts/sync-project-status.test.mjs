@@ -26,6 +26,15 @@ test("does not treat leftover branches from promoted or closed work as active", 
   assert.equal(state({ pulls: [merged], refs: [branch + "-followup"] }), "In progress");
 });
 
+test("keeps blocked work in Backlog while branches and pull requests remain open", () => {
+  const blocked = { ...issue, labels: [...issue.labels, "blocked"] };
+  assert.equal(state({ issue: blocked, refs: [branch] }), "Backlog");
+  assert.equal(state({ issue: blocked, pulls: [{ ...pr, state: "open", draft: true }] }), "Backlog");
+  assert.equal(state({ issue: blocked, pulls: [{ ...pr, state: "open", draft: false }] }), "Backlog");
+  assert.equal(state({ issue: blocked, pulls: [merged] }), "Backlog");
+  assert.equal(state({ issue: { ...blocked, state: "CLOSED" } }), "Done");
+});
+
 test("uses task branching and explicit issue references", () => {
   assert.deepEqual([...taskIssues({ ...pr, body: "Refs #194\n\nSee also #10.\nRefs #193" })], [193, 194]);
   assert.deepEqual([...taskIssues({ head: { ref: "other" }, body: "Closes #193" })], []);
