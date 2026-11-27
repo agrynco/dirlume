@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { api, describeError, isFileServer, isWritableServerPlace, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type KSwitcherPlace, type WritableServerPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
+import { api, describeError, isFileServer, isWritableServerPlace, isLockError, isPermissionError, placePath, windowsClient, type ArchivePlace, type ConflictPolicy, type CopyOptions, type Entry, type FilePlace, type FtpPlace, type GoogleDrivePlace, type KSwitcherPlace, type WritableServerPlace, type SshPlace, type TransferConflict, type TransferEntryDetails, type TransferEvent, type TransferProgress, type TransferSource } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogIconButton } from "./DialogActions";
 import { childPlace, formatSize, localPath, type Side } from "./panes";
@@ -13,6 +13,7 @@ import { HistoryField } from "./HistoryField";
 import { ElevationButton, LockDialog } from "./ProcessTools";
 import { SudoDialog } from "./SudoDialog";
 import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEstimate";
+import { isLocalMovePath, movePath, resolveMoveDestination, type MoveDestination } from "./moveDestination";
 
 export interface Transfer {
   kind: "copy" | "move";
@@ -24,6 +25,9 @@ export interface Transfer {
   kswitcherDestination?: KSwitcherPlace;
   kswitcherBroker?: boolean;
   archiveDestination?: ArchivePlace;
+  googleDriveDestination?: GoogleDrivePlace;
+  moveTarget?: FilePlace;
+  connectedPlaces?: readonly FilePlace[];
   chooseOperation?: boolean;
   collection?: { folders: string[][]; unavailable: string[]; needsLocalDestination: boolean };
 }
@@ -65,6 +69,8 @@ function estimateLabel(seconds: number | null) {
 }
 
 export function itemSource(place: FilePlace, item: Entry): TransferSource {
+  if (place.kind === "googleDrive") return { kind: "google_drive", profile: place.id, item: item.name, name: item.googleDrive?.name ?? item.name,
+    parent: place.folders.at(-1)?.id ?? "root", folder: item.directory };
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (isFileServer(place)) return { kind: place.kind, connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
@@ -78,14 +84,21 @@ export function itemSource(place: FilePlace, item: Entry): TransferSource {
     folder: item.directory, ...metadata };
 }
 
-export function TransferDialog({ transfer, side, showHidden, onClose, onFinished }: {
+export function TransferDialog({ transfer, side, showHidden, onClose, onFinished, onRename }: {
   transfer: Transfer;
   side: Side;
   showHidden: boolean;
   onClose: () => void;
-  onFinished: (success: boolean, movedPaths: readonly string[]) => void;
+  onFinished: (success: boolean, movedPaths: readonly string[], destination?: MoveDestination) => void;
+  onRename?: (name: string) => Promise<void>;
 }) {
-  const [destination, setDestination] = useState(transfer.target);
+  const driveTarget = transfer.googleDriveDestination;
+  const driveAccount = driveTarget?.email || driveTarget?.address;
+  const driveRoot = driveAccount ? `${driveAccount}:/${t("My Drive")}` : undefined;
+  const resolveEnteredMove = transfer.kind === "move";
+  const defaultDestination = resolveEnteredMove && transfer.moveTarget ? movePath(transfer.moveTarget)
+    : driveAccount ? `${driveAccount}:/${transfer.target}` : transfer.target;
+  const [destination, setDestination] = useState(defaultDestination);
   const [multipleDestinations, setMultipleDestinations] = useState(false);
   const [additional, setAdditional] = useState([""]);
   const [access, setAccess] = useState<CopyOptions["access"]>("default");
@@ -102,6 +115,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [completed, setCompleted] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [error, setError] = useState("");
+  const [driveNotes, setDriveNotes] = useState<string[]>([]);
+  const [checkingDestination, setCheckingDestination] = useState(false);
   const [blocked, setBlocked] = useState<Transfer["items"][number]>();
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [conflict, setConflict] = useState<TransferConflict | null>(null);
@@ -112,6 +127,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [estimatedTime, setEstimatedTime] = useState<string>();
   const running = useRef<number | null>(null);
   const session = useRef<number | null>(null);
+  const resolvedDestination = useRef<{ profile: string; parent: string } | undefined>(undefined);
+  const resolvedMove = useRef<MoveDestination | undefined>(undefined);
   const cancelled = useRef(false);
   const failedDecision = useRef(false);
   const reportedBytes = useRef(new Map<string, number>());
@@ -127,22 +144,33 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const kswitcherTarget = transfer.kswitcherDestination;
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
     (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
-  const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget && !serverTarget;
-  const replaceable = serverTarget || transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
+  const localTarget = resolveEnteredMove ? isLocalMovePath(destination)
+    : !transfer.remoteDestination && !archiveTarget && !kswitcherTarget && !serverTarget && !driveTarget;
+  const replaceable = serverTarget || transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" || transfer.source.kind === "googleDrive" ||
     transfer.kswitcherBroker || transfer.items.every(({ place }) => place.kind === "server" || place.kind === "kswitcher");
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
-  const manyDestinations = multipleDestinations && !moving && !serverTarget;
+  const driveSource = transfer.source.kind === "googleDrive";
+  const manyDestinations = multipleDestinations && !moving && !serverTarget && !driveSource && !driveTarget;
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
-  const submitDisabled = targets.some((path) => !path.trim()) || (localCopy && useFilter && !mask.trim());
-  const focusMove = transfer.kind === "move" && !submitDisabled;
   const singleFile = !transfer.collection && !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
   const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
+  const renameName = moving && onRename && destination !== defaultDestination && destination.trim() &&
+    destination !== "." && destination !== ".." && !/[\\/:]/.test(destination) ? destination : null;
+  const qualifiedDrivePath = !!driveRoot && (destination === driveRoot || destination.startsWith(driveRoot + "/"));
+  const localPathEntered = !!driveTarget && isLocalMovePath(destination);
+  const unsupportedDestination = !resolveEnteredMove && !renameName && (!!archiveTarget && destination !== defaultDestination ||
+    !!driveTarget && !qualifiedDrivePath && !localPathEntered);
+  const submitDisabled = checkingDestination || unsupportedDestination || targets.some((path) => !path.trim()) ||
+    (localCopy && useFilter && !mask.trim());
+  const focusMove = transfer.kind === "move" && !submitDisabled;
+  const [setupPromptStart, setupPromptEnd] = moving && onRename
+    ? t("Rename or move {0} to:").split("{0}") : [promptStart, promptEnd];
   const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
-    ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
+    ? destination.replace(/[\\/]+$/, "") + separator + (transfer.items[0].entry.googleDrive?.name ?? transfer.items[0].entry.name)
     : destination;
   const lockingMove = phase === "done" && windowsClient && blocked?.place.kind === "local" && moving && isLockError(error);
   const visibleEstimate = phase === "working" && !conflict ? estimatedTime : undefined;
@@ -194,6 +222,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   }
 
   function cancel() {
+    if (checkingDestination) return;
     if (running.current === null) {
       onClose();
       return;
@@ -229,7 +258,21 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     });
   }
 
-  async function run(retry: boolean) {
+  async function resolveGoogleDriveDestination(path: string) {
+    if (!driveTarget || !driveRoot || !qualifiedDrivePath) return undefined;
+    const profile = driveTarget.id;
+    if (path === defaultDestination) return { profile, parent: driveTarget.folders.at(-1)?.id ?? "root" };
+    let parent = "root";
+    for (const segment of path.slice(driveRoot.length).split("/").filter(Boolean)) {
+      if (cancelled.current) return undefined;
+      const matches = (await api.listGoogleDrive(profile, parent)).filter((item) => item.directory && item.name === segment);
+      if (matches.length !== 1) throw new Error(t("Choose a unique Google Drive folder. {0}", segment));
+      parent = matches[0].id;
+    }
+    return { profile, parent };
+  }
+
+  async function run(retry: boolean, driveDestination = resolvedDestination.current) {
     if (running.current !== null) return;
     const previousSession = session.current;
     const id = previousSession ?? nextTransferId();
@@ -237,6 +280,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     running.current = id;
     failedDecision.current = false;
     const archiveCopy = !moving && transfer.items.every(({ place }) => place.kind === "local") ? archiveTarget : undefined;
+    const move = resolvedMove.current;
     const jobs = archiveCopy ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
     estimate.current = new TransferEstimate(archiveCopy ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
     setEstimatedTime(undefined);
@@ -247,6 +291,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     let finished = false;
     let initialized = previousSession !== null;
     let skippedItems = skipped;
+    let driveIssues = false;
+    if (!retry) setDriveNotes([]);
     const movedPaths: string[] = [];
     try {
       if (!initialized) {
@@ -282,36 +328,61 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const { destination, item } = jobs[index];
         attempted = item;
         const { place, entry } = item;
-        setProgress({ file: entry.name, bytes: 0, total: null });
-        const remoteCopy = !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
+        setProgress({ file: entry.googleDrive?.name ?? entry.name, bytes: 0, total: null });
+        const remoteCopy = driveSource || !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
           (place.kind === "server" || place.kind === "kswitcher") && entry.directory;
-        const target = item.collectionDestination?.length
+        const target = move?.path ?? (item.collectionDestination?.length
           ? [destination.replace(/[\\/]+$/, ""), ...item.collectionDestination].join(separator)
           : remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
-          : destination;
+          : destination);
+        const remote = move ? move.remote : transfer.remoteDestination;
+        const server = move ? move.server : serverTarget;
+        const archive = move ? move.archive : archiveTarget;
         const request = {
           source: itemSource(place, entry), destination: target, moving,
-          ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
-          sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
-          serverDestination: serverTarget?.id,
-          archiveDestination: archiveTarget ? { id: archiveTarget.id, segments: archiveTarget.segments } : undefined,
-          kswitcherDestination: kswitcherTarget?.peer, kswitcherBroker: transfer.kswitcherBroker,
+          ftpDestination: remote?.kind === "ftp" ? remote.id : undefined,
+          sshDestination: remote?.kind === "ssh" ? remote.id : undefined,
+          serverDestination: server?.id,
+          archiveDestination: archive ? { id: archive.id, segments: archive.segments } : undefined,
+          googleDriveDestination: move ? move.googleDrive : driveDestination,
+          kswitcherDestination: (move ? move.kswitcher : kswitcherTarget)?.peer,
+          kswitcherBroker: move ? move.broker : transfer.kswitcherBroker,
           multiple: !!transfer.collection || itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
         const output = transferEvents(id);
-        const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
-        if (result.kind === "source_retained") {
-          setError(t(transfer.kswitcherBroker || item.place.kind !== "local" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
-            "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
-          setBlocked(item);
-          return;
+        const driveToLocal = place.kind === "googleDrive" && !request.googleDriveDestination &&
+          !remote && !server && !archive && !request.kswitcherDestination && !request.kswitcherBroker;
+        let result;
+        try {
+          result = await api.transfer(id, request, output);
+        } catch (error) {
+          if (!driveToLocal || jobs.length === 1 || cancelled.current) throw error;
+          driveIssues = true;
+          const name = entry.googleDrive?.name ?? entry.name;
+          const detail = errorText(describeError(error));
+          setDriveNotes((notes) => [...notes, `${name} — ${detail}`]);
+          setSkipped(++skippedItems);
+        } finally {
+          output.onmessage = () => {};
         }
-        if (result.kind === "completed") {
+        if (result?.kind === "source_retained") {
+          if (driveToLocal) {
+            driveIssues = true;
+            setDriveNotes((notes) => [...notes, `${result.source} — ${errorText(result.error)}`]);
+            setCompleted((count) => count + 1);
+          } else {
+            setError(t(transfer.kswitcherBroker || item.place.kind !== "local" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+              "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
+            setBlocked(item);
+            return;
+          }
+        }
+        if (result?.kind === "completed") {
           if (moving && item.searchPath) movedPaths.push(item.searchPath);
           setCompleted((count) => count + 1);
-        } else setSkipped(++skippedItems);
+        } else if (result?.kind === "skipped") setSkipped(++skippedItems);
         estimate.current?.finishItem();
         reportedBytes.current.clear();
         setProcessed(index + 1);
@@ -336,16 +407,49 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
       running.current = null;
       setConflict(null);
       setSudo(null);
-      const success = finished && !cancelled.current && skippedItems === 0;
-      onFinished(success, movedPaths);
+      const success = finished && !cancelled.current && skippedItems === 0 && !driveIssues;
+      onFinished(success, movedPaths, move);
       if (success) onClose();
       else setPhase("done");
     }
   }
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    if (phase === "setup") void run(false);
+    if (phase !== "setup" || checkingDestination || unsupportedDestination) return;
+    setCheckingDestination(true);
+    setError("");
+    try {
+      if (renameName && onRename) {
+        await onRename(renameName);
+        onClose();
+      } else {
+        if (resolveEnteredMove) {
+          const target = await resolveMoveDestination(destination, transfer.moveTarget, transfer.connectedPlaces ?? [], transfer.source, itemCount > 1);
+          for (const { place, entry } of transfer.items) {
+            if (entry.link && (place.kind !== "local" || target.googleDrive || target.remote || target.server || target.archive || target.kswitcher || target.broker)) {
+              throw new Error(t("Choose files or folders without symbolic links."));
+            }
+            if (target.googleDrive && place.kind !== "local" && place.kind !== "googleDrive") {
+              throw new Error(t("Choose local or Google Drive items to transfer to Google Drive."));
+            }
+            if (place.kind === "googleDrive" && !target.googleDrive) {
+              if (target.remote || target.server || target.archive || target.kswitcher) {
+                throw new Error(t("Choose a local folder or a Google Drive folder as the destination."));
+              }
+            }
+          }
+          resolvedMove.current = target;
+        } else {
+          resolvedDestination.current = await resolveGoogleDriveDestination(destination);
+        }
+        void run(false, resolvedDestination.current);
+      }
+    } catch (failure) {
+      setError(describeError(failure));
+    } finally {
+      setCheckingDestination(false);
+    }
   }
 
   const status = error ? "Transfer stopped" : cancelled.current ? "Transfer canceled" : "Transfer complete";
@@ -360,15 +464,21 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
             <div className="field">
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {transfer.collection ? t("Copy from collection") : <>
-                  {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+                  {setupPromptStart}<strong>{itemCount === 1 ? (transfer.items[0].entry.googleDrive?.name ?? transfer.items[0].entry.name) : t("{0} selected items", itemCount)}</strong>{setupPromptEnd}
                 </>}
               </label>
-              {transfer.remoteDestination && <span className="muted" id="transfer-connection">
+              {!resolveEnteredMove && transfer.remoteDestination && <span className="muted" id="transfer-connection">
                 {remoteDestinationLabel(transfer.remoteDestination)}
               </span>}
-              {kswitcherTarget && <span className="muted" id="transfer-connection">{kswitcherTarget.address}</span>}
-              {serverTarget && <span className="muted" id="transfer-connection">{serverTarget.address}</span>}
-              {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus={!focusMove || undefined} value={destination} /> :
+              {!resolveEnteredMove && kswitcherTarget && <span className="muted" id="transfer-connection">{kswitcherTarget.address}</span>}
+              {!resolveEnteredMove && serverTarget && <span className="muted" id="transfer-connection">{serverTarget.address}</span>}
+              {archiveTarget || driveTarget || resolveEnteredMove && (serverTarget || transfer.remoteDestination || kswitcherTarget) ? <input id="transfer-destination" type="text"
+                readOnly={(!resolveEnteredMove && !driveTarget && !onRename) || checkingDestination}
+                data-initial-focus={!focusMove || undefined} value={destination}
+                onFocus={(event) => { if (resolveEnteredMove || driveTarget || onRename) event.currentTarget.select(); }} onChange={(event) => {
+                  setDestination(event.target.value);
+                  setError("");
+                }} /> :
               serverTarget ? <input id="transfer-destination" type="text" aria-label={t("Destination")} aria-describedby="transfer-connection"
                 required data-initial-focus={!focusMove || undefined} value={destination} onChange={(event) => setDestination(event.target.value)} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
@@ -428,7 +538,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <span>{t("Copy contents of symbolic links")}</span>
               </label>
             </>}
-            {!moving && !archiveTarget && !serverTarget && <label className="field-checkbox">
+            {!moving && !archiveTarget && !serverTarget && !driveSource && !driveTarget && <label className="field-checkbox">
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
               <span>{t("Process multiple destinations")}</span>
             </label>}
@@ -445,10 +555,15 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               <input type="checkbox" checked={moving} onChange={(event) => setMoving(event.target.checked)} />
               <span>{t("Move instead of copying")}</span>
             </label>}
+            {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+            {unsupportedDestination && <p className="dialog-error" role="status">{t(driveTarget
+              ? "Enter a Google Drive path, an absolute local path, or a new name."
+              : "Enter a new name or keep the destination shown when the dialog opened.")}</p>}
           </div>
           <footer className="dialog-footer">
-            <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
-            <Button type="submit" className="primary" data-initial-focus={focusMove || undefined} disabled={submitDisabled}>{t(verb)}</Button>
+            <Button type="button" disabled={checkingDestination} onClick={onClose}>{t("Cancel")}</Button>
+            <Button type="submit" className="primary" data-initial-focus={focusMove || undefined}
+              disabled={submitDisabled}>{t(renameName ? "Rename" : verb)}</Button>
           </footer>
         </form>
       ) : (
@@ -469,6 +584,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 {visibleEstimate && <div className="transfer-estimate" id="transfer-estimate">{visibleEstimate}</div>}
                 {phase === "done" && <p role="status">{t("{0} completed", completed)}{skipped ? `, ${t("{0} skipped", skipped)}` : ""}.</p>}
                 {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+                {phase === "done" && driveNotes.length > 0 && <ul>{driveNotes.map((note, index) => <li key={index}>{note}</li>)}</ul>}
                 {lockingMove && <div className="dialog-actions">
                   <Button type="button" onClick={() => {
                     const paths = [placePath(childPlace(blocked.place, blocked.entry.name))];

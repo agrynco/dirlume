@@ -11,6 +11,7 @@ const catalog = languages.map((language) => language.name === nginx.name ? nginx
 export const languageChoices = [...catalog].sort((left, right) => left.name.localeCompare(right.name));
 
 function directorySegments(place: TextPlace) {
+  if (place.kind === "googleDrive") return place.folders.map(({ name }) => name);
   if (place.kind === "kswitcher") return place.path.split(/[\\/]/).filter(Boolean);
   if (place.kind !== "local") return place.segments;
   const unc = uncParts(place.path);

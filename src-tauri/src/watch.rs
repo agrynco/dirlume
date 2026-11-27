@@ -10,7 +10,7 @@ use std::{
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -48,10 +48,15 @@ pub enum MeasurementSource {
         connection: u32,
         segments: Vec<String>,
     },
+    GoogleDrive {
+        profile: uuid::Uuid,
+        folders: HashMap<String, String>,
+    },
 }
 
 #[tauri::command]
 pub async fn measure_folders(
+    app: AppHandle,
     id: u32,
     source: MeasurementSource,
     names: Vec<String>,
@@ -61,7 +66,7 @@ pub async fn measure_folders(
 ) -> Result<()> {
     let connection = match &source {
         MeasurementSource::Ftp { connection, .. } => Some(ftp_state.connection(*connection)?),
-        MeasurementSource::Local { .. } => None,
+        MeasurementSource::Local { .. } | MeasurementSource::GoogleDrive { .. } => None,
     };
     let stop = Arc::new(MeasurementStop::default());
     state
@@ -69,39 +74,69 @@ pub async fn measure_folders(
         .lock()
         .map_err(message)?
         .insert(id, Arc::clone(&stop));
-    let result = blocking(move || {
-        let reported_incomplete = AtomicBool::new(false);
-        match source {
-            MeasurementSource::Local { directory } => {
-                let directory = local::absolute(&directory).map_err(message)?;
-                for name in &names {
-                    local::name_component(name).map_err(message)?;
-                }
-                let workers = names.len().min(2);
-                let names = Mutex::new(names.into_iter());
-                thread::scope(|scope| {
-                    for _ in 0..workers {
-                        scope.spawn(|| {
-                            let pending = std::iter::from_fn(|| names.lock().ok()?.next());
-                            report_sizes(pending, &output, &reported_incomplete, |name| {
-                                space_analyzer::measure_folder(&directory.join(name), &stop.local)
-                            });
-                        });
+    let result = if let MeasurementSource::GoogleDrive { profile, folders } = source {
+        stop.remote
+            .run_until_cancelled(async {
+                let drive = crate::google_drive::TransferDrive::readable(&app, profile).await?;
+                for name in names {
+                    let folder = folders
+                        .get(&name)
+                        .ok_or("Choose a valid Google Drive item.")?;
+                    let (bytes, incomplete) = drive.folder_size(folder).await?;
+                    if output
+                        .send(SizeResult {
+                            name,
+                            bytes,
+                            incomplete,
+                        })
+                        .is_err()
+                    {
+                        break;
                     }
-                });
+                }
+                Ok(())
+            })
+            .await
+            .unwrap_or(Ok(()))
+    } else {
+        blocking(move || {
+            let reported_incomplete = AtomicBool::new(false);
+            match source {
+                MeasurementSource::Local { directory } => {
+                    let directory = local::absolute(&directory).map_err(message)?;
+                    for name in &names {
+                        local::name_component(name).map_err(message)?;
+                    }
+                    let workers = names.len().min(2);
+                    let names = Mutex::new(names.into_iter());
+                    thread::scope(|scope| {
+                        for _ in 0..workers {
+                            scope.spawn(|| {
+                                let pending = std::iter::from_fn(|| names.lock().ok()?.next());
+                                report_sizes(pending, &output, &reported_incomplete, |name| {
+                                    space_analyzer::measure_folder(
+                                        &directory.join(name),
+                                        &stop.local,
+                                    )
+                                });
+                            });
+                        }
+                    });
+                }
+                MeasurementSource::Ftp { segments, .. } => {
+                    let mut ftp = connection
+                        .ok_or("Connect to the FTP server first.")?
+                        .open_with_cancel(Some(stop.remote.clone()))?;
+                    report_sizes(names, &output, &reported_incomplete, |name| {
+                        ftp.folder_size(&ftp::child(&segments, name), &stop.local)
+                    });
+                }
+                MeasurementSource::GoogleDrive { .. } => unreachable!(),
             }
-            MeasurementSource::Ftp { segments, .. } => {
-                let mut ftp = connection
-                    .ok_or("Connect to the FTP server first.")?
-                    .open_with_cancel(Some(stop.remote.clone()))?;
-                report_sizes(names, &output, &reported_incomplete, |name| {
-                    ftp.folder_size(&ftp::child(&segments, name), &stop.local)
-                });
-            }
-        }
-        Ok(())
-    })
-    .await;
+            Ok(())
+        })
+        .await
+    };
     state.0.lock().map_err(message)?.remove(&id);
     result
 }

@@ -2,7 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { api, describeError, folderLabel, isFileServer, placePath, windowsClient, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SpaceChange, type SpaceScanEvent, type SshPlace } from "./api";
 import { childPlace, localPath, readPlace } from "./panes";
 
-export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" }>;
+export type SpacePlace = Exclude<FileLocation, { kind: "archive" | "smbRoot" | "googleDrive" }>;
 export type Metric = "allocated" | "logical";
 export type Scope = { place: SpacePlace; kind: "volume" | "share" | "connection" };
 

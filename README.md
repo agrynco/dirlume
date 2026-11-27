@@ -113,7 +113,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Esc / F10 inside the viewer or editor | Close the current document. A changed editor asks before discarding changes. |
 | F6 inside the viewer or editor | Switch to the other mode for the current file. Unsaved edits stay in the Editor. |
 | Ctrl+Tab / Ctrl+Shift+Tab | Cycle forward or backward through the file panels and open documents. |
-| F5 / F6 | Open the Copy or Rename or move dialog. |
+| F5 / F6 | Open the Copy or Rename or move dialog. In F6, the other pane supplies the initial path. Enter a new name to rename one item in place, or enter the actual destination path. Google Drive paths include the account, such as `user@example.com:/My Drive/Work`. |
 | Ctrl+Alt+S | Open Options. |
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
@@ -241,6 +241,14 @@ node scripts/server-smoke.mjs
 On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dirlume with an isolated WebView2 profile and test files. The CI smoke job uses a separate build with the `ui-automation` feature. To include the FTP smoke test locally, install `pyftpdlib==2.2.0` in Python and set `DIRLUME_FTP_PYTHON` to that Python executable. Use a UI automation build so the fixture keeps its FTP profiles separate.
 
 For Windows memory investigations, [measure WebView2 by PID and process role](docs/webview2-memory.md).
+
+### Test Google Drive sign-in
+
+Enable the Google Drive API in the Dirlume Google Cloud project and add the `https://www.googleapis.com/auth/drive` scope. Add test accounts under **Google Auth Platform → Audience → Test users** when the app is in Testing. Create a **Desktop app** OAuth client in that project and download its JSON. Set `DIRLUME_GOOGLE_OAUTH_CLIENT` to the absolute path before starting Dirlume, or save the file as `google-drive-oauth.json` in Dirlume's app configuration directory. Keep the JSON out of the repository. The operating system credential store holds saved Google sign-ins. Reconnect a read-only account to grant access for write operations. Testing-mode grants for this scope expire after seven days. Public distribution with full My Drive access requires [Google's restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
+To package a test build with Google Drive ready to connect, set `DIRLUME_BUNDLE_GOOGLE_OAUTH_CLIENT` to the absolute path of the Desktop app client JSON at build time. The bundled client is used when the recipient has no local configuration.
+
+Run `node scripts/google-drive-pane-smoke.mjs` after the frontend build to verify the pane workflows with a simulated Google Drive connection.
 
 ## Archives
 

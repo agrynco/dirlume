@@ -266,6 +266,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          DIRLUME_GOOGLE_OAUTH_JSON: ${{ needs.version.outputs.publish == 'true' && secrets.DIRLUME_GOOGLE_OAUTH_JSON || '' }}
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         run: |
           $configArgs = @()
@@ -274,8 +275,20 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $configArgs = @('--config', 'src-tauri/target/updater-config.json')
           }
-          npm run tauri -- build --ci --bundles "$env:DIRLUME_BUNDLES" @configArgs -- --locked
-          exit $LASTEXITCODE
+          $oauthFile = $null
+          try {
+            if ($env:DIRLUME_SIGNED_RELEASE -eq 'true') {
+              if (-not $env:DIRLUME_GOOGLE_OAUTH_JSON) { throw 'The release requires a Google Drive Desktop OAuth client.' }
+              $oauthFile = Join-Path $env:RUNNER_TEMP 'dirlume-google-drive-oauth.json'
+              [IO.File]::WriteAllText($oauthFile, $env:DIRLUME_GOOGLE_OAUTH_JSON)
+              $env:DIRLUME_BUNDLE_GOOGLE_OAUTH_CLIENT = $oauthFile
+              Remove-Item Env:DIRLUME_GOOGLE_OAUTH_JSON
+            }
+            npm run tauri -- build --ci --bundles "$env:DIRLUME_BUNDLES" @configArgs -- --locked
+            exit $LASTEXITCODE
+          } finally {
+            if ($oauthFile) { Remove-Item -LiteralPath $oauthFile -ErrorAction SilentlyContinue }
+          }
       - name: Retain build-matched JavaScript source maps
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

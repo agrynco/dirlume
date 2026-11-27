@@ -1381,6 +1381,17 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .attribute-metadata { display: grid; gap: 4px; margin: 0; }
 .attribute-metadata > div { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
 .attribute-metadata dd { margin: 0; }
+.google-drive-connection-body { display: grid; align-content: start; gap: 14px; }
+.google-drive-connection-body .dialog-error { margin: 0; }
+.google-drive-account { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.google-drive-account > div { min-width: 0; }
+.google-drive-account p, .google-drive-sign-in-status p { color: var(--dialog-muted); margin-block-start: 3px; }
+.google-drive-sign-in-status {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.google-drive-sign-in-status > svg { flex: none; width: 20px; height: 20px; color: var(--accent); }
+.google-drive-remove { margin-inline-end: auto; }
 .transfer-body, .command-menu { display: grid; gap: 10px; }
 .transfer-options { row-gap: var(--dialog-control-gap); }
 .help-layout {

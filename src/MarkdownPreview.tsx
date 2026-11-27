@@ -231,6 +231,7 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
     }
     return { place: { ...place, path: parts.join("\\") + (parts.length === 1 ? "\\" : "") }, name };
   }
+  if (place.kind === "googleDrive") throw new Error("Use a file path on this source.");
   const basePath = place.segments.map(encodeURIComponent).join("/");
   const url = new URL(destination, documentOrigin + "/" + (basePath ? basePath + "/" : ""));
   if (url.origin !== documentOrigin) throw new Error("Use a file path on this source.");

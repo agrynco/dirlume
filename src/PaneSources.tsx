@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { Activity, ChevronDown, Clock3, Folder, HardDrive, LibraryBig, Server } from "lucide-react";
+import { Activity, ChevronDown, Cloud, Clock3, Folder, HardDrive, LibraryBig, Server } from "lucide-react";
 import { api, describeError, windowsClient, type ComputerDrive, type ConnectionSource, type QuickLocation } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
@@ -109,6 +109,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
     { label: "NetBox", bindings: shortcuts.netboxSources, Icon: Server, value: "netbox" },
     { label: "SMB", bindings: shortcuts.smbSources, Icon: Server, value: "smb" as const },
     { label: t("Remote machine"), bindings: shortcuts.remoteSources, Icon: Server, value: "remote" },
+    { label: "Google Drive", bindings: shortcuts.googleDriveSources, Icon: Cloud, value: "googleDrive" },
   ] as const;
   const folders = locations.map((location) => {
     const command = driveSourceCommand(location);

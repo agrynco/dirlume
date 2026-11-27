@@ -94,12 +94,12 @@ export function collectionReferencePath({ origin, name }: CollectionReference) {
 export async function resolveCollectionReference(
   reference: CollectionReference,
   bridgeDirectory: string,
-  register: (place: FilePlace) => void,
+  register: (place: TextPlace) => void,
   archivePassword?: string,
   activePlaces: readonly (FilePlace | null)[] = [],
 ) {
   const { origin, name } = reference;
-  let place: FilePlace;
+  let place: TextPlace;
   let listing: Listing;
   switch (origin.kind) {
     case "local": {
@@ -230,7 +230,7 @@ export function createCollectionFolder(siblings: CollectionEntry[], value: strin
   return { kind: "folder", id: newId(), name: collectionName(siblings, value), children: [] };
 }
 
-export function collectionReference(place: TextPlace, entry: Pick<Entry, "name" | "directory">): CollectionReference {
+export function collectionReference(place: Exclude<TextPlace, { kind: "googleDrive" }>, entry: Pick<Entry, "name" | "directory">): CollectionReference {
   const origin: Origin = (() => {
     switch (place.kind) {
       case "local": return { kind: "local", path: place.smb ? mountedSmbPath(place.path, place.smb) : place.path };
