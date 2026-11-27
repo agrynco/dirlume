@@ -80,12 +80,14 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
   return page;
 }
 
-async function start(page, names, { move = false, policy = "ask", fromActionBar = false } = {}) {
+async function start(page, names, move = false, policy = "ask") {
   const source = page.locator('#left-files[aria-busy="false"]');
   await page.locator("dialog[open]").waitFor({ state: "hidden" });
   const row = (name, attributes = "") => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]${attributes}`);
   // Use selection events so the estimate test does not depend on how the
   // runner schedules animation frames after Playwright installs a clock.
+  // Synthetic clicks do not include the pointer event that activates the pane.
+  await source.dispatchEvent("pointerdown", { button: 0, pointerType: "mouse", isPrimary: true });
   await row(names[0]).dispatchEvent("click", { button: 0 });
   if (names.length > 1) for (const name of names) await row(name).dispatchEvent("click", { button: 0, ctrlKey: true });
   await row(names.at(-1), '[data-current="true"]').waitFor();
@@ -93,8 +95,7 @@ async function start(page, names, { move = false, policy = "ask", fromActionBar 
   const verb = move ? "Rename or move" : "Copy";
   const setup = dialog(page, verb);
   try {
-    if (fromActionBar) await page.locator(`.actionbar [data-command="${move ? "move" : "copy"}"]`).click();
-    else await source.press(move ? "F6" : "F5");
+    await source.press(move ? "F6" : "F5");
     await setup.waitFor();
   } catch (error) {
     const workspace = await page.evaluate(() => ({
@@ -175,11 +176,11 @@ try {
   await verifyCopyCheckboxes(browser);
   console.log("Verified aligned Copy checkboxes, translated wrapping, and label and keyboard activation.");
   const overwritePage = await fixture(browser, false, { mockClock: false });
-  await start(overwritePage, ["a.bin"], { policy: "overwrite", fromActionBar: true });
+  await start(overwritePage, ["a.bin"], false, "overwrite");
   assert.equal(await overwritePage.evaluate(() => window.transferFixture.current.request.policy), "overwrite");
   await complete(overwritePage);
   await dialog(overwritePage, "Copying…").waitFor({ state: "hidden" });
-  await start(overwritePage, ["b.bin"], { fromActionBar: true });
+  await start(overwritePage, ["b.bin"]);
   assert.equal(await overwritePage.evaluate(() => window.transferFixture.current.request.policy), "ask");
   await overwritePage.evaluate(() => window.transferFixture.conflict(true));
   const readOnly = dialog(overwritePage, "File already exists");
@@ -249,7 +250,7 @@ try {
   await destinationsPage.close();
 
   const movePage = await fixture(browser);
-  await start(movePage, ["a.bin", "b.bin"], { move: true });
+  await start(movePage, ["a.bin", "b.bin"], true);
   await complete(movePage);
   await waitForSource(movePage, "b.bin");
   await movePage.evaluate(() => window.transferFixture.current.reject(new Error("Fixture failed.")));
