@@ -233,17 +233,21 @@ pub(super) fn prepare(
     let _ = refresh_environment;
 
     let run = format!("DIRLUME_{}", uuid::Uuid::new_v4().simple());
+    let working_folder = format!("{run}_FOLDER");
+    command.env(
+        &working_folder,
+        local::display_path(folder).map_err(crate::message)?,
+    );
     let mut template = Template {
         command: &mut command,
         values,
         prefix: run.clone(),
         count: 0,
     };
-    let mut script = String::new();
     #[cfg(unix)]
-    script.push_str("trap 'exit 130' INT TERM\n");
+    let mut script = format!("trap 'exit 130' INT TERM\ncd -- \"${working_folder}\" || exit 1\n");
     #[cfg(windows)]
-    script.push_str("$ErrorActionPreference = 'Stop'\n[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n");
+    let mut script = format!("$ErrorActionPreference = 'Stop'\n[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\nSet-Location -LiteralPath $env:{working_folder}\n");
     for (index, step) in steps.iter().enumerate() {
         use std::fmt::Write;
         let number = index + 1;
@@ -275,4 +279,93 @@ pub(super) fn prepare(
     #[cfg(unix)]
     command.args(["-c", script.as_str()]);
     Ok((command, label.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::user_menu::{revision, Document, Prompt, UserMenus, LOCAL_NAME, PERSONAL_NAME};
+
+    #[test]
+    fn only_the_reviewed_command_runs_with_literal_arguments_and_stops_on_failure() {
+        let fixture = tempfile::tempdir().unwrap();
+        let folder = fixture.path().canonicalize().unwrap();
+        let opposite = folder.join("інші & файли");
+        fs::create_dir(&opposite).unwrap();
+        let first = folder.join("file one 'é & $.txt");
+        let second = folder.join("file two (`sample) ;.txt");
+        fs::write(&first, []).unwrap();
+        fs::write(&second, []).unwrap();
+
+        #[cfg(windows)]
+        let steps = ["function Store { Set-Content -LiteralPath .\\args.txt -Encoding UTF8 -Value ([string[]]$args) }; Store {{focusedPath}} {{oppositeFolder}} {{markedPaths}} {{prompt:value}}",
+            "cmd.exe /d /c exit 7", "Set-Content -LiteralPath .\\unexpected.txt -Value unexpected"];
+        #[cfg(unix)]
+        let steps = ["printf '%s\\n' {{focusedPath}} {{oppositeFolder}} {{markedPaths}} {{prompt:value}} > args.txt",
+            "(exit 7)", "touch unexpected.txt"];
+        let doc = Document {
+            version: 1,
+            entries: vec![Entry::Command {
+                label: "Example".into(),
+                hotkey: "F4".into(),
+                visibility: Visibility::File,
+                mask: "*.txt".into(),
+                steps: steps.into_iter().map(str::to_owned).collect(),
+                prompts: vec![Prompt {
+                    name: "value".into(),
+                    label: "Value".into(),
+                    initial: String::new(),
+                }],
+            }],
+        };
+        let local_file = folder.join(LOCAL_NAME);
+        let personal = folder.join(PERSONAL_NAME);
+        let bytes = serde_json::to_vec(&doc).unwrap();
+        fs::write(&local_file, &bytes).unwrap();
+        let wire_path = |path: &Path| local::display_path(path).unwrap();
+        let prompt = "literal ' \" $ && ` & $(bad)";
+        let request = || Run {
+            source: SourceVersion {
+                folder: wire_path(&folder),
+                path: wire_path(&local_file),
+                revision: Some(revision(&bytes)),
+            },
+            index: vec![0],
+            opposite: Some(wire_path(&opposite)),
+            focused: Some(wire_path(&first)),
+            marked: vec![wire_path(&first), wire_path(&second)],
+            inputs: HashMap::from([("value".into(), prompt.into())]),
+        };
+        let menus = UserMenus::default();
+        assert!(menus.prepare(request(), &personal, false).is_err());
+        menus
+            .0
+            .lock()
+            .unwrap()
+            .insert(local_file.clone(), revision(&bytes));
+        fs::write(&local_file, b"changed").unwrap();
+        assert!(menus.prepare(request(), &personal, false).is_err());
+        fs::write(&local_file, &bytes).unwrap();
+        let (command, _) = menus.prepare(request(), &personal, false).unwrap();
+        let (code, transcript) = terminal::run_menu_fixture(command);
+        assert_eq!(code, 7, "{transcript}");
+        assert!(transcript.contains("Step 2"), "{transcript}");
+        let output = fs::read_to_string(folder.join("args.txt")).unwrap();
+        assert_eq!(
+            output
+                .trim_start_matches('\u{feff}')
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                wire_path(&first),
+                wire_path(&opposite),
+                wire_path(&first),
+                wire_path(&second),
+                prompt.to_owned()
+            ]
+        );
+        assert!(!folder.join("unexpected.txt").exists());
+    }
 }

@@ -201,7 +201,7 @@ unset DIRLUME_ZSH_STARTUP DIRLUME_ZSH_DIRECTORY"#,
 }
 
 struct Terminal {
-    master: Box<dyn MasterPty + Send>,
+    master: Option<Box<dyn MasterPty + Send>>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn ChildKiller + Send + Sync>,
     #[cfg(unix)]
@@ -352,12 +352,31 @@ fn start_pty(
     let mut child = pair.slave.spawn_command(command).map_err(message)?;
     drop(pair.slave);
     let terminal = Arc::new(Mutex::new(Terminal {
-        master: pair.master,
+        master: Some(pair.master),
         writer,
         child: child.clone_killer(),
         #[cfg(unix)]
         _zsh_startup: zsh_startup,
     }));
+    let (child, menu_status) = if menu_label.is_some() {
+        let terminal = Arc::downgrade(&terminal);
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("dirlume-menu-wait".into())
+            .spawn(move || {
+                let _ = send.send(child.wait());
+                // ConPTY keeps its output open until the pseudoconsole closes, even
+                // after the shell has exited. Release it while the reader drains.
+                let master = terminal
+                    .upgrade()
+                    .and_then(|terminal| terminal.lock().ok()?.master.take());
+                drop(master);
+            })
+            .map_err(message)?;
+        (None, Some(receive))
+    } else {
+        (Some(child), None)
+    };
     std::thread::Builder::new()
         .name("dirlume-terminal".into())
         .spawn(move || {
@@ -396,22 +415,20 @@ fn start_pty(
                     break;
                 }
             }
-            if menu_label.is_none() {
+            if let Some(status) = menu_status
+                .and_then(|receiver| receiver.recv().ok())
+                .and_then(std::result::Result::ok)
+            {
+                let _ = output.send(Output::Finished {
+                    code: status.exit_code(),
+                });
+            } else {
                 let _ = output.send(Output::Closed);
             }
-            match child.wait() {
-                Ok(status) if menu_label.is_some() => {
-                    let _ = output.send(Output::Finished {
-                        code: status.exit_code(),
-                    });
-                }
-                Err(error) => {
+            if let Some(mut child) = child {
+                if let Err(error) = child.wait() {
                     failure("wait_terminal", FailureCode::Io, error.raw_os_error());
-                    if menu_label.is_some() {
-                        let _ = output.send(Output::Closed);
-                    }
                 }
-                _ => (),
             }
         })
         .map_err(message)?;
@@ -502,12 +519,12 @@ pub async fn resize_terminal(
     let terminal = state.get(id)?;
     let size = size(rows, cols);
     blocking(move || match terminal {
-        SharedTerminal::Local(terminal) => terminal
-            .lock()
-            .map_err(message)?
-            .master
-            .resize(size)
-            .map_err(message),
+        SharedTerminal::Local(terminal) => {
+            if let Some(master) = &terminal.lock().map_err(message)?.master {
+                master.resize(size).map_err(message)?;
+            }
+            Ok(())
+        }
         SharedTerminal::Ssh(terminal) => terminal.resize(size.rows, size.cols),
     })
     .await
@@ -521,6 +538,66 @@ pub async fn close_terminal(id: u32, state: State<'_, Terminals>) -> Result<()> 
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+pub(crate) fn run_menu_fixture(command: CommandBuilder) -> (u32, String) {
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+
+    let (send, receive) = mpsc::channel();
+    let output = Channel::new(move |value| {
+        if let tauri::ipc::InvokeResponseBody::Json(json) = value {
+            let _ = send.send(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+        }
+        Ok(())
+    });
+    let terminal = start_pty(
+        command,
+        size(24, 80),
+        output,
+        Some("Fixture".into()),
+        #[cfg(unix)]
+        None,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut bytes = Vec::new();
+    let mut answered = [
+        ("\x1b[6n", b"\x1b[1;1R".as_slice(), 0),
+        ("\x1b[c", b"\x1b[?1;2c".as_slice(), 0),
+    ];
+    loop {
+        let value = receive
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "No menu exit result after output: {}",
+                    String::from_utf8_lossy(&bytes)
+                )
+            });
+        if let Some(code) = value["code"].as_u64() {
+            return (code as u32, String::from_utf8_lossy(&bytes).into_owned());
+        }
+        let data = value["data"]
+            .as_str()
+            .expect("Expected terminal output or an exit code");
+        bytes.extend(STANDARD.decode(data).unwrap());
+        let transcript = String::from_utf8_lossy(&bytes);
+        for (query, response, count) in &mut answered {
+            let requests = transcript.matches(*query).count();
+            if requests > *count {
+                let mut terminal = terminal.lock().unwrap();
+                for _ in *count..requests {
+                    let _ = terminal.writer.write_all(response);
+                }
+                let _ = terminal.writer.flush();
+                *count = requests;
+            }
+        }
+    }
 }
 
 #[cfg(all(test, unix))]

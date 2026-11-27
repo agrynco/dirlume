@@ -103,6 +103,7 @@ export const commands = {
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
   fileOperationHistory: { label: "File operation history", key: "" },
+  userMenu: { label: "Open User Menu", key: "" },
   undoFileOperation: { label: "Undo file operation", key: "" },
   redoFileOperation: { label: "Redo file operation", key: "" },
   mkdir: { label: "New folder", key: "F7" },

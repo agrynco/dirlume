@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::{self, File},
-    io::{self, Read, Write},
+    fs::{self, OpenOptions},
+    io::{self, Read},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -13,6 +13,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::{desktop::blocking, local, message, Result};
 
 mod shell;
+mod storage;
 
 const LOCAL_NAME: &str = ".dirlume-menu.json";
 const PERSONAL_NAME: &str = "user-menu.json";
@@ -87,10 +88,11 @@ fn directory(path: &str) -> Result<PathBuf> {
     let path = local::absolute(path).map_err(message)?;
     let resolved = path.canonicalize().map_err(message)?;
     #[cfg(windows)]
-    if local::display_path(&resolved)
-        .map_err(message)?
-        .starts_with(r"\\")
-    {
+    if !matches!(local::drive_type(&resolved), Some(2 | 3 | 5 | 6)) {
+        return Err("Choose a local file pane to use the User Menu.".into());
+    }
+    #[cfg(unix)]
+    if !local_volume(&resolved) {
         return Err("Choose a local file pane to use the User Menu.".into());
     }
     if !resolved.is_dir() {
@@ -99,7 +101,49 @@ fn directory(path: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-fn sources<'a>(folder: &'a Path, personal: &Path) -> impl Iterator<Item = (PathBuf, bool)> + use<'a> {
+#[cfg(unix)]
+fn local_volume(path: &Path) -> bool {
+    use std::{ffi::CString, mem::MaybeUninit, os::unix::ffi::OsStrExt};
+
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut info = MaybeUninit::<libc::statfs>::zeroed();
+    // statfs reads the NUL-terminated path and initializes the result on success.
+    if unsafe { libc::statfs(path.as_ptr(), info.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    let info = unsafe { info.assume_init() };
+    #[cfg(target_os = "macos")]
+    {
+        info.f_flags & libc::MNT_LOCAL as u32 != 0
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Network mounts can look like ordinary local paths to the file pane.
+        !matches!(
+            info.f_type as u32,
+            0x6969
+                | 0xff53_4d42
+                | 0xfe53_4d42
+                | 0x517b
+                | 0x7375_7245
+                | 0x00c3_6400
+                | 0x5346_414f
+                | 0x0102_1997
+        )
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = info;
+        true
+    }
+}
+
+fn sources<'a>(
+    folder: &'a Path,
+    personal: &Path,
+) -> impl Iterator<Item = (PathBuf, bool)> + use<'a> {
     folder.ancestors().enumerate().filter_map(move |(index, folder)| {
         let path = folder.join(LOCAL_NAME);
         (index == 0 || !matches!(path.symlink_metadata(), Err(error) if error.kind() == io::ErrorKind::NotFound))
@@ -124,7 +168,25 @@ fn read(path: &Path) -> io::Result<Option<Vec<u8>>> {
             "A menu definition must be a regular file.",
         ));
     }
-    let mut file = File::open(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other(
+            "A menu definition must be a regular file.",
+        ));
+    }
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
         .take((MAX_BYTES + 1) as u64)
@@ -326,14 +388,7 @@ pub async fn save_user_menu(
         if personal {
             fs::create_dir_all(parent).map_err(message)?;
         }
-        let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(message)?;
-        staged.write_all(&bytes).map_err(message)?;
-        staged.as_file().sync_all().map_err(message)?;
-        if checked_read(&path, source.revision.as_deref())?.is_some() {
-            staged.persist(&path).map_err(message)?;
-        } else {
-            staged.persist_noclobber(&path).map_err(message)?;
-        }
+        storage::save(&path, &bytes, source.revision.as_deref())?;
         approvals.remove(&path);
         load_source(&path, personal, &approvals)
     })
@@ -363,5 +418,45 @@ impl UserMenus {
         }
         let document = parse(&bytes)?;
         shell::prepare(request, &document.entries, &folder, refresh_environment)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_precedence_reads_local_parent_and_personal_in_order() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("parent");
+        let folder = root.join("child");
+        let personal = fixture.path().join(PERSONAL_NAME);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(root.join(LOCAL_NAME), b"invalid").unwrap();
+        let paths: Vec<_> = sources(&folder, &personal).take(3).collect();
+        assert_eq!(
+            paths,
+            [
+                (folder.join(LOCAL_NAME), false),
+                (root.join(LOCAL_NAME), false),
+                (personal, true)
+            ]
+        );
+        let invalid = load_source(&paths[1].0, false, &HashMap::new()).unwrap();
+        assert!(invalid.error.is_some());
+        assert!(!invalid.approved);
+    }
+
+    #[test]
+    fn saves_an_exact_revision_and_preserves_external_changes() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join(LOCAL_NAME);
+        storage::save(&path, b"first", None).unwrap();
+        storage::save(&path, b"saved", Some(&revision(b"first"))).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"saved");
+        fs::write(&path, b"external change").unwrap();
+        assert!(storage::save(&path, b"draft", Some(&revision(b"saved"))).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"external change");
+        assert!(checked_read(&path, Some(&revision(b"saved"))).is_err());
     }
 }
