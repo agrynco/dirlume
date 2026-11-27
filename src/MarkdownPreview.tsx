@@ -220,6 +220,17 @@ async function resolveFileLink({ place }: NamedFile, destination: string): Promi
     const { directory, name } = await api.resolveTextLink(place.path, decodedPath);
     return { place: { kind: "local", path: directory, parent: null }, name };
   }
+  if (place.kind === "kswitcher") {
+    const folders = place.path.split(/[\\/]/).filter(Boolean);
+    const base = folders.map(encodeURIComponent).join("/");
+    const url = new URL(destination, documentOrigin + "/" + base + "/");
+    const parts = url.pathname.slice(1).split("/").map(decodeURIComponent);
+    const name = parts.pop();
+    if (url.origin !== documentOrigin || parts[0] !== folders[0] || !name || [...parts, name].some((part) => /[\\/]/.test(part))) {
+      throw new Error("Use a file path on this source.");
+    }
+    return { place: { ...place, path: parts.join("\\") + (parts.length === 1 ? "\\" : "") }, name };
+  }
   const basePath = place.segments.map(encodeURIComponent).join("/");
   const url = new URL(destination, documentOrigin + "/" + (basePath ? basePath + "/" : ""));
   if (url.origin !== documentOrigin) throw new Error("Use a file path on this source.");

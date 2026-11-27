@@ -78,6 +78,25 @@ pub struct Conflict {
 }
 
 impl Conflict {
+    pub fn paired(
+        path: String,
+        incoming: EntryDetails,
+        existing: EntryDetails,
+        replaceable: bool,
+        read_only: bool,
+    ) -> Self {
+        Self {
+            path,
+            directory: existing.directory,
+            read_only,
+            confirm_read_only: read_only,
+            replaceable,
+            allow_remember: replaceable,
+            incoming: Some(incoming),
+            existing,
+        }
+    }
+
     pub fn network(
         path: String,
         incoming: &fs::Metadata,

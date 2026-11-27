@@ -34,6 +34,7 @@ async function fixture(browser, platform, nestedLocal = false) {
     const entries = (depth) => depth < folders.length ? [folder(folders[depth])] : [];
     const listing = (depth) => ({ entries: entries(depth), omitted: 0, elevated: false });
     const state = window.connectionFixture = { attempts: 0, offline: false, failProfiles: false, emptySsh: false,
+      operations: false, allowWrite: true, conflictPrompt: true, transfers: [], mutations: [], edits: [],
       directorySettings: JSON.parse(localStorage.getItem("fixture.directory-settings") ?? "null") ?? undefined };
     if (nestedLocal) {
       const place = { kind: "local", path, parent: path.slice(0, path.lastIndexOf(separator)) };
@@ -87,7 +88,29 @@ async function fixture(browser, platform, nestedLocal = false) {
         if (command === "list_kswitcher") {
           const parts = args.path.split("\\").filter(Boolean);
           const parent = parts.length === 0 ? null : parts.length === 1 ? "" : parts.length === 2 ? parts[0] + "\\" : parts.slice(0, -1).join("\\");
+          if (state.operations) {
+            if (!parts.length) return { parent, omitted: 0, entries: [folder("C:"), folder("D:")] };
+            return { parent, omitted: 0, entries: parts.length === 1
+              ? [folder("subfolder"), { ...folder("notes.txt"), directory: false, size: 13 }] : [folder("inside")] };
+          }
           return remote({ parent, omitted: 0, entries: parts.length ? entries(parts.length - 1) : [folder("C:")] });
+        }
+        if (command === "kswitcher_capabilities" && state.operations) return {
+          write: state.allowWrite, delete: state.allowWrite, revisionRead: true,
+          onHostTransfer: true, localEndpoint: true, conflictPrompt: state.conflictPrompt,
+        };
+        if (command === "transfer_item") {
+          state.transfers.push(args.request);
+          return { kind: "completed" };
+        }
+        if (command === "change_kswitcher") {
+          state.mutations.push({ peer: args.peer, path: args.path, change: args.change });
+          return null;
+        }
+        if (command === "read_kswitcher_text") return { text: "Remote notes\n", encoding: "utf8", revision: "123" };
+        if (command === "save_kswitcher_text") {
+          state.edits.push(args);
+          return { text: args.text, encoding: args.encoding, revision: "124" };
         }
         if (command === "connect_smb") return remote({ kind: "shares", server: smbRoot, names: ["share"], warning: null });
         if (command === "list_directory") {
@@ -111,6 +134,79 @@ async function enterFromCatalog(page, side, name, saved) {
   await button(pane(page, side), `Locations for ${side} pane`).click();
   await button(pane(page, side), name).click();
   await row(page, side, saved).dblclick();
+}
+
+async function checkKSwitcherOperations(page) {
+  await page.evaluate(() => { window.connectionFixture.operations = true; });
+  for (const [side, drive] of [["left", "C:"], ["right", "D:"]]) {
+    await enterFromCatalog(page, side, "Remote machine", "Saved KSwitcher");
+    await row(page, side, drive).dblclick();
+    await waitPath(page, side, drive + "\\");
+  }
+
+  await row(page, "left", "subfolder").click();
+  await list(page, "left").press("F5");
+  const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+  assert.equal(await copy.getByRole("combobox", { name: "Destination", exact: true }).inputValue(), "D:\\");
+  await copy.getByRole("option", { name: "Ask", exact: true }).waitFor({ state: "attached" });
+  await button(copy, "Copy").click();
+  await copy.waitFor({ state: "hidden" });
+  await list(page, "left").press("F6");
+  const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  const transfers = await page.evaluate(() => window.connectionFixture.transfers);
+  assert.equal(transfers.length, 2);
+  for (const [index, request] of transfers.entries()) {
+    assert.equal(request.source.kind, "kswitcher");
+    assert.equal(request.source.path, "C:\\subfolder");
+    assert.equal(request.destination, "D:\\");
+    assert.equal(request.source.peer, request.kswitcherDestination);
+    assert.equal(request.moving, index === 1);
+  }
+
+  await row(page, "left", "notes.txt").click();
+  await list(page, "left").press("F3");
+  const viewer = page.getByRole("region", { name: "notes.txt", exact: true });
+  await viewer.getByText("Remote notes", { exact: true }).waitFor();
+  await button(viewer, "Close document").click();
+  await list(page, "left").waitFor();
+  await row(page, "left", "notes.txt").click();
+  await list(page, "left").press("F2");
+  const rename = page.getByRole("dialog", { name: "Rename", exact: true });
+  await rename.getByRole("textbox", { name: "Name", exact: true }).fill("renamed.txt");
+  await button(rename, "Rename").click();
+  await rename.waitFor({ state: "hidden" });
+
+  await list(page, "left").press("F7");
+  const mkdir = page.getByRole("dialog", { name: "New folder", exact: true });
+  await mkdir.getByRole("textbox", { name: "Name", exact: true }).fill("Created remotely");
+  await button(mkdir, "Create").click();
+  await mkdir.waitFor({ state: "hidden" });
+
+  await row(page, "left", "notes.txt").click();
+  await list(page, "left").press("F8");
+  const recycle = page.getByRole("dialog", { name: "Move to remote recycle bin", exact: true });
+  await button(recycle, "Move to remote recycle bin").click();
+  await recycle.waitFor({ state: "hidden" });
+  assert.deepEqual(await page.evaluate(() => window.connectionFixture.mutations), [
+    { peer: "fixture-peer", path: "C:\\notes.txt", change: { kind: "rename", name: "renamed.txt" } },
+    { peer: "fixture-peer", path: "C:\\Created remotely", change: { kind: "create_folder" } },
+    { peer: "fixture-peer", path: "C:\\notes.txt", change: { kind: "recycle" } },
+  ]);
+
+  await row(page, "right", "notes.txt").click();
+  await list(page, "right").press("F4");
+  const editor = page.getByRole("region", { name: "notes.txt", exact: true });
+  const text = editor.locator(".cm-content");
+  await text.press("Control+End");
+  await page.keyboard.insertText("Updated remotely");
+  await text.press("Control+s");
+  await page.waitForFunction(() => window.connectionFixture.edits.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.connectionFixture.edits[0]), {
+    peer: "fixture-peer", path: "D:\\notes.txt", text: "Remote notes\nUpdated remotely",
+    encoding: "utf8", revision: "123",
+  });
 }
 
 async function checkDirectoryCache(page) {
@@ -453,6 +549,10 @@ try {
     await page.close();
   }
   console.log("Verified NetBox cached Back and Forward, manual refresh, and the remembered path on reconnect.");
+  const { page } = await fixture(browser, platforms[0]);
+  await checkKSwitcherOperations(page);
+  await page.close();
+  console.log("Verified KSwitcher transfer routing across drives, revision-checked editing, rename, folder creation, and remote Trash.");
 } finally {
   await browser.close();
 }
