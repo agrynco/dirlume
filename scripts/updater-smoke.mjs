@@ -314,15 +314,16 @@ try {
     assert.equal(await readFile(join(first, "LICENSE"), "utf8"), installedVersion);
   }
   if (testDebian) {
+    const installDebian = (path) => run("sudo", ["apt-get", "-o", "Acquire::Retries=3", "install", "-y", "--no-install-recommends", path]);
     const packageName = spawnSync("dpkg-deb", ["--field", before.debian, "Package"], { encoding: "utf8" });
     assert.equal(packageName.status, 0, packageName.stderr);
     assert.equal(packageName.stdout.trim(), "dirlume-updater-smoke");
     debianPackage = packageName.stdout.trim();
-    run("sudo", ["dpkg", "--install", before.debian]);
+    installDebian(before.debian);
     const executable = "/usr/bin/dirlume";
     const debianUrl = `https://github.com/agrynco/dirlume/releases/download/v${nextVersion}/${basename(after.debian)}`;
     await checkLaunch(executable, { debian_url: debianUrl }, installedVersion);
-    run("sudo", ["dpkg", "--install", after.debian]);
+    installDebian(after.debian);
     await checkLaunch(executable, { debian_url: debianUrl }, nextVersion);
     await checkLaunch(executable, { debian_url: debianUrl, restart_check: true }, nextVersion);
     console.log("Verified the manual Debian upgrade, offline highlights, and acknowledgment across restarts.");
