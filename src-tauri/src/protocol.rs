@@ -8,6 +8,20 @@ pub const MAX_INVITATION_LENGTH: usize = 8192;
 pub(crate) const COMPUTER_NAME_HEADER: &str = "x-dirlume-computer-name";
 
 #[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum LanChange {
+    Folder,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct LanChangeRequest {
+    pub segments: Vec<String>,
+    pub change: LanChange,
+}
+
+#[cfg(feature = "desktop")]
 pub(crate) fn computer_name() -> Option<String> {
     sysinfo::System::host_name().ok().and_then(|name| {
         let name = name.trim();

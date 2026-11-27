@@ -23,6 +23,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
+import { isLanGroupPlace, type LanGroupPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
 import { useFilePaneTree, usePaneTreeRevision } from "./filePaneTree";
@@ -183,7 +184,7 @@ type Modal =
   | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
-  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> | LanGroupPlace }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
@@ -476,6 +477,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
+  const lanGroupPlace = isLanGroupPlace(pane.place) && pane.place.segments.length ? pane.place : undefined;
   const kswitcher = pane.place?.kind === "kswitcher" && pane.place.path ? pane.place : undefined;
   const kswitcherWrite = kswitcher?.capabilities?.write;
   const kswitcherDelete = kswitcher?.capabilities?.delete;
@@ -1171,6 +1173,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       const { host, drive } = source;
       if (host.kind === "dirlume") {
         void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential, lan: true }, { segments: [drive] });
+      } else if (host.kind === "group") {
+        void openLanGroupDrive(side, host.id, host.name, [drive]);
       } else {
         void load(side, { kind: "kswitcher", directory: "", peer: host.id,
           address: host.name, path: drive + "\\", parent: null });
@@ -1184,6 +1188,24 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       void load(side, filesystemPlace(path));
     }
     focusRevealedSide(side);
+  }
+
+  async function openLanGroupDrive(side: Side, peer: string, name: string, segments: string[]) {
+    const { ticket, signal } = beginListing(side);
+    updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: name, error: "" }));
+    try {
+      const { listing, ...connection } = await api.connectLanGroupPeer(peer, segments);
+      const place = { ...connection, kind: "server" as const, address: name, segments, pairedComputer: true, groupPeer: peer };
+      if (signal.aborted || ticket !== request.current[side]) { disconnect(place); return; }
+      routeLocation(side, place, listing);
+    } catch (failure) {
+      if (ticket === request.current[side]) updatePane(side, (pane) => ({ ...pane, error: describeError(failure) }));
+    } finally {
+      if (ticket === request.current[side]) {
+        delete pendingListings.current[side];
+        updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined }));
+      }
+    }
   }
 
   function paneSources(side: Side, overlay = false) {
@@ -3205,7 +3227,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       case "mkdir":
         if (!pane.search && !busy && !pane.loading) {
-          const place = local ?? fileServer ?? (archive?.canAdd ? archive : undefined) ?? kswitcher;
+          const place = local ?? fileServer ?? lanGroupPlace ?? (archive?.canAdd ? archive : undefined) ?? kswitcher;
           if (place) setModal({ kind: "mkdir", side: active, place });
         }
         break;
@@ -3414,7 +3436,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher) && current.link) || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !fileServer && !kswitcher) || !!pane.search || busy },
-    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !fileServer && !archive?.canAdd && !kswitcher) || !!pane.search || busy },
+    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcher) || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2,
       disabled: (!local && !fileServer && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
@@ -4235,7 +4257,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       {modal?.kind === "mkdir" && <NewFolderDialog directory={placePath(modal.place)} showHidden={preferences.hidden}
         archive={modal.place.kind === "archive" ? modal.place : undefined}
         kswitcher={modal.place.kind === "kswitcher" ? modal.place : undefined}
-        remote={isFileServer(modal.place) ? modal.place : undefined}
+        remote={isFileServer(modal.place) || isLanGroupPlace(modal.place) ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
           await load(modal.side, modal.place, "refresh", name);

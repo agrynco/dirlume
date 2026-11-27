@@ -88,6 +88,8 @@ impl Identity {
 struct Share {
     roots: ShareRoots,
     authorization: String,
+    #[cfg(feature = "desktop")]
+    writable: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 enum ShareRoots {
@@ -380,6 +382,8 @@ fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
     Ok(Arc::new(Share {
         roots: ShareRoots::Folder(Arc::new(Dir::open_ambient_dir(root, ambient_authority())?)),
         authorization: format!("Bearer {token}"),
+        #[cfg(feature = "desktop")]
+        writable: None,
     }))
 }
 
@@ -456,29 +460,51 @@ impl DesktopServer {
     #[cfg(test)]
     pub(crate) async fn start(root: &Path, ip: std::net::IpAddr) -> Result<Self> {
         let roots = ShareRoots::Folder(Arc::new(Dir::open_ambient_dir(root, ambient_authority())?));
-        Self::start_with_roots(roots, ip).await
+        Self::start_with_roots(roots, ip, None).await
     }
 
     pub(crate) async fn start_computer(
         locations: impl Fn() -> Vec<(String, PathBuf)> + Send + Sync + 'static,
         ip: std::net::IpAddr,
     ) -> Result<Self> {
+        Self::start_computer_with_group(locations, ip, None).await
+    }
+
+    pub(crate) async fn start_computer_with_group(
+        locations: impl Fn() -> Vec<(String, PathBuf)> + Send + Sync + 'static,
+        ip: std::net::IpAddr,
+        group: Option<(
+            &crate::lan_group::GroupKey,
+            Arc<std::sync::atomic::AtomicBool>,
+        )>,
+    ) -> Result<Self> {
         let roots: ComputerLocations = Arc::new(locations);
         let initial = Arc::clone(&roots);
         if spawn_blocking(move || available_computer_locations(&initial).is_empty()).await? {
             return Err("There are no accessible local drives.".into());
         }
-        Self::start_with_roots(ShareRoots::Computer(roots), ip).await
+        Self::start_with_roots(ShareRoots::Computer(roots), ip, group).await
     }
 
-    async fn start_with_roots(roots: ShareRoots, ip: std::net::IpAddr) -> Result<Self> {
+    async fn start_with_roots(
+        roots: ShareRoots,
+        ip: std::net::IpAddr,
+        group: Option<(
+            &crate::lan_group::GroupKey,
+            Arc<std::sync::atomic::AtomicBool>,
+        )>,
+    ) -> Result<Self> {
         let listener = std::net::TcpListener::bind(SocketAddr::new(ip, 0))?;
         listener.set_nonblocking(true)?;
         let address = advertised_url(&ip.to_string(), listener.local_addr()?.port())?;
-        let identity = Identity::generate(address.clone())?;
+        let mut identity = Identity::generate(address.clone())?;
+        if let Some((key, _)) = &group {
+            identity.invitation.token = key.bearer(&identity.invitation.certificate);
+        }
         let share = Arc::new(Share {
             roots,
             authorization: format!("Bearer {}", identity.invitation.token),
+            writable: group.map(|(_, writable)| writable),
         });
         let invitation = identity.invitation.encode()?;
         let shutdown = axum_server::Handle::new();
@@ -525,10 +551,54 @@ fn router(share: Arc<Share>) -> Router {
         .route("/v1/download", post(download))
         .route("/v1/bytes", post(read_bytes));
     #[cfg(feature = "desktop")]
-    let router = router.route("/v1/drives", post(computer_drives));
+    let router = router
+        .route("/v1/drives", post(computer_drives))
+        .route("/v1/lan/change", post(change_computer));
     router
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(share)
+}
+
+#[cfg(feature = "desktop")]
+async fn change_computer(
+    State(share): State<Arc<Share>>,
+    headers: HeaderMap,
+    Json(operation): Json<crate::protocol::LanChangeRequest>,
+) -> std::result::Result<Json<std::result::Result<(), String>>, StatusCode> {
+    share.authorize(&headers)?;
+    Ok(Json(
+        spawn_blocking(move || apply_lan_change(&share, operation))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    ))
+}
+
+#[cfg(feature = "desktop")]
+fn apply_lan_change(
+    share: &Share,
+    operation: crate::protocol::LanChangeRequest,
+) -> std::result::Result<(), String> {
+    use crate::protocol::LanChange;
+    use std::sync::atomic::Ordering;
+    if !share
+        .writable
+        .as_ref()
+        .is_some_and(|write| write.load(Ordering::Acquire))
+    {
+        return Err("The remote computer allows read access only.".to_owned());
+    }
+    if operation.segments.len() < 2 {
+        return Err("Choose a location inside a remote drive.".to_owned());
+    }
+    let (directory, path) = share
+        .resolve(RemotePath {
+            segments: operation.segments,
+        })
+        .map_err(|error| error.to_string())?;
+    match operation.change {
+        LanChange::Folder => directory.create_dir(path),
+    }
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(feature = "desktop")]

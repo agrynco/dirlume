@@ -2069,6 +2069,44 @@ async fn list_connected_computer_drives(
     computer_drive_metadata(&connection).await
 }
 
+#[tauri::command]
+async fn list_lan_group_drives(
+    peer: String,
+    sharing: State<'_, crate::desktop_share::DesktopShare>,
+) -> Result<Vec<crate::server::ComputerDrive>> {
+    let invitation = sharing.group_invitation(&peer).await?;
+    computer_drive_metadata(&Connection::connect(&invitation)?).await
+}
+
+#[tauri::command]
+async fn connect_lan_group_peer(
+    peer: String,
+    segments: Vec<String>,
+    sharing: State<'_, crate::desktop_share::DesktopShare>,
+    state: State<'_, Connections>,
+) -> Result<Connected> {
+    let invitation = sharing.group_invitation(&peer).await?;
+    open_server(&invitation, segments, &state).await
+}
+
+#[tauri::command]
+async fn create_lan_folder(
+    id: u32,
+    segments: Vec<String>,
+    state: State<'_, Connections>,
+) -> Result<()> {
+    let connection = state.get(id)?;
+    let action = crate::protocol::LanChangeRequest {
+        segments,
+        change: crate::protocol::LanChange::Folder,
+    };
+    let response = connection
+        .request("v1/lan/change", action, Duration::from_secs(15))
+        .await?;
+    serde_json::from_slice::<Result<()>>(&collect_response(response, 8 * 1024).await?)
+        .map_err(message)?
+}
+
 async fn computer_drive_metadata(
     connection: &Connection,
 ) -> Result<Vec<crate::server::ComputerDrive>> {
@@ -3707,6 +3745,16 @@ pub fn run() {
         crate::folders::create_folders,
         crate::folders::prepare_collection_folders,
         crate::desktop_share::active_desktop_share,
+        crate::desktop_share::active_lan_group,
+        crate::desktop_share::lan_group_writable,
+        crate::desktop_share::set_lan_group_writable,
+        crate::desktop_share::start_lan_group,
+        crate::desktop_share::copy_lan_group_code,
+        crate::desktop_share::list_lan_group_peers,
+        crate::desktop_share::leave_lan_group,
+        list_lan_group_drives,
+        connect_lan_group_peer,
+        create_lan_folder,
         connect_server,
         crate::desktop_share::start_desktop_computer_share,
         crate::desktop_share::stop_desktop_share,

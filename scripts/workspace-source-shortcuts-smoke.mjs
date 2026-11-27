@@ -76,6 +76,22 @@ try {
               if (command.startsWith("create_ssh") && args.sudoPassword === undefined) throw "SSH permission denied.";
               return null;
             case "computer_name": return "This test PC";
+            case "active_lan_group": return Boolean(window.fixtureLanGroup);
+            case "lan_group_writable": return Boolean(window.fixtureGroupWritable);
+            case "set_lan_group_writable": window.fixtureGroupWritable = args.writable; return null;
+            case "start_lan_group": window.fixtureLanGroup = args.code ?? "generated"; return null;
+            case "copy_lan_group_code": return null;
+            case "leave_lan_group": window.fixtureLanGroup = null; return null;
+            case "list_lan_group_peers": return window.fixtureLanGroup ?
+              [{ id: "group-peer", name: "Group test PC", online: true }] : [];
+            case "list_lan_group_drives": return pairedDrives();
+            case "connect_lan_group_peer":
+              window.groupTarget = { peer: args.peer, segments: args.segments };
+              return { id: 10, address: "fixture", origin: "https://fixture", share: "group", listing: remoteListing(args.segments) };
+            case "create_lan_folder":
+              if (!window.fixturePeerAllowsCreate) throw "The remote computer allows read access only.";
+              window.createdLanFolder = args.segments;
+              return null;
             case "verify_computer_pairing": return "Name from the remote host";
             case "save_server_invitation": return "new-fixture-credential";
             case "list_saved_computer_drives": return pairedDrives();
@@ -266,10 +282,38 @@ try {
     await options.getByRole("heading", { name: "Computers", exact: true }).waitFor();
     await options.getByText("This test PC", { exact: true }).waitFor();
     await options.getByText("Dirlume test PC", { exact: true }).waitFor();
+    await options.getByText("Legacy pairing codes", { exact: true }).click();
     assert.equal(await options.getByLabel("Computer name", { exact: true }).count(), 0);
     await options.getByLabel("Pairing code", { exact: true }).fill("test-invitation");
     await button(options, "Pair computer").click();
     await options.getByText("Name from the remote host", { exact: true }).waitFor();
+    const group = options.getByRole("group", { name: "Dirlume LAN group", exact: true });
+    await group.getByLabel("Group code", { exact: true }).fill("same-fixture-code");
+    await button(group, "Join group").click();
+    await group.getByLabel("Allow group members to create folders", { exact: true }).check();
+    await page.waitForFunction(() => window.fixtureGroupWritable === true);
+    await button(group, "Copy group code").click();
+    await group.getByText("Group code copied. Paste the same code on each computer.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.fixtureLanGroup), "same-fixture-code");
+    await button(options, "Done").click();
+    await files("left").press("Alt+F1");
+    const groupPeer = sources("left").getByRole("group", { name: "Group test PC", exact: true });
+    await groupPeer.getByRole("button", { name: /^Files/ }).click();
+    await waitForPath("left", "/Files");
+    assert.deepEqual(await page.evaluate(() => window.groupTarget), { peer: "group-peer", segments: ["Files"] });
+    await files("left").press("F7");
+    const lanMkdir = page.getByRole("dialog", { name: "New folder", exact: true });
+    await lanMkdir.getByRole("textbox", { name: "Name", exact: true }).fill("Projects");
+    await button(lanMkdir, "Create").click();
+    await lanMkdir.getByRole("alert").filter({ hasText: "The remote computer allows read access only." }).waitFor();
+    await page.evaluate(() => { window.fixturePeerAllowsCreate = true; });
+    await button(lanMkdir, "Create").click();
+    await lanMkdir.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.createdLanFolder), ["Files", "Projects"]);
+    await button(page, "Options").click();
+    await button(options, "Computers").click();
+    await button(group, "Leave group").click();
+    await group.getByLabel("Group code", { exact: true }).waitFor();
     await button(options, "Done").click();
 
     async function enter(view, side) {

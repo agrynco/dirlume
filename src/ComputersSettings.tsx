@@ -14,10 +14,20 @@ export function ComputersSettings() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [groupActive, setGroupActive] = useState(false);
+  const [groupCode, setGroupCode] = useState("");
+  const [groupCopied, setGroupCopied] = useState(false);
+  const [groupError, setGroupError] = useState("");
+  const [groupWritable, setGroupWritable] = useState(false);
+  const [groupPeers, setGroupPeers] = useState<Awaited<ReturnType<typeof api.lanGroupPeers>>>([]);
 
   useEffect(() => {
     let current = true;
     void api.computerName().then((name) => { if (current) setName(name ?? ""); }).catch(() => {});
+    void api.activeLanGroup().then((active) => { if (current) setGroupActive(Boolean(active)); })
+      .catch((failure: unknown) => { if (current) setGroupError(describeError(failure)); });
+    void api.lanGroupWritable().then((writable) => { if (current) setGroupWritable(Boolean(writable)); })
+      .catch((failure: unknown) => { if (current) setGroupError(describeError(failure)); });
     void api.activeComputerSharing().then((sharing) => { if (current) setActiveSharing(sharing); })
       .catch((error: unknown) => { if (current) setError(describeError(error)); });
     const refresh = () => setComputers(readRemoteProfiles());
@@ -27,6 +37,22 @@ export function ComputersSettings() {
       window.removeEventListener("storage", refresh);
     };
   }, []);
+
+  useEffect(() => {
+    if (!groupActive) return;
+    let current = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function refresh() {
+      try {
+        const peers = await api.lanGroupPeers();
+        if (current) setGroupPeers(peers ?? []);
+      } finally {
+        if (current) timer = setTimeout(() => void refresh().catch(() => {}), 2_000);
+      }
+    }
+    void refresh().catch(() => {});
+    return () => { current = false; clearTimeout(timer); };
+  }, [groupActive]);
 
   async function runPairing(action: () => Promise<void>) {
     setWorking(true);
@@ -51,8 +77,68 @@ export function ComputersSettings() {
     });
   }
 
+  async function runGroup(action: () => Promise<void>) {
+    setWorking(true);
+    setGroupError("");
+    setGroupCopied(false);
+    try { await action(); }
+    catch (failure) { setGroupError(describeError(failure)); }
+    finally { setWorking(false); }
+  }
+
+  function startGroup(code?: string) {
+    void runGroup(async () => {
+      await api.startLanGroup(code);
+      setGroupCode("");
+      setGroupWritable(false);
+      setGroupActive(true);
+    });
+  }
+
   return <div className="dialog-body settings-general">
     {name && <div className="setting"><span>{t("This computer")}</span><strong>{name}</strong></div>}
+    <fieldset disabled={working}>
+      <legend>{t("Dirlume LAN group")}</legend>
+      {groupActive ? <>
+        <p role="status">{t("Your drives are shared with this group while Dirlume is running.")}</p>
+        <label className="field-checkbox">
+          <input type="checkbox" checked={groupWritable} onChange={(event) => {
+            const writable = event.target.checked;
+            void runGroup(async () => { await api.setLanGroupWritable(writable); setGroupWritable(writable); });
+          }} />
+          {t("Allow group members to create folders")}
+        </label>
+        <div className="dialog-actions">
+          <Button type="button" onClick={() => void runGroup(async () => {
+            await api.copyLanGroupCode();
+            setGroupCopied(true);
+          })}>{t("Copy group code")}</Button>
+          <Button type="button" onClick={() => void runGroup(async () => {
+            await api.leaveLanGroup();
+            setGroupActive(false);
+            setGroupPeers([]);
+          })}>{t("Leave group")}</Button>
+        </div>
+        {groupCopied && <p role="status">{t("Group code copied. Paste the same code on each computer.")}</p>}
+        {groupPeers.length ? <ul className="computer-settings-list" aria-label={t("Group members")}>
+          {groupPeers.map((peer) => <li key={peer.id}><span>{peer.name}</span>
+            {!peer.online && <span>{t("Offline")}</span>}</li>)}
+        </ul> : <p role="status">{t("Waiting for group members…")}</p>}
+      </> : <>
+        <p>{t("Create a group on one computer and join it with the same code on the others. Members can browse and download from each other's drives.")}</p>
+        <div className="dialog-actions">
+          <Button type="button" onClick={() => startGroup()}>{t("Create group")}</Button>
+        </div>
+        <form onSubmit={(event) => { event.preventDefault(); if (groupCode.trim()) startGroup(groupCode.trim()); }}>
+          <label className="field">{t("Group code")}
+            <input type="password" autoComplete="off" spellCheck={false} value={groupCode}
+              onChange={(event) => setGroupCode(event.target.value)} required />
+          </label>
+          <Button type="submit" disabled={!groupCode.trim()}>{t("Join group")}</Button>
+        </form>
+      </>}
+      {groupError && <p role="alert" className="dialog-error">{errorText(groupError)}</p>}
+    </fieldset>
     <fieldset>
       <legend>{t("Saved computers")}</legend>
       {computers.length === 0 ? <p>{t("No saved computers.")}</p> :
@@ -65,8 +151,10 @@ export function ComputersSettings() {
           </li>)}
         </ul>}
     </fieldset>
+    <details open={Boolean(activeSharing)}>
+    <summary>{t("Legacy pairing codes")}</summary>
     <fieldset disabled={working}>
-      <legend>{t("Dirlume LAN")}</legend>
+      <legend>{t("Direct connection")}</legend>
       <p>{t("Pairing lets another computer browse and download files from your local drives while Dirlume is running.")}</p>
       <div className="dialog-actions">
         {activeSharing ? <>
@@ -93,6 +181,7 @@ export function ComputersSettings() {
       </form>
       {error && <p role="alert" className="dialog-error">{errorText(error)}</p>}
     </fieldset>
+    </details>
     {removing && <RemoveConnectionDialog profile={removing} onRemoved={() => {
       setComputers(readRemoteProfiles());
       setRemoving(null);

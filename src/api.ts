@@ -116,7 +116,7 @@ export interface ComputerSharing {
 export type FileLocation =
   | { kind: "local"; path: string; parent: string | null; smb?: SmbMount }
   | { kind: "smbRoot"; path: string }
-  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
+  | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string; groupPeer?: string }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[];
       directories?: DirectoryPreferences; environment?: EnvironmentPreferences }
   | { kind: "archive"; id: number; path: string; parent: string; segments: string[]; writable: boolean; canAdd: boolean; address: string }
@@ -141,6 +141,10 @@ export type FilePlace = Exclude<FileLocation, { kind: "smbRoot" }>;
 export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
 export type FileServerPlace = FtpPlace | SshPlace;
+export type LanGroupPlace = Extract<Place, { kind: "server" }> & { groupPeer: string };
+export function isLanGroupPlace(place: Place | null | undefined): place is LanGroupPlace {
+  return place?.kind === "server" && typeof place.groupPeer === "string";
+}
 export type FileServer = Pick<FileServerPlace, "kind" | "id">;
 export function isFileServer(place: Place | null | undefined): place is FileServerPlace {
   return place?.kind === "ftp" || place?.kind === "ssh";
@@ -674,6 +678,18 @@ export const api = {
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),
   listSavedComputerDrives: (credential: string) => invoke<ComputerDrive[]>("list_saved_computer_drives", { credential }),
   listConnectedComputerDrives: (id: number) => invoke<ComputerDrive[]>("list_connected_computer_drives", { id }),
+  activeLanGroup: () => invoke<boolean>("active_lan_group"),
+  lanGroupWritable: () => invoke<boolean>("lan_group_writable"),
+  setLanGroupWritable: (writable: boolean) => invoke<void>("set_lan_group_writable", { writable }),
+  startLanGroup: (code?: string) => invoke<void>("start_lan_group", { code }),
+  copyLanGroupCode: () => invoke<void>("copy_lan_group_code"),
+  leaveLanGroup: () => invoke<void>("leave_lan_group"),
+  lanGroupPeers: () => invoke<{ id: string; name: string; online: boolean }[]>("list_lan_group_peers"),
+  listLanGroupDrives: (peer: string) => invoke<ComputerDrive[]>("list_lan_group_drives", { peer }),
+  connectLanGroupPeer: (peer: string, segments: string[]) =>
+    invoke<Connection & { share: string }>("connect_lan_group_peer", { peer, segments }),
+  createLanFolder: (place: LanGroupPlace, name: string) =>
+    invoke<void>("create_lan_folder", { id: place.id, segments: [...place.segments, name] }),
   activeComputerSharing: () => invoke<ComputerSharing | null>("active_desktop_share"),
   startComputerSharing: () => invoke<ComputerSharing>("start_desktop_computer_share"),
   stopComputerSharing: () => invoke<void>("stop_desktop_share"),

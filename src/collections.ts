@@ -7,7 +7,7 @@ type Origin =
   | { kind: "local"; path: string }
   | { kind: "archive"; path: string; segments: string[] }
   | { kind: "ftp" | "ssh"; profileId: string; address: string; segments: string[] }
-  | { kind: "server"; share?: string; profileId?: string; address: string; segments: string[] }
+  | { kind: "server"; share?: string; profileId?: string; groupPeer?: string; address: string; segments: string[] }
   | { kind: "kswitcher"; peer: string; address: string; path: string };
 
 export type CollectionReference = {
@@ -139,6 +139,15 @@ export async function resolveCollectionReference(
         listing = await api.listServer(active.id, origin.segments);
         break;
       }
+      if (origin.groupPeer) {
+        const result = await api.connectLanGroupPeer(origin.groupPeer, origin.segments);
+        place = { kind: "server", id: result.id, share: result.share, address: origin.address, groupPeer: origin.groupPeer,
+          origin: result.origin, segments: origin.segments, pairedComputer: true };
+        register(place);
+        listing = result.listing;
+        if (origin.share && result.share !== origin.share) throw new Error("The Dirlume server share has changed.");
+        break;
+      }
       const profile = readRemoteProfiles().find((item) => item.kind === "server" && item.id === origin.profileId);
       if (profile?.kind !== "server") throw new Error("Reconnect to the Dirlume server before copying.");
       const result = await api.connectSavedServer(profile.credential, origin.segments);
@@ -195,7 +204,8 @@ function isCollectionReference(value: unknown): value is CollectionReference {
     case "ftp":
     case "ssh": return typeof origin.profileId === "string" && typeof origin.address === "string" && validSegments(origin.segments);
     case "server": return (typeof origin.share === "string" || typeof origin.profileId === "string") && typeof origin.address === "string" &&
-      (origin.profileId === undefined || typeof origin.profileId === "string") && validSegments(origin.segments);
+      (origin.profileId === undefined || typeof origin.profileId === "string") &&
+      (origin.groupPeer === undefined || typeof origin.groupPeer === "string") && validSegments(origin.segments);
     case "kswitcher": return typeof origin.peer === "string" && typeof origin.address === "string" && typeof origin.path === "string";
     default: return false;
   }
@@ -227,7 +237,8 @@ export function collectionReference(place: TextPlace, entry: Pick<Entry, "name" 
       case "archive": return { kind: "archive", path: place.path, segments: place.segments };
       case "ftp":
       case "ssh": return { kind: place.kind, profileId: place.profileId, address: place.address, segments: place.segments };
-      case "server": return { kind: "server", share: place.share, profileId: place.profileId, address: place.address, segments: place.segments };
+      case "server": return { kind: "server", share: place.share, profileId: place.profileId, groupPeer: place.groupPeer,
+        address: place.address, segments: place.segments };
       case "kswitcher": return { kind: "kswitcher", peer: place.peer, address: place.address, path: place.path };
     }
   })();
@@ -269,7 +280,7 @@ function referenceKey(reference: CollectionReference) {
     case "archive": return JSON.stringify([origin.kind, origin.path, origin.segments, name]);
     case "ftp":
     case "ssh": return JSON.stringify([origin.kind, origin.profileId, origin.segments, name]);
-    case "server": return JSON.stringify([origin.kind, origin.profileId ?? origin.share, origin.segments, name]);
+    case "server": return JSON.stringify([origin.kind, origin.groupPeer ?? origin.profileId ?? origin.share, origin.segments, name]);
     case "kswitcher": return JSON.stringify([origin.kind, origin.peer, origin.path.replace(/[\\/]+$/, "").toLowerCase(), name.toLowerCase()]);
   }
 }
