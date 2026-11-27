@@ -419,17 +419,19 @@ pub fn copy_to(
         &CopyOptions::default(),
         &mut Vec::new(),
         progress,
+        |_| Ok(()),
     )
 }
 
-pub fn copy_with_options(
+pub fn copy_with_options<T>(
     source: &Path,
     target: &Path,
     replace: bool,
     options: &CopyOptions,
     ancestors: &mut Vec<PathBuf>,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
-) -> io::Result<()> {
+    before_commit: impl FnOnce(&Path) -> io::Result<T>,
+) -> io::Result<T> {
     let target = transfer_path(source, target)?;
     let directory = target.parent().expect("transfer path has a parent");
     let metadata = options.metadata(source)?;
@@ -442,11 +444,13 @@ pub fn copy_with_options(
     let staged = workspace.path().join("copy");
     copy_entry(source, &staged, metadata, options, ancestors, &mut progress)?;
     progress(source, 0, None)?;
+    let receipt = before_commit(&staged)?;
     if replace {
         replace_file(&staged, &target)
     } else {
         renamest::rename_exclusive(staged, target)
-    }
+    }?;
+    Ok(receipt)
 }
 
 pub fn transfer_path(source: &Path, target: &Path) -> io::Result<PathBuf> {

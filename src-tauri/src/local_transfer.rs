@@ -239,6 +239,7 @@ pub(crate) fn plan_target(
 pub(crate) struct MoveResume {
     folders: HashMap<PathBuf, MovingFolder>,
     skipped: HashMap<PathBuf, same_file::Handle>,
+    pub(crate) history: Option<Vec<crate::file_history::Commit>>,
 }
 
 struct MovingFolder {
@@ -322,6 +323,9 @@ fn transfer_entry(
 
     if options.moving && merge.is_none() {
         progress(source, 0, None)?;
+        let proof = (resume.history.is_some() && ancestors.is_empty() && replace.is_none())
+            .then(|| crate::file_history::Proof::original(source, &target, &incoming).ok())
+            .flatten();
         let result = if let Some(existing) = &replace {
             existing.verify(&target)?;
             local::replace_file(source, &target)
@@ -329,7 +333,12 @@ fn transfer_entry(
             local::move_item(source, target.clone())
         };
         match result {
-            Ok(()) => return Ok(true),
+            Ok(()) => {
+                if let Some(history) = &mut resume.history {
+                    history.push(crate::file_history::Commit::new(source, &target, proof));
+                }
+                return Ok(true);
+            }
             Err(error) if error.kind() == ErrorKind::CrossesDevices => {}
             Err(error) => return Err(error),
         }
@@ -353,6 +362,9 @@ fn transfer_entry(
             if let Err(error) = local::preserve_access(source, &target, &incoming) {
                 let _ = fs::remove_dir(&target);
                 return Err(error);
+            }
+            if let Some(history) = &mut resume.history {
+                history.push(crate::file_history::Commit::new(source, &target, None));
             }
         }
         let target_folder = same_file::Handle::from_path(&target)?;
@@ -392,6 +404,9 @@ fn transfer_entry(
         if options.moving && all_transferred {
             verify_folder(source, &source_folder)?;
             fs::remove_dir(source)?;
+            if let Some(history) = &mut resume.history {
+                history.push(crate::file_history::Commit::new(source, &target, None));
+            }
             resume.folders.remove(source);
         }
         return Ok(all_transferred);
@@ -402,7 +417,11 @@ fn transfer_entry(
     } else {
         None
     };
-    local::copy_with_options(
+    let proof =
+        (!options.moving && resume.history.is_some() && ancestors.is_empty() && replace.is_none())
+            .then(|| crate::file_history::Proof::original(source, &target, &incoming).ok())
+            .flatten();
+    let proof = local::copy_with_options(
         source,
         &target,
         replace.is_some(),
@@ -420,7 +439,13 @@ fn transfer_entry(
             }
             Ok(())
         },
+        |staged| {
+            Ok(proof.and_then(|proof| proof.copied_to(source, staged, options.copy.clone()).ok()))
+        },
     )?;
+    if let Some(history) = &mut resume.history {
+        history.push(crate::file_history::Commit::new(source, &target, proof));
+    }
     if let Some(original) = original {
         remove_original(source, &original).map_err(|error| {
             io::Error::other(format!(
@@ -522,6 +547,16 @@ impl FileRevision {
 }
 
 pub(crate) fn remove_original(source: &Path, original: &FileRevision) -> io::Result<()> {
+    with_verified_original(source, original, |staged| {
+        local::with_writable_file(staged, || fs::remove_file(staged))
+    })
+}
+
+pub(crate) fn with_verified_original(
+    source: &Path,
+    original: &FileRevision,
+    publish: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     original.verify(source)?;
     let parent = source
         .parent()
@@ -536,9 +571,7 @@ pub(crate) fn remove_original(source: &Path, original: &FileRevision) -> io::Res
     // Keep the staged original if it cannot be restored because another file
     // appeared at the source path. Never delete an unverified replacement.
     let recovery = workspace.keep();
-    let result = original
-        .verify(&staged)
-        .and_then(|()| local::with_writable_file(&staged, || fs::remove_file(&staged)));
+    let result = original.verify(&staged).and_then(|()| publish(&staged));
     if let Err(error) = result {
         if let Err(restore) = local::move_item(&staged, source.to_owned()) {
             return Err(io::Error::other(format!(

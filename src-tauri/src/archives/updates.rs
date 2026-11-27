@@ -158,6 +158,7 @@ impl Archive {
                 policy,
                 &mut copy_progress,
                 &mut ask,
+                &mut |_, _| {},
             )?);
         }
         if !writer.changes.is_empty() {

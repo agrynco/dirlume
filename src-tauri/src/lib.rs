@@ -23,6 +23,8 @@ mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;
 #[cfg(feature = "desktop")]
+mod file_history;
+#[cfg(feature = "desktop")]
 mod folders;
 #[cfg(feature = "desktop")]
 mod ftp;

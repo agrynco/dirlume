@@ -71,6 +71,7 @@ pub fn download<S: DownloadSession>(
     options: &local_transfer::Options,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     mut ask: impl FnMut(Conflict) -> io::Result<Decision>,
+    mut committed: impl FnMut(&Path, &Path),
 ) -> Result<bool> {
     let parent = target
         .parent()
@@ -100,7 +101,9 @@ pub fn download<S: DownloadSession>(
     if entry.is_file() && !transfer.session.matches_file(segments, &entry)? {
         return Err(file_changed::<S>());
     }
-    prepared.publish(&mut progress).map_err(message)
+    prepared
+        .publish(&mut progress, &mut committed)
+        .map_err(message)
 }
 
 fn download_entry<S: DownloadSession>(session: &mut S, segments: &[String]) -> Result<S::Entry> {
@@ -125,13 +128,18 @@ fn file_changed<S: Session>() -> String {
 
 struct StagedDownload {
     source: PathBuf,
+    remote: PathBuf,
     target: PlannedTarget,
     children: Vec<StagedDownload>,
     complete: bool,
 }
 
 impl StagedDownload {
-    fn publish(self, progress: &mut Progress<'_>) -> io::Result<bool> {
+    fn publish(
+        self,
+        progress: &mut Progress<'_>,
+        committed: &mut impl FnMut(&Path, &Path),
+    ) -> io::Result<bool> {
         progress(&self.source, 0, None)?;
         let PlannedTarget {
             path,
@@ -143,7 +151,7 @@ impl StagedDownload {
             local_transfer::verify_folder(&path, &folder)?;
             for child in self.children {
                 local_transfer::verify_folder(&path, &folder)?;
-                complete &= child.publish(progress)?;
+                complete &= child.publish(progress, committed)?;
             }
         } else {
             let moved = if let Some(file) = &replace {
@@ -167,6 +175,7 @@ impl StagedDownload {
                 }
                 Err(error) => return Err(error),
             }
+            committed(&self.remote, &path);
         }
         Ok(complete)
     }
@@ -189,6 +198,7 @@ impl<S: DownloadSession> Download<'_, S> {
     ) -> Result<StagedDownload> {
         let mut prepared = StagedDownload {
             source,
+            remote: PathBuf::from(format!("/{}", segments.join("/"))),
             target,
             children: Vec::new(),
             complete: true,
@@ -325,6 +335,7 @@ pub fn upload<S: UploadSession>(
     policy: local_transfer::Policy,
     progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
     ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+    committed: &mut impl FnMut(&Path, &Path),
 ) -> Result<bool> {
     use local_transfer::{Decision, Policy};
     progress(source, 0, None).map_err(message)?;
@@ -365,6 +376,7 @@ pub fn upload<S: UploadSession>(
         let folder = same_file::Handle::from_path(source).map_err(message)?;
         if existing.is_none() {
             session.mkdir(target)?;
+            committed(source, Path::new(&format!("/{}", target.join("/"))));
         }
         let mut complete = true;
         for item in fs::read_dir(source).map_err(message)? {
@@ -381,6 +393,7 @@ pub fn upload<S: UploadSession>(
                 policy,
                 progress,
                 ask,
+                committed,
             )?;
         }
         return Ok(complete);
@@ -408,7 +421,10 @@ pub fn upload<S: UploadSession>(
     if result.is_err() {
         session.remove_stage(&staged);
     }
-    result.map(|()| true)
+    result.map(|()| {
+        committed(source, Path::new(&format!("/{}", target.join("/"))));
+        true
+    })
 }
 
 #[cfg(test)]
@@ -521,6 +537,7 @@ mod tests {
                 conflicts += 1;
                 Ok(Decision::Overwrite)
             },
+            &mut |_, _| {},
         )
         .unwrap());
         assert_eq!(conflicts, 1);

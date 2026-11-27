@@ -469,6 +469,24 @@ export type TransferOutcome = { kind: "completed" | "skipped" }
 export type TransferProgress = { file: string; path?: string; bytes: number; total: number | null };
 export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
 
+export type FileHistoryDirection = "undo" | "redo";
+export interface FileHistory {
+  entries: {
+    id: number;
+    moving: boolean;
+    source: string;
+    destination: string;
+    time: number;
+    outcome: string;
+    reason: string | null;
+    rows: { source: string; destination: string; outcome: string; error: string | null }[];
+  }[];
+  undo: number | null;
+  redo: number | null;
+  pending: FileHistoryDirection | null;
+  changed: boolean;
+}
+
 interface Connection {
   id: number;
   address: string;
@@ -741,7 +759,11 @@ export const api = {
     { kind: "ftp"; connection: number; segments: string[] }, names: string[], output: Channel<SizeResult>) =>
     invoke<void>("measure_folders", { id, source, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
-  beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
+  beginTransfer: (id: number, history?: { moving: boolean; source: string; destination: string; multipleDestinations: boolean }) =>
+    invoke<void>("begin_transfer", { id, history }),
+  fileOperationHistory: () => invoke<FileHistory>("file_operation_history"),
+  reverseFileOperation: (direction: FileHistoryDirection, expected: number) =>
+    invoke<FileHistory>("reverse_file_operation", { direction, expected }),
   deleteSelection: (id: number, selection: Deletion, onProgress: Channel<DeletionEvent>) =>
     invoke<DeletionResult>("delete_selection", { id, ...selection, onProgress }),
   cancelDeletion: (id: number) => invoke<void>("cancel_deletion", { id }),
