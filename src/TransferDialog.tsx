@@ -120,7 +120,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [moving, setMoving] = useState(transfer.kind === "move");
   const archiveTarget = transfer.archiveDestination;
   const lanTarget = transfer.lanDestination;
-  const lanMove = moving && (lanTarget || transfer.items.some(({ place }) => isLanGroupPlace(place)));
+  const remoteMove = moving && (lanTarget || transfer.items.some(({ place }) => isLanGroupPlace(place) || place.kind === "ssh"));
   const sameLanMove = moving && lanTarget && isLanGroupPlace(transfer.source) && transfer.source.groupPeer === lanTarget.groupPeer;
   const kswitcherTarget = transfer.kswitcherDestination;
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
@@ -297,7 +297,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "source_retained") {
-          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) || item.place.kind === "ssh" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
             "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
           setBlocked(item);
           return;
@@ -402,7 +402,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <option value="ask">{t(sameLanMove || transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
                 <option value="skip">{t("Skip")}</option>
                 {replaceable && !sameLanMove && <option value="overwrite">{t("Overwrite all")}</option>}
-                {replaceable && localTarget && !transfer.kswitcherBroker && !lanMove && <>
+                {replaceable && localTarget && !transfer.kswitcherBroker && !remoteMove && <>
                   <option value="rename">{t("Rename incoming item")}</option>
                   <option value="newer">{t("Overwrite older files only")}</option>
                 </>}

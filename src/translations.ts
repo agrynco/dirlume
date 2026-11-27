@@ -1549,6 +1549,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Estimating time remaining…": ["Оцінюємо залишок часу…", "Оцениваем оставшееся время…"],
   "About {0} remaining": ["Залишилося приблизно {0}", "Осталось примерно {0}"],
   "Choose regular local files to move to an SSH/SFTP folder.": ["Виберіть звичайні локальні файли для перенесення до папки SSH/SFTP.", "Выберите обычные локальные файлы для перемещения в папку SSH/SFTP."],
+  "Choose a local destination for the SSH/SFTP move.": ["Виберіть локальну папку для переміщення з SSH/SFTP.", "Выберите локальную папку для перемещения из SSH/SFTP."],
+  "Choose local files and folders without links for the SSH/SFTP move.": ["Виберіть локальні файли й папки без посилань для переміщення до SSH/SFTP.", "Выберите локальные файлы и папки без ссылок для перемещения в SSH/SFTP."],
   "Choose regular local files to move to a Dirlume LAN folder.": ["Виберіть звичайні локальні файли для перенесення до папки Dirlume LAN.", "Выберите обычные локальные файлы для перемещения в папку Dirlume LAN."],
   "Waiting for the local network to reconnect to your group…": ["Очікуємо підключення до локальної мережі, щоб повернутися до групи…", "Ожидаем подключения к локальной сети, чтобы вернуться в группу…"],
   "Join the group again after restarting Dirlume.": ["Після перезапуску Dirlume потрібно знову приєднатися до групи.", "После перезапуска Dirlume нужно снова присоединиться к группе."],

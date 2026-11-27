@@ -8,11 +8,12 @@ RUN useradd -m -s /bin/bash dirlume-fixture \
     && printf 'dirlume-fixture:fixture-login\n' | chpasswd \
     && printf 'dirlume-fixture ALL=(root) /usr/lib/openssh/sftp-server *\n' >/etc/sudoers.d/dirlume-fixture \
     && chmod 440 /etc/sudoers.d/dirlume-fixture
-RUN mkdir -p /run/sshd /srv/dirlume-target/batch/protected /srv/dirlume-delete/nested \
+RUN mkdir -p /run/sshd /srv/dirlume-target/batch/protected /srv/dirlume-delete/nested /srv/dirlume-move/nested \
     && chown dirlume-fixture /srv/dirlume-target /srv/dirlume-target/batch \
     && printf 'occupied\n' >/srv/dirlume-target/batch/protected/occupied.txt \
     && printf 'protected\n' >/srv/dirlume-delete/nested/protected.txt \
     && printf 'protected read\n' >/srv/dirlume-read.txt \
+    && printf 'move protected folder\n' >/srv/dirlume-move/nested/test.txt \
     && chmod 600 /srv/dirlume-read.txt
 
 CMD ["sh", "-c", "ssh-keygen -A && exec /usr/sbin/sshd -D -e -o PasswordAuthentication=yes -o PermitRootLogin=no"]

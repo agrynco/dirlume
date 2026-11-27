@@ -135,6 +135,14 @@ async function fixture(browser, refresh) {
             matches: names.map((label) => ({ label, text: label, directory: false })) };
         }
         if (command === "transfer_item") {
+          if (args.request.source.kind === "ssh" && args.request.moving) {
+            const { source, destination } = args.request;
+            if (source.connection !== state.connection || destination !== state.root) throw new Error("The SSH move used the wrong path or connection.");
+            const name = source.segments.at(-1);
+            state.local.push(entry(name));
+            await state.remove("/destination", name);
+            return { kind: "completed" };
+          }
           if (args.request.sshDestination !== state.connection) throw new Error("The upload used the wrong SSH connection.");
           const { destination, source, moving, retry } = args.request;
           state.transfers ??= [];
@@ -547,6 +555,12 @@ try {
   await button(permissions, "Continue with sudo").click();
   await permissions.waitFor({ state: "hidden" });
   await list(sudoPage, "right").getByText("4 B", { exact: true }).last().waitFor();
+  await row(sudoPage, "right", "renamed.txt").click();
+  await list(sudoPage, "right").press("F6");
+  const downloadMove = sudoPage.getByRole("dialog", { name: "Rename or move", exact: true });
+  await button(downloadMove, "Move").click();
+  await row(sudoPage, "left", "renamed.txt").waitFor();
+  await row(sudoPage, "right", "renamed.txt").waitFor({ state: "detached" });
   await sudoPage.close();
   console.log("Verified SSH uploads during listing and navigation, failures, skips, cancellation, pane refresh, and custom or disabled bindings.");
   console.log("Verified SFTP connection identity, local-to-remote move, editable paths, and cleanup retry in both pane positions.");

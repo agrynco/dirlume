@@ -11,7 +11,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::{AuthenticatedRoute, Connection, Session};
+use super::{
+    standard_rename::{self, RenameSession},
+    AuthenticatedRoute, Connection, Session,
+};
 use crate::{
     desktop::{message, Result},
     netbox_connection,
@@ -21,14 +24,55 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 struct Authorization {
     session: Session,
+    rename: Option<RenameSession>,
     read_only: bool,
     expires: Instant,
+}
+
+impl Authorization {
+    fn open(
+        connection: &Connection,
+        password: Zeroizing<String>,
+        read_only: bool,
+        stop: Option<CancellationToken>,
+    ) -> Result<Self> {
+        let (session, rename) = open_sftp(
+            connection.authenticated_client_with_cancel(stop)?,
+            password,
+            read_only,
+        )?;
+        Ok(Self {
+            session: session.with_recycle(connection.profile.environment.recycle_bin.clone(), true),
+            rename,
+            read_only,
+            expires: Instant::now() + IDLE_TIMEOUT,
+        })
+    }
+
+    fn alive(&self, read_only: bool) -> bool {
+        self.expires > Instant::now() && !self.session.is_closed() && (!self.read_only || read_only)
+    }
+
+    fn rename(&mut self, from: &str, to: &str) -> Option<Result<()>> {
+        let rename = self.rename.as_mut().filter(|rename| rename.usable)?;
+        let result = self.session.critical(rename.rename(from, to));
+        self.expires = Instant::now() + IDLE_TIMEOUT;
+        Some(result)
+    }
 }
 
 #[derive(Default)]
 pub(super) struct Access(Arc<Mutex<Option<Authorization>>>);
 
 impl Access {
+    fn remember(&self, state: &mut Option<Authorization>, authorization: Authorization) {
+        let start_timer = state.is_none();
+        *state = Some(authorization);
+        if start_timer {
+            async_runtime::spawn(expire(Arc::downgrade(&self.0)));
+        }
+    }
+
     pub(super) fn run<T>(
         &self,
         connection: &Connection,
@@ -40,12 +84,10 @@ impl Access {
         let mut state =
             async_runtime::block_on(netbox_connection::wait(None, stop.as_ref(), self.0.lock()))
                 .map_err(|error| message(std::io::Error::from(error)))?;
-        if let Some(current) = state.as_mut().filter(|current| {
-            password.is_none()
-                && current.expires > Instant::now()
-                && !current.session.is_closed()
-                && (!current.read_only || read_only)
-        }) {
+        if let Some(current) = state
+            .as_mut()
+            .filter(|current| password.is_none() && current.alive(read_only))
+        {
             current.session.set_cancel(stop);
             let result = operation(&mut current.session);
             current.session.set_cancel(None);
@@ -61,24 +103,43 @@ impl Access {
         let Some(password) = password else {
             return Ok(None);
         };
-        let mut session = open_sftp(
-            connection.authenticated_client_with_cancel(stop)?,
-            password,
-            read_only,
-        )?
-        .with_recycle(connection.profile.environment.recycle_bin.clone(), true);
-        let result = operation(&mut session)?;
-        session.set_cancel(None);
-        let start_timer = state.is_none();
-        *state = Some(Authorization {
-            session,
-            read_only,
-            expires: Instant::now() + IDLE_TIMEOUT,
-        });
-        if start_timer {
-            async_runtime::spawn(expire(Arc::downgrade(&self.0)));
-        }
+        let mut authorization = Authorization::open(connection, password, read_only, stop)?;
+        let result = operation(&mut authorization.session)?;
+        authorization.session.set_cancel(None);
+        authorization.expires = Instant::now() + IDLE_TIMEOUT;
+        self.remember(&mut state, authorization);
         Ok(Some(result))
+    }
+
+    pub(super) fn rename(
+        &self,
+        connection: &Connection,
+        password: Option<Zeroizing<String>>,
+        from: &str,
+        to: &str,
+    ) -> Result<()> {
+        let mut state = async_runtime::block_on(self.0.lock());
+        if password.is_none() {
+            return state
+                .as_mut()
+                .filter(|current| current.alive(false))
+                .and_then(|current| current.rename(from, to))
+                .unwrap_or_else(|| Err(super::PERMISSION_DENIED.to_owned()));
+        }
+        let password = password.expect("explicit sudo authorization");
+        let mut authorization = Authorization::open(connection, password.clone(), false, None)?;
+        if let Some(result) = authorization.rename(from, to) {
+            self.remember(&mut state, authorization);
+            return result;
+        }
+        // Some SSH servers limit a connection to one session. Use a separate connection
+        // for the authorized rename in that case.
+        drop(authorization);
+        let route = connection.authenticated_client()?;
+        route.1.wait(async {
+            let channel = open_channel(&route, password, false).await?;
+            standard_rename::run_on_channel(channel, from, to).await
+        })
     }
 }
 
@@ -103,15 +164,25 @@ fn open_sftp(
     client: AuthenticatedRoute,
     password: Zeroizing<String>,
     read_only: bool,
-) -> Result<Session> {
-    let sftp = client.1.wait(async {
+) -> Result<(Session, Option<RenameSession>)> {
+    let (sftp, rename) = client.1.wait(async {
+        let rename_password = (!read_only).then(|| password.clone());
         let channel = open_channel(&client, password, read_only).await?;
         let (reader, writer) = tokio::io::split(channel.into_stream());
-        Sftp::new(writer, reader, Default::default())
+        let sftp = Sftp::new(writer, reader, Default::default())
             .await
-            .map_err(message)
+            .map_err(message)?;
+        let rename = if let Some(password) = rename_password {
+            match open_channel(&client, password, false).await {
+                Ok(channel) => RenameSession::open(channel).await.ok(),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        Ok::<_, String>((sftp, rename))
     })?;
-    Ok(Session::new(client, sftp))
+    Ok((Session::new(client, sftp), rename))
 }
 
 pub(super) async fn open_channel(

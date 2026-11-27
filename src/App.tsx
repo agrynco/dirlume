@@ -2245,6 +2245,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
+    if (kind === "move" && source.kind === "ssh" && target && target.kind !== "local") {
+      setStatus({ text: "Choose a local destination for the SSH/SFTP move.", error: true });
+      return;
+    }
     const remoteDestination = isFileServer(target) ? target : undefined;
     const lanDestination = isLanGroupPlace(target) && target.segments.length ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
@@ -2284,8 +2288,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       return;
     }
     if (kind === "move" && remoteDestination && (remoteDestination.kind !== "ssh" ||
-      items.some(({ place, entry }) => place.kind !== "local" || entry.directory || entry.link))) {
-      setStatus({ text: "Choose regular local files to move to an SSH/SFTP folder.", error: true });
+      items.some(({ place, entry }) => place.kind !== "local" || entry.link))) {
+      setStatus({ text: "Choose local files and folders without links for the SSH/SFTP move.", error: true });
       return;
     }
     if (remoteDestination && source.kind !== "local") {
@@ -2408,7 +2412,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (kind === "copy") collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
       return;
     }
-    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "ftp" && !isLanGroupPlace(source) &&
+    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isLanGroupPlace(source) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     if (kind === "move" && source.kind === "ftp") {
       setModal({ kind: "rename", path: placePath(source), name: selected.name, remote: source });
@@ -3483,7 +3487,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
-      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !ftp && !lanGroupPlace && !(kswitcherWrite && kswitcherDelete)) ||
+      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !fileServer && !lanGroupPlace && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !lanGroupPlace && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || lanGroupPlace) && current.link) || busy },
@@ -4239,6 +4243,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               const place = item.place;
               if (place.kind === "ssh") setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, remote: place });
             }}>{t("Rename")}</Button>}
+            {item.place.kind === "ssh" && entry && !toCollection && !state.search && !state.loading && !busy &&
+              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
             {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>

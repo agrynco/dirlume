@@ -1413,6 +1413,105 @@ impl VerifiedUpload for ssh::Session {
     }
 }
 
+enum LocalOriginal {
+    Folder(same_file::Handle),
+    File(local_transfer::FileRevision),
+}
+
+struct LocalMoveItem {
+    path: PathBuf,
+    target: Vec<String>,
+    original: LocalOriginal,
+}
+
+fn collect_local_move(
+    source: &Path,
+    target: &[String],
+    transfer: &TransferSession,
+    items: &mut Vec<LocalMoveItem>,
+) -> Result<()> {
+    transfer.ensure_running().map_err(message)?;
+    let metadata = fs::symlink_metadata(source).map_err(message)?;
+    if local::is_link(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err("Choose local files and folders without symbolic links.".to_owned());
+    }
+    let original = if metadata.is_dir() {
+        let folder = same_file::Handle::from_path(source).map_err(message)?;
+        for entry in fs::read_dir(source).map_err(message)? {
+            local_transfer::verify_folder(source, &folder).map_err(message)?;
+            let entry = entry.map_err(message)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| "A filename cannot be represented as Unicode.")?;
+            let child = [target, &[name]].concat();
+            collect_local_move(&entry.path(), &child, transfer, items)?;
+        }
+        LocalOriginal::Folder(folder)
+    } else {
+        LocalOriginal::File(
+            local_transfer::FileRevision::capture(source, &metadata).map_err(message)?,
+        )
+    };
+    items.push(LocalMoveItem {
+        path: source.to_owned(),
+        target: target.to_vec(),
+        original,
+    });
+    Ok(())
+}
+
+fn move_local_folder<S: VerifiedUpload>(
+    client: &mut S,
+    source: &Path,
+    target: &[String],
+    policy: local_transfer::Policy,
+    transfer: &TransferSession,
+    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: &mut impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let mut items = Vec::new();
+    collect_local_move(source, target, transfer, &mut items)?;
+    if !remote_transfer::upload(
+        client,
+        source,
+        target,
+        policy,
+        progress,
+        ask,
+        &mut |_, _| {},
+    )? {
+        return Ok(TransferOutcome::Skipped);
+    }
+    for item in items {
+        let result = (|| {
+            transfer.ensure_running().map_err(message)?;
+            match item.original {
+                LocalOriginal::Folder(original) => {
+                    local_transfer::verify_folder(&item.path, &original).map_err(message)?;
+                    fs::remove_dir(&item.path).map_err(message)
+                }
+                LocalOriginal::File(original) => {
+                    original.verify(&item.path).map_err(message)?;
+                    let mut input = fs::File::open(&item.path).map_err(message)?;
+                    client.verify_uploaded(&item.target, &mut input, transfer)?;
+                    drop(input);
+                    transfer.ensure_running().map_err(message)?;
+                    local_transfer::remove_original(&item.path, &original).map_err(message)
+                }
+            }
+        })();
+        if let Err(error) = result {
+            return Ok(TransferOutcome::SourceRetained {
+                source: crate::file_history::display(source),
+                destination: format!("/{}", target.join("/")),
+                error,
+            });
+        }
+    }
+    Ok(TransferOutcome::Completed)
+}
+
 fn move_uploaded_file<S: VerifiedUpload>(
     remote: &mut S,
     request: &TransferRequest,
@@ -1516,11 +1615,12 @@ pub(crate) fn verify_lan_folder_move(invitation: &str, drive: &str, host: &Path)
     fs::write(source.join("nested/note.txt"), b"Move the tree").unwrap();
     let target = [drive.to_owned(), "Move fixture".to_owned()];
     let mut progress = |_: &Path, _, _| Ok(());
-    let result = lan_transfer::move_local_folder(
+    let result = move_local_folder(
         &mut client,
         &source,
         &target,
         local_transfer::Policy::Ask,
+        &transfer,
         &mut progress,
         &mut |_| panic!("Unexpected conflict"),
     )
@@ -1633,6 +1733,48 @@ pub(crate) fn verify_sftp_sudo_transfer(connection: Arc<ssh::Connection>) {
     let deletion = ["srv", "dirlume-delete"].map(str::to_owned);
     remote.remove(&deletion, true, false).unwrap();
     assert!(remote.stat(&deletion).unwrap().is_none());
+
+    let local_move = fixture.path().join("local-move");
+    fs::create_dir_all(local_move.join("nested")).unwrap();
+    fs::write(
+        local_move.join("nested/test.txt"),
+        b"move an uploaded folder",
+    )
+    .unwrap();
+    let remote_move = ["srv", "dirlume-target", "local-move"].map(str::to_owned);
+    let result = move_local_folder(
+        &mut remote,
+        &local_move,
+        &remote_move,
+        local_transfer::Policy::Ask,
+        &transfer,
+        &mut |_, _, _| Ok(()),
+        &mut |_| panic!("An unexpected overwrite was requested"),
+    )
+    .unwrap();
+    assert!(matches!(result, TransferOutcome::Completed));
+    assert!(!local_move.exists());
+    let mut leaf = remote_move.to_vec();
+    leaf.extend(["nested".to_owned(), "test.txt".to_owned()]);
+    assert!(remote.stat(&leaf).unwrap().is_some());
+
+    let remote_source = ["srv", "dirlume-move"].map(str::to_owned);
+    let downloaded = fixture.path().join("moved-download");
+    let result = reader
+        .move_to_local(
+            &remote_source,
+            &downloaded,
+            &options,
+            |_, _, _| Ok(()),
+            |_| panic!("An unexpected overwrite was requested"),
+        )
+        .unwrap();
+    assert!(matches!(result, TransferOutcome::Completed));
+    assert_eq!(
+        fs::read(downloaded.join("nested/test.txt")).unwrap(),
+        b"move protected folder\n"
+    );
+    assert!(remote.stat(&remote_source).unwrap().is_none());
     assert_eq!(denied.load(Ordering::Relaxed), 1);
 }
 
@@ -1913,11 +2055,12 @@ async fn transfer_item(
                             name,
                             request.multiple,
                         )?;
-                        return lan_transfer::move_local_folder(
+                        return move_local_folder(
                             &mut client,
                             source,
                             &target,
                             request.policy,
+                            &session,
                             &mut progress,
                             &mut ask,
                         );
@@ -2148,6 +2291,24 @@ async fn transfer_item(
                     let mut remote =
                         ssh_transfer::SshTransfer::open(&connection, false, &session, &output)?;
                     if request.moving {
+                        let metadata = fs::symlink_metadata(source).map_err(message)?;
+                        if metadata.is_dir() && !local::is_link(&metadata) {
+                            let target = remote_transfer::upload_destination(
+                                &mut remote,
+                                &request.destination,
+                                name,
+                                request.multiple,
+                            )?;
+                            return move_local_folder(
+                                &mut remote,
+                                source,
+                                &target,
+                                request.policy,
+                                &session,
+                                &mut progress,
+                                &mut ask,
+                            );
+                        }
                         return move_uploaded_file(
                             &mut remote,
                             &request,
@@ -2243,12 +2404,14 @@ async fn transfer_item(
                 .map(transfer_outcome);
             }
             if let Some(connection) = ssh_source {
-                if request.moving {
-                    return Err("Use Copy to download SSH items.".to_owned());
-                }
                 if let TransferSource::Ssh { segments, .. } = &request.source {
+                    let mut remote =
+                        ssh_transfer::SshTransfer::open(&connection, true, &session, &output)?;
+                    if request.moving {
+                        return remote.move_to_local(segments, &target, &options, progress, ask);
+                    }
                     return remote_transfer::download(
-                        &mut ssh_transfer::SshTransfer::open(&connection, true, &session, &output)?,
+                        &mut remote,
                         segments,
                         &target,
                         &options,

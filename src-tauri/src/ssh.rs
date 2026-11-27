@@ -402,15 +402,14 @@ impl Connection {
         if from == to {
             return Ok(());
         }
-        let client = self.authenticated_client()?;
-        client.1.wait(async {
-            if let Some(password) = password {
-                let channel = sudo::open_channel(&client, password, false).await?;
-                standard_rename::run_on_channel(channel, &from, &to).await
-            } else {
-                standard_rename::run(&client, &from, &to).await
+        if password.is_none() {
+            let client = self.authenticated_client()?;
+            match client.1.wait(standard_rename::run(&client, &from, &to)) {
+                Err(error) if error == PERMISSION_DENIED => {}
+                result => return result,
             }
-        })
+        }
+        self.sudo.rename(self, password, &from, &to)
     }
 
     pub(crate) async fn complete(&self, script: &str) -> Result<Vec<u8>> {

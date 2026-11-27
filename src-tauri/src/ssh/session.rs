@@ -292,7 +292,10 @@ impl Session {
             })
     }
 
-    fn critical<T>(&self, operation: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    pub(super) fn critical<T>(
+        &self,
+        operation: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
         let deadline = self.client.1.timeout().unwrap_or(Duration::from_secs(15));
         tauri::async_runtime::block_on(netbox_connection::wait(Some(deadline), None, operation))
             .map_err(|error| message(std::io::Error::from(error)))?

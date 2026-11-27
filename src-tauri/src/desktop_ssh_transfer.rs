@@ -1,16 +1,20 @@
 use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
+    fs::{self, File},
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::Path,
     sync::{mpsc, Arc, Mutex},
 };
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use tauri::ipc::Channel;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use super::{TransferEvent, TransferSession, VerifiedUpload};
+use super::{
+    copy_downloaded_item, TransferEvent, TransferOutcome, TransferSession, VerifiedUpload,
+};
 use crate::remote_transfer::{DownloadSession, Entry as _, Session as _, UploadSession as _};
-use crate::{message, remote_transfer, ssh, Result};
+use crate::{local, local_transfer, message, remote_transfer, ssh, Result};
 
 struct Pending {
     ticket: Uuid,
@@ -116,6 +120,109 @@ pub(super) struct SshTransfer<'a> {
     output: &'a Channel<TransferEvent>,
 }
 
+enum RemoteOriginal {
+    Directory,
+    File { entry: ssh::Entry, digest: String },
+}
+
+pub(super) struct SshMoveCleanup(Vec<(Vec<String>, RemoteOriginal)>);
+
+impl SshMoveCleanup {
+    pub(super) fn capture(
+        remote: &mut SshTransfer<'_>,
+        source: &[String],
+        staged: &Path,
+    ) -> Result<Self> {
+        let mut cleanup = Self(Vec::new());
+        cleanup.record(remote, source, staged)?;
+        Ok(cleanup)
+    }
+
+    fn record(
+        &mut self,
+        remote: &mut SshTransfer<'_>,
+        source: &[String],
+        staged: &Path,
+    ) -> Result<()> {
+        remote.transfer.ensure_running().map_err(message)?;
+        let original = if staged.is_dir() {
+            for item in fs::read_dir(staged).map_err(message)? {
+                let item = item.map_err(message)?;
+                let name = item
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| "A filename could not be represented as Unicode.")?;
+                self.record(remote, &remote_transfer::child(source, &name), &item.path())?;
+            }
+            RemoteOriginal::Directory
+        } else {
+            let entry = remote
+                .stat(source)?
+                .filter(|entry| entry.is_file())
+                .ok_or("The SSH source file changed during the move.")?;
+            let digest =
+                crate::protocol::lan_file_digest(File::open(staged).map_err(message)?, || {
+                    remote.transfer.ensure_running()
+                })
+                .map_err(message)?;
+            RemoteOriginal::File { entry, digest }
+        };
+        self.0.push((source.to_vec(), original));
+        Ok(())
+    }
+
+    pub(super) fn finish(
+        self,
+        remote: &mut SshTransfer<'_>,
+        source: &[String],
+        destination: String,
+    ) -> TransferOutcome {
+        let check = || "The SSH source item changed during the move.".to_owned();
+        for (segments, original) in self.0 {
+            let result = remote.operation(&segments, |session| {
+                let current = session.stat(&segments)?.ok_or_else(check)?;
+                match &original {
+                    RemoteOriginal::Directory if current.is_directory() => {
+                        session.remove_leaf(&segments, true)
+                    }
+                    RemoteOriginal::File { entry, digest } if *entry == current => {
+                        let mut proof = FileHash(ring::digest::Context::new(&ring::digest::SHA256));
+                        session.download_file(&segments, &mut proof, |_| Ok(()))?;
+                        if &URL_SAFE_NO_PAD.encode(proof.0.finish().as_ref()) != digest
+                            || session.stat(&segments)?.as_ref() != Some(entry)
+                        {
+                            return Err(check());
+                        }
+                        session.remove_leaf(&segments, false)
+                    }
+                    _ => Err(check()),
+                }
+            });
+            if let Err(error) = result {
+                return TransferOutcome::SourceRetained {
+                    source: format!("/{}", source.join("/")),
+                    destination,
+                    error,
+                };
+            }
+        }
+        TransferOutcome::Completed
+    }
+}
+
+struct FileHash(ring::digest::Context);
+
+impl Write for FileHash {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.0.update(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 impl<'a> SshTransfer<'a> {
     pub(super) fn open(
         connection: &'a Arc<ssh::Connection>,
@@ -131,6 +238,55 @@ impl<'a> SshTransfer<'a> {
             transfer,
             output,
         })
+    }
+
+    pub(super) fn move_to_local<P>(
+        &mut self,
+        source: &[String],
+        target: &Path,
+        options: &local_transfer::Options,
+        progress: P,
+        ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+    ) -> Result<TransferOutcome>
+    where
+        P: FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    {
+        let mut cleanup = None;
+        let outcome = copy_downloaded_item(
+            target,
+            self.transfer,
+            options,
+            progress,
+            ask,
+            |staged, progress| {
+                let temporary_copy = local_transfer::Options {
+                    moving: false,
+                    policy: local_transfer::Policy::Ask,
+                    ask_read_only: true,
+                    copy: local::CopyOptions::default(),
+                };
+                if !remote_transfer::download(
+                    self,
+                    source,
+                    staged,
+                    &temporary_copy,
+                    progress,
+                    |_| Ok(local_transfer::Decision::Skip),
+                    |_, _| {},
+                )? {
+                    return Err("Could not stage the complete SSH move source.".to_owned());
+                }
+                cleanup = Some(SshMoveCleanup::capture(self, source, staged)?);
+                Ok(())
+            },
+        )?;
+        if matches!(outcome, TransferOutcome::Completed) {
+            if let Some(cleanup) = cleanup {
+                self.read_only = false;
+                return Ok(cleanup.finish(self, source, crate::file_history::display(target)));
+            }
+        }
+        Ok(outcome)
     }
 
     pub(super) fn remove(
