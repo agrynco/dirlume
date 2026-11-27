@@ -1,5 +1,6 @@
 // English message keys also serve as the default text. The translations are Ukrainian and Russian.
 export const translations: Readonly<Record<string, readonly [uk: string, ru: string]>> = {
+  "Insert KSwitcher snippet": ["Вставити сніпет KSwitcher", "Вставить сниппет KSwitcher"],
   "File pane view": ["Вигляд файлової панелі", "Вид файловой панели"],
   "List": ["Список", "Список"],
   "Folder sizes": ["Розміри папок", "Размеры папок"],
