@@ -60,6 +60,22 @@ pub enum WriteError {
 
 type WriteResult<T> = std::result::Result<T, WriteError>;
 
+pub(super) fn verify_branch_head(
+    git: &Path,
+    root: &Path,
+    head_ref: Option<&str>,
+    head: Option<&str>,
+) -> WriteResult<()> {
+    let state = snapshot(git, root)?;
+    if state.write_blocked {
+        return Err(WriteError::OperationInProgress);
+    }
+    if state.snapshot.head_ref.as_deref() != head_ref || state.snapshot.head.as_deref() != head {
+        return Err(WriteError::Stale);
+    }
+    Ok(())
+}
+
 impl From<GitError> for WriteError {
     fn from(error: GitError) -> Self {
         let detail = match error {

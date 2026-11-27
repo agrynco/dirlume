@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { GitCommitHorizontal } from "lucide-react";
-import { api, type GitBranch as Branch, type GitCommit, type GitDetails, type GitHistory, type GitRepository, type NamedFile } from "./api";
+import { api, type GitBranch as Branch, type GitBranchAction, type GitBranchRequest, type GitCommit, type GitDetails, type GitHistory, type GitRepository, type NamedFile } from "./api";
 import { Button } from "./Button";
-import { GitChanges } from "./GitChanges";
+import { Dialog } from "./Dialog";
+import { GitChanges, writeError } from "./GitChanges";
+import { GitRevisionComparison } from "./GitRevisionComparison";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
 import { opposite, type Side } from "./panes";
@@ -18,6 +20,11 @@ function gitError(error: unknown) {
 
 const statusLabels: Readonly<Record<string, string>> = {
   A: "Added", M: "Modified", D: "Deleted", R: "Renamed", C: "Copied", T: "Type changed",
+};
+
+const branchActions: Record<GitBranchAction, string> = {
+  create: "Create branch", track: "Create tracking branch and switch", switch: "Switch branch",
+  rename: "Rename branch", delete: "Delete branch",
 };
 
 function ChangeDetails({ root, commit }: { root: string; commit: GitCommit }) {
@@ -105,16 +112,24 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
+  const [comparing, setComparing] = useState(false);
   const [selectedChange, setSelectedChange] = useState("");
   const [draft, setDraft] = useState<{ root: string; message: string }>();
+  const [branchReview, setBranchReview] = useState<{ request: GitBranchRequest; root: string; branchName: string }>();
+  const [branchWorking, setBranchWorking] = useState(false);
+  const [branchFailure, setBranchFailure] = useState("");
+  const [branchFeedback, setBranchFeedback] = useState("");
   const filterField = useRef<HTMLInputElement>(null);
   const branches = useRef<HTMLDivElement>(null);
+  const knownRepository = useRef<{ path: string; root: string }>(null);
   useLayoutEffect(() => { if (!changes) filterField.current?.focus(); }, [changes]);
   useEffect(() => {
     let canceled = false;
     setError("");
-    void api.gitRepository(path).then((repository) => {
+    const root = knownRepository.current?.path === path ? knownRepository.current.root : path;
+    void api.gitRepository(root).then((repository) => {
       if (canceled) return;
+      knownRepository.current = { path, root: repository.root };
       setRepository(repository);
       setSelected((current) => repository.branches.some(({ reference }) => reference === current)
         ? current : repository.headRef ?? "HEAD");
@@ -130,6 +145,42 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
       tip: repository.head ?? "", remote: false });
   }
   const visible = allBranches.filter(({ name }) => name.toLocaleLowerCase().includes(filter.toLocaleLowerCase()));
+  function reviewBranch(action: GitBranchAction) {
+    if (!repository || branchWorking) return;
+    setBranchFailure("");
+    setBranchFeedback("");
+    setBranchReview({
+      root: repository.root,
+      branchName: branch?.name ?? (repository.headRef?.replace(/^refs\/heads\//, "") || t("Detached HEAD")),
+      request: {
+        action, expectedHeadRef: repository.headRef, expectedHead: repository.head,
+        reference: branch?.reference ?? null, tip: branch?.tip ?? null,
+        name: action === "rename" ? branch?.name ?? "" : action === "track" ? branch?.name.split("/").slice(1).join("/") ?? "" : "",
+      },
+    });
+  }
+
+  async function applyBranch() {
+    if (!branchReview || branchWorking) return;
+    const { root, request } = branchReview;
+    setBranchWorking(true);
+    setBranchFailure("");
+    try {
+      const updated = await api.gitUpdateBranch(root, { ...request, name: request.name?.trim() || null });
+      setRepository(updated);
+      setSelected(request.action === "rename" || request.action === "create"
+        ? "refs/heads/" + request.name?.trim() : updated.headRef ?? "HEAD");
+      setBranchReview(undefined);
+      setBranchFeedback(t("Branch updated."));
+      onRefresh();
+    } catch (error) {
+      setBranchFailure(writeError(error));
+      setBranchReview(undefined);
+      onRefresh();
+    } finally {
+      setBranchWorking(false);
+    }
+  }
   function handleBranchKeys(event: KeyboardEvent) {
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     const current = visible.findIndex(({ reference }) => reference === selected);
@@ -183,6 +234,18 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
           event.preventDefault();
           branches.current?.querySelector<HTMLElement>("[role=option][tabindex='0']")?.focus();
         }} />}
+      {repository && !error && <div className="git-branch-actions" role="group" aria-label={t("Branch actions")}>
+        <Button disabled={!tip || branchWorking} onClick={() => reviewBranch("create")}>{t(branchActions.create)}</Button>
+        {branch?.remote
+          ? <Button disabled={branchWorking} onClick={() => reviewBranch("track")}>{t(branchActions.track)}</Button>
+          : <>
+            <Button disabled={!branch || selected === checkedOut || branchWorking} onClick={() => reviewBranch("switch")}>{t(branchActions.switch)}</Button>
+            <Button disabled={!branch || branchWorking} onClick={() => reviewBranch("rename")}>{t(branchActions.rename)}</Button>
+            <Button disabled={!branch || selected === checkedOut || branchWorking} onClick={() => reviewBranch("delete")}>{t(branchActions.delete)}</Button>
+          </>}
+      </div>}
+      {branchFailure && <p className="git-error" role="alert">{branchFailure}</p>}
+      {branchFeedback && <p role="status">{branchFeedback}</p>}
       {error ? <p className="pane-empty git-error" role="alert">{error}</p> : repository ?
         <div className="git-scroll" ref={branches} role="listbox" aria-label={t("Git branches")} onKeyDown={handleBranchKeys}>
           {branchGroup(false)}
@@ -194,8 +257,28 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
       <header className="pane-heading">
         <span className="pane-title"><GitCommitHorizontal aria-hidden="true" />{t("Commit history")}</span>
         {repository && <span className="git-ref">{branch?.name ?? allBranches.find(({ reference }) => reference === checkedOut)?.name}</span>}
+        <Button disabled={!repository || !!error} aria-pressed={comparing}
+          onClick={() => setComparing(!comparing)}>{t("Compare revisions")}</Button>
       </header>
-      {repository && !changes && <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />}
+      {repository && !changes && (comparing
+        ? <GitRevisionComparison key={repository.root + ":" + selected + ":" + refresh} repository={repository} target={tip} />
+        : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />)}
     </section>
+    {branchReview && <Dialog title={t(branchActions[branchReview.request.action])} helpTopic="gitView"
+      onClose={branchWorking ? undefined : () => setBranchReview(undefined)} footer={<>
+        <Button disabled={branchWorking} onClick={() => setBranchReview(undefined)}>{t("Cancel")}</Button>
+        <Button disabled={branchWorking || (["create", "track", "rename"].includes(branchReview.request.action) && !branchReview.request.name?.trim())}
+          onClick={() => void applyBranch()}>{t(branchActions[branchReview.request.action])}</Button>
+      </>}>
+      <p><code>{branchReview.root}</code></p>
+      <p>{t("Branch {0}", branchReview.branchName)}</p>
+      {branchReview.request.action === "delete" && <p>{t("Git deletes only a branch that has been merged.")}</p>}
+      {["create", "track", "rename"].includes(branchReview.request.action) && <label className="field">{t("Branch name")}
+        <input value={branchReview.request.name ?? ""} autoFocus autoComplete="off" spellCheck={false}
+          disabled={branchWorking} onChange={(event) => setBranchReview({
+            ...branchReview, request: { ...branchReview.request, name: event.target.value },
+          })} />
+      </label>}
+    </Dialog>}
   </>;
 }

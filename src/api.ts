@@ -403,6 +403,17 @@ export interface GitRepository {
   headRef: string | null;
   head: string | null;
   branches: GitBranch[];
+  tags?: { reference: string; name: string }[];
+}
+
+export type GitBranchAction = "create" | "track" | "switch" | "rename" | "delete";
+export interface GitBranchRequest {
+  action: GitBranchAction;
+  expectedHeadRef: string | null;
+  expectedHead: string | null;
+  reference: string | null;
+  tip: string | null;
+  name: string | null;
 }
 
 export interface GitCommit {
@@ -423,6 +434,16 @@ export interface GitDetails {
   merge: boolean;
   changes: { status: string; path: string; previousPath: string | null }[];
 }
+
+export interface GitComparison {
+  base: string;
+  target: string;
+  baseOnly: GitHistory;
+  targetOnly: GitHistory;
+  changes: GitDetails["changes"];
+}
+
+export type GitRevisionDiff = Pick<GitWorkingDiff, "patch" | "fallback">;
 
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
@@ -652,6 +673,14 @@ export const api = {
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
+  gitUpdateBranch: (root: string, request: GitBranchRequest) =>
+    invoke<GitRepository>("git_update_branch", { root, request }),
+  gitCompareRevisions: (root: string, base: string, target: string) =>
+    invoke<GitComparison>("git_compare_revisions", { root, base, target }),
+  gitRevisionHistory: (root: string, included: string, excluded: string, offset: number) =>
+    invoke<GitHistory>("git_revision_history", { root, included, excluded, offset }),
+  gitRevisionDiff: (root: string, base: string, target: string, path: string, previousPath: string | null) =>
+    invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath }),
   gitIndexState: (root: string) => invoke<GitWorkingIndex>("git_index_state", { root }),
   gitUpdateIndex: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange, action: GitIndexAction, replace: boolean) =>
     invoke<void>("git_update_index", { root, expected, change, action, replace }),

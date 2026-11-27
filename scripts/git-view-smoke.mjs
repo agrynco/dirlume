@@ -44,7 +44,20 @@ try {
                 { reference: "refs/heads/main", name: "main", tip: hash("a"), remote: false },
                 { reference: "refs/heads/topic", name: "topic", tip: hash("b"), remote: false },
                 { reference: "refs/remotes/origin/topic", name: "origin/topic", tip: hash("c"), remote: true },
-              ] };
+              ], tags: [{ reference: "refs/tags/v1", name: "v1" }] };
+          case "git_compare_revisions":
+            assertRoot(args.root);
+            window.gitCompared = { base: args.base, target: args.target };
+            return {
+              base: hash("a"), target: hash("c"),
+              baseOnly: { commits: [commit("a", "Base-only commit")], nextOffset: null },
+              targetOnly: { commits: [commit("c", "Target-only commit")], nextOffset: null },
+              changes: [{ status: "M", path: "compare.txt", previousPath: null }],
+            };
+          case "git_revision_diff":
+            assertRoot(args.root);
+            if (args.base !== hash("a") || args.target !== hash("c") || args.path !== "compare.txt") throw "invalid comparison";
+            return { patch: "-old\n+new\n", fallback: null };
           case "git_history":
             if (args.tip === hash("b")) return new Promise((resolve) => {
               window.finishOldHistory = () => resolve({ commits: [commit("b", "Stale local topic")], nextOffset: null });
@@ -151,6 +164,20 @@ try {
   await history.getByRole("button", { name: /Remote-tracking topic/ }).waitFor();
   await page.evaluate(() => window.finishOldHistory());
   assert.equal(await history.getByText("Stale local topic").count(), 0);
+  await button(history, "Compare revisions").click();
+  await history.getByRole("combobox", { name: "Target revision", exact: true }).selectOption("refs/tags/v1");
+  await button(history, "Compare").click();
+  await history.getByText("Base-only commit", { exact: false }).waitFor();
+  await history.getByText("Target-only commit", { exact: false }).waitFor();
+  await history.getByRole("button", { name: /compare\.txt/ }).click();
+  await history.getByText("+new", { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitCompared), { base: "a".repeat(40), target: "refs/tags/v1" });
+  assert.equal(await page.evaluate(() => window.gitLastAction), undefined);
+  await button(history, "Compare revisions").click();
+  await button(branches, "Create tracking branch and switch").click();
+  const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });
+  assert.equal(await tracking.getByRole("textbox", { name: "Branch name", exact: true }).inputValue(), "topic");
+  await button(tracking, "Cancel").click();
   await button(branches, "Changes").click();
   const changes = page.getByRole("region", { name: "Changes", exact: true });
   const preview = page.getByRole("region", { name: "Change preview", exact: true });

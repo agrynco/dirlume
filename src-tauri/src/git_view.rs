@@ -7,6 +7,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod branches;
+pub(crate) mod comparison;
 pub(crate) mod writes;
 
 #[derive(Debug, Serialize)]
@@ -32,6 +34,13 @@ pub struct Repository {
     head_ref: Option<String>,
     head: Option<String>,
     branches: Vec<Branch>,
+    tags: Vec<Tag>,
+}
+
+#[derive(Serialize)]
+struct Tag {
+    reference: String,
+    name: String,
 }
 
 #[derive(Serialize)]
@@ -296,17 +305,42 @@ fn repository(git: &Path, path: &Path) -> Result<Repository> {
         .and_then(|name| name.to_str())
         .unwrap_or(&root)
         .to_owned();
+    let tags = bounded(
+        git,
+        path,
+        &[
+            "for-each-ref",
+            "--sort=refname",
+            "--format=%(refname)",
+            "refs/tags/",
+        ],
+        STATUS_LIMIT,
+    )?
+    .ok_or(GitError::Unreadable)?;
+    let tags = String::from_utf8_lossy(&tags)
+        .lines()
+        .filter_map(|reference| {
+            Some(Tag {
+                reference: reference.into(),
+                name: reference.strip_prefix("refs/tags/")?.into(),
+            })
+        })
+        .collect();
     Ok(Repository {
         root,
         name,
         head_ref,
         head,
         branches,
+        tags,
     })
 }
 
 fn history(git: &Path, path: &Path, tip: &str, offset: u32) -> Result<History> {
-    let tip = oid(tip)?;
+    history_range(git, path, oid(tip)?, offset)
+}
+
+fn history_range(git: &Path, path: &Path, range: &str, offset: u32) -> Result<History> {
     let data = success(run(
         git,
         path,
@@ -321,7 +355,7 @@ fn history(git: &Path, path: &Path, tip: &str, offset: u32) -> Result<History> {
             "--format=%H%x00%h%x00%an%x00%aI%x00%s",
             &format!("--skip={offset}"),
             &format!("--max-count={}", PAGE_SIZE + 1),
-            tip,
+            range,
             "--",
         ],
     )?)?;
@@ -391,8 +425,16 @@ fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
         "--root"
     });
     args.extend([hash, "--"]);
-    let changed = success(run(git, path, &args)?)?;
-    let changed = String::from_utf8_lossy(&changed);
+    let changes = parse_changes(&success(run(git, path, &args)?)?)?;
+    Ok(Details {
+        message: message.trim_end_matches('\n').into(),
+        merge,
+        changes,
+    })
+}
+
+fn parse_changes(changed: &[u8]) -> Result<Vec<Change>> {
+    let changed = String::from_utf8_lossy(changed);
     let mut fields = changed.split_terminator('\0');
     let mut changes = Vec::new();
     while let Some(status) = fields.next() {
@@ -412,11 +454,7 @@ fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
             previous_path,
         });
     }
-    Ok(Details {
-        message: message.trim_end_matches('\n').into(),
-        merge,
-        changes,
-    })
+    Ok(changes)
 }
 
 async fn query<T: Send + 'static>(
@@ -666,7 +704,7 @@ pub async fn git_details(root: String, hash: String) -> Result<Details> {
 mod tests {
     use super::*;
 
-    fn git(repo: &Path, args: &[&str]) -> String {
+    pub(super) fn git(repo: &Path, args: &[&str]) -> String {
         let output = run(&executable().unwrap(), repo, args).unwrap();
         assert!(
             output.status.success(),
