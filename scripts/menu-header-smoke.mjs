@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { closeToolWindow, openOptionsWindow } from "./tool-window-smoke.mjs";
 
 const mainMenu = (page) => page.getByRole("menubar", { name: "Main menu", exact: true });
 
@@ -38,6 +39,10 @@ export function blankMenuHeaderPoint(menubar) {
 
 async function openMenuOptions(page) {
   await page.getByRole("button", { name: "Options", exact: true }).click();
+  return selectWindowSettings(page);
+}
+
+async function selectWindowSettings(page) {
   const options = page.getByRole("dialog", { name: "Options", exact: true });
   await options.getByRole("searchbox", { name: "Search settings", exact: true }).fill("menu");
   await options.getByRole("button", { name: "Window", exact: true }).click();
@@ -120,9 +125,12 @@ export async function testHeaderMenus(page, windows = false) {
   const connect = page.getByRole("button", { name: "Connect", exact: true });
   const search = page.getByRole("button", { name: "Find files", exact: true });
   if (await bar.isVisible()) {
-    const options = await openMenuOptions(page);
+    const tool = windows ? await openOptionsWindow(page) : null;
+    const options = tool ? await selectWindowSettings(tool) : await openMenuOptions(page);
     await menuPreference(options).uncheck();
-    await options.getByRole("button", { name: "Done", exact: true }).click();
+    const done = options.getByRole("button", { name: "Done", exact: true });
+    if (tool) await closeToolWindow(tool, () => done.click());
+    else await done.click();
   }
   await bar.waitFor({ state: "hidden" });
   assert.equal(await connect.count(), 0);
