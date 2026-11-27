@@ -8,7 +8,7 @@ use std::{
         atomic::{AtomicU32, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -962,6 +962,9 @@ struct TransferRequest {
     destination: String,
     ftp_destination: Option<u32>,
     ssh_destination: Option<u32>,
+    kswitcher_destination: Option<String>,
+    #[serde(default)]
+    kswitcher_broker: bool,
     multiple: bool,
     moving: bool,
     policy: local_transfer::Policy,
@@ -1314,6 +1317,8 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
         destination: "/".to_owned(),
         ftp_destination: None,
         ssh_destination: Some(12),
+        kswitcher_destination: None,
+        kswitcher_broker: false,
         multiple: false,
         moving: true,
         policy: Policy::Ask,
@@ -1430,6 +1435,11 @@ async fn transfer_item(
     ssh_state: State<'_, ssh::SshState>,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
+    if request.kswitcher_broker || request.kswitcher_destination.is_some() {
+        return session
+            .interrupt(transfer_kswitcher(&request, &session, &output))
+            .await;
+    }
     let connection = match &request.source {
         TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
         _ => None,
@@ -1727,6 +1737,127 @@ async fn transfer_item(
         result
     })
     .await
+}
+
+async fn transfer_kswitcher(
+    request: &TransferRequest,
+    session: &Arc<TransferSession>,
+    output: &Channel<TransferEvent>,
+) -> Result<TransferOutcome> {
+    use crate::kswitcher_lan::Endpoint;
+    use local_transfer::Policy;
+    if request.ftp_destination.is_some() || request.ssh_destination.is_some() {
+        return Err("Choose a local or KSwitcher LAN destination.".into());
+    }
+    let (source_peer, source_path, name) = match &request.source {
+        TransferSource::Local { directory, name } => (
+            None,
+            Path::new(directory).join(local::name_component(name).map_err(message)?),
+            name.as_str(),
+        ),
+        TransferSource::Kswitcher { peer, path, name } => {
+            (Some(peer.as_str()), PathBuf::from(path), name.as_str())
+        }
+        _ => return Err("Choose a local or KSwitcher LAN source.".into()),
+    };
+    let target_peer = request.kswitcher_destination.as_deref();
+    let target_path = if let Some(peer) = target_peer {
+        let destination = Path::new(&request.destination);
+        if crate::kswitcher_lan::destination_is_folder(peer, destination).await? {
+            destination.join(local::name_component(name).map_err(message)?)
+        } else if request.multiple || request.destination.ends_with(std::path::is_separator) {
+            return Err("The destination folder does not exist.".into());
+        } else {
+            destination.to_path_buf()
+        }
+    } else {
+        transfer_target(
+            &request.destination,
+            name,
+            Some(&source_path),
+            request.multiple,
+            true,
+        )
+        .map_err(message)?
+    };
+    let source = Endpoint {
+        peer: source_peer,
+        path: source_path.to_str().ok_or("Choose a valid source.")?,
+    };
+    let target = Endpoint {
+        peer: target_peer,
+        path: target_path
+            .to_str()
+            .ok_or("Choose an absolute destination.")?,
+    };
+    let conflict = match request.policy {
+        Policy::Ask => {
+            let peer = source_peer
+                .or(target_peer)
+                .ok_or("Choose a KSwitcher LAN location.")?;
+            if crate::kswitcher_lan::capabilities(peer)
+                .await?
+                .conflict_prompt
+            {
+                "ask"
+            } else {
+                "fail"
+            }
+        }
+        Policy::Skip => "skip",
+        Policy::Overwrite => "replace",
+        _ => return Err("Choose a supported KSwitcher copy option.".into()),
+    };
+    let result = crate::kswitcher_lan::transfer(
+        source,
+        target,
+        request.moving,
+        conflict,
+        |path, bytes, total| {
+            session.ensure_running()?;
+            report_transfer_progress(output, Path::new(path), bytes, Some(total));
+            Ok(())
+        },
+        |collision| {
+            let session = Arc::clone(session);
+            let output = output.clone();
+            let details = |file: crate::kswitcher_lan::TransferMetadata| {
+                let modified =
+                    file.modified
+                        .checked_sub(116_444_736_000_000_000)
+                        .and_then(|ticks| {
+                            UNIX_EPOCH.checked_add(Duration::from_secs(ticks / 10_000_000))
+                        });
+                const DIRECTORY: u32 = 0x10;
+                local_transfer::EntryDetails::network(
+                    Some(file.size),
+                    modified,
+                    file.attributes & DIRECTORY != 0,
+                )
+            };
+            const READ_ONLY: u32 = 0x01;
+            let read_only = collision.existing.attributes & READ_ONLY != 0;
+            let prompt = local_transfer::Conflict::paired(
+                collision.path,
+                details(collision.incoming),
+                details(collision.existing),
+                collision.replaceable,
+                read_only,
+            );
+            blocking(move || session.ask(prompt, &output).map_err(message))
+        },
+    )
+    .await?;
+    match result {
+        crate::kswitcher_lan::TransferResult::Finished(copied) => Ok(transfer_outcome(copied)),
+        crate::kswitcher_lan::TransferResult::SourceCleanupFailed(error) => {
+            Ok(TransferOutcome::SourceRetained {
+                destination: target_path.to_string_lossy().into_owned(),
+                source: source_path.to_string_lossy().into_owned(),
+                error,
+            })
+        }
+    }
 }
 
 #[derive(Default)]
@@ -3088,6 +3219,54 @@ async fn list_kswitcher(peer: String, path: String) -> Result<crate::kswitcher_l
     crate::kswitcher_lan::list(&peer, &path).await
 }
 
+#[tauri::command]
+async fn kswitcher_capabilities(peer: String) -> Result<crate::kswitcher_lan::Capabilities> {
+    crate::kswitcher_lan::capabilities(&peer).await
+}
+
+#[tauri::command]
+async fn change_kswitcher(
+    peer: String,
+    path: String,
+    change: crate::kswitcher_lan::Change,
+) -> Result<()> {
+    crate::kswitcher_lan::change(&peer, &path, change).await
+}
+
+#[tauri::command]
+async fn read_kswitcher_text(peer: String, path: String) -> Result<TextDocument> {
+    crate::kswitcher_lan::read_text(&peer, &path).await
+}
+
+#[tauri::command]
+async fn read_kswitcher_preview(peer: String, path: String) -> Result<tauri::ipc::Response> {
+    let bytes = crate::kswitcher_lan::preview(&peer, &path).await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+async fn read_kswitcher_bytes(peer: String, path: String, offset: u64) -> Result<BytePage> {
+    let bytes = crate::kswitcher_lan::preview(&peer, &path).await?;
+    let length = bytes.len() as u64;
+    let data = bytes
+        .into_iter()
+        .skip(offset.min(length) as usize)
+        .take(crate::protocol::BYTE_PAGE_SIZE as usize)
+        .collect();
+    Ok(BytePage { length, data })
+}
+
+#[tauri::command]
+async fn save_kswitcher_text(
+    peer: String,
+    path: String,
+    revision: String,
+    text: String,
+    encoding: Encoding,
+) -> Result<TextDocument> {
+    crate::kswitcher_lan::save_text(&peer, &path, &revision, text, encoding).await
+}
+
 pub fn run() {
     #[cfg(windows)]
     crate::portable::maybe_apply_update();
@@ -3339,6 +3518,12 @@ pub fn run() {
         save_text_as,
         kswitcher_peers,
         list_kswitcher,
+        kswitcher_capabilities,
+        change_kswitcher,
+        read_kswitcher_text,
+        read_kswitcher_preview,
+        read_kswitcher_bytes,
+        save_kswitcher_text,
         begin_transfer,
         crate::file_history::file_operation_history,
         crate::file_history::reverse_file_operation,
