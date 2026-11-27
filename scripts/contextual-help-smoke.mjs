@@ -101,6 +101,17 @@ try {
   await currentTopic(help, "files").waitFor();
   await closeHelp(page, help, files);
 
+  await files.locator('[data-tooltip="note.txt"]').click();
+  await files.press("Shift+Delete");
+  const deletion = page.getByRole("dialog", { name: "Delete permanently", exact: true });
+  await deletion.locator('button:focus', { hasText: /^Cancel$/ }).waitFor();
+  await page.keyboard.press("ArrowRight");
+  await deletion.locator('button:focus', { hasText: /^Delete permanently$/ }).waitFor();
+  await page.keyboard.press("ArrowLeft");
+  await deletion.locator('button:focus', { hasText: /^Cancel$/ }).waitFor();
+  await page.keyboard.press("Enter");
+  await deletion.waitFor({ state: "hidden" });
+
   const drive = page.getByRole("button", { name: "Locations for left pane", exact: true });
   await drive.click();
   const picker = page.getByRole("group", { name: "Left pane sources", exact: true });
@@ -128,6 +139,10 @@ try {
   await page.getByRole("button", { name: "Find files", exact: true }).click();
   const search = page.getByRole("dialog", { name: "Find files", exact: true });
   const mask = search.getByRole("textbox", { name: "File mask", exact: true });
+  await mask.fill("note.txt");
+  await mask.evaluate((input) => input.setSelectionRange(input.value.length, input.value.length));
+  await page.keyboard.press("ArrowLeft");
+  assert.equal(await mask.evaluate((input) => input.selectionStart), 7);
   await openHelp(page, mask, "search");
   await closeHelp(page, help, mask);
   await page.keyboard.press("Escape");
