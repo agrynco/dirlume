@@ -285,7 +285,7 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
         <dd>{version ? <code>{version}</code> :
           error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}</dd>
         <dt>{t("Created by")}</dt>
-        <dd>bitcodepro</dd>
+        <dd>Anatolii Hrynchuk</dd>
         <dt>{t("License")}</dt>
         <dd><a href={licenseUrl} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
           event.preventDefault();
