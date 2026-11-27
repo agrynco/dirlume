@@ -8,7 +8,7 @@ import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, placePath, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { api, describeError, folderLabel, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
 import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
@@ -158,7 +158,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onOpenConnections, onAddNetBoxConnection, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
-  const path = pane.place ? placePath(pane.place) : "";
+  const path = pane.place ? placeAddress(pane.place) : "";
   const catalog = pane.place?.kind === "connections";
   const netbox = pane.place?.kind === "connections" && pane.place.source === "netbox";
   const [filterOpen, setFilterOpen] = useState(false);

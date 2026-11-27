@@ -90,8 +90,9 @@ export interface CopyOptions {
   mask?: string;
 }
 
+type SmbMount = { server: string; root: string; share: string };
 type SmbConnection =
-  | { kind: "opened"; listing: LocalListing; warning: string | null }
+  | { kind: "opened"; listing: LocalListing; warning: string | null; mount?: SmbMount }
   | { kind: "shares"; server: string; names: string[]; warning: string | null }
   | { kind: "credentials_required"; error: string | null };
 
@@ -113,7 +114,7 @@ export interface ComputerSharing {
 }
 
 export type FileLocation =
-  | { kind: "local"; path: string; parent: string | null }
+  | { kind: "local"; path: string; parent: string | null; smb?: SmbMount }
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[];
@@ -736,11 +737,16 @@ export function placePath(place: Place) {
   return place.kind === "connections" ? connectionSourceNames[place.source] : place.path;
 }
 
+export function placeAddress(place: Place) {
+  return place.kind === "local" && place.smb ? mountedSmbPath(place.path, place.smb) : placePath(place);
+}
+
 export function documentPath({ place, name }: NamedFile) {
   if (place.kind === "server" || isFileServer(place)) {
     return place.origin + "/" + [...place.segments, name].map(encodeURIComponent).join("/");
   }
   if (place.kind === "local") {
+    if (place.smb) return mountedSmbPath(place.path, place.smb) + "/" + encodeURIComponent(name);
     const [host, ...segments] = uncParts(place.path);
     if (host && segments.length) return "smb://" + host + "/" + [...segments, name].map(encodeURIComponent).join("/");
   }
@@ -752,10 +758,15 @@ export function documentPath({ place, name }: NamedFile) {
 export function smbLocation(result: Exclude<SmbConnection, { kind: "credentials_required" }>): { place: SmbPlace; listing: Listing } {
   if (result.kind === "opened") {
     const { path, parent } = result.listing;
-    return { place: { kind: "local", path, parent }, listing: result.listing };
+    return { place: { kind: "local", path, parent, smb: result.mount }, listing: result.listing };
   }
   const entries = result.names.map((name) => ({ name, directory: true, link: false, hidden: false, size: null, modified: null }));
   return { place: { kind: "smbRoot", path: result.server }, listing: { entries, omitted: 0 } };
+}
+
+export function mountedSmbPath(path: string, mount: SmbMount) {
+  const segments = path.slice(mount.root.length).split("/").filter(Boolean).map(encodeURIComponent);
+  return [mount.share, ...segments].join("/");
 }
 
 export async function connectFtpLocation(profileId: string, segments?: string[], remembered?: string[], signal?: AbortSignal) {
@@ -846,6 +857,10 @@ export function folderLabel(place: Place) {
   if (place.kind === "server" || isFileServer(place)) return place.segments.at(-1) ?? place.address;
   if (place.kind === "archive" && place.segments.length) return place.segments.at(-1)!;
   if (place.kind === "kswitcher" && !place.path) return place.address;
+  if (place.kind === "smbRoot" && /^smb:\/\//i.test(place.path)) return smbHost(place) ?? place.path;
+  if (place.kind === "local" && place.smb?.root === place.path) {
+    return decodeURIComponent(place.smb.share.slice(place.smb.share.lastIndexOf("/") + 1));
+  }
   return place.path.split(windowsClient ? /[\\/]/ : "/").filter(Boolean).at(-1) ?? place.path;
 }
 
@@ -861,6 +876,11 @@ export function uncParts(path: string) {
 }
 
 export function smbHost(place: Place | null) {
+  const url = place?.kind === "local" ? place.smb?.server :
+    place?.kind === "smbRoot" && /^smb:\/\//i.test(place.path) ? place.path : undefined;
+  if (url) {
+    try { return new URL(url).host; } catch { return undefined; }
+  }
   return place?.kind === "local" || place?.kind === "smbRoot" ? uncParts(place.path)[0] : undefined;
 }
 

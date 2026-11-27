@@ -1,4 +1,4 @@
-import { api, uncParts, type ConnectionSource, type Entry, type SavedConnection } from "./api";
+import { api, uncParts, windowsClient, type ConnectionSource, type Entry, type SavedConnection } from "./api";
 import { t } from "./i18n";
 
 type SmbProfile = Extract<SavedConnection, { kind: "smb" }>;
@@ -35,15 +35,34 @@ export function readRemoteProfiles(): RemoteProfile[] {
 }
 
 export function saveSmbLocation(label: string, path: string, existing?: SmbProfile) {
-  const input = path.trim().replace(/^smb:\/\//i, "").replaceAll("/", "\\");
-  const unc = input.startsWith("\\\\") ? input : "\\\\" + input;
-  const parts = uncParts(unc);
-  if (!parts.length || parts.some((part) => part === "." || part === ".." || /[:*?"<>|\x00-\x1f]/.test(part))) {
+  const address = windowsClient ? windowsSmbAddress(path) : unixSmbAddress(path);
+  if (!address) {
     throw new Error(t("Enter a valid SMB server or share."));
   }
-  const profile: SmbProfile = { kind: "smb", id: existing?.id ?? connectionId(), label, path: "\\\\" + parts.join("\\") };
+  const profile: SmbProfile = { kind: "smb", id: existing?.id ?? connectionId(), label, path: address };
   localStorage.setItem(smbKey, JSON.stringify([...readSmbLocations().filter(({ id }) => id !== profile.id), profile]));
   return profile.id;
+}
+
+function windowsSmbAddress(path: string) {
+  const input = path.trim().replace(/^smb:\/\//i, "").replaceAll("/", "\\");
+  const parts = uncParts(input.startsWith("\\\\") ? input : "\\\\" + input);
+  if (parts.length && parts.every((part) => part !== "." && part !== ".." && !/[:*?"<>|\x00-\x1f]/.test(part))) {
+    return "\\\\" + parts.join("\\");
+  }
+}
+
+function unixSmbAddress(path: string) {
+  const input = path.trim().replaceAll("\\", "/");
+  const isUrl = /^smb:\/\//i.test(input);
+  const [host, ...parts] = input.replace(/^(?:smb:)?\/\//i, "").split("/");
+  if (!host || /[@?#%\s]/.test(host)) return;
+  try {
+    const address = new URL(`smb://${host}/`);
+    const segments = parts.filter(Boolean).map((part) => isUrl ? decodeURIComponent(part) : part);
+    if (segments.some((part) => part === "." || part === ".." || /[\\/\x00-\x1f\x7f]/.test(part))) return;
+    return address.href + segments.map(encodeURIComponent).join("/");
+  } catch { return undefined; }
 }
 
 export async function saveRemoteConnection(label: string, provider: "server" | "kswitcher", value: string,

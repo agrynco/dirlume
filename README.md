@@ -245,7 +245,7 @@ With a writable, unencrypted ZIP or 7z archive open, select local files or folde
 
 ## Remote sources
 
-Choose **NetBox**, **SMB** (Windows), or **Remote machine** from either pane's sources menu to open saved connections. NetBox shows FTP and SFTP profiles together with their name, protocol, and host. Press **2** in the sources menu to open NetBox, **Shift+F4** to add a profile, **F4** to edit it, and **Enter** to connect. Configure the shortcuts in **Options → Keyboard shortcuts**.
+Choose **NetBox**, **SMB**, or **Remote machine** from either pane's sources menu to open saved connections. NetBox shows FTP and SFTP profiles together with their name, protocol, and host. Press **2** in the sources menu to open NetBox, **Shift+F4** to add a profile, **F4** to edit it, and **Enter** to connect. Configure the shortcuts in **Options → Keyboard shortcuts**.
 
 While browsing a remote folder, choose the source breadcrumb or its entry in the sources menu to open saved connections in the same pane. NetBox selects the current connection. Use the dimmed path to return directly to a folder on that connection. **Back** returns to the remote folder, and **Forward** opens the list again.
 
@@ -304,7 +304,7 @@ Use the client's tool list for argument schemas. The server works with the locat
 | Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
 
 For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
-On Windows, add an **SMB** connection using a server name, IP address, or UNC share path such as `\\server\documents`. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
+Add an **SMB** connection on Windows, macOS, or Ubuntu using a server name, IP address, or share address such as `smb://server/documents`. Windows also supports UNC paths. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** saves a successful sign-in in the system credential store. Ubuntu uses the `gvfs-backends` and `gvfs-fuse` packages to open shares from a desktop session.
 
 ## Desktop diagnostics
 

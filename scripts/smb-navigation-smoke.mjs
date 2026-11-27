@@ -483,4 +483,95 @@ export async function testSmbNavigation() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) await testSmbNavigation();
+export async function testMountedSmbNavigation() {
+  const browser = await chromium.launch({ channel: "chrome" });
+  try {
+    const page = await browser.newPage({ userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+    const server = "smb://fixture.test/";
+    const share = server + "team%20docs";
+    const mount = { server, share, root: "/run/user/1000/gvfs/fixture" };
+    await page.route("http://dirlume.test/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return route.fulfill({ path: resolve("dist", path === "/" ? "index.html" : "." + path) });
+    });
+    await page.addInitScript(({ mount }) => {
+      let authorized = false;
+      const entry = { name: "subfolder", directory: true, link: false, hidden: false, size: null, modified: null };
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: async (command, args) => {
+          switch (command) {
+            case "locations": return [{ label: "Home", path: "/home/fixture" }];
+            case "file_icons": return args.items.map(() => null);
+            case "connect_smb":
+              if (args.path !== mount.server && args.path !== mount.share) throw new Error("Unexpected SMB address");
+              if (args.credentials && args.credentials.password !== "correct") {
+                return { kind: "credentials_required", error: "Sign-in denied" };
+              }
+              authorized ||= Boolean(args.credentials);
+              if (!authorized) return { kind: "credentials_required", error: null };
+              return args.path === mount.server ? { kind: "shares", server: mount.server, names: ["team docs"] } : {
+                kind: "opened", listing: { path: mount.root, parent: "/run/user/1000/gvfs", entries: [entry], omitted: 0 }, mount,
+              };
+            case "list_directory":
+              return { path: args.path, parent: args.path.slice(0, args.path.lastIndexOf("/")),
+                entries: args.path === mount.root ? [entry] : [], omitted: 0 };
+            default: return null;
+          }
+        },
+      };
+    }, { mount });
+    await page.goto("http://dirlume.test/");
+    const pane = (side) => page.getByRole("region", { name: side + " pane", exact: true });
+    const files = (side) => pane(side).getByRole("listbox", { name: side + " files" });
+    const pathIs = async (side, path) => {
+      try {
+        await page.waitForFunction(({ side, path }) =>
+          document.getElementById(side + "-path")?.dataset.path === path, { side, path }, { timeout: 5000 });
+      } catch (error) {
+        const current = await page.locator("#" + side + "-path").getAttribute("data-path");
+        throw new Error("Expected " + side + " pane to show " + path + ", found " + current +
+          ". " + (await page.getByRole("alert").allTextContents()).join(" "), { cause: error });
+      }
+    };
+    for (const side of ["left", "right"]) {
+      await pathIs(side, "/home/fixture");
+      await pane(side).getByRole("button", { name: "Locations for " + side + " pane" }).click();
+      await pane(side).getByRole("button", { name: "SMB", exact: true }).click();
+      await pathIs(side, "SMB");
+      await files(side).press("Shift+F4");
+      const editor = page.getByRole("dialog", { name: "Add SMB connection" });
+      await editor.getByLabel("Connection name").fill(side + " SMB");
+      await editor.getByLabel("SMB server or share").fill(side === "left" ? "fixture.test" : share);
+      await editor.getByRole("button", { name: "Save connection" }).click();
+      await files(side).getByRole("option", { name: new RegExp("^" + side + " SMB") }).dblclick();
+      if (side === "left") {
+        const login = page.getByRole("dialog", { name: "Connect to SMB" });
+        await login.getByLabel("Username").fill("fixture");
+        await login.getByLabel("Password", { exact: true }).fill("incorrect");
+        await login.getByRole("button", { name: "Connect", exact: true }).click();
+        await login.getByRole("alert").getByText("Sign-in denied").waitFor();
+        await login.getByLabel("Password", { exact: true }).fill("correct");
+        await login.getByRole("button", { name: "Connect", exact: true }).click();
+        await pathIs(side, server);
+        await files(side).getByRole("option", { name: /^team docs/ }).dblclick();
+      }
+      await pathIs(side, share);
+      await files(side).getByRole("option", { name: /^subfolder/ }).dblclick();
+      await pathIs(side, share + "/subfolder");
+      const parent = pane(side).getByRole("button", { name: "Parent folder", exact: true });
+      await parent.click();
+      await pathIs(side, share);
+      await parent.click();
+      await pathIs(side, server);
+    }
+    console.log("Verified mounted SMB profiles, sign-in retry, and parent navigation in both panes.");
+  } finally {
+    await browser.close();
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
+  await testSmbNavigation();
+  await testMountedSmbNavigation();
+}

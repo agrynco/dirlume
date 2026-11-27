@@ -48,6 +48,9 @@
     },
     "windows": {
       "nsis": { "installMode": "currentUser" }
+    },
+    "linux": {
+      "deb": { "depends": ["gvfs-backends", "gvfs-fuse"] }
     }
   }
 }

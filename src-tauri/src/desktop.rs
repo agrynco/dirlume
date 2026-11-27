@@ -3048,8 +3048,8 @@ pub fn run() {
         crate::file_clipboard::dropped_files,
         #[cfg(windows)]
         crate::windows_shell::windows_item_menu,
-        #[cfg(windows)]
-        crate::windows_smb::connect_smb,
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+        crate::smb::connect_smb,
         #[cfg(windows)]
         crate::windows_elevation::open_elevated,
         #[cfg(windows)]

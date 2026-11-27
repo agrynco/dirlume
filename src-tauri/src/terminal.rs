@@ -313,7 +313,7 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
     #[cfg(unix)]
     let zsh_startup = (std::path::Path::new(&shell).file_name()
         == Some(std::ffi::OsStr::new("zsh")))
-    .then(|| configure_zsh(&mut command, &cwd))
+    .then(|| configure_zsh(&mut command, cwd))
     .transpose()
     .map_err(message)?;
     #[cfg(unix)]
