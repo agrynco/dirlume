@@ -12,7 +12,7 @@ import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
+  ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
   FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, Redo2, RefreshCw,
   ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
@@ -22,8 +22,10 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
-import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
+import { googleDriveSignInRequired, smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type GoogleDrivePlace, type SavedConnection, type SshHostVerification } from "./api";
+import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
+import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
 import { useFilePaneTree, usePaneTreeRevision } from "./filePaneTree";
 import { usePaneFolderSizes } from "./paneFolderSizes";
@@ -33,6 +35,7 @@ import { Dialog, readDialogSize } from "./Dialog";
 import { ReleaseNotes } from "./ReleaseNotes";
 import { KSwitcherUnavailableError, reportFrontendError, SshConnectionLostError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
+import { GoogleDriveConnectionDialog } from "./GoogleDriveConnectionDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
 import { FileHistoryDialog } from "./FileHistoryDialog";
 import { UserMenuDialog } from "./UserMenuDialog";
@@ -54,6 +57,12 @@ import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { PaneSources, type PaneSource } from "./PaneSources";
 import { RecentLocationsPane } from "./RecentLocationsPane";
+import { CollectionsPane } from "./CollectionsPane";
+import {
+  addCollectionReferences, collectionContents, collectionReference, collectionReferenceFromRecent, collectionReferencePath, collectionTrail,
+  editCollectionEntries, persistCollections, readCollections, resolveCollectionReference,
+  type CollectionEntry, type CollectionFolder, type CollectionReference,
+} from "./collections";
 import { persistRecentLocations, readRecentLocations, recentLocation, recentLocationKey, recentLocationLimit, type RecentLocation } from "./recentLocations";
 import { connectionEntries, readRemoteProfiles } from "./savedConnections";
 import { cacheDirectory, directoryCacheRevision, forgetDirectoryProfile, invalidateDirectories, readCachedDirectory, registerDirectorySession, rememberDirectory,
@@ -79,7 +88,8 @@ import { ImageDocument } from "./ImageDocument";
 import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
 import { canEditImage, imageType } from "./ImageViewport";
 import { isMarkdownFile, type MarkdownLocation, type MarkdownPosition } from "./markdown";
-import { TransferDialog, type Transfer } from "./TransferDialog";
+import { TransferDialog, nextTransferId, TransferSudoPrompt, type Transfer } from "./TransferDialog";
+import type { TransferEvent, TransferSudoRequest } from "./api";
 import { useArchiveChange } from "./useArchiveChange";
 import {
   applyListing, breadcrumbTrail, childPlace, closeSearchResults, connectionSource, filesystemPlace, formatSize, localPath, opposite,
@@ -155,26 +165,31 @@ function localSearchRoot(pane: PaneState) {
 type ActionModal = (
   | { kind: "rename" | "newFile"; path: string; name: string; side?: Side }
   | { kind: "recycle" | "delete"; path: string; names: string[]; directories?: string[]; relativePaths?: string[][]; searchSide?: Side }
-) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace; kswitcher?: KSwitcherPlace };
+) & { remote?: FtpPlace | SshPlace; archive?: ArchivePlace; kswitcher?: KSwitcherPlace; shared?: WritableServerPlace;
+  drive?: { place: GoogleDrivePlace; itemIds: string[]; side: Side } };
 
 type RemoteDeletionProgress = {
   signal: AbortSignal;
   completed: (count: number) => void;
+  ssh?: { id: number; output: Channel<TransferEvent> };
 };
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
+  | { kind: "collect"; side: Side; path: string[]; references: CollectionReference[] }
+  | { kind: "collectionExport"; side: Side; stop: AbortController }
+  | { kind: "collectionArchivePassword"; submit: (password: string) => Promise<void>; cancel: () => void }
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
   | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
-  | { kind: "transfer"; side: Side; transfer: Transfer }
+  | { kind: "transfer"; side: Side; transfer: Transfer; temporary?: Resource[] }
   | { kind: "fileHistory"; direction?: "undo" | "redo" }
   | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
-  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" }> }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> | WritableServerPlace | GoogleDrivePlace }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
@@ -221,11 +236,46 @@ function sameConnection(left: Place | null, right: Place) {
   return (left?.kind === "server" || isFileServer(left) || left?.kind === "archive") && left.kind === right.kind && left.id === right.id;
 }
 
+function treeRelativePath(root: Place | null, destination: FileLocation) {
+  if (root?.kind === "googleDrive" && destination.kind === "googleDrive" && root.id === destination.id &&
+    root.folders.every((folder, index) => folder.id === destination.folders[index]?.id)) {
+    return destination.folders.slice(root.folders.length).map(({ id }) => id);
+  }
+  if (root?.kind === "archive" && destination.kind === "archive") {
+    return root.id === destination.id && root.segments.every((part, index) => part === destination.segments[index])
+      ? destination.segments.slice(root.segments.length) : null;
+  }
+  return canAnalyze(root) && canAnalyze(destination) ? spaceRelativePath(root, destination) : null;
+}
+
 function sameDocumentFile(left: NamedFile, right: NamedFile) {
+  if (left.place.kind === "googleDrive" || right.place.kind === "googleDrive") {
+    return left.place.kind === "googleDrive" && right.place.kind === "googleDrive" &&
+      left.place.id === right.place.id && left.driveItem === right.driveItem;
+  }
   return left.name === right.name && left.place.kind === right.place.kind &&
     placePath(left.place) === placePath(right.place) &&
     (right.place.kind === "local" || right.place.kind === "kswitcher" &&
       left.place.kind === "kswitcher" && left.place.peer === right.place.peer || sameConnection(left.place, right.place));
+}
+
+function driveEditorLink(entry: Entry | undefined) {
+  const item = entry?.googleDrive;
+  if (!item || item.directory) return null;
+  if (item.webViewLink && /^https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\//i.test(item.webViewLink)) {
+    return item.webViewLink;
+  }
+  if (/\.(?:docx?|xlsx?|pptx?)$/i.test(item.name)) {
+    return item.webViewLink ?? `https://drive.google.com/file/d/${encodeURIComponent(item.id)}/view`;
+  }
+  return null;
+}
+
+function canRenameTransferItem({ place, entry }: Transfer["items"][number]) {
+  return place.kind === "local" || isFileServer(place) ||
+    place.kind === "googleDrive" && !!entry.googleDrive ||
+    !entry.link && (isWritableServerPlace(place) || place.kind === "archive" && place.canAdd ||
+      place.kind === "kswitcher" && !!place.capabilities?.write);
 }
 
 function disconnect(place: Resource) {
@@ -255,6 +305,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const visiblePanes = useRef(panes);
   visiblePanes.current = panes;
   const [rowRename, setRowRename] = useState<RowRename | null>(null);
+  const transferArchiveRename = useArchiveChange();
   const [locations, setLocations] = useState<QuickLocation[]>([]);
   const [sourceMenu, setSourceMenu] = useState<{ side: Side; returnFocus: HTMLElement | null } | null>(null);
   const [focusedSide, setActive] = useState<Side>(administratorWorkspace?.side ?? (startup?.active === "right" ? "right" : "left"));
@@ -276,6 +327,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [fileRevision, setFileRevision] = useState(0);
   const [sshUploadRefresh, setSshUploadRefresh] = useState<number | null>(null);
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
+  const folderScanSudo = useSudoFolderScan();
+  const treeBrowseSudo = useSudoFolderScan("browse");
   const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
@@ -283,8 +336,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [environmentRevision, setEnvironmentRevision] = useState(0);
   const [recentPanes, setRecentPanes] = useState({ left: false, right: false });
   const [recentLocations, setRecentLocations] = useState(readRecentLocations);
+  const [collectionState, setCollectionState] = useState(() => {
+    try { return { items: readCollections(), error: "" }; }
+    catch (failure) { return { items: [] as CollectionFolder[], error: describeError(failure) }; }
+  });
+  const [collectionPanes, setCollectionPanes] = useState<Record<Side, string[] | null>>({ left: null, right: null });
   const active = quickViewSource ?? focusedSide;
   const recentActive = recentPanes[active];
+  const collectionActive = collectionPanes[active] !== null;
   const diskActive = diskPanes[active] !== null;
   const diskSide = diskPanes.left ? "left" : diskPanes.right ? "right" : null;
   const analysis = diskActive ? null : analysisPanes[active];
@@ -394,14 +453,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
   const leftCanSort = leftSort.canSort;
   const rightCanSort = rightSort.canSort;
-  const leftRoot = !panes.left.search && panes.left.place?.kind === "local" ? panes.left.place : null;
-  const rightRoot = !panes.right.search && panes.right.place?.kind === "local" ? panes.right.place : null;
+  const leftRoot = !panes.left.search && supportsFileTree(panes.left.place) ? panes.left.place : null;
+  const rightRoot = !panes.right.search && supportsFileTree(panes.right.place) ? panes.right.place : null;
   const leftTreeOn = preferences.paneViews.left === "tree";
   const rightTreeOn = preferences.paneViews.right === "tree";
-  const leftRevision = usePaneTreeRevision(leftRoot?.path, leftTreeOn, fileRevision);
-  const rightRevision = usePaneTreeRevision(rightRoot?.path, rightTreeOn, fileRevision);
-  const leftTree = useFilePaneTree(leftRoot, leftTreeOn, leftRevision);
-  const rightTree = useFilePaneTree(rightRoot, rightTreeOn, rightRevision);
+  const leftRevision = usePaneTreeRevision(leftRoot?.kind === "local" ? leftRoot.path : undefined, leftTreeOn, fileRevision);
+  const rightRevision = usePaneTreeRevision(rightRoot?.kind === "local" ? rightRoot.path : undefined, rightTreeOn, fileRevision);
+  const leftTree = useFilePaneTree(leftRoot, leftTreeOn, leftRevision, treeBrowseSudo.authorize);
+  const rightTree = useFilePaneTree(rightRoot, rightTreeOn, rightRevision, treeBrowseSudo.authorize);
   const trees = { left: leftTree, right: rightTree };
   const folderSizes = {
     left: usePaneFolderSizes(panes.left, folderSizesEnabled.left, leftTreeOn),
@@ -449,9 +508,27 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const state = panes[side];
     if (!trees[side].enabled || !state.selected) return null;
     const item = paneItem(state, trees[side].lookup(state, state.selected) ?? undefined);
-    if (item?.place.kind !== "local") return null;
-    const folder = item.entry.directory ? childPlace(item.place, item.entry.name) : item.place;
-    return folder.kind === "local" ? { ...folder, parent: parentPath(folder.path, windowsClient) } : null;
+    if (!item || !supportsFileTree(item.place)) return null;
+    const folder = item.entry.directory && item.place.kind === "googleDrive" && item.entry.googleDrive
+      ? { ...item.place, folders: [...item.place.folders, { id: item.entry.googleDrive.id, name: item.entry.googleDrive.name }] }
+      : item.entry.directory ? childPlace(item.place, item.entry.name) : item.place;
+    return folder.kind === "local" ? { ...folder, parent: parentPath(folder.path, windowsClient) } :
+      supportsFileTree(folder) ? folder : null;
+  }
+  async function selectChangedItem(side: Side, directory: TreePlace, name: string) {
+    const pane = latest.current[side];
+    const root = pane.place;
+    const segments = trees[side].enabled && root ? treeRelativePath(root, directory) : null;
+    if (root && segments) {
+      const branch = segments.length ? trees[side].lookup(pane, segments.join("/")) : null;
+      if (branch?.tree && !branch.tree.expanded) trees[side].toggle(branch);
+      setFileRevision((revision) => revision + 1);
+      if (await load(side, root, "refresh")) updatePane(side, (current) => ({
+        ...current, selected: [...segments, name].join("/"),
+      }));
+    } else {
+      await load(side, directory, "refresh", name);
+    }
   }
   const terminalLocation = analysis?.location.place ?? treeFolder(active) ?? pane.place;
   const terminalPlace = terminalLocation?.kind === "local" || terminalLocation?.kind === "ssh" ? terminalLocation : null;
@@ -461,13 +538,22 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
+  const writableServer = isWritableServerPlace(pane.place) ? pane.place : undefined;
   const kswitcher = pane.place?.kind === "kswitcher" && pane.place.path ? pane.place : undefined;
   const kswitcherWrite = kswitcher?.capabilities?.write;
   const kswitcherDelete = kswitcher?.capabilities?.delete;
+  const actionDirectory = treeFolder(active) ?? pane.place;
+  const canCreateItem = actionDirectory?.kind === "local" || isFileServer(actionDirectory) ||
+    isWritableServerPlace(actionDirectory) ||
+    actionDirectory?.kind === "archive" && actionDirectory.canAdd ||
+    actionDirectory?.kind === "kswitcher" && !!actionDirectory.path || actionDirectory?.kind === "googleDrive";
   const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
-  const permanentDelete = Boolean(fileServer && !remoteTrash || smbHost(local));
+  const permanentDelete = Boolean(fileServer && !remoteTrash || writableServer || smbHost(local));
   const canTransfer = Boolean(currentItem && (currentItem.place.kind !== "kswitcher" ||
-    currentItem.place.path && !currentItem.entry.link && (!currentItem.entry.directory || kswitcherWrite)));
+    currentItem.place.path && !currentItem.entry.link) &&
+    (currentItem.place.kind !== "googleDrive" ||
+      panes[opposite(active)].place?.kind === "googleDrive" ||
+      panes[opposite(active)].place?.kind === "local" && !smbHost(panes[opposite(active)].place)));
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
   const [helpRequest, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
@@ -686,8 +772,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         if (background && pane.error !== pane.kswitcherAvailabilityError) {
           Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         }
-        const source = openedPlace.kind === "connections" && openedPlace.source === "netbox" ? openedPlace.from : null;
-        if (action === "push" && isFileServer(source)) {
+        const source = openedPlace.kind === "connections" ? openedPlace.from : null;
+        if (openedPlace.kind === "connections" && openedPlace.source === "googleDrive" && action !== "refresh" && !background) {
+          const drive = pane.place?.kind === "googleDrive" ? pane.place : source?.kind === "googleDrive" ? source : undefined;
+          if (drive && listing.entries.some((entry) => entry.name === drive.id)) listing.selected = drive.id;
+        }
+        if (action === "push" && openedPlace.kind === "connections" && openedPlace.source === "netbox" && isFileServer(source)) {
           const profile = listing.entries.find(({ connection }) => connection?.kind === source.kind && connection.id === source.profileId);
           if (profile) listing.selected = profile.name;
         }
@@ -728,10 +818,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           setModal(credentialsDialog);
         }
         const text = credentialsRequired ? (prompt ? "" : error.message) : describeError(error);
+        if (place.kind === "googleDrive" && text === googleDriveSignInRequired) {
+          for (const shown of ["left", "right"] as const) {
+            updatePane(shown, (pane) => pane.place?.kind === "connections" && pane.place.source === "googleDrive"
+              ? { ...pane, entries: pane.entries.map((entry) => entry.connection?.kind === "googleDrive" && entry.connection.id === place.id
+                ? { ...entry, connection: { ...entry.connection, signInNeeded: true } } : entry) } : pane);
+          }
+        }
         updatePane(side, (pane) => {
           if (background && (pane.place !== place || pane.error === text ||
             pane.error && pane.error !== pane.kswitcherAvailabilityError)) return pane;
-          if (place.kind === "connections" && place.source === "netbox" &&
+          if (place.kind === "connections" && (place.source === "netbox" || place.source === "googleDrive") &&
             (action === "push" || typeof action === "number")) {
             return { ...applyListing(pane, place, { entries: [], omitted: 0 }, action, addressFrom), error: text };
           }
@@ -1093,11 +1190,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       analysisHandles.current[side]?.focus();
       return;
     }
-    document.getElementById(side + (environmentPanels[side] ? "-environment" : recentPanes[side] ? "-recent" : "-files"))?.focus({ preventScroll: true });
+    document.getElementById(side + (environmentPanels[side] ? "-environment" : recentPanes[side] ? "-recent" :
+      collectionPanes[side] ? "-collections" : "-files"))?.focus({ preventScroll: true });
   }
 
   function paneCovered(side: Side) {
-    return !!gitView || environmentPanels[side] !== null || recentPanes[side] || side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
+    return !!gitView || environmentPanels[side] !== null || recentPanes[side] || collectionPanes[side] !== null ||
+      side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
   }
 
   function closeSourceMenu(restoreFocus: boolean) {
@@ -1123,6 +1222,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (analysisPanes[side]) setAnalysisPanes((current) => ({ ...current, [side]: null }));
     if (diskPanes[side]) setDiskPanes((current) => ({ ...current, [side]: null }));
     if (recentPanes[side]) setRecentPanes((current) => ({ ...current, [side]: false }));
+    if (collectionPanes[side]) setCollectionPanes((current) => ({ ...current, [side]: null }));
     if (side === previewSide) setQuickViewSource(null);
   }
 
@@ -1137,11 +1237,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openPaneSource(side: Side, source: PaneSource) {
     closeSourceMenu(false);
     revealWorkspaceSide(side);
-    if (source === "recent") {
+    if (source === "recent" || source === "collections") {
       showProcesses(side, false);
       cancelFolderOperation(side);
       updatePane(side, (pane) => ({ ...pane, error: "" }));
-      setRecentPanes((current) => ({ ...current, [side]: true }));
+      if (source === "recent") setRecentPanes((current) => ({ ...current, [side]: true }));
+      else setCollectionPanes((current) => ({ ...current, [side]: [] }));
       setActive(side);
       return;
     }
@@ -1152,6 +1253,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       const { host, drive } = source;
       if (host.kind === "dirlume") {
         void openSavedConnection(side, { kind: "server", id: host.id, label: host.name, credential: host.credential, lan: true }, { segments: [drive] });
+      } else if (host.kind === "group") {
+        void openLanGroupDrive(side, host.id, host.name, [drive]);
       } else {
         void load(side, { kind: "kswitcher", directory: "", peer: host.id,
           address: host.name, path: drive + "\\", parent: null });
@@ -1167,11 +1270,116 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     focusRevealedSide(side);
   }
 
+  async function openLanGroupDrive(side: Side, peer: string, name: string, segments: string[]) {
+    const { ticket, signal } = beginListing(side);
+    updatePane(side, (pane) => ({ ...pane, loading: true, loadingPath: name, error: "" }));
+    try {
+      const { listing, ...connection } = await api.connectLanGroupPeer(peer, segments);
+      const place = { ...connection, kind: "server" as const, address: name, segments, pairedComputer: true, groupPeer: peer };
+      if (signal.aborted || ticket !== request.current[side]) { disconnect(place); return; }
+      routeLocation(side, place, listing);
+    } catch (failure) {
+      if (ticket === request.current[side]) updatePane(side, (pane) => ({ ...pane, error: describeError(failure) }));
+    } finally {
+      if (ticket === request.current[side]) {
+        delete pendingListings.current[side];
+        updatePane(side, (pane) => ({ ...pane, loading: false, loadingPath: undefined }));
+      }
+    }
+  }
+
   function paneSources(side: Side, overlay = false) {
     return <PaneSources side={side} overlay={overlay} open={sourceMenu?.side === side && (overlay || !paneCovered(side))}
       locations={locations} shortcuts={shortcuts}
       onToggle={() => toggleSourceMenu(side)} onClose={closeSourceMenu}
       onPick={(source) => openPaneSource(side, source)} />;
+  }
+
+  function saveCollections(items: CollectionFolder[]) {
+    if (collectionState.error) throw new Error(collectionState.error);
+    persistCollections(items);
+    setCollectionState({ items, error: "" });
+  }
+
+  function confirmCollectionAdd(path: string[], references: CollectionReference[]) {
+    const trail = collectionTrail(collectionState.items, path);
+    const folder = trail.at(-1);
+    if (!folder || path.length !== trail.length) throw new Error("Open a collection folder first.");
+    const merged = addCollectionReferences(folder, references);
+    const items = editCollectionEntries(collectionState.items, path.slice(0, -1), (entries) =>
+      entries.map((entry) => entry.id === folder.id ? merged : entry));
+    saveCollections(items);
+    setModal(null);
+  }
+
+  function collectReferences(side: Side, references: CollectionReference[]) {
+    const path = collectionPanes[opposite(side)];
+    if (!references.length || !path) return;
+    if (!path.length || collectionTrail(collectionState.items, path).length !== path.length) {
+      setStatus({ text: "Open a collection folder first.", error: true });
+      return;
+    }
+    setModal({ kind: "collect", side, path, references });
+  }
+
+  async function exportCollection(side: Side, entries: CollectionEntry[]) {
+    if (modal || !entries.length) return;
+    const other = opposite(side);
+    const target = !paneCovered(other) && !panes[other].search && !processPanels[other] ? panes[other].place : null;
+    const localTarget = target?.kind === "local" ? target : null;
+    const { folders, references } = collectionContents(entries);
+    const stop = new AbortController();
+    setModal({ kind: "collectionExport", side, stop });
+    const temporary: Resource[] = [];
+    const items: Transfer["items"] = [];
+    const unavailable: string[] = [];
+    for (const { reference, destination } of references) {
+      if (stop.signal.aborted) break;
+      try {
+        const resolve = (password?: string) => resolveCollectionReference(reference, preferences.kswitcher, (place) => {
+          if ("id" in place && place.kind !== "googleDrive") temporary.push(place);
+        }, password, [
+          connected.current.left, connected.current.right,
+          ...[panes.left.place, panes.right.place].map((place) => place?.kind === "archive" ? place : null),
+        ]);
+        const resolved = await resolve().catch(async (failure: unknown) => {
+          if (reference.origin.kind !== "archive" || stop.signal.aborted || describeError(failure) !== passwordError) throw failure;
+          return new Promise<Awaited<ReturnType<typeof resolve>>>((accept, reject) => {
+            const finish = () => setModal({ kind: "collectionExport", side, stop });
+            setModal({ kind: "collectionArchivePassword",
+              submit: async (password) => { const result = await resolve(password); finish(); accept(result); },
+              cancel: () => { finish(); reject(failure); },
+            });
+          });
+        });
+        if (resolved.entry.link && resolved.place.kind !== "local") throw new Error("Choose an original item without a remote link.");
+        items.push({ ...resolved, collectionDestination: destination });
+      } catch (failure) {
+        unavailable.push(collectionReferencePath(reference) + " · " + errorText(describeError(failure)));
+      }
+    }
+    if (stop.signal.aborted || !items.length && !folders.length) {
+      temporary.forEach(disconnect);
+      if (!stop.signal.aborted) {
+        setStatus({ text: unavailable.join("\n"), error: true });
+        setModal(null);
+        requestAnimationFrame(() => focus(side));
+      }
+      return;
+    }
+    const allLocal = items.every(({ place }) => place.kind === "local");
+    const remoteDestination = !folders.length && allLocal && isFileServer(target) ? target : undefined;
+    const archiveDestination = !folders.length && allLocal && target?.kind === "archive" && target.canAdd &&
+      items.every(({ entry }) => !entry.link) ? target : undefined;
+    const kswitcherDestination = !folders.length && allLocal && target?.kind === "kswitcher" && target.path && target.capabilities?.write &&
+      items.every(({ entry }) => !entry.link) ? target : undefined;
+    const destination = localTarget ?? remoteDestination ?? archiveDestination ?? kswitcherDestination;
+    const source = items[0]?.place ?? localTarget ?? localPath("");
+    setModal({ kind: "transfer", side, temporary, transfer: {
+      kind: "copy", source, items, target: destination ? placePath(destination) : "",
+      archiveDestination, remoteDestination, kswitcherDestination, kswitcherBroker: !!kswitcherDestination,
+      collection: { folders, unavailable, needsLocalDestination: !!target && !destination },
+    } });
   }
 
   function selectDocument(id: number | null, paneOrigin?: PaneDocumentOrigin) {
@@ -1519,7 +1727,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       invalidateListing(side);
     }
     setQuickViewSource(null);
-    if (mode) setRecentPanes((current) => ({ ...current, [side]: false }));
+    if (mode) {
+      setRecentPanes((current) => ({ ...current, [side]: false }));
+      setCollectionPanes((current) => ({ ...current, [side]: null }));
+    }
     setEnvironmentPanels((panels) => ({ ...panels, [side]: mode }));
     setActive(side);
     if (!mode) focusRevealedSide(side);
@@ -1568,6 +1779,19 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const item = paneItem(pane, entry);
     if (!item) return;
     const { place, entry: file } = item;
+    if (place.kind === "googleDrive") {
+      const item = file.googleDrive;
+      if (!item) return;
+      if (item.directory) {
+        if (entry.tree) toggleTreeBranch(side, entry);
+        else void load(side, { ...place, folders: [...place.folders, { id: item.id, name: item.name }] });
+      } else if (item.webViewLink) {
+        openGoogleDriveLink(item.webViewLink);
+      } else {
+        setStatus({ text: "Copy the remote file to a local folder to open it." });
+      }
+      return;
+    }
     if (file.directory) {
       if (entry.tree && !file.link) { toggleTreeBranch(side, entry); return; }
       void load(side, childPlace(place, file.name), "push", selectParent && place.kind === "local" ? ".." : undefined);
@@ -1590,6 +1814,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       } else void fileOpens.openFile(side, place, file.name);
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
+    }
+  }
+
+  function openGoogleDriveLink(link: string) {
+    void api.openWebLink(link).catch((failure: unknown) => setStatus({ text: describeError(failure), error: true }));
+  }
+
+  async function reconnectGoogleDrive(side: Side) {
+    const place = latest.current[side].place;
+    if (place?.kind !== "googleDrive") return;
+    try {
+      const profile = (await api.googleDriveProfiles()).find(({ id }) => id === place.id);
+      if (profile && latest.current[side].place === place) editConnection(side, "googleDrive", { ...profile, kind: "googleDrive" });
+    } catch (failure) {
+      setStatus({ text: describeError(failure), error: true });
     }
   }
 
@@ -1619,7 +1858,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     connectionDialogsClosed(side);
     for (const shown of ["left", "right"] as const) {
       const { place, loading } = latest.current[shown];
-      if (place?.kind !== "connections" || loading) continue;
+      if (place?.kind !== "connections" || loading && place.source !== "googleDrive") continue;
       void load(shown, place, "refresh").then((loaded) => {
         if (!loaded || shown !== side || !selected) return;
         updatePane(shown, (pane) => {
@@ -1632,6 +1871,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
+    if (profile.kind === "googleDrive") {
+      if (profile.signInNeeded) editConnection(side, "googleDrive", profile);
+      else await load(side, { kind: "googleDrive", id: profile.id, address: profile.label, email: profile.email, folders: [] });
+      return;
+    }
     const { approvals = [], segments, fromRecent } = options;
     const remembered = segments === undefined && "host" in profile ? rememberedDirectory(profile) : undefined;
     const { ticket, signal } = beginListing(side);
@@ -1784,9 +2028,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (panes[side].search) return () => closeResults(side);
     const place = panes[side].place;
     const target = parentPlace(place);
+    if (place?.kind === "googleDrive" && !target) return () => openConnections(side, "googleDrive");
     if (!place || !target) return undefined;
     return () => {
-      const reveal = target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
+      const reveal = place.kind === "googleDrive" ? place.folders.at(-1)?.id : target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
       void load(side, target, "push", reveal, undefined, treeFolder(side) ?? undefined);
       focus(side);
     };
@@ -2000,7 +2245,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   function setFilePaneView(side: Side, view: FilePaneView) {
     const pane = panes[side];
-    if (pane.loading || pane.search || pane.place?.kind !== "local" || preferences.paneViews[side] === view) return;
+    if (pane.loading || pane.search || !supportsFileTree(pane.place) ||
+        preferences.paneViews[side] === view) return;
     const nested = view === "list" && pane.selected?.includes("/") ? trees[side].lookup(pane, pane.selected) : null;
     const item = nested && paneItem(pane, nested);
     if (view === "list") updatePane(side, (current) => ({ ...current,
@@ -2092,46 +2338,57 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
-    const remoteDestination = isFileServer(target) ? target : undefined;
-    const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
-    const fromKSwitcher = source.kind === "kswitcher";
-    const kswitcherBroker = Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
-    if (kswitcherDestination && source.kind !== "local" && !fromKSwitcher) {
-      setStatus({ text: "Choose a local or KSwitcher LAN source.", error: true });
+    if (kind === "copy" && source.kind === "googleDrive") {
+      if (target?.kind !== "googleDrive" && (target?.kind !== "local" || smbHost(target))) {
+        setStatus({ text: "Choose a local folder or a Google Drive folder in the other pane.", error: true });
+        return;
+      }
+    } else if (kind === "copy" && target?.kind === "googleDrive" && source.kind !== "local") {
+      setStatus({ text: "Choose a local file or use the same Google Drive account in both panes.", error: true });
       return;
     }
-    if (kswitcherDestination && !kswitcherDestination.capabilities?.write ||
-      fromKSwitcher && kswitcherDestination && !source.capabilities?.write ||
-      kind === "move" && (kswitcherDestination && !kswitcherDestination.capabilities?.delete ||
-        fromKSwitcher && !source.capabilities?.delete)) {
+    if (kind === "move" && (source.kind === "archive" && !source.writable ||
+      source.kind === "server" && !isWritableServerPlace(source))) {
+      setStatus({ text: "This source is read-only.", error: true });
+      return;
+    }
+    const remoteDestination = isFileServer(target) ? target : undefined;
+    const serverDestination = isWritableServerPlace(target) ? target : undefined;
+    const archiveDestination = target?.kind === "archive" ? target : undefined;
+    const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
+    const fromKSwitcher = source.kind === "kswitcher";
+    const kswitcherBroker = Boolean(
+      kswitcherDestination && source.kind === "local" ||
+      fromKSwitcher && (source.capabilities?.write || kind === "move" && source.capabilities?.delete) &&
+        (!target || target.kind === "local" || kswitcherDestination),
+    );
+    if (kind === "copy" && target?.kind === "server" && !serverDestination) {
+      setStatus({ text: isLanGroupPlace(target) ? "Choose a location inside a remote drive." : "This source is read-only.", error: true });
+      return;
+    }
+    if (kind === "copy" && kswitcherDestination && !kswitcherDestination.capabilities?.write ||
+      kind === "move" && fromKSwitcher && !source.capabilities?.delete) {
       setStatus({ text: "Grant the required file permission in Trusted clients.", error: true });
       return;
     }
-    const archiveDestination = source.kind === "local" && target?.kind === "archive" && kind === "copy" ? target : undefined;
-    if (archiveDestination && (!archiveDestination.canAdd || items.some(({ entry }) => entry.link))) {
-      setStatus({ text: archiveDestination.canAdd ? "Choose local files and folders without symbolic links." :
-        "Choose a writable ZIP or 7z archive.", error: true });
+    if (kind === "copy" && archiveDestination && !archiveDestination.canAdd) {
+      setStatus({ text: "Choose a writable ZIP or 7z archive.", error: true });
       return;
     }
-    if (kind === "move" && remoteDestination && (remoteDestination.kind !== "ssh" ||
-      items.some(({ place, entry }) => place.kind !== "local" || entry.directory || entry.link))) {
-      setStatus({ text: "Choose regular local files to move to an SSH/SFTP folder.", error: true });
-      return;
-    }
-    if (remoteDestination && source.kind !== "local") {
-      setStatus({ text: remoteDestination.kind === "ssh" ? "Choose a local source for the SSH upload." :
-        "Choose a local source for the FTP upload.", error: true });
-      return;
-    }
-    if ((source.kind !== "local" || kswitcherBroker) && items.some(({ entry }) => entry.link ||
-      fromKSwitcher && !kswitcherBroker && entry.directory)) {
-      setStatus({ text: fromKSwitcher && !kswitcherBroker ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
+    if (kind === "copy" && (source.kind !== "local" || remoteDestination || serverDestination || archiveDestination || kswitcherBroker) &&
+      items.some(({ entry }) => entry.link)) {
+      setStatus({ text: "Choose files or folders without symbolic links.", error: true });
       return;
     }
     setModal({ kind: "transfer", side, transfer: {
       kind, source, items, chooseOperation,
-      target: target && (archiveDestination || kswitcherDestination || target.kind === "local" || isFileServer(target)) ? placePath(target) : "",
-      remoteDestination, archiveDestination, kswitcherDestination, kswitcherBroker,
+      target: target && (archiveDestination || kswitcherDestination || serverDestination || target.kind === "local" || target.kind === "googleDrive" || isFileServer(target)) ? placePath(target) : "",
+      remoteDestination, serverDestination, archiveDestination, kswitcherDestination, kswitcherBroker,
+      googleDriveDestination: target?.kind === "googleDrive" ? target : undefined,
+      moveTarget: kind === "move" && target && target.kind !== "connections" && target.kind !== "smbRoot" ? target : undefined,
+      connectedPlaces: kind === "move" ? [source, target, connected.current.left, connected.current.right,
+        panes.left.place, panes.right.place].flatMap((place) =>
+        place && place.kind !== "connections" && place.kind !== "smbRoot" ? [place] : []) : undefined,
     } });
   }
 
@@ -2173,15 +2430,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     return true;
   }
 
-  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace | KSwitcherPlace,
+  function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace | KSwitcherPlace | WritableServerPlace,
     entries: readonly Entry[], tree = false, searchSide?: Side) {
     if (!entries.length) return;
     const remote = place.kind === "ftp" || place.kind === "ssh" ? place : undefined;
     const archive = place.kind === "archive" ? place : undefined;
     const kswitcher = place.kind === "kswitcher" ? place : undefined;
+    const shared = isWritableServerPlace(place) ? place : undefined;
     setModal({
-      kind: remote && !remote.environment?.recycleBin?.keepDeleted || archive || smbHost(place) ? "delete" : command,
-      path: placePath(place), remote, archive, kswitcher, names: entries.map(({ name }) => name),
+      kind: remote && !remote.environment?.recycleBin?.keepDeleted || archive || shared || smbHost(place) ? "delete" : command,
+      path: placePath(place), remote, archive, kswitcher, shared, names: entries.map(({ name }) => name),
       directories: entries.filter(({ directory, link }) => directory && !link).map(({ name }) => name),
       relativePaths: searchSide ? entries.map(({ name }) => name.split("/")) :
         tree ? entries.map((entry) => [...(entry.tree?.segments ?? [entry.name])]) : undefined,
@@ -2198,7 +2456,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       return;
     }
     const place = state.place;
-    if (place?.kind === "local" || isFileServer(place) || place?.kind === "archive" && place.writable ||
+    if (place?.kind === "googleDrive") {
+      const items = selectedEntries(side, selected, true, false).filter((entry) => entry.googleDrive);
+      if (items.length) setModal({
+        kind: command, path: placePath(place),
+        names: items.map(({ googleDrive }) => googleDrive!.name),
+        drive: { place, side, itemIds: items.map(({ googleDrive }) => googleDrive!.id) },
+      });
+      return;
+    }
+    if (place?.kind === "local" || isFileServer(place) || isWritableServerPlace(place) || place?.kind === "archive" && place.writable ||
       place?.kind === "kswitcher" && place.path && place.capabilities?.delete) {
       confirmDeletion(command, place, selectedEntries(side, selected), trees[side].enabled);
     }
@@ -2233,21 +2500,25 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Select a file or folder in the active pane." });
       return;
     }
-    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "ftp" &&
-      (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
-    if (kind === "move" && source.kind === "ftp") {
-      setModal({ kind: "rename", path: placePath(source), name: selected.name, remote: source });
+    const targetSide = opposite(side);
+    if (kind === "copy" && collectionPanes[targetSide]) {
+      if (source.kind === "googleDrive") {
+        setStatus({ text: "Copy one Google Drive file to a local folder.", error: true });
+        return;
+      }
+      if (kind === "copy") collectReferences(side, transferItems(side, selected).flatMap(({ place, entry }) =>
+        place.kind === "googleDrive" ? [] : [collectionReference(place, entry)]));
       return;
     }
-    const targetSide = opposite(side);
+    if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "googleDrive" && !isFileServer(source) && !isWritableServerPlace(source) &&
+      !(source.kind === "archive" && source.writable) &&
+      (source.kind !== "kswitcher" || !source.capabilities?.delete))) return;
     const otherPane = panes[targetSide];
-    const target = otherPane.search || kind === "move" && state.search &&
+    const target = collectionPanes[targetSide] || otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
-        processPanels[targetSide] || otherPane.loading) ? null : otherPane.place;
-    if (kind === "move" && target?.kind === "ftp") {
-      setStatus({ text: "Choose a local destination. FTP does not support moving local files." });
-    }
-    openTransfer(kind, source, transferItems(side, selected), kind === "move" && target?.kind === "ftp" ? null : target, false, side);
+        processPanels[targetSide] || otherPane.loading) ? null :
+      treeFolder(targetSide) ?? otherPane.place;
+    openTransfer(kind, source, transferItems(side, selected), target, false, side);
   }
 
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
@@ -2266,7 +2537,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         gitView || modal || helpTopic || activeDocument !== null) return null;
     const pane = panes[side];
     return !pane.search && !pane.loading && !processPanels[side] &&
-      (pane.place?.kind === "local" || (local && isFileServer(pane.place))) ? side : null;
+      (pane.place?.kind === "local" || pane.place?.kind === "googleDrive" && (local || source !== undefined &&
+        panes[source].place?.kind === "googleDrive") || (local && isFileServer(pane.place))) ? side : null;
   }
 
   function moveDrag(event: PointerEvent<HTMLDivElement>) {
@@ -2295,7 +2567,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     try {
       const files = await api.droppedFiles(payload.paths);
       const items = files.map(({ directory, entry }) => ({ place: localPath(directory), entry }));
-      if (items.length) openTransfer("copy", items[0].place, items, panes[side].place, panes[side].place?.kind === "local");
+      if (items.length) openTransfer("copy", items[0].place, items, treeFolder(side) ?? panes[side].place, panes[side].place?.kind === "local");
     } catch (error) {
       setStatus({ text: describeError(error), error: true });
     }
@@ -2323,7 +2595,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   async function pasteClipboard(side: Side) {
     const pane = panes[side];
-    if (pane.place?.kind !== "local" || pane.search || processPanels[side] || pane.loading) return;
+    if (pane.place?.kind !== "local" && pane.place?.kind !== "googleDrive" || pane.search || processPanels[side] || pane.loading) return;
     try {
       const files = await api.clipboardFiles();
       if (!files.length) {
@@ -2331,7 +2603,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         return;
       }
       const items = files.map(({ directory, entry }) => ({ place: localPath(directory), entry }));
-      openTransfer("copy", items[0].place, items, pane.place);
+      openTransfer("copy", items[0].place, items, treeFolder(side) ?? pane.place);
     } catch (failure) { setStatus({ text: describeError(failure), error: true }); }
   }
 
@@ -2407,6 +2679,29 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     else await api.operate(place.path, { kind: "rename", name, new_name: newName });
   }
 
+  async function renameTransferItem(side: Side, { place, entry }: Transfer["items"][number], name: string) {
+    if (name === (entry.googleDrive?.name ?? entry.name)) return;
+    let selected = name;
+    if (place.kind === "local" || place.kind === "ftp") await renameItem(place, entry.name, name);
+    else if (place.kind === "googleDrive" && entry.googleDrive) {
+      selected = entry.googleDrive.id;
+      await api.changeGoogleDrive(place.id, { kind: "rename", item: selected, name });
+    } else if (place.kind === "ssh") {
+      await api.renameSsh(place.id, [...place.segments, entry.name], name);
+      invalidateDirectories({ kind: place.kind, id: place.profileId });
+    } else if (place.kind === "archive") {
+      await transferArchiveRename.run(place.id, { kind: "rename", segments: [...place.segments, entry.name], name });
+    } else if (place.kind === "kswitcher") {
+      await api.changeKSwitcher(place.peer, kswitcherPath(place.path, entry.name), { kind: "rename", name });
+    } else if (isWritableServerPlace(place)) {
+      await api.changeServerItem(place, [entry.name], { kind: "rename", name });
+    } else {
+      throw new Error("This source is read-only.");
+    }
+    await selectChangedItem(side, place, selected);
+    refresh(opposite(side));
+  }
+
   function closeRowRename(side: Side) {
     setRowRename(null);
     requestAnimationFrame(() => document.getElementById(side + "-files")?.focus());
@@ -2415,20 +2710,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   async function submitRowRename(rename: RowRename, name: string) {
     if (name !== rename.name) {
       await renameItem(rename.place, rename.name, name);
-      if (rename.place.kind === "local") setFileRevision((revision) => revision + 1);
       if (rename.treeKey) {
         const renamedKey = [...rename.treeKey.split("/").slice(0, -1), name].join("/");
         updatePane(rename.side, (pane) => ({ ...pane,
           selected: renamedKey, marked: pane.marked.map((key) => key === rename.treeKey ? renamedKey : key),
         }));
       }
-      if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
-        await load(rename.side, rename.place, "refresh", name);
+      if (rename.treeKey || sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+        await selectChangedItem(rename.side, rename.place, name);
         refresh(opposite(rename.side));
+      } else if (rename.place.kind === "local") {
+        setFileRevision((revision) => revision + 1);
       }
     }
     setRowRename((current) => current === rename ? null : current);
-    if (sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
+    if (rename.treeKey || sameRenameLocation(visiblePanes.current[rename.side].place, rename.place)) {
       requestAnimationFrame(() => document.getElementById(rename.side + "-files")?.focus());
     }
   }
@@ -2503,7 +2799,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const pane = latest.current[side];
     const root = pane.place;
     const addressFrom = treeFolder(side);
-    const segments = root?.kind === "local" && destination.kind === "local" ? spaceRelativePath(root, destination) : null;
+    const segments = treeRelativePath(root, destination);
     const ticket = ++treeNavigation.current[side];
     const current = () => treeNavigation.current[side] === ticket && latest.current[side].place === root &&
       latest.current[side].selected === pane.selected;
@@ -2673,7 +2969,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const marked = marks.size ? entries[active].filter(({ name }) => marks.has(name)) : [];
     const items = trees[active].enabled && current ? selectedEntries(active, current, true, false) :
       marked.length ? marked : current ? [current] : [];
-    const names = items.map(({ name, tree }) => pane.search?.matches.get(name)?.entry.name ?? tree?.segments.at(-1) ?? name);
+    const names = items.map(({ name, tree, googleDrive }) => pane.search?.matches.get(name)?.entry.name ?? tree?.segments.at(-1) ?? googleDrive?.name ?? name);
     if (!names.length) return;
     void api.copyText(names.join("\n")).then(() => setStatus({ text: "Item names copied to the clipboard." }),
       (error: unknown) => setStatus({ text: describeError(error), error: true }));
@@ -2681,6 +2977,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   function fileFor(side: Side, entry = entries[side][paneCursorIndex(panes[side], entries[side])]): NamedFile | null {
     const item = paneItem(panes[side], entry);
+    if (item?.place.kind === "googleDrive") return item.entry.googleDrive?.download
+      ? { place: item.place, name: item.entry.googleDrive.name, driveItem: item.entry.googleDrive.id } : null;
     return item && (item.place.kind !== "kswitcher" || item.place.capabilities?.revisionRead) && !item.entry.directory && !item.entry.link
       ? { place: item.place, name: item.entry.name } : null;
   }
@@ -2721,20 +3019,25 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const comparison = comparisonLeft && comparisonRight ? { left: comparisonLeft, right: comparisonRight } : null;
 
   const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && markedNames[active].has(entry.name));
-  const measurePlace = pane.place && (pane.place.kind === "archive" || canAnalyze(pane.place)) && !pane.search ? pane.place : null;
+  const measurePlace = pane.place && (pane.place.kind === "googleDrive" || pane.place.kind === "archive" || canAnalyze(pane.place)) && !pane.search ? pane.place : null;
   const measureParent = !!measurePlace && currentRow?.name === "..";
   const measureEntries = !measurePlace || pane.loading ? [] : measureParent
     ? lists[active].filter((entry) => entry.directory && !entry.link && entry.name !== "..")
-    : !trees[active].enabled && markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
+    : (!trees[active].enabled || measurePlace.kind === "googleDrive") && markedFolders.length ? markedFolders
+      : current?.directory && !current.link ? [current] : [];
 
-  function measure() {
+  function measure(side = active, place = measurePlace, folders = measureEntries) {
+    const measurePlace = place;
+    const measureEntries = folders;
     if (!measurePlace || !measureEntries.length) return;
-    cancelScan(active);
+    cancelScan(side);
     const id = ++measureId.current;
-    const controller = measurePlace.kind === "local" || measurePlace.kind === "ftp" ? undefined : new AbortController();
-    scans.current[active] = { id, controller };
+    const nativeMeasure = measurePlace.kind === "local" || measurePlace.kind === "googleDrive" ||
+      measurePlace.kind === "ftp" && !trees[side].enabled;
+    const controller = nativeMeasure ? undefined : new AbortController();
+    scans.current[side] = { id, controller };
     const names = measureEntries.map(({ name }) => name);
-    updatePane(active, (pane) => ({ ...pane, measuring: names }));
+    updatePane(side, (pane) => ({ ...pane, measuring: names }));
     const measuringSide = (): Side | undefined =>
       scans.current.left?.id === id ? "left" : scans.current.right?.id === id ? "right" : undefined;
     const storeResult = (result: SizeResult) => {
@@ -2747,8 +3050,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     };
     async function run() {
       if (!measurePlace) return;
-      if (measurePlace.kind === "local" || measurePlace.kind === "ftp") {
-        const source = measurePlace.kind === "ftp" ? { kind: "ftp" as const, connection: measurePlace.id, segments: measurePlace.segments }
+      if (nativeMeasure && (measurePlace.kind === "local" || measurePlace.kind === "ftp" || measurePlace.kind === "googleDrive")) {
+        const source = measurePlace.kind === "googleDrive" ? {
+          kind: "google_drive" as const, profile: measurePlace.id,
+          folders: Object.fromEntries(measureEntries.flatMap(({ name, googleDrive }) => googleDrive ? [[name, googleDrive.id]] : [])),
+        } : measurePlace.kind === "ftp" ? { kind: "ftp" as const, connection: measurePlace.id, segments: measurePlace.segments }
           : { kind: "local" as const, directory: measurePlace.path };
         const output = new Channel<SizeResult>(storeResult);
         try { await api.measureFolders(id, source, names, output); }
@@ -2756,15 +3062,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         return;
       }
       const signal = controller!.signal;
-      for (const name of names) {
+      for (const entry of measureEntries) {
         if (signal.aborted) break;
-        const child = childPlace(measurePlace, name);
+        const child = (entry.tree?.segments ?? [entry.name]).reduce<FileLocation>((place, name) => childPlace(place, name), measurePlace);
         if (child.kind === "smbRoot") continue;
         await scanSpace(child, signal, (result) => {
           if (result.phase === "scanning") return;
-          storeResult({ name, bytes: result.root.logical,
+          storeResult({ name: entry.name, bytes: result.root.logical,
             incomplete: result.phase !== "complete" || result.root.missingLogical > 0 });
-        });
+        }, folderScanSudo.authorize);
       }
     }
     void run().catch((error: unknown) => {
@@ -2816,6 +3122,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     setProcessPanels(swapSides);
     setEnvironmentPanels(swapSides);
     setRecentPanes(swapSides);
+    setCollectionPanes(swapSides);
     setQuickViewSource((side) => side === null ? null : opposite(side));
     setAnalysisPanes(swapSides);
     setDiskPanes(swapSides);
@@ -2825,7 +3132,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     selectionAnchor.current = swapSides(selectionAnchor.current);
     scans.current = swapSides(scans.current);
     setActive(opposite(focusedSide));
-    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : recentActive ? "-recent" : "-files");
+    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : recentActive ? "-recent" :
+      collectionActive ? "-collections" : "-files");
     requestAnimationFrame(() => {
       if (movedFocus?.isConnected) movedFocus.focus({ preventScroll: true });
       else if (!diskActive && analysisHandles.current[next]) analysisHandles.current[next]?.focus();
@@ -2861,7 +3169,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (panesAvailable && !gitView && !showingAnalysis) showEnvironment(active, environmentPanels[active] ? null : "root");
       return;
     }
-    if ((environmentActive || recentActive) && !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
+    if ((environmentActive || recentActive || collectionActive) &&
+        !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
     if (command === "gitView") {
       if (!canToggleGitView) return;
       if (gitView) closeGitView();
@@ -3089,9 +3398,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }
         break;
       case "mkdir":
-        if (!pane.search && !busy && !pane.loading) {
-          const place = local ?? (archive?.canAdd ? archive : undefined) ?? (kswitcher?.capabilities?.write ? kswitcher : undefined);
-          if (place) setModal({ kind: "mkdir", side: active, place });
+        if (canCreateItem && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "mkdir", side: active, place: actionDirectory });
         }
         break;
       case "createArchive":
@@ -3101,11 +3409,24 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }
         break;
       case "rename": {
-        const place = current?.tree && currentItem?.place.kind === "local" ? currentItem.place : local ?? ftp;
+        if (currentItem?.place.kind === "googleDrive" && currentItem.entry.googleDrive && !busy && !pane.loading && !pane.search) {
+          setModal({ kind: "rename", path: placePath(currentItem.place), name: currentItem.entry.googleDrive.name,
+            drive: { side: active, place: currentItem.place, itemIds: [currentItem.entry.googleDrive.id] } });
+          break;
+        }
+        const nested = current?.tree ? currentItem?.place : undefined;
+        const place = nested?.kind === "local" || nested?.kind === "ftp" ? nested : local ?? ftp;
         if (place && current && !pane.search && !busy && !pane.loading) {
           setRowRename({ side: active, place, name: currentItem?.entry.name ?? current.name, treeKey: current.tree ? current.name : undefined });
-        } else if (archive?.canAdd && current && !current.link && !pane.search && !busy && !pane.loading) {
-          setModal({ kind: "rename", side: active, path: placePath(archive), name: current.name, archive });
+        } else if (currentItem?.place.kind === "ssh" && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, remote: currentItem.place });
+        } else if (writableServer && currentItem && isWritableServerPlace(currentItem.place) &&
+          !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "rename", side: active, path: placePath(currentItem.place), name: currentItem.entry.name, shared: currentItem.place });
+        } else if (currentItem?.place.kind === "archive" && currentItem.place.canAdd &&
+          !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "rename", side: active, path: placePath(currentItem.place),
+            name: currentItem.entry.name, archive: currentItem.place });
         } else if (currentItem?.place.kind === "kswitcher" && currentItem.place.capabilities?.write &&
           !currentItem.entry.link && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "rename", side: active, path: currentItem.place.path, name: currentItem.entry.name, kswitcher: currentItem.place });
@@ -3113,10 +3434,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       }
       case "newFile": {
-        const place = local ?? (kswitcher?.capabilities?.write ? kswitcher : undefined);
-        if (place && !pane.search && !busy && !pane.loading) {
-          setModal(place.kind === "kswitcher" ? { kind: "newFile", side: active, path: place.path, name: "", kswitcher: place } :
-            { kind: "newFile", path: place.path, name: "" });
+        if (canCreateItem && !pane.search && !busy && !pane.loading) {
+          setModal({ kind: "newFile", side: active, path: placePath(actionDirectory), name: "",
+            drive: actionDirectory.kind === "googleDrive" ? { side: active, place: actionDirectory, itemIds: [] } : undefined,
+            archive: actionDirectory.kind === "archive" ? actionDirectory : undefined,
+            kswitcher: actionDirectory.kind === "kswitcher" ? actionDirectory : undefined,
+            shared: isWritableServerPlace(actionDirectory) ? actionDirectory : undefined,
+            remote: isFileServer(actionDirectory) ? actionDirectory : undefined });
         }
         break;
       }
@@ -3131,8 +3455,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       case "view":
       case "edit": {
+        if (command === "edit") {
+          const link = driveEditorLink(currentItem?.entry);
+          if (link) {
+            openGoogleDriveLink(link);
+            break;
+          }
+        }
         if (command === "view" && measureEntries.length) {
-          if (trees[active].enabled && !measureParent) {
+          if (local && trees[active].enabled && !measureParent) {
             const folder = measureEntries[0];
             folderSizes[active].measureBranch(folder.tree?.segments ?? [folder.name]);
           }
@@ -3197,10 +3528,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       }
       return;
     }
-    if (environmentActive || recentActive) {
-      const fromList = target.id === active + (recentActive ? "-recent" : "-environment");
-      const tabThroughRecent = recentActive && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
-      if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft"].includes(command) ||
+    if (environmentActive || recentActive || collectionActive) {
+      const fromList = target.id === active + (collectionActive ? "-collections" : recentActive ? "-recent" : "-environment");
+      const tabThroughRecent = (recentActive || collectionActive) && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
+      if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft", "leftLocations", "rightLocations"].includes(command) ||
           command === "switchPane" && fromList && !tabThroughRecent)) {
         event.preventDefault();
         if (!event.repeat) perform(command);
@@ -3277,6 +3608,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   const currentFile = fileFor(active);
+  const currentDriveEditor = driveEditorLink(currentItem?.entry);
   const fileActions = diskActive ? [] : analysis ? ([
     { command: "copy", label: "Copy", Icon: Copy, disabled: analysis.root.kind !== "local" || busy },
     { command: "move", label: "Move", Icon: ArrowLeftRight, disabled: analysis.root.kind !== "local" || busy },
@@ -3288,29 +3620,33 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   ] as const) : ([
     { command: "view", label: measureParent || measureEntries.length ? "Measure" : "View", Icon: measureParent || measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
-    { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !(imageType(currentFile.name)
-      ? currentFile.place.kind !== "kswitcher" : writableTextPlace(currentFile.place)) },
-    { command: "copy", label: local || fileServer || archive || kswitcherWrite ? "Copy" : "Download",
-      Icon: local || fileServer || archive || kswitcherWrite ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
-    { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
-      disabled: (!local && !ftp && !(kswitcherWrite && kswitcherDelete)) || !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
-    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !archive?.canAdd && !kswitcherWrite) ||
-      !!pane.search || !current || ((archive || kswitcher) && current.link) || busy },
-    { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !kswitcherWrite) || !!pane.search || busy },
-    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !archive?.canAdd && !kswitcherWrite) || !!pane.search || busy },
+    { command: "edit", label: currentDriveEditor ? "Edit in browser" : "Edit", Icon: Pencil,
+      disabled: !currentDriveEditor && (!currentFile || !(imageType(currentFile.name)
+        ? currentFile.place.kind !== "kswitcher" : writableTextPlace(currentFile.place))) },
+    { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
+      Icon: Copy, disabled: !canTransfer || busy },
+    { command: "move", label: "Move", Icon: ArrowLeftRight,
+      disabled: (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete && !currentItem?.entry.googleDrive) ||
+        !!pane.search && !localSearchRoot(pane) || !currentItem || busy },
+    { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !writableServer && !archive?.canAdd && !kswitcherWrite && !currentItem?.entry.googleDrive) ||
+      !!pane.search || !current || ((archive || kswitcher || writableServer) && current.link) || busy },
+    { command: "newFile", label: "New file", Icon: FilePlus, disabled: !canCreateItem || !!pane.search || busy },
+    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: !canCreateItem || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2,
-      disabled: (!local && !fileServer && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
+      disabled: (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete && !currentItem?.entry.googleDrive) || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
-  ] as const).filter(({ command }) => !ftp || command !== "rename");
+  ] as const);
   const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !recentActive && !processPanels[active] && !pane.loading;
   const systemFolder = currentRow?.name === ".." ? pane.place :
     currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
   const systemFolderPath = systemFolder?.kind === "local" && !smbHost(systemFolder) ? systemFolder.path : null;
-  const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && !currentItem.entry.directory);
-  const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right && !gitView && !showingAnalysis &&
+  const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && currentItem.place.kind !== "googleDrive" && !currentItem.entry.directory);
+  const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
+    !collectionPanes.left && !collectionPanes.right && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
   const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
+    !collectionPanes.left && !collectionPanes.right &&
     (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
   const previewFile = previewSide && filesAvailable ? currentFile : null;
   const previousPreview = adjacentQuickViewFile(-1);
@@ -3422,7 +3758,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
-  const showFileActions = !showingGit && !environmentActive && !recentActive && activeDocument === null;
+  const showFileActions = !showingGit && !environmentActive && !recentActive && !collectionActive && activeDocument === null;
   const commandLineVisible = showFileActions && !panelsHidden;
   const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
@@ -3501,7 +3837,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             entries={entries[side]} fileTypes={fileTypes} locations={locations} addressPlace={treeFolder(side)}
             fileView={trees[side].enabled ? "tree" : "list"} onFileView={(view) => void setFilePaneView(side, view)}
             onTreeBranch={(entry) => toggleTreeBranch(side, entry)} folderSizes={folderSizes[side]}
-            onFolderSizes={() => setFolderSizesEnabled((before) => ({ ...before, [side]: !before[side] }))}
+            onFolderSizes={() => {
+              const place = panes[side].place;
+              if (place?.kind === "googleDrive") {
+                measure(side, place, lists[side].filter(({ googleDrive }) => googleDrive?.directory));
+              } else {
+                setFolderSizesEnabled((before) => ({ ...before, [side]: !before[side] }));
+              }
+            }}
             preserveScroll={showingGit || !!environmentPanels[side] || !!analysisPanes[side] || !!diskPanes[side]}
             onAnalyze={(place) => openSpaceAnalyzer(side, place)} spaceDisabled={showingEnvironment}
             modeId={preferences.selectedPanelModes[side]} mode={preferences.panelModes[preferences.selectedPanelModes[side]]}
@@ -3528,18 +3871,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                     "Enter an absolute FTP path starting with /.", error: true });
                   return;
                 }
-                void load(side, { ...place, segments: path.split("/").filter(Boolean) });
+                const destination = { ...place, segments: path.split("/").filter(Boolean) };
+                if (trees[side].enabled) void navigateTree(side, destination, true);
+                else void load(side, destination);
               } else if (trees[side].enabled) void navigateTree(side, filesystemPlace(path), true);
               else void load(side, filesystemPlace(path));
             }}
             onLocalLocation={(location) => openPaneSource(side, location)}
             onPathAncestor={(place) => {
               showProcesses(side, false);
-              if (trees[side].enabled && place.kind === "local") void navigateTree(side, place, true);
+              if (trees[side].enabled && supportsFileTree(place)) void navigateTree(side, place, true);
               else void load(side, place);
             }}
             onOpenConnections={(source) => openConnections(side, source)}
-            onAddNetBoxConnection={() => editConnection(side, "netbox")}
+            onAddConnection={(source) => editConnection(side, source)}
+            onReconnectGoogleDrive={() => { void reconnectGoogleDrive(side); }}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={parentAction(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
@@ -3571,7 +3917,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             locations={recentLocations} sourceMenu={paneSources(side)} error={panes[side].error} loading={panes[side].loading}
             onFocus={() => setActive(side)} onClose={() => closeRecent(side)} onOpen={(location) => void openRecent(side, location)}
             onRemove={(location) => setRecentLocations((items) => items.filter((item) => recentLocationKey(item) !== recentLocationKey(location)))}
-            onClear={() => setRecentLocations([])} onEdit={(location) => void editRecentConnection(side, location)} />)}
+            onClear={() => setRecentLocations([])} onEdit={(location) => void editRecentConnection(side, location)}
+            copyBindings={shortcuts.copy} onCollect={collectionPanes[opposite(side)] ? (location) => {
+              const reference = collectionReferenceFromRecent(location);
+              if (reference) collectReferences(side, [reference]);
+              else setStatus({ text: "This location cannot be added as a folder reference.", error: true });
+            } : undefined} />)}
+        {(["left", "right"] as const).map((side) => {
+          const path = collectionPanes[side];
+          return path && <CollectionsPane key={swappedPanes ? opposite(side) : side} side={side} active={active === side}
+            collections={collectionState.items} path={path} sourceMenu={paneSources(side)} shortcuts={shortcuts}
+            loadError={collectionState.error} onFocus={() => setActive(side)}
+            onPath={(path) => setCollectionPanes((current) => ({ ...current, [side]: path }))}
+            onClose={() => { setCollectionPanes((current) => ({ ...current, [side]: null })); focusRevealedSide(side); }}
+            onChange={saveCollections} onCopy={(entries) => void exportCollection(side, entries)} />;
+        })}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
           return mode && <Suspense key={swappedPanes ? opposite(side) : side} fallback={<section className={"pane environment-pane environment-" + side}>
@@ -3894,15 +4254,32 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           </div>
         </Dialog>
       )}
+      {modal?.kind === "collectionExport" && <Dialog title={t("Copy from collection")}
+        onClose={() => { modal.stop.abort(); setModal(null); requestAnimationFrame(() => focus(modal.side)); }}>
+        <div className="dialog-body"><p role="status">{t("Checking original files and folders…")}</p></div>
+      </Dialog>}
+      {modal?.kind === "collectionArchivePassword" && <ArchivePasswordDialog onOpen={modal.submit} onClose={modal.cancel} />}
       {modal?.kind === "transfer" && (
-        <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden} onClose={() => setModal(null)}
-          onFinished={(success, movedPaths) => {
+        <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden}
+          onRename={modal.transfer.kind === "move" && !panes[modal.side].search && modal.transfer.items.length === 1 &&
+            canRenameTransferItem(modal.transfer.items[0]) ? (name) => renameTransferItem(modal.side, modal.transfer.items[0], name) : undefined}
+          onClose={() => {
+          modal.temporary?.forEach(disconnect);
+          setModal(null);
+          if (modal.transfer.collection) requestAnimationFrame(() => focus(modal.side));
+        }}
+          onFinished={(success, movedPaths, resolved) => {
             if (movedPaths.length) {
               const removed = new Set(movedPaths);
               removeSearchMatches(modal.side, (match) => removed.has(match.relativePath));
             }
-            const destination = modal.transfer.remoteDestination;
+            const destination = resolved ? resolved.remote : modal.transfer.remoteDestination;
             if (destination) invalidateDirectories({ kind: destination.kind, id: destination.profileId });
+            if (modal.transfer.kind === "move") {
+              for (const { place } of modal.transfer.items) {
+                if (isFileServer(place)) invalidateDirectories({ kind: place.kind, id: place.profileId });
+              }
+            }
             if (destination?.kind === "ssh") {
               setSshUploadRefresh(destination.id);
               if (modal.transfer.kind === "move") refresh(modal.side);
@@ -3934,6 +4311,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         setModal(null);
         setHelpTopic("files");
       }} />}
+      {folderScanSudo.prompt}
+      {treeBrowseSudo.prompt}
       {modal?.kind === "sudoBrowse" && <SudoDialog operation="browse" address={modal.target.place.address}
         path={placePath(modal.target.place)} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
         onConfirm={async (password) => {
@@ -3947,8 +4326,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         const { side, x, y, entry } = fileMenu;
         const state = panes[side];
         const item = entry ? paneItem(state, entry) : null;
+        const driveEditor = driveEditorLink(item?.entry);
+        const driveLink = driveEditor ?? item?.entry.googleDrive?.webViewLink;
         const kswitcherItem = item?.place.kind === "kswitcher" ? item.place : undefined;
         const target = panes[opposite(side)];
+        const toCollection = collectionPanes[opposite(side)] !== null;
         return <FileContextMenu x={x} y={y} onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
           {state.place?.kind === "connections" && (() => {
             const { source } = state.place;
@@ -3969,19 +4351,65 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             setFileMenu(null);
             open(side, entry);
           }}>{t("Open")}</Button>}
-          {item && <>
-            <Button role="menuitem" disabled={item.place.kind === "kswitcher" && (!item.place.path || item.entry.link ||
-              item.entry.directory && !item.place.capabilities?.write)} onClick={() => {
+          {item?.place.kind === "googleDrive" && entry && <>
+            {item.entry.directory && <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>}
+            {driveLink && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
-              openTransfer("copy", item.place, transferItems(side, entry!, state.marked.includes(entry!.name)),
-                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null : target.place, false, side);
-            }}>{t(item.place.kind === "kswitcher" && !item.place.capabilities?.write ? "Download" : "Copy")}</Button>
+              openGoogleDriveLink(driveLink);
+            }}>{t(driveEditor ? "Edit in browser" : "Open in browser")}</Button>}
+            {fileFor(side, entry) && (driveEditor ? ["view"] as const : ["view", "edit"] as const).map((action) => <Button key={action} role="menuitem" onClick={() => {
+              const file = fileFor(side, entry);
+              setFileMenu(null);
+              if (file) openDocument(file, action === "edit", { fromPane: side });
+            }}>{t(action === "view" ? "View" : "Edit")}</Button>)}
+            {(["copy", "move"] as const).map((action) => <Button key={action} role="menuitem" disabled={action === "copy" && (toCollection || !!target.search ||
+              target.place?.kind !== "googleDrive" && (target.place?.kind !== "local" || !!smbHost(target.place)))}
+              onClick={() => { setFileMenu(null); transfer(action, side, entry); }}>{t(action === "copy" ? "Copy" : "Move")}</Button>)}
+            {!busy && !state.loading && item.entry.googleDrive && <>
+              <Button role="menuitem" onClick={() => {
+                const { place } = item;
+                if (place.kind !== "googleDrive" || !item.entry.googleDrive) return;
+                setFileMenu(null);
+                setModal({ kind: "rename", path: placePath(place), name: item.entry.googleDrive.name,
+                  drive: { place, side, itemIds: [item.entry.googleDrive.id] } });
+              }}>{t("Rename")}</Button>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
+            </>}
+          </>}
+          {item && item.place.kind !== "googleDrive" && <>
+            <Button role="menuitem" disabled={!toCollection && item.place.kind === "kswitcher" && (!item.place.path || item.entry.link)}
+              onClick={() => {
+              setFileMenu(null);
+              const items = transferItems(side, entry!, state.marked.includes(entry!.name));
+              if (toCollection) collectReferences(side, items.flatMap(({ place, entry }) =>
+                place.kind === "googleDrive" ? [] : [collectionReference(place, entry)]));
+              else openTransfer("copy", item.place, items,
+                target.search ? null :
+                  treeFolder(opposite(side)) ?? target.place, false, side);
+            }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
+            {isWritableServerPlace(item.place) && entry && !state.search && !state.loading && !busy && <>
+              {!item.entry.directory && !item.entry.link && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                if (isWritableServerPlace(item.place)) openDocument({ place: item.place, name: item.entry.name }, true, { fromPane: side });
+              }}>{t("Edit")}</Button>}
+              {!toCollection && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                transfer("move", side, entry);
+              }}>{t("Move")}</Button>}
+              {!item.entry.link && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                const place = item.place;
+                if (isWritableServerPlace(place)) setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, shared: place });
+              }}>{t("Rename")}</Button>}
+              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
+            </>}
             {kswitcherItem?.path && !state.search && !state.loading && !busy && <>
+              {!item.entry.link && kswitcherItem.capabilities?.delete && !toCollection && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                transfer("move", side, entry);
+              }}>{t("Move")}</Button>}
               {!item.entry.link && kswitcherItem.capabilities?.write && <>
-                {kswitcherItem.capabilities.delete && <Button role="menuitem" onClick={() => {
-                  setFileMenu(null);
-                  transfer("move", side, entry);
-                }}>{t("Move")}</Button>}
                 <Button role="menuitem" onClick={() => {
                   setFileMenu(null);
                   setModal({ kind: "rename", side, path: kswitcherItem.path, name: item.entry.name, kswitcher: kswitcherItem });
@@ -3993,10 +4421,34 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               </>}
             </>}
             {localSearchRoot(state) && entry && !state.loading && !busy && <>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>
+              {!toCollection && <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
+            {item.place.kind === "ssh" && !state.search && !state.loading && !busy && <Button role="menuitem" onClick={() => {
+              setFileMenu(null);
+              const place = item.place;
+              if (place.kind === "ssh") setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, remote: place });
+            }}>{t("Rename")}</Button>}
+            {isFileServer(item.place) && entry && !toCollection && !state.search && !state.loading && !busy &&
+              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
+            {item.place.kind === "archive" && item.place.writable && entry && !state.search && !state.loading && !busy && (() => {
+              const archive = item.place;
+              return <>
+                {!item.entry.link && !toCollection && <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  transfer("move", side, entry);
+                }}>{t("Move")}</Button>}
+                {!item.entry.link && archive.canAdd && <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  setModal({ kind: "rename", side, path: placePath(archive), name: item.entry.name, archive });
+                }}>{t("Rename")}</Button>}
+                <Button role="menuitem" onClick={() => {
+                  setFileMenu(null);
+                  deleteSelection(side, "delete", entry);
+                }}>{t("Delete permanently")}</Button>
+              </>;
+            })()}
             {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
@@ -4060,7 +4512,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       {fileBookmarksOpen && <FileBookmarksDialog bookmarks={fileBookmarks} addKey={keyLabel("bookmarkLine")}
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
         onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setFileBookmarksOpen(false)} />}
-      {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
+      {modal?.kind === "connectionEditor" && modal.source === "googleDrive" && <GoogleDriveConnectionDialog
+        profile={modal.profile?.kind === "googleDrive" ? modal.profile : undefined}
+        onSaved={(id) => {
+          const place = latest.current[modal.side].place;
+          reloadConnectionLists(modal.side, { kind: "googleDrive", id });
+          if (place?.kind === "googleDrive" && place.id === id) void load(modal.side, place, "refresh");
+        }}
+        onRemove={(profile) => setModal({ kind: "removeConnection", side: modal.side, profile })}
+        onClose={() => connectionDialogsClosed(modal.side)} />}
+      {modal?.kind === "connectionEditor" && modal.source !== "googleDrive" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
         bindings={shortcuts}
         remoteProvider="server" bridgeDirectory={preferences.kswitcher}
         onSaved={(kind, id) => {
@@ -4068,10 +4529,29 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           reloadConnectionLists(modal.side, { kind, id });
         }}
         onClose={() => connectionDialogsClosed(modal.side)} />}
+      {modal?.kind === "collect" && <AddToCollectionDialog
+        destination={collectionTrail(collectionState.items, modal.path).map(({ name }) => name).join(" / ")}
+        count={modal.references.length}
+        onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
+        onConfirm={() => { confirmCollectionAdd(modal.path, modal.references); requestAnimationFrame(() => focus(modal.side)); }} />}
       {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
         onRemoved={() => {
           const { kind, id } = modal.profile;
           if (kind === "ftp" || kind === "ssh") forgetDirectoryProfile({ kind, id });
+          if (kind === "googleDrive") {
+            const removed = (place: Place | null | undefined) => place?.kind === "googleDrive" && place.id === id;
+            for (const side of ["left", "right"] as const) {
+              if (removed(latest.current[side].place)) void load(side, { kind: "connections", source: "googleDrive", from: null });
+              updatePane(side, (pane) => ({
+                ...pane,
+                addressTrail: removed(pane.addressTrail) ? undefined : pane.addressTrail,
+                history: pane.history.filter((place) => !removed(place)).map((place) =>
+                  place.kind === "connections" && (removed(place.from) || removed(place.trail))
+                    ? { ...place, from: null, trail: undefined } : place),
+                position: pane.history.slice(0, pane.position + 1).filter((place) => !removed(place)).length - 1,
+              }));
+            }
+          }
           reloadConnectionLists(modal.side);
         }} onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}
@@ -4082,12 +4562,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }} />}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap} onClose={() => setModal(null)} />}
-      {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
+      {modal?.kind === "mkdir" && <NewFolderDialog directory={placePath(modal.place)} showHidden={preferences.hidden}
         archive={modal.place.kind === "archive" ? modal.place : undefined}
         kswitcher={modal.place.kind === "kswitcher" ? modal.place : undefined}
+        googleDrive={modal.place.kind === "googleDrive" ? modal.place : undefined}
+        remote={isFileServer(modal.place) || isWritableServerPlace(modal.place) ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
-        onCreated={async (name) => {
-          await load(modal.side, modal.place, "refresh", name);
+        onCreated={async (name, itemId) => {
+          if (modal.place.kind === "googleDrive") await selectChangedItem(modal.side, modal.place, itemId ?? name);
+          else await selectChangedItem(modal.side, modal.place, name);
           refresh(opposite(modal.side));
         }} />}
       {modal?.kind === "createArchive" && <ArchiveDialog directory={modal.directory} names={modal.names}
@@ -4106,19 +4589,81 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       }} />}
       {(modal?.kind === "rename" || modal?.kind === "newFile" || modal?.kind === "recycle" || modal?.kind === "delete") && (
         <FileDialog modal={modal} onClose={() => setModal(null)}
-          hasNonemptyFolders={(modal.remote || modal.kswitcher) && modal.kind === "delete" ? async () => {
+          hasNonemptyFolders={(modal.remote || modal.kswitcher || modal.shared) && modal.kind === "delete" ? async () => {
             for (const name of modal.directories ?? []) {
               const segments = modal.relativePaths?.[modal.names.indexOf(name)] ?? [name];
               const remote = modal.remote;
-              const listing = remote ? await (remote.kind === "ssh" ? api.listSsh : api.listFtp)(remote.id, [...remote.segments, ...segments])
+              const listing = remote ? await (remote.kind === "ssh"
+                ? api.listSsh(remote.id, [...remote.segments, ...segments], undefined, true).catch((error: unknown) => {
+                  if ((error instanceof Error ? error.message : String(error)) === "SSH permission denied.") {
+                    return { entries: [], omitted: 1 };
+                  }
+                  throw error;
+                })
+                : api.listFtp(remote.id, [...remote.segments, ...segments]))
+                : modal.shared ? await api.listServer(modal.shared.id, [...modal.shared.segments, ...segments])
                 : await api.listKSwitcher(modal.kswitcher!.directory, modal.kswitcher!.peer, kswitcherPath(modal.path, segments.join("\\")));
               if (listing.entries.length || listing.omitted) return true;
             }
             return false;
           } : undefined}
-          onSubmit={async (operation, recursive, progress) => {
+          onSubmit={async (operation, recursive, progress, sudoPassword) => {
           const remote = modal.remote;
-          if (modal.kswitcher) {
+          if (modal.drive) {
+            const { place, side, itemIds } = modal.drive;
+            if (operation?.kind === "create_file") {
+              const item = await api.changeGoogleDrive(place.id, { kind: "createFile", parent: place.folders.at(-1)?.id ?? "root", name: operation.name });
+              if (item) await selectChangedItem(side, place, item);
+            } else if (operation?.kind === "rename") {
+              await api.changeGoogleDrive(place.id, { kind: "rename", item: itemIds[0], name: operation.new_name });
+              await selectChangedItem(side, place, itemIds[0]);
+            } else if ("names" in modal) {
+              let completed = 0;
+              try {
+                for (const item of itemIds) {
+                  await api.changeGoogleDrive(place.id, { kind: modal.kind === "delete" ? "delete" : "trash", item });
+                  completed += 1;
+                }
+              } catch (error) {
+                if (completed) setModal({ ...modal, names: modal.names.slice(completed), drive: { ...modal.drive, itemIds: itemIds.slice(completed) } });
+                throw error;
+              } finally {
+                if (completed) fileLocationsChanged();
+              }
+            }
+            refresh(opposite(side));
+            setModal(null);
+            return;
+          }
+          if (modal.shared) {
+            const shared = modal.shared;
+            try {
+              if ("names" in modal) {
+                let removed = 0;
+                try {
+                  await batch(modal.names, async (name, index) => {
+                    await api.changeServerItem(shared, modal.relativePaths?.[index] ?? [name], {
+                      kind: "delete", recursive: recursive && Boolean(modal.directories?.includes(name)),
+                    });
+                    removed += 1;
+                  }, progress);
+                } catch (failure) {
+                  if (removed) setModal({ ...modal, names: modal.names.slice(removed), relativePaths: modal.relativePaths?.slice(removed) });
+                  throw failure;
+                }
+                if (progress?.signal.aborted) setStatus({ text: t("{0} of {1} completed", removed, modal.names.length) });
+              } else if (operation?.kind === "create_file") {
+                await api.changeServerItem(shared, [operation.name], { kind: "create_text", encoding: operation.encoding ?? "utf8" });
+                if (modal.side) await selectChangedItem(modal.side, shared, operation.name);
+                openDocument({ place: shared, name: operation.name }, true, { fromPane: modal.side });
+              } else if (operation?.kind === "rename") {
+                await api.changeServerItem(shared, [operation.name], { kind: "rename", name: operation.new_name });
+                if (modal.side) await selectChangedItem(modal.side, shared, operation.new_name);
+              }
+            } finally {
+              fileLocationsChanged();
+            }
+          } else if (modal.kswitcher) {
             const { peer } = modal.kswitcher;
             try {
               if ("names" in modal) {
@@ -4129,9 +4674,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 }, progress);
               } else if (operation?.kind === "rename") {
                 await api.changeKSwitcher(peer, kswitcherPath(modal.path, operation.name), { kind: "rename", name: operation.new_name });
+                if (modal.side) await selectChangedItem(modal.side, modal.kswitcher, operation.new_name);
               } else if (operation?.kind === "create_file") {
                 if (/[\\/]/.test(operation.name) || operation.name === "." || operation.name === "..") throw new Error(t("Enter a valid destination name."));
                 await api.changeKSwitcher(peer, kswitcherPath(modal.path, operation.name), { kind: "create_file", encoding: operation.encoding ?? "utf8" });
+                if (modal.side) await selectChangedItem(modal.side, modal.kswitcher, operation.name);
                 openDocument({ place: modal.kswitcher, name: operation.name }, true, { fromPane: modal.side });
               }
             } finally {
@@ -4139,16 +4686,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             }
           } else if ("names" in modal && modal.archive) {
             const archive = modal.archive;
-            await api.deleteArchiveEntries(archive.id, modal.names.map((name) => [...archive.segments, name]));
+            await api.deleteArchiveEntries(archive.id, modal.names.map((name, index) =>
+              [...archive.segments, ...(modal.relativePaths?.[index] ?? [name])]));
             refresh("left");
             refresh("right");
           } else if ("names" in modal && remote) {
             const completed: string[][] = [];
             try {
-              const remove = remote.kind === "ssh" ? api.deleteSsh : api.deleteFtp;
               await batch(modal.names, async (name, index) => {
                 const segments = [...remote.segments, ...(modal.relativePaths?.[index] ?? [name])];
-                await remove(remote.id, segments, recursive && (modal.directories?.includes(name) ?? false), modal.kind === "recycle");
+                const directory = recursive && (modal.directories?.includes(name) ?? false);
+                const recycle = modal.kind === "recycle";
+                if (remote.kind === "ssh") {
+                  if (!progress?.ssh) throw new Error("The SSH deletion request has closed.");
+                  await api.deleteSsh(remote.id, segments, directory, recycle, progress.ssh.id, progress.ssh.output);
+                } else await api.deleteFtp(remote.id, segments, directory, recycle);
                 completed.push(segments);
               }, progress);
               if (progress?.signal.aborted) {
@@ -4188,6 +4740,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               permanent: modal.kind === "delete", relativePaths: modal.relativePaths } });
             return;
           } else if (operation) {
+            if (operation.kind === "create_file" && modal.archive) {
+              if (modal.side) {
+                await selectChangedItem(modal.side, modal.archive, operation.name);
+                refresh(opposite(modal.side));
+              }
+              openDocument({ place: modal.archive, name: operation.name }, true, { fromPane: modal.side });
+              setModal(null);
+              return;
+            }
             if (operation.kind === "rename" && modal.archive) {
               const archive = modal.archive;
               const before = [...archive.segments, operation.name];
@@ -4197,16 +4758,31 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 if (place?.kind !== "archive" || place.path !== archive.path) continue;
                 const childRenamed = before.every((part, index) => part === place.segments[index]);
                 const destination = childRenamed ? { ...place, segments: [...after, ...place.segments.slice(before.length)] } : place;
-                void load(side, destination, "refresh", side === modal.side ? operation.new_name : undefined);
+                if (!childRenamed && side === modal.side) await selectChangedItem(side, archive, operation.new_name);
+                else {
+                  if (trees[side].enabled) setFileRevision((revision) => revision + 1);
+                  void load(side, destination, "refresh", side === modal.side ? operation.new_name : undefined);
+                }
               }
               setModal(null);
               return;
             }
-            if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
-            else await api.operate(modal.path, operation);
+            if (operation.kind === "create_file" && remote) {
+              await api.createRemoteTextFile(remote, operation.name, operation.encoding ?? "utf8", sudoPassword);
+              invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+              if (modal.side) await selectChangedItem(modal.side, remote, operation.name);
+            } else if (operation.kind === "rename" && remote?.kind === "ssh") {
+              await api.renameSsh(remote.id, [...remote.segments, operation.name], operation.new_name, sudoPassword);
+              invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+              if (modal.side) await selectChangedItem(modal.side, remote, operation.new_name);
+            } else if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
+            else {
+              await api.operate(modal.path, operation);
+              if (modal.side && trees[modal.side].enabled) await selectChangedItem(modal.side, localPath(modal.path), operation.name);
+            }
             fileLocationsChanged();
             if (modal.kind === "newFile") {
-              openDocument({ place: { kind: "local", path: modal.path, parent: null }, name: operation.name }, true, { fromPane: modal.side });
+              openDocument({ place: remote ?? { kind: "local", path: modal.path, parent: null }, name: operation.name }, true, { fromPane: modal.side });
             }
           }
           setModal(null);
@@ -4231,6 +4807,32 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     </div>
     </ElevationContext>
   );
+}
+
+function AddToCollectionDialog({ destination, count, onClose, onConfirm }: {
+  destination: string;
+  count: number;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const [error, setError] = useState("");
+  return <Dialog title={t("Add to collection")} onClose={onClose}>
+    <form className="dialog-form" onSubmit={(event) => {
+      event.preventDefault();
+      try { onConfirm(); }
+      catch (failure) { setError(describeError(failure)); }
+    }}>
+      <div className="dialog-body">
+        <p>{t("Add {0} to this collection folder?", countText(count, "item"))}</p>
+        <p dir="auto"><strong>{destination}</strong></p>
+        {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+      </div>
+      <footer className="dialog-footer">
+        <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
+        <Button type="submit" data-initial-focus>{t("Add to collection")}</Button>
+      </footer>
+    </form>
+  </Dialog>;
 }
 
 function UpToDateDialog({ onClose }: { onClose: () => void }) {
@@ -4280,12 +4882,14 @@ function CommandHistory({ commands, onChoose, onClose }: {
 function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   modal: ActionModal;
   onClose: () => void;
-  onSubmit: (operation: Operation | undefined, recursive: boolean, progress?: RemoteDeletionProgress) => Promise<void>;
+  onSubmit: (operation: Operation | undefined, recursive: boolean, progress?: RemoteDeletionProgress, sudoPassword?: string) => Promise<void>;
   hasNonemptyFolders?: () => Promise<boolean>;
 }) {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
   const [encoding, setEncoding] = useState<TextEncoding>("utf8");
   const [error, setError] = useState("");
+  const [sudoOperation, setSudoOperation] = useState<Extract<Operation, { kind: "rename" | "create_file" }>>();
+  const [sshApproval, setSshApproval] = useState<{ id: number; request: TransferSudoRequest }>();
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
@@ -4294,9 +4898,12 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   const cancelRemote = useRef<AbortController>(null);
   const archiveChange = useArchiveChange();
   const renameInArchive = modal.kind === "rename" && modal.archive;
+  const createInArchive = modal.kind === "newFile" && modal.archive;
+  const updatesArchive = renameInArchive || createInArchive;
+  const remoteAddress = (modal.remote ?? modal.shared ?? modal.kswitcher)?.address;
   const titles = { newFile: "New file", rename: "Rename", recycle: "Move to Trash", delete: "Delete permanently" };
   const remoteRecycle = modal.kind === "recycle" && !!(modal.remote || modal.kswitcher);
-  const canCancelRemote = remoteRecycle || modal.kind === "delete" && !!modal.kswitcher;
+  const canCancelRemote = remoteRecycle || modal.kind === "delete" && Boolean(modal.kswitcher || modal.shared || modal.remote?.kind === "ssh");
   const title = t(remoteRecycle ? "Move to remote recycle bin" : titles[modal.kind]);
   const removing = "names" in modal;
   const permanent = modal.kind === "delete";
@@ -4310,6 +4917,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
     cancelRemote.current = controller;
     setCancelingRemote(false);
     setCompleted(0);
+    let ssh: RemoteDeletionProgress["ssh"];
     try {
       if (hasNonemptyFolders && !recursive && await hasNonemptyFolders()) {
         setRecursive(true);
@@ -4317,13 +4925,38 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
       }
       if (renameInArchive) {
         await archiveChange.run(renameInArchive.id, { kind: "rename", segments: [...renameInArchive.segments, modal.name], name });
+      } else if (createInArchive) {
+        await archiveChange.run(createInArchive.id, { kind: "text", parent: createInArchive.segments, name, encoding });
+      }
+      if (removing && controller && modal.remote?.kind === "ssh") {
+        const id = nextTransferId();
+        const output = new Channel<TransferEvent>((request) => {
+          if (request.kind === "sudo_required" && !controller.signal.aborted) setSshApproval({ id, request });
+        });
+        await api.beginTransfer(id);
+        ssh = { id, output };
+        if (controller.signal.aborted) return;
+        controller.signal.addEventListener("abort", () => {
+          setSshApproval(undefined);
+          void api.cancelTransfer(id).catch(() => {});
+        }, { once: true });
       }
       await onSubmit(modal.kind === "newFile" ? { kind: "create_file", name, encoding } :
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive,
-        controller ? { signal: controller.signal, completed: setCompleted } : undefined);
+        controller ? { signal: controller.signal, completed: setCompleted, ssh } : undefined);
     } catch (error) {
-      setError(describeError(error));
+      const reason = describeError(error);
+      setError(reason);
+      if (modal.remote?.kind === "ssh" && reason === "SSH permission denied.") {
+        if (modal.kind === "newFile") setSudoOperation({ kind: "create_file", name, encoding });
+        if (modal.kind === "rename") setSudoOperation({ kind: "rename", name: modal.name, new_name: name });
+      }
     } finally {
+      if (ssh) {
+        ssh.output.onmessage = () => {};
+        await api.finishTransfer(ssh.id).catch(() => {});
+      }
+      setSshApproval(undefined);
       setWaiting(false);
       cancelRemote.current = null;
     }
@@ -4331,7 +4964,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   function close() {
     if (!waiting) onClose();
-    else if (renameInArchive) archiveChange.cancel();
+    else if (updatesArchive) archiveChange.cancel();
     else if (cancelRemote.current) {
       cancelRemote.current.abort();
       setCancelingRemote(true);
@@ -4340,7 +4973,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
 
   return (
     <>
-    <Dialog key={String(recursive)} title={recursive ? t(modal.kswitcher ? "Delete contents" :
+    <Dialog key={String(recursive)} title={recursive ? t(modal.kswitcher || modal.shared ? "Delete contents" :
       modal.remote?.kind === "ssh" ? "Delete SSH folder contents" : "Delete FTP folder contents") : title} tone={permanent ? "warning" : undefined}
       onClose={close}>
       <form className="dialog-form" onSubmit={(event) => { void submit(event); }}>
@@ -4349,7 +4982,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
             ? <div className={permanent ? "permanent-delete-message" : "trash-confirmation"}>
               {permanent ? <Trash2 aria-hidden="true" /> : <CircleHelp aria-hidden="true" />}
               <div>
-                <p>{recursive ? t(modal.kswitcher ? "Permanently delete the selected folders and all their contents?" :
+                <p>{recursive ? t(modal.kswitcher || modal.shared ? "Permanently delete the selected folders and all their contents?" :
                   modal.remote?.kind === "ssh" ? "Permanently delete the selected SSH folders and all their contents?" :
                   "Permanently delete the selected FTP folders and all their contents?") :
                   <Message text={permanent ? "Permanently delete {0}?" : remoteRecycle ? "Move {0} to the remote recycle bin?" : "Move {0} to Trash?"}>
@@ -4370,21 +5003,22 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
               {Object.entries(textEncodingLabels).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </select>
           </label>}
+          {modal.kind === "newFile" && <p dir="auto">{remoteAddress ? remoteAddress + " · " + modal.path : modal.path}</p>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
-          {renameInArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
+          {updatesArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
           {canCancelRemote && removing && waiting && <>
             <progress aria-label={t(remoteRecycle ? "Moving to the remote recycle bin" : "Deleting…")} max={modal.names.length} value={completed} />
             <p role="status">{t("{0} of {1} completed", completed, modal.names.length)}</p>
           </>}
-          {!modal.remote && !modal.archive && !modal.kswitcher && windowsClient && isPermissionError(error) &&
+          {!modal.remote && !modal.archive && !modal.kswitcher && !modal.shared && windowsClient && isPermissionError(error) &&
             <ElevationButton directory={modal.path} selected={modal.kind === "rename" ? modal.name : undefined} />}
-          {!modal.remote && !modal.archive && !modal.kswitcher && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
+          {!modal.remote && !modal.archive && !modal.kswitcher && !modal.shared && windowsClient && isLockError(error) && <div className="dialog-actions"><Button type="button" onClick={() => setLockPaths(
             ("names" in modal ? modal.names : [modal.name]).filter(Boolean).map((name) => placePath(childPlace(localPath(modal.path), name))),
           )}>{t("Find locking processes")}</Button></div>}
         </div>
         <footer className="dialog-footer">
           <Button type="button" data-initial-focus={removing ? true : undefined} onClick={close}
-            disabled={waiting && (canCancelRemote ? cancelingRemote : !renameInArchive || archiveChange.canceling)}>
+            disabled={waiting && (canCancelRemote ? cancelingRemote : !updatesArchive || archiveChange.canceling)}>
             {t(archiveChange.canceling || cancelingRemote ? "Canceling…" : "Cancel")}
           </Button>
           <Button type="submit" className={permanent ? "alert-confirm" : removing ? undefined : "primary"}
@@ -4394,6 +5028,12 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </footer>
       </form>
     </Dialog>
+    {sshApproval && <TransferSudoPrompt key={sshApproval.request.ticket} id={sshApproval.id} request={sshApproval.request}
+      operation="delete" onClose={() => setSshApproval((current) => current?.request.ticket === sshApproval.request.ticket ? undefined : current)} />}
+    {sudoOperation && modal.remote?.kind === "ssh" && <SudoDialog address={modal.remote.address}
+      path={`/${[...modal.remote.segments, sudoOperation.name].join("/")}`} operation={sudoOperation.kind === "rename" ? "rename" : "createFile"}
+      onClose={() => setSudoOperation(undefined)} onConfirm={(password) =>
+        onSubmit(sudoOperation, false, undefined, password)} />}
     {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
     </>
   );

@@ -59,25 +59,76 @@ try {
             case "git_repository": return { root: home, name: "Fixture", headRef: null, head: null, branches: [] };
             case "git_history": return { commits: [], nextOffset: null };
             case "ftp_profiles": return [{ id: "ftp", label: "FTP fixture", host: "fixture", port: 21 }];
-            case "ssh_profiles": return [];
+            case "ssh_profiles": return [{ id: "ssh", label: "SSH creation fixture", host: "fixture", port: 22 }];
             case "connect_ftp": return { id: 1, address: "fixture", origin: "ftp://fixture", segments: ["nested"], listing };
             case "list_ftp": return listing;
+            case "connect_ssh": return { kind: "connected", id: 9, address: "fixture", origin: "sftp://fixture",
+              segments: ["nested"], listing };
+            case "list_ssh": return { ...listing, elevated: false };
+            case "read_ftp_text":
+            case "read_ssh_text": return { text: "", encoding: "utf8", revision: "fixture" };
+            case "create_ftp_folder":
+            case "create_ftp_text_file":
+            case "create_ssh_folder":
+            case "create_ssh_text_file":
+              (window.remoteCreates ??= []).push({ command, segments: args.segments, encoding: args.encoding,
+                elevated: args.sudoPassword !== undefined });
+              if (command.startsWith("create_ssh") && args.sudoPassword === undefined) throw "SSH permission denied.";
+              return null;
             case "computer_name": return "This test PC";
+            case "lan_group_status": return {
+              active: Boolean(window.fixtureLanGroup), remembered: Boolean(window.fixtureLanGroup || window.fixtureSavedGroup),
+              writable: Boolean(window.fixtureGroupWritable), storageError: null,
+            };
+            case "set_lan_group_writable": window.fixtureGroupWritable = args.writable; return null;
+            case "start_lan_group":
+              window.fixtureLanGroup = args.code ?? "generated";
+              window.fixtureGroupWritable = false;
+              return { active: true, remembered: true, writable: false, storageError: null };
+            case "copy_lan_group_code": return null;
+            case "leave_lan_group":
+              window.fixtureLanGroup = null;
+              window.fixtureSavedGroup = false;
+              return { active: false, remembered: false, writable: false, storageError: null };
+            case "list_lan_group_peers": return window.fixtureLanGroup ?
+              [{ id: "group-peer", name: "Group test PC", online: true }] : [];
+            case "list_lan_group_drives": return pairedDrives();
+            case "connect_lan_group_peer":
+              window.groupTarget = { peer: args.peer, segments: args.segments };
+              return { id: 10, address: "fixture", origin: "https://fixture", share: "group", listing: remoteListing(args.segments) };
+            case "change_lan_item":
+              if (!window.fixturePeerAllowsCreate) throw "The remote computer allows read access only.";
+              window.lastLanChange = args;
+              return null;
+            case "read_server_text": return { text: "", encoding: "utf8", revision: "remote-start" };
+            case "save_lan_text": window.savedLanText = args; return "remote-saved";
+            case "verify_computer_pairing": return "Name from the remote host";
+            case "save_server_invitation": return "new-fixture-credential";
             case "list_saved_computer_drives": return pairedDrives();
             case "connect_saved_server":
               window.dirlumeDrive = args.segments;
               return { id: 8, address: "fixture", origin: "https://fixture", share: "fixture", listing: remoteListing(args.segments) };
             case "list_server": return remoteListing(args.segments);
+            case "transfer_item":
+              window.lastTransfer = args.request;
+              return { kind: "completed" };
+            case "prepare_collection_folders":
+              window.collectionFolders = args;
+              return null;
             case "list_connected_computer_drives":
               if (window.deferCapacity) {
                 window.deferCapacity = false;
                 return new Promise((resolve) => { window.finishCapacity = () => resolve([drive("Files", 800, 700)]); });
               }
               return pairedDrives();
-            case "kswitcher_peers": return windows ? [
-              { id: "online", name: "KSwitcher PC", online: true },
-              { id: "offline", name: "Offline KSwitcher PC", online: false },
-            ] : [];
+            case "kswitcher_peers":
+              if (window.kswitcherAuthorizationDenied) {
+                throw "Authorize this executable in KSwitcher → Computers → Trusted clients.";
+              }
+              return windows ? [
+                { id: "online", name: "KSwitcher PC", online: true },
+                { id: "offline", name: "Offline KSwitcher PC", online: false },
+              ] : [];
             case "list_kswitcher":
               if (args.peer === "offline") throw new Error("An offline peer must not be queried.");
               if (args.path === "") return { ...listing, entries: [], parent: null,
@@ -85,7 +136,7 @@ try {
               window.kswitcherDrive = args.path;
               window.kswitcherListings = (window.kswitcherListings ?? 0) + 1;
               if (window.kswitcherFailure) throw window.kswitcherFailure;
-              return { ...listing, parent: "" };
+              return { ...(window.collectionKSwitcher ? remoteListing(["drive"]) : listing), parent: "" };
             case "report_diagnostic":
               if (args.operation === "list_kswitcher") (window.kswitcherDiagnostics ??= []).push(args);
               return null;
@@ -154,6 +205,16 @@ try {
     await refresh.click();
     await page.waitForFunction(() => typeof window.finishCapacity === "function");
     await openPairedDrive("Full disk");
+    await files("left").getByRole("option", { name: /^nested/ }).click();
+    await files("left").press("F5");
+    const copyFolder = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await copyFolder.getByRole("combobox", { name: "Destination", exact: true }).inputValue(), downloads);
+    await button(copyFolder, "Copy").click();
+    await page.waitForFunction(() => window.lastTransfer);
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "server", connection: 8, segments: ["Full disk", "nested"], folder: true,
+    });
+    await copyFolder.waitFor({ state: "hidden" });
     await control.getByText("0 B free of 100 GiB", { exact: true }).waitFor();
     await page.evaluate(() => window.finishCapacity());
     assert.equal(await control.getAttribute("aria-description"), "0 B free of 100 GiB, 100 GiB used");
@@ -161,8 +222,17 @@ try {
     await control.getByText("Analyze space", { exact: true }).waitFor();
     assert.equal(await control.isEnabled(), true);
     if (windows) {
+      await page.evaluate(() => { window.kswitcherAuthorizationDenied = true; });
       await files("right").press("Alt+F2");
-      const lan = sources("right").getByRole("group", { name: "Dirlume LAN", exact: true });
+      const kswitcher = sources("right").getByRole("group", { name: "KSwitcher LAN", exact: true });
+      await kswitcher.getByRole("status").filter({ hasText: "To browse KSwitcher computers" }).waitFor();
+      const direct = sources("right").getByRole("group", { name: "Dirlume LAN", exact: true });
+      await direct.getByRole("group", { name: "Dirlume test PC", exact: true }).getByRole("button", { name: /^Full disk/ }).waitFor();
+      assert.equal(await direct.getByText(/Trusted clients/).count(), 0);
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => { window.kswitcherAuthorizationDenied = false; });
+      await files("right").press("Alt+F2");
+      const lan = sources("right").getByRole("group", { name: "KSwitcher LAN", exact: true });
       await lan.getByRole("group", { name: "Offline KSwitcher PC", exact: true }).getByText("Offline", { exact: true }).waitFor();
       await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
       await page.waitForFunction(() => window.kswitcherDrive === "C:\\");
@@ -222,6 +292,114 @@ try {
     await options.getByRole("heading", { name: "Computers", exact: true }).waitFor();
     await options.getByText("This test PC", { exact: true }).waitFor();
     await options.getByText("Dirlume test PC", { exact: true }).waitFor();
+    await options.getByText("Legacy pairing codes", { exact: true }).click();
+    assert.equal(await options.getByLabel("Computer name", { exact: true }).count(), 0);
+    await options.getByLabel("Pairing code", { exact: true }).fill("test-invitation");
+    await button(options, "Pair computer").click();
+    await options.getByText("Name from the remote host", { exact: true }).waitFor();
+    const group = options.getByRole("group", { name: "Dirlume LAN group", exact: true });
+    await group.getByLabel("Group code", { exact: true }).fill("same-fixture-code");
+    await button(group, "Join group").click();
+    await group.getByLabel("Allow group members to change files and folders", { exact: true }).check();
+    await page.waitForFunction(() => window.fixtureGroupWritable === true);
+    await button(group, "Copy group code").click();
+    await group.getByText("Group code copied. Paste the same code on each computer.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.fixtureLanGroup), "same-fixture-code");
+    await button(options, "Done").click();
+    await files("left").press("Alt+F1");
+    const groupPeer = sources("left").getByRole("group", { name: "Group test PC", exact: true });
+    await groupPeer.getByRole("button", { name: /^Files/ }).click();
+    await waitForPath("left", "/Files");
+    assert.deepEqual(await page.evaluate(() => window.groupTarget), { peer: "group-peer", segments: ["Files"] });
+    await files("left").press("F7");
+    const lanMkdir = page.getByRole("dialog", { name: "New folder", exact: true });
+    await lanMkdir.getByRole("textbox", { name: "Name", exact: true }).fill("Projects");
+    await button(lanMkdir, "Create").click();
+    await lanMkdir.getByRole("alert").filter({ hasText: "The remote computer allows read access only." }).waitFor();
+    await page.evaluate(() => { window.fixturePeerAllowsCreate = true; });
+    await button(lanMkdir, "Create").click();
+    await lanMkdir.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange.segments), ["Files", "Projects"]);
+    await button(pane("left"), "Tree").click();
+    const lanBranch = files("left").getByRole("treeitem", { name: /^nested/ });
+    await lanBranch.click();
+    await files("left").press("F7");
+    await lanMkdir.getByRole("textbox", { name: "Name", exact: true }).fill("Child");
+    await button(lanMkdir, "Create").click();
+    await lanMkdir.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange.segments), ["Files", "nested", "Child"]);
+    await lanBranch.click();
+    await files("left").press("Shift+F4");
+    const lanNewFile = page.getByRole("dialog", { name: "New file", exact: true });
+    await lanNewFile.getByRole("textbox", { name: "Name", exact: true }).fill("draft.txt");
+    await button(lanNewFile, "Create").click();
+    const lanEditor = page.getByRole("region", { name: "draft.txt", exact: true });
+    const lanContent = lanEditor.locator(".cm-content");
+    await lanContent.fill("Updated from the other computer.");
+    await lanContent.press(client === "macOS" ? "Meta+s" : "Control+s");
+    await page.waitForFunction(() => window.savedLanText);
+    assert.deepEqual(await page.evaluate(() => window.savedLanText), {
+      id: 10, segments: ["Files", "nested", "draft.txt"], revision: "remote-start", text: "Updated from the other computer.",
+    });
+    await button(lanEditor, "Close document").click();
+    const lanChild = files("left").getByRole("treeitem", { level: 2, name: /note\.txt/ });
+    await lanChild.click();
+    await files("left").press("F2");
+    const lanRename = page.getByRole("dialog", { name: "Rename", exact: true });
+    await lanRename.getByRole("textbox", { name: "Name", exact: true }).fill("renamed.txt");
+    await button(lanRename, "Rename").click();
+    await lanRename.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange), {
+      id: 10, segments: ["Files", "nested", "note.txt"], change: { kind: "rename", name: "renamed.txt" },
+    });
+    await lanChild.click();
+    await files("left").press("Shift+Delete");
+    const lanDelete = page.getByRole("dialog", { name: "Delete permanently", exact: true });
+    await button(lanDelete, "Delete permanently").click();
+    await lanDelete.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange), {
+      id: 10, segments: ["Files", "nested", "note.txt"], change: { kind: "delete", recursive: false },
+    });
+    await button(pane("left"), "List").click();
+    await files("right").press("Alt+F2");
+    await button(sources("right"), "Downloads").click();
+    await waitForPath("right", downloads);
+    await files("right").getByRole("option", { name: /^note\.txt/ }).click();
+    await files("right").press("F5");
+    const uploadDialog = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await uploadDialog.getByRole("textbox", { name: "Destination", exact: true }).inputValue(), "/Files/nested");
+    await button(uploadDialog, "Copy").click();
+    await uploadDialog.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.lastTransfer.serverDestination), 10);
+    await files("left").getByRole("option", { name: /^note\.txt/ }).click();
+    await files("left").press("F6");
+    const lanMove = page.getByRole("dialog", { name: "Rename or move", exact: true });
+    await button(lanMove, "Move").click();
+    await lanMove.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => ({
+      moving: window.lastTransfer.moving,
+      source: window.lastTransfer.source,
+    })), {
+      moving: true,
+      source: { kind: "server", connection: 10, segments: ["Files", "nested", "note.txt"], folder: false, writable_server: true },
+    });
+    await button(page, "Options").click();
+    await button(options, "Computers").click();
+    await button(group, "Leave group").click();
+    await group.getByLabel("Group code", { exact: true }).waitFor();
+    await button(options, "Done").click();
+    await page.evaluate(() => { window.fixtureSavedGroup = true; });
+    await button(page, "Options").click();
+    await button(options, "Computers").click();
+    await group.getByText("Waiting for the local network to reconnect to your group…", { exact: true }).waitFor();
+    await page.evaluate(() => {
+      window.fixtureLanGroup = "same-fixture-code";
+      window.fixtureGroupWritable = false;
+    });
+    await button(group, "Copy group code").waitFor();
+    assert.equal(await group.getByLabel("Allow group members to change files and folders").isChecked(), false);
+    await button(group, "Leave group").click();
+    await group.getByLabel("Group code", { exact: true }).waitFor();
     await button(options, "Done").click();
 
     async function enter(view, side) {
@@ -357,6 +535,142 @@ try {
         await page.keyboard.press("Digit0");
         assert.equal(await sources("left").isVisible(), true);
       }
+    }
+    for (const [profile, provider] of [[/^FTP fixture/, "ftp"], [/^SSH creation fixture/, "ssh"]]) {
+      await page.setViewportSize({ width: 1400, height: 760 });
+      await files("left").press("Alt+F1");
+      await button(sources("left"), "NetBox").click();
+      await files("left").getByRole("option", { name: profile }).dblclick();
+      await waitForPath("left", "/nested");
+      for (const [key, title, name, suffix] of [
+        ["F7", "New folder", "Projects", "folder"],
+        ["Shift+F4", "New file", "draft.txt", "text_file"],
+      ]) {
+        await files("left").press(key);
+        const create = page.getByRole("dialog", { name: title, exact: true });
+        await create.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+        await button(create, "Create").click();
+        if (provider === "ssh") {
+          const sudo = page.getByRole("dialog", { name: "SSH permissions", exact: true });
+          await sudo.getByLabel("Sudo password", { exact: true }).waitFor();
+          await button(sudo, "Continue with sudo").click();
+        }
+        await create.waitFor({ state: "hidden" });
+        const attempts = await page.evaluate(({ provider, suffix }) => window.remoteCreates.filter(({ command }) =>
+          command === `create_${provider}_${suffix}`), { provider, suffix });
+        assert.deepEqual(attempts.map(({ elevated }) => elevated), provider === "ssh" ? [false, true] : [false]);
+        assert.deepEqual(attempts.at(-1).segments, ["nested", name]);
+        if (suffix === "text_file") {
+          await button(page.getByRole("region", { name, exact: true }), "Close document").click();
+        }
+      }
+    }
+
+    await page.goto("http://dirlume.test/");
+    await waitForPath("right", downloads);
+    await files("left").press("Alt+F1");
+    await sources("left").press("Digit6");
+    const collectionPane = page.locator('[data-pane-side="left"][aria-label="Collections"]');
+    const collectionList = page.locator("#left-collections");
+    async function nameCollectionItem(title, name) {
+      const dialog = page.getByRole("dialog", { name: title, exact: true });
+      await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+      await button(dialog, "Create").click();
+      await dialog.waitFor({ state: "hidden" });
+    }
+    await button(collectionPane, "New collection").click();
+    await nameCollectionItem("New collection", "Delivery");
+    await collectionList.press("F7");
+    await nameCollectionItem("New folder", "Notes");
+    for (const confirm of [false, true, true]) {
+      await files("right").getByRole("option", { name: /^note\.txt/ }).click();
+      await files("right").press("F5");
+      const dialog = page.getByRole("dialog", { name: "Add to collection", exact: true });
+      await dialog.getByText("Delivery / Notes", { exact: true }).waitFor();
+      await button(dialog, confirm ? "Add to collection" : "Cancel").click();
+      await dialog.waitFor({ state: "hidden" });
+      assert.equal(await collectionList.getByRole("option", { name: /^note\.txt/ }).count(), confirm ? 1 : 0);
+    }
+    await page.reload();
+    await waitForPath("right", downloads);
+    await files("right").press("Alt+F2");
+    await button(sources("right"), "Collections").click();
+    const reopened = page.locator("#right-collections");
+    await reopened.getByRole("option", { name: "Delivery", exact: true }).click();
+    await reopened.press("F5");
+    const exportDialog = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await exportDialog.getByRole("combobox", { name: "Destination", exact: true }).inputValue(), home);
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.collectionFolders), { directory: home, paths: [["Delivery"], ["Delivery", "Notes"]] });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), { kind: "local", directory: downloads, name: "note.txt" });
+    assert.equal(await page.evaluate(() => window.lastTransfer.destination), [home, "Delivery", "Notes"].join(windows ? "\\" : "/"));
+    await reopened.getByRole("option", { name: "Delivery", exact: true }).dblclick();
+    await reopened.getByRole("option", { name: "Notes", exact: true }).dblclick();
+    const reference = reopened.getByRole("option", { name: /^note\.txt/ });
+    await reference.waitFor();
+    await reopened.press("Delete");
+    const remove = page.getByRole("dialog", { name: "Remove from collection", exact: true });
+    await button(remove, "Remove").click();
+    await reference.waitFor({ state: "hidden" });
+    assert.equal(await files("left").getByRole("option", { name: /^note\.txt/ }).count(), 1);
+
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "NetBox").click();
+    await files("left").getByRole("option", { name: /^FTP fixture/ }).dblclick();
+    await waitForPath("left", "/nested");
+    await files("left").getByRole("option", { name: /^note\.txt/ }).click();
+    await files("left").press("F5");
+    await button(page.getByRole("dialog", { name: "Add to collection", exact: true }), "Add to collection").click();
+    await reference.waitFor();
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "Home").click();
+    await waitForPath("left", home);
+    await reference.click();
+    await reopened.press("F5");
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "ftp", connection: 1, segments: ["nested", "note.txt"],
+    });
+    await openPairedDrive("Files");
+    await files("left").getByRole("option", { name: /^nested/ }).click();
+    await files("left").press("F5");
+    const addCollection = page.getByRole("dialog", { name: "Add to collection", exact: true });
+    await button(addCollection, "Add to collection").click();
+    const directFolder = reopened.getByRole("option", { name: /^nested.*Dirlume test PC/ });
+    await directFolder.waitFor();
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "Home").click();
+    await waitForPath("left", home);
+    await directFolder.click();
+    await reopened.press("F5");
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "server", connection: 8, segments: ["Files", "nested"], folder: true,
+    });
+    if (windows) {
+      await page.evaluate(() => { window.collectionKSwitcher = true; });
+      await files("left").press("Alt+F1");
+      const lan = sources("left").getByRole("group", { name: "KSwitcher LAN", exact: true });
+      await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
+      await files("left").getByRole("option", { name: /^nested/ }).click();
+      await files("left").press("F5");
+      await button(addCollection, "Add to collection").click();
+      const kswitcherFolder = reopened.getByRole("option", { name: /^nested.*C:/ });
+      await kswitcherFolder.waitFor();
+      await files("left").press("Alt+F1");
+      await button(sources("left"), "Home").click();
+      await waitForPath("left", home);
+      await kswitcherFolder.click();
+      await reopened.press("F5");
+      await button(exportDialog, "Copy").click();
+      await exportDialog.waitFor({ state: "hidden" });
+      assert.deepEqual(await page.evaluate(() => {
+        const { kind, peer, path, folder } = window.lastTransfer.source;
+        return { kind, peer, path, folder };
+      }), { kind: "kswitcher", peer: "online", path: "C:\\nested", folder: true });
     }
     const localized = {
       Windows: { language: "en", title: "Folder shortcuts", up: "Move up", down: "Move down" },

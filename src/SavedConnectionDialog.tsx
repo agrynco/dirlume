@@ -15,6 +15,7 @@ export const connectionCommands = {
   netbox: ["addNetBoxProfile", "editNetBoxProfile"],
   smb: ["addSmbProfile", "editSmbProfile"],
   remote: ["addRemoteProfile", "editRemoteProfile"],
+  googleDrive: ["addGoogleDriveProfile", "editGoogleDriveProfile"],
 } as const;
 
 export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeDirectory, bindings, onSaved, onClose }: {
@@ -50,6 +51,7 @@ export function SavedConnectionDialog({ source, profile, remoteProvider, bridgeD
         onUseFtp={changeProtocol ? (draft) => setSelection({ kind: "ftp", draft: { ...draft, port: draft.portEdited ? draft.port : "21" } }) : undefined} />
     );
   }
+  if (source === "googleDrive") return null;
   return <LocationConnectionDialog source={source} profile={profile} remoteProvider={remoteProvider}
     bridgeDirectory={bridgeDirectory} onSaved={onSaved} onClose={onClose} />;
 }

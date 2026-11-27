@@ -37,7 +37,7 @@ function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
 
 export function TextWindow(props: Omit<Parameters<typeof WholeTextWindow>[0], "openPaged">) {
   const { file, editing, active, fontSizes, diagnosticLog, onClose } = props;
-  const key = diagnosticLog ? null : JSON.stringify([documentPath(file), editing]);
+  const key = diagnosticLog ? null : JSON.stringify([documentPath(file), file.driveItem, editing]);
   const [opened, setOpened] = useState<{ key: string; pages: TextPages | null }>();
   const request = useRef<AbortController | null>(null);
 

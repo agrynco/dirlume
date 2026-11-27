@@ -1,4 +1,4 @@
-import { api, isFileServer, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
+import { api, isFileServer, supportsFileTree, placePath, smbHost, smbLocation, uncParts, windowsClient, type ConnectionSource, type Entry, type FileLocation, type FilePlace, type Listing, type Place, type SizeResult, type SshPlace } from "./api";
 import { locale, t } from "./i18n";
 import { connectionEntries } from "./savedConnections";
 
@@ -72,6 +72,10 @@ export function folderMeasurement(pane: PaneState, entry: Entry) {
   return computed ? computed.unavailable ? undefined : computed : pane.sizes.get(entry.name);
 }
 
+export function entryLabel(entry: Entry) {
+  return entry.googleDrive?.name ?? (entry.connection?.kind === "googleDrive" ? entry.connection.label : entry.name);
+}
+
 export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortSettings,
   canSort: (mode: SortMode) => boolean, metadata: ReadonlyMap<string, PanelMetadata>, descriptions: ReadonlyMap<string, string>, pending: boolean) {
   const filter = pane.filter.toLocaleLowerCase();
@@ -83,9 +87,10 @@ export function visibleEntries(pane: PaneState, hidden: boolean, settings: SortS
     : pane.entries;
   const visible = compareFileEntries(
     entries.filter((entry) => (hidden || !entry.hidden || entry.name === pane.revealedHidden && entry.name === pane.selected) &&
-      (!filter || entry.name.toLocaleLowerCase().includes(filter))),
+      (!filter || entryLabel(entry).toLocaleLowerCase().includes(filter) ||
+        entry.connection?.kind === "googleDrive" && entry.connection.email.toLocaleLowerCase().includes(filter))),
     sort, available ? chosen : "name", settings, pane.marked,
-    (entry) => pane.search?.matches.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entry.name,
+    (entry) => pane.search?.matches.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entryLabel(entry),
     (entry, field) => {
       switch (field) {
         case "modified": return entry.modified;
@@ -197,6 +202,7 @@ export function filesystemPlace(path: string): FileLocation {
 }
 
 export function childPlace(place: FileLocation, name: string): FileLocation {
+  if (place.kind === "googleDrive") return place;
   if (!windowsClient && place.kind === "smbRoot") {
     return { kind: "smbRoot", path: place.path.replace(/\/+$/, "") + "/" + encodeURIComponent(name) };
   }
@@ -212,6 +218,7 @@ export function childPlace(place: FileLocation, name: string): FileLocation {
 
 export function parentPlace(place: Place | null): FileLocation | null {
   if (!place || place.kind === "connections") return null;
+  if (place.kind === "googleDrive") return place.folders.length ? { ...place, folders: place.folders.slice(0, -1) } : null;
   if (place.kind === "archive") return place.segments.length
     ? { ...place, segments: place.segments.slice(0, -1) } : localPath(place.parent);
   if (place.kind === "server" || isFileServer(place)) {
@@ -238,6 +245,7 @@ export function parentPath(path: string, windows: boolean) {
 }
 
 export function placeKey(place: FileLocation) {
+  if (place.kind === "googleDrive") return JSON.stringify([place.kind, place.id, ...place.folders.map(({ id }) => id)]);
   const source = place.kind === "local" || place.kind === "smbRoot" ? [] :
     place.kind === "kswitcher" ? [place.directory, place.peer] : [place.id];
   const path = placePath(place);
@@ -247,6 +255,7 @@ export function placeKey(place: FileLocation) {
 
 export function connectionSource(place: FileLocation | null): ConnectionSource | undefined {
   switch (place?.kind) {
+    case "googleDrive": return "googleDrive";
     case "ftp":
     case "ssh": return "netbox";
     case "server":
@@ -291,6 +300,9 @@ export class SmbCredentialsRequired extends Error {
 }
 
 function folderInAncestor(from: Place | null, to: Place) {
+  if (from?.kind === "googleDrive" && to.kind === "googleDrive" && from.id === to.id) {
+    return to.folders.every((folder, index) => folder.id === from.folders[index]?.id) ? from.folders[to.folders.length]?.id : undefined;
+  }
   if (!from || from.kind !== to.kind) return;
   if ((to.kind === "server" || isFileServer(to)) && (!("id" in from) || from.id !== to.id)) return;
   if (to.kind === "kswitcher" && (from.kind !== "kswitcher" || from.peer !== to.peer || from.directory !== to.directory)) return;
@@ -308,6 +320,13 @@ type PlaceListing<Location extends Place> = { place: Location; listing: Listing;
 export function readPlace(place: FileLocation, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<FileLocation>>;
 export function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<Place>>;
 export async function readPlace(place: Place, sudoPassword?: string, reuseSudo?: boolean, signal?: AbortSignal): Promise<PlaceListing<Place>> {
+  if (place.kind === "googleDrive") {
+    const items = await api.listGoogleDrive(place.id, place.folders.at(-1)?.id ?? "root");
+    return { place, listing: { omitted: 0, entries: items.map((item) => ({
+      name: item.id, directory: item.directory, size: item.size, modified: item.modified,
+      hidden: false, link: false, googleDrive: item,
+    })) } };
+  }
   if (place.kind === "connections") return { place, listing: { entries: await connectionEntries(place.source), omitted: 0 } };
   if (place.kind === "archive") return { place, listing: await api.listArchive(place.id, place.segments) };
   if (place.kind === "ftp") return { place, listing: await api.listFtp(place.id, place.segments, signal) };
@@ -358,7 +377,7 @@ export function applyListing(pane: PaneState, place: Place, listing: Listing, ac
   const retained = (key: string) => {
     if (current.has(key)) return true;
     const slash = key.indexOf("/");
-    if (slash < 0 || place.kind !== "local") return false;
+    if (slash < 0 || !supportsFileTree(place)) return false;
     const branch = current.get(key.slice(0, slash));
     return !!branch?.directory && !branch.link;
   };

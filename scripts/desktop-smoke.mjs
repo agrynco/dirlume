@@ -185,16 +185,18 @@ async function testDirectComputerPairing(guest) {
   const hostProgram = join(hostStorage, "Dirlume.exe");
   await copyFile(executable, hostProgram);
   const host = await launchDesktop(hostProgram, hostStorage);
-  const name = "Loopback desktop";
   const systemDrive = process.env.SystemDrive ?? "C:";
+  let name;
   try {
     assert.notEqual(host.process.pid, child.pid);
+    name = await host.page.evaluate(() => window.__TAURI_INTERNALS__.invoke("computer_name")) ?? "127.0.0.1";
     const share = await host.page.evaluate(() =>
       window.__TAURI_INTERNALS__.invoke("start_desktop_computer_share", { address: "127.0.0.1" }));
     await guest.bringToFront();
     const options = await openOptionsWindow(guest);
     await options.getByRole("button", { name: "Computers", exact: true }).click();
-    await options.getByLabel("Computer name", { exact: true }).fill(name);
+    await options.getByText("Legacy pairing codes", { exact: true }).click();
+    assert.equal(await options.getByLabel("Computer name", { exact: true }).count(), 0);
     await options.getByLabel("Pairing code", { exact: true }).evaluate((input, invitation) => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, invitation);
       input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -225,7 +227,7 @@ async function testDirectComputerPairing(guest) {
     console.log("Verified native Dirlume-to-Dirlume pairing, drives in both panes, and revocation on a separate host process.");
   } finally {
     try {
-      if (!guest.isClosed()) await guest.evaluate(async (label) => {
+      if (name && !guest.isClosed()) await guest.evaluate(async (label) => {
         const key = "dirlume.remote-connections";
         const profiles = JSON.parse(localStorage.getItem(key) ?? "[]");
         const paired = profiles.find((profile) => profile.label === label && profile.lan === true);
@@ -1112,8 +1114,9 @@ try {
   assert.equal(await optionsContent.locator("mark, .setting-search-alias").count(), 0);
   await optionsDialog.getByRole("button", { name: "Computers", exact: true }).click();
   await optionsDialog.getByRole("heading", { name: "Computers", exact: true }).waitFor();
-  await optionsDialog.getByLabel("Pairing code", { exact: true }).waitFor();
-  assert.equal(await optionsDialog.getByRole("button", { name: "Pair computer", exact: true }).isEnabled(), false);
+  const lanGroup = optionsDialog.getByRole("group", { name: "Dirlume LAN group", exact: true });
+  await lanGroup.getByLabel("Group code", { exact: true }).waitFor();
+  assert.equal(await lanGroup.getByRole("button", { name: "Join group", exact: true }).isEnabled(), false);
   assert.equal(await optionsDialog.getByLabel("KSwitcher installation folder", { exact: true }).count(), 0);
   await closeToolWindow(optionsPage);
   await showOptions(() => page.locator("#left-files").dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true }));
@@ -1826,7 +1829,7 @@ try {
     assert.equal(await flag("Hidden").isDisabled(), true);
     await cancelAttributes();
     await page.keyboard.press("F5");
-    await finishTransfer("Download");
+    await finishTransfer("Copy");
     await local.getByRole("option", { name: /^folder/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "folder", "файл.bin")), bytes);
     await remote.focus();
@@ -1846,7 +1849,7 @@ try {
     await page.getByRole("button", { name: "Close document", exact: true }).click();
     await page.getByRole("option", { name: /^файл.bin/ }).click();
     await page.keyboard.press("F5");
-    await finishTransfer("Download");
+    await finishTransfer("Copy");
     await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^файл.bin/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "файл.bin")), bytes);
     const back = leftPane.getByRole("button", { name: "Back", exact: true });
@@ -2031,6 +2034,11 @@ try {
       page = await startDesktop();
       return page;
     });
+    const sources = page.locator("#left-pane .location-menu");
+    await sources.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+    await sources.getByRole("button", { name: "Home", exact: true }).click();
+    await navigate("left", src);
+    await navigate("right", dst);
   }
   await showOptions();
   const featureDialog = optionsDialog;
@@ -2104,7 +2112,7 @@ try {
   featureFonts.forEach(([, family], index) => assert.ok(featureValues[index][0].replaceAll("\\", "").startsWith(family)));
   const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: "Files", exact: true });
   if (await filesTab.isVisible()) await filesTab.click();
-  const sampleForFonts = page.getByRole("option", { name: /^sample\.rs/ }).first();
+  const sampleForFonts = page.locator("#left-files").getByRole("option", { name: /^sample\.rs/ });
   const sampleSurface = page.getByRole("region", { name: "sample.rs", exact: true }).locator(".code-surface");
   for (const [shortcut, expected] of [["F3", "21px"], ["F4", "19px"]]) {
     await sampleForFonts.click();

@@ -16,10 +16,12 @@ Issue an invitation on the host after starting the server.
 dirlume-server invite --state-dir /var/lib/dirlume
 ```
 
-Share the invitation privately. It includes the address, TLS certificate, and token for reading the shared folder. In Dirlume, open **Connect**, paste the invitation, and choose **Connect**. **Download** copies files or entire folders to the local folder in the other pane. **View** opens text or Markdown, and **Compare** can use text files from both panes. The desktop app keeps the invitation in memory for the session. To change the address or revoke an invitation, stop the server and restart it with a new state directory.
+Share the invitation privately. It includes the address, TLS certificate, and access token for the shared folder. In Dirlume, use **Remote machine** to open the saved connection. Browse in **List** or **Tree**, press **F5** to copy files or folders to the other pane, and open or compare text files.
+
+Shares start with read access. To grant write access to everyone who holds the invitation, add `--allow-write` to the host's `serve` command. The server still uses the service account's filesystem permissions. A writable share supports creating, editing, renaming, copying, moving, and deleting files and folders. Remove the flag and restart the server to restore read-only access. To change the address or revoke the invitation itself, stop the server and restart it with a new state directory.
 
 ## Run continuously
 
-- **Ubuntu.** Use a systemd service under an unprivileged account. Set an absolute `ExecStart` and `Restart=on-failure`. Give the account read access to the shared folder and write access to its state directory. A system service can start before login.
+- **Ubuntu.** Use a systemd service under an unprivileged account. Set an absolute `ExecStart` and `Restart=on-failure`. Give the account read access to the shared folder and write access to its state directory. Grant write access to the shared folder if you run with `--allow-write`. A system service can start before login.
 - **macOS.** Use a LaunchDaemon to start at boot or a LaunchAgent to start at login. In `ProgramArguments`, put the absolute executable path and each argument in its own entry. Enable `RunAtLoad` and use `KeepAlive` to restart the process.
 - **Windows.** In Task Scheduler, create a task to run the executable with the `serve` arguments at startup or login. Set the task to restart after failure. To run before login, use a service account with access to both directories and configure the task to run while the account is signed out.

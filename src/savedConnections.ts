@@ -90,7 +90,8 @@ export async function saveRemoteConnection(label: string, provider: "server" | "
 }
 
 export async function removeSavedConnection(profile: SavedConnection) {
-  if (profile.kind === "ftp") await api.removeFtpProfile(profile.id);
+  if (profile.kind === "googleDrive") await api.removeGoogleDrive(profile.id);
+  else if (profile.kind === "ftp") await api.removeFtpProfile(profile.id);
   else if (profile.kind === "ssh") await api.removeSshProfile(profile.id);
   else if (profile.kind === "smb") {
     localStorage.setItem(smbKey, JSON.stringify(readSmbLocations().filter(({ id }) => id !== profile.id)));
@@ -103,6 +104,9 @@ export async function removeSavedConnection(profile: SavedConnection) {
 export async function connectionEntries(source: ConnectionSource): Promise<Entry[]> {
   let profiles: SavedConnection[];
   switch (source) {
+    case "googleDrive":
+      profiles = (await api.googleDriveProfiles()).map((profile) => ({ ...profile, kind: "googleDrive" }));
+      break;
     case "netbox": {
       const [ftp, ssh] = await Promise.all([api.ftpProfiles(), api.sshProfiles()]);
       profiles = [...ftp.map((item) => ({ ...item, kind: "ftp" as const })), ...ssh.map((item) => ({ ...item, kind: "ssh" as const }))];
@@ -119,6 +123,9 @@ export async function connectionEntries(source: ConnectionSource): Promise<Entry
   const taken = new Set([".."]);
   return profiles.map((connection) => {
     const { label } = connection;
+    if (connection.kind === "googleDrive") {
+      return { name: connection.id, directory: true, hidden: false, link: false, size: null, modified: null, connection };
+    }
     let name = label;
     for (let number = 2; taken.has(name); number++) name = `${label} (${number})`;
     taken.add(name);

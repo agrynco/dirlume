@@ -48,7 +48,7 @@ pub trait UploadSession: Session {
     fn upload_to_stage(
         &mut self,
         target: &[String],
-        input: &mut impl Read,
+        input: &mut (impl Read + io::Seek),
         progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<String>;
     fn remove_stage(&mut self, stage: &str);
@@ -493,7 +493,7 @@ mod tests {
         fn upload_to_stage(
             &mut self,
             _: &[String],
-            input: &mut impl Read,
+            input: &mut (impl Read + io::Seek),
             _: impl FnMut(u64) -> Result<()>,
         ) -> Result<String> {
             input.read_to_end(&mut self.staged).map_err(message)?;

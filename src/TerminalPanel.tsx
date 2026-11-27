@@ -13,7 +13,7 @@ import type { Scheme, Theme } from "./appearance";
 import { changeShellDirectory } from "./shell";
 import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { CommandSuggestions, commandSuggestions, moveSuggestion, type CommandSuggestion } from "./CommandSuggestions";
-import { replaceTerminalRange, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
+import { createTerminalSnippetTicket, replaceTerminalRange, replaceTerminalSnippet, trackTerminalDraft, type TerminalDraft } from "./terminalDraft";
 import { showTooltipAtPointer } from "./tooltips";
 import "@xterm/xterm/css/xterm.css";
 
@@ -243,6 +243,65 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     let lastCommand = 0;
     const submitted = new Map<string, { original: string; pending: number }>();
     const applicationQueue: Exclude<TerminalCommand, null>[] = [];
+    // Keep the accessibility receiver beside the xterm input so a request
+    // can only target the terminal that owns focus.
+    const snippetInput = windowsClient && !menuRun && term.textarea?.parentElement
+      ? document.createElement("input") : null;
+    let snippetTicket = "";
+    let snippetInputHasTerminalFocus = false;
+    let returnSnippetFocusTimer = 0;
+    if (snippetInput) {
+      snippetInput.className = "dirlume-terminal-snippet-input";
+      snippetInput.tabIndex = -1;
+      snippetInput.hidden = true;
+      snippetInput.setAttribute("aria-label", t("Insert KSwitcher snippet"));
+      term.textarea?.parentElement?.append(snippetInput);
+      snippetInput.addEventListener("input", insertSnippet);
+      snippetInput.addEventListener("focus", () => {
+        // WebView2 focuses the receiver before applying an accessibility edit.
+        returnSnippetFocusTimer = window.setTimeout(restoreSnippetFocus, 100);
+      });
+    }
+
+    function snippetDraft() {
+      const buffer = term.buffer.active;
+      return atPrompt && !closed && !stopped && clipboard.current.visible &&
+        buffer.type === "normal" && buffer.viewportY === buffer.baseY
+        ? editable : null;
+    }
+
+    function syncSnippetInput() {
+      if (!snippetInput) return;
+      if (!snippetDraft()) snippetTicket = "";
+      else if (!snippetTicket) snippetTicket = createTerminalSnippetTicket();
+      snippetInput.hidden = !snippetTicket;
+      snippetInput.value = snippetTicket;
+    }
+
+    function insertSnippet() {
+      if (!snippetInput) return;
+      const focus = document.activeElement;
+      const input = document.hasFocus() &&
+        (focus === term.textarea || snippetInputHasTerminalFocus && focus === snippetInput) && snippetDraft();
+      const replacement = input && snippetTicket && replaceTerminalSnippet(input, snippetTicket, snippetInput.value,
+        term.modes.applicationCursorKeysMode, term.modes.bracketedPasteMode);
+      if (replacement) {
+        editable = replacement.draft;
+        snippetTicket = "";
+        hideSuggestions();
+        send(replacement.data, false);
+      }
+      restoreSnippetFocus();
+    }
+
+    function restoreSnippetFocus() {
+      window.clearTimeout(returnSnippetFocusTimer);
+      const restore = snippetInputHasTerminalFocus && document.hasFocus() && !closed && !stopped &&
+        clipboard.current.visible && document.activeElement === snippetInput;
+      snippetInputHasTerminalFocus = false;
+      if (restore) term.focus();
+      syncSnippetInput();
+    }
 
     function hideSuggestions() {
       revision++;
@@ -341,7 +400,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       activeRequest = null;
       hideSuggestions();
     };
-    term.textarea?.addEventListener("blur", hideSuggestions);
+    function blurTerminal(event: FocusEvent) {
+      snippetInputHasTerminalFocus = snippetInput !== null && event.relatedTarget === snippetInput;
+      if (event.relatedTarget && !snippetInputHasTerminalFocus) {
+        snippetTicket = "";
+        syncSnippetInput();
+      }
+      hideSuggestions();
+    }
+    term.textarea?.addEventListener("blur", blurTerminal);
 
     function runQueuedCommand() {
       if (closed || stopped || !opened || (tracksPrompt && (!atPrompt || draft))) return false;
@@ -390,6 +457,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
 
     function shellCommand(command: string) {
+      const dnsFlush = windows && command.match(/^[ \t]*(ipconfig(?:\.exe)?)[ \t]+(\/flushdns)[ \t]*$/i);
+      if (dnsFlush) return "Invoke-DirlumeDnsFlush '" + dnsFlush[1] + "' '" + dnsFlush[2] + "'";
       if (!/\p{Cc}/u.test(command)) return command;
       const encoded = btoa(Array.from(new TextEncoder().encode(command), (byte) => String.fromCharCode(byte)).join(""));
       if (windows) return ". ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "'))))";
@@ -483,6 +552,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       draft = false;
       hideSuggestions();
       editable = editorSupported ? { text: "", caret: 0 } : null;
+      snippetTicket = "";
+      syncSnippetInput();
       if (!followingPane && nextDirectory === null && currentDirectory && currentDirectory !== previousDirectory) {
         reportDirectory.current(currentDirectory);
       }
@@ -563,6 +634,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
           if (editable?.text.trim()) completionTimer = window.setTimeout(() => void completeDraft(), 160);
         }
       }
+      syncSnippetInput();
       queued = queued.then(async () => {
         await opening;
         if (stopped) return;
@@ -674,6 +746,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       }).catch(() => {});
     });
     const scrolled = term.onScroll(() => {
+      syncSnippetInput();
       hideLinkTooltip();
       if (term.buffer.active.viewportY !== term.buffer.active.baseY) hideSuggestions();
       else renderSuggestions();
@@ -684,6 +757,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     return () => {
       stopped = true;
       clearTimeout(startupTimer);
+      clearTimeout(returnSnippetFocusTimer);
       hideLinkTooltip();
       hideSuggestions();
       suspendSuggestions.current = () => {};
@@ -696,7 +770,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       resized.dispose();
       scrolled.dispose();
       outputChanged.dispose();
-      term.textarea?.removeEventListener("blur", hideSuggestions);
+      term.textarea?.removeEventListener("blur", blurTerminal);
       surface.removeEventListener("mousedown", preserveSelection, true);
       surface.removeEventListener("mousemove", trackLinkDrag, true);
       surface.removeEventListener("contextmenu", openContextMenu, true);

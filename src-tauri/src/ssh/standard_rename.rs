@@ -1,8 +1,8 @@
 use std::{borrow::Cow, num::NonZeroUsize, ops::Deref, path::Path, sync::Mutex};
 
 use bytes::Bytes;
-use openssh_sftp_client_lowlevel::{connect, Queue, ReadEnd};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use openssh_sftp_client_lowlevel::{connect, Queue, ReadEnd, WriteEnd};
+use tokio::io::{AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 
 use super::{message, sftp_channel, AuthenticatedRoute, Result};
 
@@ -38,28 +38,91 @@ impl PendingPackets {
 
 pub(super) async fn run(client: &AuthenticatedRoute, from: &str, to: &str) -> Result<()> {
     let channel = sftp_channel(client).await?;
-    let (reader, mut writer) = tokio::io::split(channel.into_stream());
-    let mut requests = connect::<Vec<u8>, _, _>(PendingPackets::default(), ()).map_err(message)?;
-    let mut replies = ReadEnd::new(
-        reader,
-        NonZeroUsize::new(4096).unwrap(),
-        requests.deref().clone(),
-    );
-    requests.queue().flush(&mut writer).await?;
-    replies.receive_server_hello().await.map_err(message)?;
-    let id = requests.create_response_id();
-    // Deliberately use SFTP v3 rename. The advertised POSIX extension overwrites an
-    // existing name, including an item created while the upload was being published.
-    let reply = requests
-        .send_rename_request(
-            id,
-            Cow::Borrowed(Path::new(from)),
-            Cow::Borrowed(Path::new(to)),
-        )
-        .map_err(message)?;
-    requests.queue().flush(&mut writer).await?;
-    replies.read_in_one_packet().await.map_err(message)?;
-    reply.wait().await.map_err(message)?;
-    let _ = writer.shutdown().await;
-    Ok(())
+    run_on_channel(channel, from, to).await
+}
+
+pub(super) async fn run_on_channel(
+    channel: russh::Channel<russh::client::Msg>,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    let mut session = RenameSession::open(channel).await?;
+    let result = session.rename(from, to).await;
+    let _ = session.channel_mut().writer.shutdown().await;
+    result
+}
+
+type Stream = russh::ChannelStream<russh::client::Msg>;
+
+pub(super) struct RenameSession {
+    channel: Option<RenameChannel>,
+    pub usable: bool,
+}
+
+struct RenameChannel {
+    writer: WriteHalf<Stream>,
+    requests: WriteEnd<Vec<u8>, PendingPackets>,
+    replies: ReadEnd<ReadHalf<Stream>, Vec<u8>, PendingPackets>,
+}
+
+impl Drop for RenameSession {
+    fn drop(&mut self) {
+        if let Some(channel) = self.channel.take() {
+            // russh closes the channel by spawning a Tokio task when its stream drops.
+            tauri::async_runtime::spawn(async move { drop(channel) });
+        }
+    }
+}
+
+impl RenameSession {
+    pub(super) async fn open(channel: russh::Channel<russh::client::Msg>) -> Result<Self> {
+        let (reader, mut writer) = tokio::io::split(channel.into_stream());
+        let requests = connect::<Vec<u8>, _, _>(PendingPackets::default(), ()).map_err(message)?;
+        let mut replies = ReadEnd::new(
+            reader,
+            NonZeroUsize::new(4096).unwrap(),
+            requests.deref().clone(),
+        );
+        requests.queue().flush(&mut writer).await?;
+        replies.receive_server_hello().await.map_err(message)?;
+        Ok(Self {
+            channel: Some(RenameChannel {
+                writer,
+                requests,
+                replies,
+            }),
+            usable: true,
+        })
+    }
+
+    fn channel_mut(&mut self) -> &mut RenameChannel {
+        self.channel.as_mut().expect("open SSH rename channel")
+    }
+
+    pub(super) async fn rename(&mut self, from: &str, to: &str) -> Result<()> {
+        self.usable = false;
+        let channel = self.channel_mut();
+        let id = channel.requests.create_response_id();
+        // SFTP v3 rename preserves an existing name. The POSIX extension can overwrite it.
+        let reply = channel
+            .requests
+            .send_rename_request(
+                id,
+                Cow::Borrowed(Path::new(from)),
+                Cow::Borrowed(Path::new(to)),
+            )
+            .map_err(message)?;
+        channel.requests.queue().flush(&mut channel.writer).await?;
+        channel
+            .replies
+            .read_in_one_packet()
+            .await
+            .map_err(message)?;
+        self.usable = true;
+        reply
+            .wait()
+            .await
+            .map(|_| ())
+            .map_err(|error| super::SftpFailure::from(error).into())
+    }
 }

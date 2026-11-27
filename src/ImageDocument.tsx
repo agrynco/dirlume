@@ -1,9 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Maximize, Pencil, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "./Button";
 import { documentPath, type NamedFile } from "./api";
 import { errorText, t } from "./i18n";
 import { HexViewer } from "./HexViewer";
+import { SudoDialog } from "./SudoDialog";
 import { canEditImage, ImageViewport, useImageSource, useImageViewport } from "./ImageViewport";
 import { bindingMatches, eventShortcut, showShortcuts, type Bindings, type Command } from "./preferences";
 
@@ -19,12 +20,15 @@ export function ImageDocument({ file, active, shortcuts, previous, next, revisio
   onEdit: () => void;
 }) {
   const section = useRef<HTMLElement>(null);
-  const content = useImageSource(file, revision);
+  const { content, authorize } = useImageSource(file, revision);
   const view = useImageViewport(shortcuts.zoomFont);
   const [hex, setHex] = useState(false);
+  const [sudo, setSudo] = useState(false);
   const canZoom = Boolean(view.natural && !view.failed && !hex);
   const path = documentPath(file);
   const editable = canEditImage(file);
+
+  useEffect(() => { setSudo(false); }, [path]);
 
   useLayoutEffect(() => {
     if (active) section.current?.focus({ preventScroll: true });
@@ -87,9 +91,13 @@ export function ImageDocument({ file, active, shortcuts, previous, next, revisio
     </div>
     {hex && <HexViewer file={file} revision={revision} />}
     {!hex && content && "error" in content && <p className="dialog-error" role="alert">{errorText(content.error)}</p>}
+    {!hex && file.place.kind === "ssh" && content && "error" in content && content.error === "SSH permission denied." &&
+      <Button onClick={() => setSudo(true)}>{t("Open with sudo…")}</Button>}
     {!hex && view.failed && <p className="dialog-error" role="alert">{t("Could not display this image.")}</p>}
     {!hex && !content && <p className="text-view" role="status">{t("Loading preview…")}</p>}
     <ImageViewport name={file.name} view={view} url={content && "url" in content ? content.url : undefined}
       hidden={hex || view.failed || !content || "error" in content} />
+    {active && !hex && sudo && file.place.kind === "ssh" && <SudoDialog address={file.place.address} path={path} operation="read"
+      onConfirm={authorize} onClose={() => setSudo(false)} />}
   </section>;
 }
