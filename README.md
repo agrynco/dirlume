@@ -40,7 +40,7 @@ Choose a file panel mode from the **Left** or **Right** menu. The active pane al
 
 In Brief and Medium, **Up** and **Down** follow the sort order from the bottom of one column to the top of the next. **Left**, **Right**, **Page Up**, and **Page Down** move by a whole screen of files. **Home** and **End** go to the first and last entries.
 
-In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
+In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Built-in modes set widths to **0** for automatic sizing. The list fits headings and values when space allows, including file size units. Name takes the space left by the metadata columns. To set your own widths, enter a character count or a percentage of the remaining space. Right-click the headings to show or hide columns for the current pane and mode. Each pane sizes its columns independently.
 
 The built-in **Full** mode uses automatic Size and Date widths. These widths follow the displayed values in the current pane font. The Size column widens as needed to show full folder measurements, even with a saved width. Set a column width to **0** to fit its displayed values automatically.
 

@@ -220,6 +220,9 @@ jobs:
       - name: Verify local file pane Tree and folder sizing
         if: github.event.action != 'closed'
         run: node scripts/file-pane-tree-smoke.mjs
+      - name: Verify automatic file pane column widths
+        if: github.event.action != 'closed'
+        run: node scripts/pane-column-sizing-smoke.mjs
       - name: Verify local Search results actions and refresh
         if: github.event.action != 'closed'
         run: node scripts/search-results-smoke.mjs
