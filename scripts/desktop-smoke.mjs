@@ -1829,7 +1829,7 @@ try {
     assert.equal(await flag("Hidden").isDisabled(), true);
     await cancelAttributes();
     await page.keyboard.press("F5");
-    await finishTransfer("Download");
+    await finishTransfer("Copy");
     await local.getByRole("option", { name: /^folder/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "folder", "файл.bin")), bytes);
     await remote.focus();
@@ -1849,7 +1849,7 @@ try {
     await page.getByRole("button", { name: "Close document", exact: true }).click();
     await page.getByRole("option", { name: /^файл.bin/ }).click();
     await page.keyboard.press("F5");
-    await finishTransfer("Download");
+    await finishTransfer("Copy");
     await page.getByRole("listbox", { name: "right files", exact: true }).getByRole("option", { name: /^файл.bin/ }).waitFor();
     assert.deepEqual(await readFile(join(dst, "файл.bin")), bytes);
     const back = leftPane.getByRole("button", { name: "Back", exact: true });
