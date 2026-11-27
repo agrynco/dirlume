@@ -83,7 +83,7 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
   }
   async function checkHeaderMenus() {
     const bar = await waitFor("the main menu", () => document.querySelector(".topbar .main-menu"));
-    if (!bar.hidden) throw new Error("The installed app displayed the main menu at startup.");
+    if (!bar.hidden) throw new Error("The installed app did not restore the saved hidden main menu.");
     for (const side of ["Right", "Left"]) {
       await revealMainMenu();
       const control = [...bar.querySelectorAll("[data-menu-group]")].find((button) => button.textContent === side);
@@ -366,8 +366,12 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
     const install = dialogButton(manualOffer, "Install and restart");
     const preferences = JSON.parse(localStorage.getItem(preferenceKey) ?? "{}");
     preferences.viewFontSizes = { ...preferences.viewFontSizes, left: 23 };
+    preferences.showMainMenu = false;
     delete preferences.mainMenuAlignment;
     preferences.menuPosition = "right";
+    if (/Windows/.test(navigator.userAgent)) {
+      await invoke("save_windows_preferences", { preferences, onlyIfMissing: false });
+    }
     localStorage.setItem(preferenceKey, JSON.stringify(preferences));
     if (portable) {
       window.dispatchEvent(new StorageEvent("storage", { key: preferenceKey }));
