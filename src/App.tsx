@@ -4351,7 +4351,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               const remote = modal.remote;
               const listing = remote ? await (remote.kind === "ssh"
                 ? api.listSsh(remote.id, [...remote.segments, ...segments], undefined, true).catch((error: unknown) => {
-                  if (String(error) === "SSH permission denied.") return { entries: [], omitted: 1 };
+                  if ((error instanceof Error ? error.message : String(error)) === "SSH permission denied.") {
+                    return { entries: [], omitted: 1 };
+                  }
                   throw error;
                 })
                 : api.listFtp(remote.id, [...remote.segments, ...segments]))
