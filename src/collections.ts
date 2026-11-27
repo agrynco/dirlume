@@ -94,12 +94,12 @@ export function collectionReferencePath({ origin, name }: CollectionReference) {
 export async function resolveCollectionReference(
   reference: CollectionReference,
   bridgeDirectory: string,
-  register: (place: FilePlace) => void,
+  register: (place: TextPlace) => void,
   archivePassword?: string,
   activePlaces: readonly (FilePlace | null)[] = [],
 ) {
   const { origin, name } = reference;
-  let place: FilePlace;
+  let place: TextPlace;
   let listing: Listing;
   switch (origin.kind) {
     case "local": {

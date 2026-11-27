@@ -8,8 +8,8 @@ import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronRight, File, Folder, Ruler,
   Activity, HardDrive, Link2, LoaderCircle, RefreshCw, Search, Server, TriangleAlert, X,
 } from "lucide-react";
-import { api, describeError, folderLabel, supportsFileTree, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
-import { folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
+import { api, describeError, folderLabel, googleDriveSignInRequired, supportsFileTree, placeAddress, smbHost, windowsClient, type ComputerDrive, type ConnectionSource, type DiskSpace, type Entry, type FileLocation, type PanelMetadataRequest, type Place, type QuickLocation } from "./api";
+import { entryLabel, folderMeasurement, formatDate, formatSize, paneCursorIndex, paneItem, type FilePaneView, type PaneState, type Side, type SortColumn } from "./panes";
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
@@ -85,7 +85,8 @@ interface PaneProps {
   onLocalLocation: (location: QuickLocation) => void;
   onPathAncestor: (place: Place) => void;
   onOpenConnections: (source: ConnectionSource) => void;
-  onAddNetBoxConnection: () => void;
+  onAddConnection: (source: ConnectionSource) => void;
+  onReconnectGoogleDrive: () => void;
   onCopyPath: (path: string) => void;
   onHistory: (offset: number) => void;
   onParent?: () => void;
@@ -156,11 +157,12 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
   onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
-  onPathAncestor, onOpenConnections, onAddNetBoxConnection, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
+  onPathAncestor, onOpenConnections, onAddConnection, onReconnectGoogleDrive, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
   const path = pane.place ? placeAddress(pane.place) : "";
   const catalog = pane.place?.kind === "connections";
   const netbox = pane.place?.kind === "connections" && pane.place.source === "netbox";
+  const driveCatalog = pane.place?.kind === "connections" && pane.place.source === "googleDrive";
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useQuickSearch(side, !processView);
   const list = useRef<HTMLDivElement>(null);
@@ -196,7 +198,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   const fitMeasuredFolders = !pane.search && (pane.sizes.size > 0 || hasReadyBackgroundSize);
   const tlsProfiles = netbox && pane.entries.some(({ connection }) =>
     connection?.kind === "ftp" && connection.encryption && connection.encryption !== "plain");
-  const tracks = netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns, fitMeasuredFolders);
+  const tracks = driveCatalog ? "minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)" : netbox ? `minmax(0, 2fr) minmax(0, ${tlsProfiles ? 15 : 7}ch) minmax(0, 3fr)` : panelColumnTracks(columns, fitMeasuredFolders);
   const rowProbe = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
   const selected = paneCursorIndex(pane, entries);
@@ -421,9 +423,9 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         return links == null ? missing : links.toLocaleString(locale());
       }
       default: {
-        const original = matches?.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entry.name;
+        const original = matches?.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entryLabel(entry);
         const display = displayPanelName(original, entry.directory, definition);
-        const prefix = listing && !entry.tree && original !== entry.name ? entry.name.slice(0, -original.length) : "";
+        const prefix = listing && !entry.googleDrive && entry.connection?.kind !== "googleDrive" && !entry.tree && original !== entry.name ? entry.name.slice(0, -original.length) : "";
         return prefix.normalize("NFC") + display;
       }
     }
@@ -510,7 +512,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <h2 data-tooltip={pane.search?.query.mask ?? title}>{title}</h2>
           {!processView && pane.place && pane.place.kind !== "connections" && pane.place.kind !== "local" && pane.place.kind !== "smbRoot" && <span className="remote-name"
             data-tooltip={pane.place.kind === "archive" ? t(pane.place.address) : pane.place.address}>
-            {pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
+            {pane.place.kind === "googleDrive" ? pane.place.address : pane.place.kind === "archive" ? t(pane.place.address) : t("Remote")}</span>}
           {!processView && host && <span className="remote-name" data-tooltip={path}>SMB · {host}</span>}
         </div>
         {layout === "standard" && viewControls}
@@ -572,15 +574,15 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
           <Button className="icon-button" aria-label={t("Close filter")} onClick={() => { setFilterOpen(false); onFilter(""); list.current?.focus(); }}><X /></Button>
         </label>
       )}
-      {netbox ? <div className="file-columns" ref={columnHeader}>
+      {netbox || driveCatalog ? <div className="file-columns" ref={columnHeader}>
         <div className="file-column-grid" style={{ gridTemplateColumns: tracks }}>
           <div className="file-column col-name">
             <Button type="button" onClick={() => onSort("name")} tooltip={t("Sort by {0}", t("Name").toLocaleLowerCase())}>
               <span>{t("Name")}</span>{sortAvailable && pane.sort.column === "name" && (pane.sort.asc ? <ArrowUp /> : <ArrowDown />)}
             </Button>
           </div>
-          <div className="file-column"><span className="file-column-label">{t("Protocol")}</span></div>
-          <div className="file-column"><span className="file-column-label">{t("Host")}</span></div>
+          <div className="file-column"><span className="file-column-label">{t(driveCatalog ? "Account email" : "Protocol")}</span></div>
+          <div className="file-column"><span className="file-column-label">{t(driveCatalog ? "Status" : "Host")}</span></div>
         </div>
       </div> : <FileColumns container={columnHeader} groups={groups} columns={definition.list} tracks={tracks} samples={widthSamples} statusSamples={statusSamples}
         visibility={visibility} sort={sortAvailable ? pane.sort : { ...pane.sort, column: "name", asc: true }} onSort={onSort}
@@ -618,18 +620,20 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         {virtual && <div ref={rowProbe} className="file-row-probe" aria-hidden="true" />}
         {entries.length > 0 && <div className="file-list-grid" style={{ gridTemplateColumns: tracks }} role="presentation">
           {renderedGroups.map(({ group, first, last, indices }, groupIndex) => <div key={groupIndex} className="file-row-group"
-            style={netbox ? { gridColumn: "1 / -1" } : columnGroupTrack(groups, groupIndex)} role="presentation">
+            style={netbox || driveCatalog ? { gridColumn: "1 / -1" } : columnGroupTrack(groups, groupIndex)} role="presentation">
           {indices.map((index, offset) => {
             const gap = index - (indices[offset - 1] ?? first - 1) - 1;
             const entry = entries[index];
             const connection = entry.connection;
+            const drive = connection?.kind === "googleDrive" ? connection : undefined;
+            const signIn = drive ? t(drive.signInNeeded ? "Sign-in needed" : "Signed in") : "";
             const profile = netbox && (connection?.kind === "ftp" || connection?.kind === "ssh") ? connection : undefined;
             const protocol = profile?.kind === "ssh" ? "SFTP" : profile?.encryption === "explicitTls" ? t("FTPS (explicit)") :
               profile?.encryption === "implicitTls" ? t("FTPS (implicit)") : "FTP";
             const icon = icons.get(byName.get(entry.name) ?? "");
             const measuring = !search && entry.directory && !entry.link && pane.measuring.includes(entry.name);
             const marked = markedSet.has(entry.name);
-            const appearance = fileAppearance(entry, fileTypes);
+            const appearance = fileAppearance(entry.googleDrive ? { ...entry, name: entry.googleDrive.name } : entry, fileTypes);
             const branchError = entry.tree?.error && (entry.tree.stale
               ? t("Folder contents may be out of date. {0}", errorText(entry.tree.error)) : errorText(entry.tree.error));
             return <Fragment key={entry.name}>
@@ -639,12 +643,12 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 aria-posinset={virtual && !tree ? index + 1 : undefined}
                 aria-level={entry.tree?.segments.length}
                 aria-expanded={entry.tree && entry.directory && !entry.link ? entry.tree.expanded : undefined}
-                aria-label={profile ? [entry.name, protocol, profile.host].join(" ") : group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
+                aria-label={drive ? [drive.label, drive.email, signIn].join(" ") : profile ? [entry.name, protocol, profile.host].join(" ") : group.map(({ field }) => itemValue(entry, field, true)).join(" ")}
                 aria-description={branchError}
                 data-file-color={appearance.tone}
                 style={appearance.color || appearance.family ? { "--entry-color": appearance.color,
                   "--entry-font": appearance.family && `${CSS.escape(appearance.family)}, var(--panel-font)` } as CSSProperties : undefined}
-                aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entry.name} data-entry-index={index}
+                aria-selected={markedSet.size ? marked : index === selected} data-current={index === selected} data-tooltip={entryLabel(entry)} data-entry-index={index}
                 data-help-topic={catalog || search ? undefined : "paneSelection"}
                 onClick={(event) => { onRow(entry, event.shiftKey, event.ctrlKey || event.metaKey); list.current?.focus({ preventScroll: true }); }}
                 onContextMenu={(event) => {
@@ -655,7 +659,11 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
                 onPointerDown={(event) => { if (entry.name !== ".." && rename?.rowKey !== entry.name) onStartDrag(entry, event); }}
                 onDragStart={(event) => event.preventDefault()}
                 onDoubleClick={() => onOpen(entry)}>
-                {profile ? <>
+                {drive ? <>
+                  <span className="file-name"><Server aria-hidden="true" /><span className="file-name-text">{drive.label}</span></span>
+                  <span className="file-metadata file-host" dir="auto" data-tooltip={drive.email}>{drive.email}</span>
+                  <span className="file-metadata file-host" data-tooltip={signIn}>{signIn}</span>
+                </> : profile ? <>
                   <span className="file-name"><Server aria-hidden="true" /><span className="file-name-text">{entry.name}</span></span>
                   <span className="file-metadata file-protocol" data-tooltip={protocol}>{protocol}</span>
                   <span className="file-metadata file-host" dir="auto" data-tooltip={profile.host}>{profile.host}</span>
@@ -693,25 +701,27 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
             <div className="file-row-spacer" aria-hidden="true" style={{ height: (last - (indices.at(-1) ?? first - 1) - 1) * viewport.rowHeight }} />}
           </div>)}
         </div>}
-        {!entries.length && (
+        {(!entries.length || pane.place?.kind === "googleDrive" && entries.length === 1 && entries[0].name === "..") && (
           <div className="pane-empty">
-            {netbox && !pane.loading && !pane.error && !pane.filter ? <>
+            {(netbox || driveCatalog) && !pane.loading && !pane.error && !pane.filter ? <>
               <p>{t("No saved connections.")}</p>
-              <Button type="button" onClick={onAddNetBoxConnection}>{t("Add connection")}</Button>
-            </> : pane.loading ? t("Loading…") : pane.error ? (netbox ? null : t("Open another location to continue.")) :
+              <Button type="button" onClick={() => onAddConnection(driveCatalog ? "googleDrive" : "netbox")}>{t("Add connection")}</Button>
+            </> : pane.loading ? t("Loading…") : pane.error ? (netbox || driveCatalog || pane.place?.kind === "googleDrive" ? null : t("Open another location to continue.")) :
               pane.filter ? t("No items match the filter.") : search ? t("No visible matches.") : pane.place ? t("This folder is empty.") : t("Choose a location.")}
           </div>
         )}
       </div>
       {quickSearch !== null && <QuickSearch side={side} query={quickSearch} current={pane.selected} fileNames={!catalog}
-        items={folderItems.map(({ name, tree }) => ({ id: name, name: matches?.get(name)?.entry.name ?? tree?.segments.at(-1) ?? name }))}
+        items={folderItems.map((entry) => ({ id: entry.name, name: matches?.get(entry.name)?.entry.name ?? entry.tree?.segments.at(-1) ?? entryLabel(entry) }))}
         onChange={setQuickSearch} onMatch={onQuickMatch}
         onAccept={(name) => { const entry = entries.find((item) => item.name === name); if (entry) onOpen(entry); }}
         onClose={() => setQuickSearch(null)} focusList={() => list.current?.focus({ preventScroll: true })} />}
       {fileOpenFeedback}
       {pane.error && <div className="pane-error" data-help-topic="paneStatus">
         <span role="alert">{errorText(pane.error)}</span>
-        {netbox && !pane.loading && <Button type="button" onClick={onRefresh}>{t("Refresh connections")}</Button>}
+        {(netbox || driveCatalog) && !pane.loading && <Button type="button" onClick={onRefresh}>{t("Refresh connections")}</Button>}
+        {pane.place?.kind === "googleDrive" && pane.error === googleDriveSignInRequired &&
+          <Button type="button" onClick={onReconnectGoogleDrive}>{t("Reconnect")}</Button>}
         {pane.deniedSshListing && !pane.loading &&
           <Button type="button" onClick={onRetryWithSudo}>{t("Open with sudo…")}</Button>}
         <Button type="button" className="icon-button" aria-label={t("Dismiss error")} onClick={onDismissError}><X /></Button>

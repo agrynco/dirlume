@@ -22,7 +22,7 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
-import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
+import { googleDriveSignInRequired, smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
 import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
@@ -35,6 +35,7 @@ import { Dialog, readDialogSize } from "./Dialog";
 import { ReleaseNotes } from "./ReleaseNotes";
 import { KSwitcherUnavailableError, reportFrontendError, SshConnectionLostError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
+import { GoogleDriveConnectionDialog } from "./GoogleDriveConnectionDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
 import { FileHistoryDialog } from "./FileHistoryDialog";
 import { UserMenuDialog } from "./UserMenuDialog";
@@ -518,7 +519,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
   const permanentDelete = Boolean(fileServer && !remoteTrash || writableServer || smbHost(local));
   const canTransfer = Boolean(currentItem && (currentItem.place.kind !== "kswitcher" ||
-    currentItem.place.path && !currentItem.entry.link));
+    currentItem.place.path && !currentItem.entry.link) &&
+    (currentItem.place.kind !== "googleDrive" || currentItem.entry.googleDrive?.download &&
+      panes[opposite(active)].place?.kind === "local" && !smbHost(panes[opposite(active)].place)));
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
   const [helpRequest, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
@@ -737,8 +740,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         if (background && pane.error !== pane.kswitcherAvailabilityError) {
           Object.assign(listing, { error: pane.error, elevationPath: pane.elevationPath, deniedSshListing: pane.deniedSshListing });
         }
-        const source = openedPlace.kind === "connections" && openedPlace.source === "netbox" ? openedPlace.from : null;
-        if (action === "push" && isFileServer(source)) {
+        const source = openedPlace.kind === "connections" ? openedPlace.from : null;
+        if (openedPlace.kind === "connections" && openedPlace.source === "googleDrive" && action !== "refresh" && !background) {
+          const drive = pane.place?.kind === "googleDrive" ? pane.place : source?.kind === "googleDrive" ? source : undefined;
+          if (drive && listing.entries.some((entry) => entry.name === drive.id)) listing.selected = drive.id;
+        }
+        if (action === "push" && openedPlace.kind === "connections" && openedPlace.source === "netbox" && isFileServer(source)) {
           const profile = listing.entries.find(({ connection }) => connection?.kind === source.kind && connection.id === source.profileId);
           if (profile) listing.selected = profile.name;
         }
@@ -779,10 +786,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           setModal(credentialsDialog);
         }
         const text = credentialsRequired ? (prompt ? "" : error.message) : describeError(error);
+        if (place.kind === "googleDrive" && text === googleDriveSignInRequired) {
+          for (const shown of ["left", "right"] as const) {
+            updatePane(shown, (pane) => pane.place?.kind === "connections" && pane.place.source === "googleDrive"
+              ? { ...pane, entries: pane.entries.map((entry) => entry.connection?.kind === "googleDrive" && entry.connection.id === place.id
+                ? { ...entry, connection: { ...entry.connection, signInNeeded: true } } : entry) } : pane);
+          }
+        }
         updatePane(side, (pane) => {
           if (background && (pane.place !== place || pane.error === text ||
             pane.error && pane.error !== pane.kswitcherAvailabilityError)) return pane;
-          if (place.kind === "connections" && place.source === "netbox" &&
+          if (place.kind === "connections" && (place.source === "netbox" || place.source === "googleDrive") &&
             (action === "push" || typeof action === "number")) {
             return { ...applyListing(pane, place, { entries: [], omitted: 0 }, action, addressFrom), error: text };
           }
@@ -1733,6 +1747,18 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const item = paneItem(pane, entry);
     if (!item) return;
     const { place, entry: file } = item;
+    if (place.kind === "googleDrive") {
+      const item = file.googleDrive;
+      if (!item) return;
+      if (item.directory) {
+        void load(side, { ...place, folders: [...place.folders, { id: item.id, name: item.name }] });
+      } else if (item.webViewLink) {
+        openGoogleDriveLink(item.webViewLink);
+      } else {
+        setStatus({ text: "Copy the remote file to a local folder to open it." });
+      }
+      return;
+    }
     if (file.directory) {
       if (entry.tree && !file.link) { toggleTreeBranch(side, entry); return; }
       void load(side, childPlace(place, file.name), "push", selectParent && place.kind === "local" ? ".." : undefined);
@@ -1755,6 +1781,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       } else void fileOpens.openFile(side, place, file.name);
     } else {
       setStatus({ text: "Copy the remote file to a local folder to open it." });
+    }
+  }
+
+  function openGoogleDriveLink(link: string) {
+    void api.openWebLink(link).catch((failure: unknown) => setStatus({ text: describeError(failure), error: true }));
+  }
+
+  async function reconnectGoogleDrive(side: Side) {
+    const place = latest.current[side].place;
+    if (place?.kind !== "googleDrive") return;
+    try {
+      const profile = (await api.googleDriveProfiles()).find(({ id }) => id === place.id);
+      if (profile && latest.current[side].place === place) editConnection(side, "googleDrive", { ...profile, kind: "googleDrive" });
+    } catch (failure) {
+      setStatus({ text: describeError(failure), error: true });
     }
   }
 
@@ -1784,7 +1825,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     connectionDialogsClosed(side);
     for (const shown of ["left", "right"] as const) {
       const { place, loading } = latest.current[shown];
-      if (place?.kind !== "connections" || loading) continue;
+      if (place?.kind !== "connections" || loading && place.source !== "googleDrive") continue;
       void load(shown, place, "refresh").then((loaded) => {
         if (!loaded || shown !== side || !selected) return;
         updatePane(shown, (pane) => {
@@ -1797,6 +1838,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   async function openSavedConnection(side: Side, profile: SavedConnectionTarget, options: ConnectionOpenOptions = {}) {
+    if (profile.kind === "googleDrive") {
+      if (profile.signInNeeded) editConnection(side, "googleDrive", profile);
+      else await load(side, { kind: "googleDrive", id: profile.id, address: profile.label, folders: [] });
+      return;
+    }
     const { approvals = [], segments, fromRecent } = options;
     const remembered = segments === undefined && "host" in profile ? rememberedDirectory(profile) : undefined;
     const { ticket, signal } = beginListing(side);
@@ -1949,9 +1995,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (panes[side].search) return () => closeResults(side);
     const place = panes[side].place;
     const target = parentPlace(place);
+    if (place?.kind === "googleDrive" && !target) return () => openConnections(side, "googleDrive");
     if (!place || !target) return undefined;
     return () => {
-      const reveal = target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
+      const reveal = place.kind === "googleDrive" ? place.folders.at(-1)?.id : target.kind === "smbRoot" || (place.kind === "archive" && !place.segments.length) ? folderLabel(place) : undefined;
       void load(side, target, "push", reveal, undefined, treeFolder(side) ?? undefined);
       focus(side);
     };
@@ -2258,6 +2305,19 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
+    if (source.kind === "googleDrive") {
+      if (kind !== "copy" || target?.kind !== "local" || smbHost(target) || items.length !== 1 || items[0].entry.directory) {
+        setStatus({ text: "Copy one Google Drive file to a local folder.", error: true });
+        return;
+      }
+      if (!items[0].entry.googleDrive?.download) {
+        setStatus({ text: "Google Drive does not allow downloading this file.", error: true });
+        return;
+      }
+    } else if (target?.kind === "googleDrive") {
+      setStatus({ text: "This source is read-only.", error: true });
+      return;
+    }
     if (kind === "move" && (source.kind === "archive" && !source.writable ||
       source.kind === "server" && !isWritableServerPlace(source))) {
       setStatus({ text: "This source is read-only.", error: true });
@@ -2399,7 +2459,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     const targetSide = opposite(side);
     if (collectionPanes[targetSide]) {
-      if (kind === "copy") collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
+      if (source.kind === "googleDrive") {
+        setStatus({ text: "Copy one Google Drive file to a local folder.", error: true });
+        return;
+      }
+      if (kind === "copy") collectReferences(side, transferItems(side, selected).flatMap(({ place, entry }) =>
+        place.kind === "googleDrive" ? [] : [collectionReference(place, entry)]));
       return;
     }
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isWritableServerPlace(source) &&
@@ -2837,7 +2902,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const marked = marks.size ? entries[active].filter(({ name }) => marks.has(name)) : [];
     const items = trees[active].enabled && current ? selectedEntries(active, current, true, false) :
       marked.length ? marked : current ? [current] : [];
-    const names = items.map(({ name, tree }) => pane.search?.matches.get(name)?.entry.name ?? tree?.segments.at(-1) ?? name);
+    const names = items.map(({ name, tree, googleDrive }) => pane.search?.matches.get(name)?.entry.name ?? tree?.segments.at(-1) ?? googleDrive?.name ?? name);
     if (!names.length) return;
     void api.copyText(names.join("\n")).then(() => setStatus({ text: "Item names copied to the clipboard." }),
       (error: unknown) => setStatus({ text: describeError(error), error: true }));
@@ -2845,7 +2910,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   function fileFor(side: Side, entry = entries[side][paneCursorIndex(panes[side], entries[side])]): NamedFile | null {
     const item = paneItem(panes[side], entry);
-    return item && (item.place.kind !== "kswitcher" || item.place.capabilities?.revisionRead) && !item.entry.directory && !item.entry.link
+    return item && item.place.kind !== "googleDrive" && (item.place.kind !== "kswitcher" || item.place.capabilities?.revisionRead) && !item.entry.directory && !item.entry.link
       ? { place: item.place, name: item.entry.name } : null;
   }
 
@@ -3486,7 +3551,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const systemFolder = currentRow?.name === ".." ? pane.place :
     currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
   const systemFolderPath = systemFolder?.kind === "local" && !smbHost(systemFolder) ? systemFolder.path : null;
-  const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && !currentItem.entry.directory);
+  const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && currentItem.place.kind !== "googleDrive" && !currentItem.entry.directory);
   const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
     !collectionPanes.left && !collectionPanes.right && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
@@ -3722,7 +3787,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               else void load(side, place);
             }}
             onOpenConnections={(source) => openConnections(side, source)}
-            onAddNetBoxConnection={() => editConnection(side, "netbox")}
+            onAddConnection={(source) => editConnection(side, source)}
+            onReconnectGoogleDrive={() => { void reconnectGoogleDrive(side); }}
             onCopyPath={copyPath}
             onHistory={(offset) => history(side, offset)} onParent={parentAction(side)} onRefresh={() => refresh(side, true)}
             onDismissError={() => {
@@ -3989,6 +4055,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           {processPanels[active] ? <Button type="button" onClick={() => showProcesses(active, false)}>{t("Back to files")}</Button> :
             fileActions.map(({ command, label, Icon, disabled }) => (
             <Button key={command} data-command={command} disabled={disabled} onClick={() => perform(command)} shortcut={keyLabel(command)}
+              tooltip={command === "copy" && currentItem?.entry.googleDrive && !currentItem.entry.directory && !currentItem.entry.googleDrive.download
+                ? t("Google Drive does not allow downloading this file.") : undefined}
               aria-keyshortcuts={shortcuts[command].join(" ") || undefined}>
               {keyLabel(command) && <kbd aria-hidden="true" data-shortcut={keyLabel(command)}>{compactShortcut(shortcuts[command][0])}</kbd>}
               {!preferences.hideActionButtonIcons && <Icon />}<span>{t(label)}</span>
@@ -4183,12 +4251,24 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             setFileMenu(null);
             open(side, entry);
           }}>{t("Open")}</Button>}
-          {item && <>
+          {item?.place.kind === "googleDrive" && <>
+            {item.entry.directory && <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, item.entry); }}>{t("Open")}</Button>}
+            {item.entry.googleDrive?.webViewLink && <Button role="menuitem" onClick={() => {
+              setFileMenu(null);
+              openGoogleDriveLink(item.entry.googleDrive!.webViewLink!);
+            }}>{t("Open in browser")}</Button>}
+            {!item.entry.directory && <Button role="menuitem" disabled={!item.entry.googleDrive?.download || toCollection ||
+              target.search !== null || target.place?.kind !== "local" || !!smbHost(target.place)}
+              tooltip={item.entry.googleDrive?.download ? undefined : t("Google Drive does not allow downloading this file.")}
+              onClick={() => { setFileMenu(null); transfer("copy", side, item.entry); }}>{t("Copy")}</Button>}
+          </>}
+          {item && item.place.kind !== "googleDrive" && <>
             <Button role="menuitem" disabled={!toCollection && item.place.kind === "kswitcher" && (!item.place.path || item.entry.link)}
               onClick={() => {
               setFileMenu(null);
               const items = transferItems(side, entry!, state.marked.includes(entry!.name));
-              if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
+              if (toCollection) collectReferences(side, items.flatMap(({ place, entry }) =>
+                place.kind === "googleDrive" ? [] : [collectionReference(place, entry)]));
               else openTransfer("copy", item.place, items,
                 target.search ? null :
                   treeFolder(opposite(side)) ?? target.place, false, side);
@@ -4196,7 +4276,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             {isWritableServerPlace(item.place) && entry && !state.search && !state.loading && !busy && <>
               {!item.entry.directory && !item.entry.link && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
-                openDocument({ place: item.place, name: item.entry.name }, true, { fromPane: side });
+                if (isWritableServerPlace(item.place)) openDocument({ place: item.place, name: item.entry.name }, true, { fromPane: side });
               }}>{t("Edit")}</Button>}
               {!toCollection && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
@@ -4317,7 +4397,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       {fileBookmarksOpen && <FileBookmarksDialog bookmarks={fileBookmarks} addKey={keyLabel("bookmarkLine")}
         onOpen={openFileBookmark} onRename={(bookmark, name) => updateFileBookmark(bookmark, (item) => ({ ...item, name: name || undefined }))}
         onRemove={(bookmark) => updateFileBookmark(bookmark, () => null)} onClose={() => setFileBookmarksOpen(false)} />}
-      {modal?.kind === "connectionEditor" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
+      {modal?.kind === "connectionEditor" && modal.source === "googleDrive" && <GoogleDriveConnectionDialog
+        profile={modal.profile?.kind === "googleDrive" ? modal.profile : undefined}
+        onSaved={(id) => {
+          const place = latest.current[modal.side].place;
+          reloadConnectionLists(modal.side, { kind: "googleDrive", id });
+          if (place?.kind === "googleDrive" && place.id === id) void load(modal.side, place, "refresh");
+        }}
+        onRemove={(profile) => setModal({ kind: "removeConnection", side: modal.side, profile })}
+        onClose={() => connectionDialogsClosed(modal.side)} />}
+      {modal?.kind === "connectionEditor" && modal.source !== "googleDrive" && <SavedConnectionDialog source={modal.source} profile={modal.profile}
         bindings={shortcuts}
         remoteProvider="server" bridgeDirectory={preferences.kswitcher}
         onSaved={(kind, id) => {
@@ -4334,6 +4423,20 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         onRemoved={() => {
           const { kind, id } = modal.profile;
           if (kind === "ftp" || kind === "ssh") forgetDirectoryProfile({ kind, id });
+          if (kind === "googleDrive") {
+            const removed = (place: Place | null | undefined) => place?.kind === "googleDrive" && place.id === id;
+            for (const side of ["left", "right"] as const) {
+              if (removed(latest.current[side].place)) void load(side, { kind: "connections", source: "googleDrive", from: null });
+              updatePane(side, (pane) => ({
+                ...pane,
+                addressTrail: removed(pane.addressTrail) ? undefined : pane.addressTrail,
+                history: pane.history.filter((place) => !removed(place)).map((place) =>
+                  place.kind === "connections" && (removed(place.from) || removed(place.trail))
+                    ? { ...place, from: null, trail: undefined } : place),
+                position: pane.history.slice(0, pane.position + 1).filter((place) => !removed(place)).length - 1,
+              }));
+            }
+          }
           reloadConnectionLists(modal.side);
         }} onClose={() => connectionDialogsClosed(modal.side)} />}
       {modal?.kind === "verifyConnection" && <VerifyHostDialog verification={modal.verification}

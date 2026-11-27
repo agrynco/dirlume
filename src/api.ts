@@ -1,5 +1,6 @@
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { invokeWithDiagnostics as invoke, reportFrontendError } from "./diagnostics";
+import { t } from "./i18n";
 import type { ImageTransform, Size } from "./imageCrop";
 
 export interface Entry extends Partial<PanelMetadata> {
@@ -11,6 +12,7 @@ export interface Entry extends Partial<PanelMetadata> {
   size: number | null;
   modified: number | null;
   connection?: SavedConnection;
+  googleDrive?: GoogleDriveItem;
   description?: string | null;
   allocationId?: string;
   tree?: {
@@ -120,7 +122,16 @@ export interface LanGroupStatus {
   storageError: string | null;
 }
 
+export type GoogleDriveItem = {
+  id: string; name: string; directory: boolean; size: number | null; modified: number | null;
+  webViewLink: string | null; download: boolean;
+};
+export type GoogleDriveProfile = { kind: "googleDrive"; id: string; label: string; email: string; signInNeeded: boolean };
+export type GoogleDrivePlace = { kind: "googleDrive"; id: string; address: string; folders: { id: string; name: string }[] };
+export const googleDriveSignInRequired = "Sign in to this Google Drive account again.";
+
 export type FileLocation =
+  | GoogleDrivePlace
   | { kind: "local"; path: string; parent: string | null; smb?: SmbMount }
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; writable?: boolean; pairedComputer?: boolean; profileId?: string; groupPeer?: string }
@@ -131,11 +142,12 @@ export type FileLocation =
       directories?: DirectoryPreferences; environment?: EnvironmentPreferences }
   | { kind: "kswitcher"; directory: string; peer: string; address: string; path: string; parent: string | null; capabilities?: KSwitcherCapabilities };
 
-export const connectionSourceNames = { netbox: "NetBox", smb: "SMB", remote: "Remote machine" } as const;
+export const connectionSourceNames = { netbox: "NetBox", smb: "SMB", remote: "Remote machine", googleDrive: "Google Drive" } as const;
 export type ConnectionSource = keyof typeof connectionSourceNames;
 export type ConnectionLocation = { kind: "connections"; source: ConnectionSource; from: FileLocation | null; trail?: FileLocation };
 export type Place = FileLocation | ConnectionLocation;
 export type SavedConnection =
+  | GoogleDriveProfile
   | ({ kind: "ftp" } & FtpProfile)
   | ({ kind: "ssh" } & SshProfile)
   | { kind: "smb"; id: string; label: string; path: string }
@@ -150,7 +162,7 @@ export type SshPlace = Extract<Place, { kind: "ssh" }>;
 export type FileServerPlace = FtpPlace | SshPlace;
 export type LanGroupPlace = Extract<Place, { kind: "server" }> & { groupPeer: string };
 export type WritableServerPlace = LanGroupPlace | (Extract<Place, { kind: "server" }> & { writable: true });
-export type TreePlace = FilePlace;
+export type TreePlace = Exclude<FilePlace, GoogleDrivePlace>;
 export type LanChange = { kind: "folder" } | { kind: "create_text"; encoding: TextEncoding } |
   { kind: "delete"; recursive: boolean } | { kind: "rename"; name: string };
 export function isLanGroupPlace(place: Place | null | undefined): place is LanGroupPlace {
@@ -165,7 +177,7 @@ export function isFileServer(place: Place | null | undefined): place is FileServ
   return place?.kind === "ftp" || place?.kind === "ssh";
 }
 export function supportsFileTree(place: Place | null | undefined): place is TreePlace {
-  return !!place && place.kind !== "connections" && place.kind !== "smbRoot" &&
+  return !!place && place.kind !== "connections" && place.kind !== "smbRoot" && place.kind !== "googleDrive" &&
     (place.kind !== "kswitcher" || !!place.path) && (!isLanGroupPlace(place) || !!place.segments.length);
 }
 export type ArchivePlace = Extract<Place, { kind: "archive" }>;
@@ -494,6 +506,7 @@ export type DeletionResult = { selection: DeletionSelection; counts: DeletionCou
 export type DeletionDecision = "retry" | "skip" | "skipRemaining";
 
 export type TransferSource =
+  | { kind: "google_drive"; profile: string; item: string; name: string }
   | { kind: "local"; directory: string; name: string }
   | { kind: "server"; connection: number; segments: string[]; folder: boolean; modified?: number; writable_server?: true }
   | { kind: "ftp"; connection: number; segments: string[] }
@@ -595,6 +608,12 @@ export type AdministratorWorkspace = {
 };
 
 export const api = {
+  googleDriveProfiles: () => invoke<Omit<GoogleDriveProfile, "kind">[]>("google_drive_profiles"),
+  signInGoogleDrive: (id: string, profileId?: string) => invoke<string>("sign_in_google_drive", { id, profileId }),
+  cancelGoogleDriveSignIn: (id: string) => invoke<void>("cancel_google_drive_sign_in", { id }),
+  renameGoogleDrive: (id: string, label: string) => invoke<void>("rename_google_drive", { id, label }),
+  removeGoogleDrive: (id: string) => invoke<void>("remove_google_drive", { id }),
+  listGoogleDrive: (id: string, folder: string) => invoke<GoogleDriveItem[]>("list_google_drive", { id, folder }),
   startMcp: () => invoke<McpConnection>("start_mcp"),
   stopMcp: () => invoke<void>("stop_mcp"),
   mcpConnection: () => invoke<McpConnection | null>("mcp_connection"),
@@ -862,6 +881,7 @@ export const api = {
 };
 
 export function placePath(place: Place) {
+  if (place.kind === "googleDrive") return [t("My Drive"), ...place.folders.map(({ name }) => name)].join("/");
   if (place.kind === "server" || isFileServer(place)) return "/" + place.segments.join("/");
   if (place.kind === "archive") return place.path + "!/" + place.segments.join("/");
   return place.kind === "connections" ? connectionSourceNames[place.source] : place.path;
@@ -1011,6 +1031,7 @@ export function isLockError(error: string) {
 }
 
 export function folderLabel(place: Place) {
+  if (place.kind === "googleDrive") return place.folders.at(-1)?.name ?? t("My Drive");
   if (place.kind === "connections") return connectionSourceNames[place.source];
   if (place.kind === "server" || isFileServer(place)) return place.segments.at(-1) ?? place.address;
   if (place.kind === "archive" && place.segments.length) return place.segments.at(-1)!;
