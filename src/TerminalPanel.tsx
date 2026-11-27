@@ -457,6 +457,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
 
     function shellCommand(command: string) {
+      const dnsFlush = windows && command.match(/^[ \t]*(ipconfig(?:\.exe)?)[ \t]+(\/flushdns)[ \t]*$/i);
+      if (dnsFlush) return "Invoke-DirlumeDnsFlush '" + dnsFlush[1] + "' '" + dnsFlush[2] + "'";
       if (!/\p{Cc}/u.test(command)) return command;
       const encoded = btoa(Array.from(new TextEncoder().encode(command), (byte) => String.fromCharCode(byte)).join(""));
       if (windows) return ". ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "'))))";

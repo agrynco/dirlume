@@ -6,6 +6,7 @@
     "Create, edit, copy, move, rename, and delete items in List and Tree on supported writable sources.",
     "Copy nested folders from remote shares and resolve file conflicts in the transfer dialog.",
     "Retry denied SFTP file operations with sudo after confirming.",
-    "Organize file references in named collections and open them from either pane."
+    "Organize file references in named collections and open them from either pane.",
+    "Request Windows administrator consent when a DNS cache flush requires it."
   ]
 }
