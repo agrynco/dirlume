@@ -79,7 +79,12 @@ async function fixture(browser, platform, nestedLocal = false) {
         if (command === "connect_saved_server") return remote({ id: args.credential === "fixture-pair" ? 8 : 6,
           share: "share", address: "Server fixture", origin: "https://fixture", listing: listing(0) });
         if (command === "open_archive") return { id: 7, path: args.path, parent: home, writable: false, canAdd: false, listing: listing(0) };
-        if (command === "list_archive") return listing(args.segments.length);
+        if (command === "list_archive") {
+          if (state.measureArchive && args.segments.length) return {
+            entries: [{ ...folder("uncompressed.txt"), directory: false, size: 3072 }], omitted: 0,
+          };
+          return listing(args.segments.length);
+        }
         if (["list_ftp", "list_ssh", "list_server"].includes(command)) {
           const segments = args.segments;
           const depth = segments[0] === "Files" ? segments.length - 1 : segments.length;
@@ -90,8 +95,13 @@ async function fixture(browser, platform, nestedLocal = false) {
           const parent = parts.length === 0 ? null : parts.length === 1 ? "" : parts.length === 2 ? parts[0] + "\\" : parts.slice(0, -1).join("\\");
           if (state.operations) {
             if (!parts.length) return { parent, omitted: 0, entries: [folder("C:"), folder("D:")] };
+            if (parts.length > 1 && state.delaySizes) {
+              await new Promise((done) => { state.releaseSize = done; });
+              return { parent, omitted: 0, entries: [{ ...folder("late.bin"), directory: false, size: 8192 }] };
+            }
             return { parent, omitted: 0, entries: parts.length === 1
-              ? [folder("subfolder"), { ...folder("notes.txt"), directory: false, size: 13 }] : [folder("inside")] };
+              ? [folder("subfolder"), { ...folder("notes.txt"), directory: false, size: 13 }]
+              : [{ ...folder("contents.bin"), directory: false, size: 2048 }] };
           }
           return remote({ parent, omitted: 0, entries: parts.length ? entries(parts.length - 1) : [folder("C:")] });
         }
@@ -143,6 +153,22 @@ async function checkKSwitcherOperations(page) {
     await row(page, side, drive).dblclick();
     await waitPath(page, side, drive + "\\");
   }
+
+  const parent = row(page, "left", "..");
+  await parent.click();
+  await list(page, "left").press("F3");
+  await row(page, "left", "subfolder").getByText("2 KiB", { exact: true }).waitFor();
+  assert.equal(await parent.getAttribute("data-current"), "true");
+  await page.evaluate(() => { window.connectionFixture.delaySizes = true; });
+  await list(page, "left").press("F3");
+  await page.waitForFunction(() => typeof window.connectionFixture.releaseSize === "function");
+  await list(page, "left").press("Escape");
+  await page.evaluate(() => {
+    window.connectionFixture.delaySizes = false;
+    window.connectionFixture.releaseSize();
+  });
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await row(page, "left", "subfolder").getByText("2 KiB", { exact: true }).waitFor();
 
   await row(page, "left", "subfolder").click();
   await list(page, "left").press("F5");
@@ -552,7 +578,15 @@ try {
   const { page } = await fixture(browser, platforms[0]);
   await checkKSwitcherOperations(page);
   await page.close();
+  const archive = await fixture(browser, platforms[1]);
+  await archive.page.evaluate(() => { window.connectionFixture.measureArchive = true; });
+  await row(archive.page, "left", "fixture.zip").dblclick();
+  await row(archive.page, "left", "..").click();
+  await list(archive.page, "left").press("F3");
+  await row(archive.page, "left", folders[0]).getByText("3 KiB", { exact: true }).waitFor();
+  await archive.page.close();
   console.log("Verified KSwitcher transfer routing across drives, revision-checked editing, rename, folder creation, and remote Trash.");
+  console.log("Verified parent-row measures through KSwitcher and archived uncompressed file sizes.");
 } finally {
   await browser.close();
 }

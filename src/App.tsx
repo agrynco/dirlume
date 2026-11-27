@@ -23,7 +23,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { canAnalyze, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
+import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
 import { useFilePaneTree, usePaneTreeRevision } from "./filePaneTree";
 import { usePaneFolderSizes } from "./paneFolderSizes";
@@ -359,7 +359,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const terminalListings = useRef<Partial<Record<Side, number>>>({});
   const nextSession = useRef(0);
   const measureId = useRef(0);
-  const scans = useRef<{ left: number | null; right: number | null }>({ left: null, right: null });
+  const scans = useRef<Record<Side, { id: number; controller?: AbortController } | null>>({ left: null, right: null });
   const drag = useRef<{ side: Side; source: Transfer["source"]; items: Transfer["items"]; pointer: number; x: number; y: number; moving: boolean } | null>(null);
   const [dropTarget, setDropTarget] = useState<Side | null>(null);
   const latest = useRef(panes);
@@ -575,7 +575,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const previous = scans.current[side];
     if (previous === null) return false;
     scans.current[side] = null;
-    void api.cancelMeasurement(previous).catch(() => {});
+    if (previous.controller) previous.controller.abort();
+    else void api.cancelMeasurement(previous.id).catch(() => {});
     updatePane(side, (pane) => ({ ...pane, measuring: [] }));
     return true;
   }, [updatePane]);
@@ -2733,22 +2734,23 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const comparison = comparisonLeft && comparisonRight ? { left: comparisonLeft, right: comparisonRight } : null;
 
   const markedFolders = entries[active].filter((entry) => entry.directory && !entry.link && markedNames[active].has(entry.name));
-  const canMeasure = Boolean(local || ftp) && !pane.search;
-  const measureEntries = !canMeasure ? [] : ftp && currentRow?.name === ".."
-    ? entries[active].filter((entry) => entry.directory && !entry.link && entry.name !== "..")
+  const measurePlace = pane.place && (pane.place.kind === "archive" || canAnalyze(pane.place)) && !pane.search ? pane.place : null;
+  const measureParent = !!measurePlace && currentRow?.name === "..";
+  const measureEntries = !measurePlace || pane.loading ? [] : measureParent
+    ? lists[active].filter((entry) => entry.directory && !entry.link && entry.name !== "..")
     : !trees[active].enabled && markedFolders.length ? markedFolders : current?.directory && !current.link ? [current] : [];
 
   function measure() {
-    if ((!local && !ftp) || pane.loading || !measureEntries.length) return;
+    if (!measurePlace || !measureEntries.length) return;
     cancelScan(active);
     const id = ++measureId.current;
-    scans.current[active] = id;
+    const controller = measurePlace.kind === "local" || measurePlace.kind === "ftp" ? undefined : new AbortController();
+    scans.current[active] = { id, controller };
     const names = measureEntries.map(({ name }) => name);
     updatePane(active, (pane) => ({ ...pane, measuring: names }));
     const measuringSide = (): Side | undefined =>
-      scans.current.left === id ? "left" : scans.current.right === id ? "right" : undefined;
-    const output = new Channel<SizeResult>();
-    output.onmessage = (result) => {
+      scans.current.left?.id === id ? "left" : scans.current.right?.id === id ? "right" : undefined;
+    const storeResult = (result: SizeResult) => {
       const side = measuringSide();
       if (!side) return;
       updatePane(side, (pane) => pane.measuring.includes(result.name) ? ({
@@ -2756,12 +2758,31 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         measuring: pane.measuring.filter((name) => name !== result.name),
       }) : pane);
     };
-    const source = ftp ? { kind: "ftp" as const, connection: ftp.id, segments: ftp.segments }
-      : { kind: "local" as const, directory: local!.path };
-    void api.measureFolders(id, source, names, output).catch((error: unknown) => {
+    async function run() {
+      if (!measurePlace) return;
+      if (measurePlace.kind === "local" || measurePlace.kind === "ftp") {
+        const source = measurePlace.kind === "ftp" ? { kind: "ftp" as const, connection: measurePlace.id, segments: measurePlace.segments }
+          : { kind: "local" as const, directory: measurePlace.path };
+        const output = new Channel<SizeResult>(storeResult);
+        try { await api.measureFolders(id, source, names, output); }
+        finally { output.onmessage = () => {}; }
+        return;
+      }
+      const signal = controller!.signal;
+      for (const name of names) {
+        if (signal.aborted) break;
+        const child = childPlace(measurePlace, name);
+        if (child.kind === "smbRoot") continue;
+        await scanSpace(child, signal, (result) => {
+          if (result.phase === "scanning") return;
+          storeResult({ name, bytes: result.root.logical,
+            incomplete: result.phase !== "complete" || result.root.missingLogical > 0 });
+        });
+      }
+    }
+    void run().catch((error: unknown) => {
       if (measuringSide()) setStatus({ text: describeError(error), error: true });
     }).finally(() => {
-      output.onmessage = () => {};
       const side = measuringSide();
       if (side) {
         scans.current[side] = null;
@@ -3124,7 +3145,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       case "view":
       case "edit": {
         if (command === "view" && measureEntries.length) {
-          if (trees[active].enabled) {
+          if (trees[active].enabled && !measureParent) {
             const folder = measureEntries[0];
             folderSizes[active].measureBranch(folder.tree?.segments ?? [folder.name]);
           }
@@ -3278,7 +3299,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: connectionCommands[catalog.source][1], label: "Edit connection", Icon: Pencil, disabled: !current?.connection || pane.loading },
     { command: "recycle", label: "Remove connection", Icon: Trash2, disabled: !current?.connection || pane.loading },
   ] as const) : ([
-    { command: "view", label: measureEntries.length ? "Measure" : "View", Icon: measureEntries.length ? Calculator : Eye,
+    { command: "view", label: measureParent || measureEntries.length ? "Measure" : "View", Icon: measureParent || measureEntries.length ? Calculator : Eye,
       disabled: !fileFor(active) && !measureEntries.length },
     { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !(imageType(currentFile.name)
       ? currentFile.place.kind !== "kswitcher" : writableTextPlace(currentFile.place)) },
