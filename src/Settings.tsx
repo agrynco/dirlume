@@ -79,7 +79,7 @@ function readOptionsLocation(): OptionsLocation {
 
 export function Settings({ preferences: saved, onChange: applyPreferences, onClose, onPick, initialPage, standalone = false }: {
   preferences: Preferences;
-  onChange: (value: Preferences) => Preferences;
+  onChange: (value: Preferences) => Promise<Preferences>;
   onClose: () => void;
   onPick?: () => Promise<AppearancePick | null>;
   standalone?: boolean;
@@ -118,6 +118,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const [loadingArchive, setLoadingArchive] = useState(false);
   const [archiveError, setArchiveError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [schemeNaming, setSchemeNaming] = useState<{ id: string; closeAfter: boolean } | null>(null);
   const [buildVersion, setBuildVersion] = useState("");
   const { shortcutSchemes, activeShortcutScheme, profileBindings } = preferences;
@@ -151,7 +152,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     ...(id === "window" ? ["Color scheme", "Keep current fonts", "New scheme", "Scheme name", "Base theme", "Delete scheme",
       "Manage custom color schemes", "Scheme to manage", ...preferences.schemes.map(({ name }) => name),
       "Favorite light scheme", "Favorite dark scheme", "Show color scheme switcher in the title bar", "Show status bar",
-      "Main menu alignment", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
+      "Main menu alignment", "Always show the main menu", ...menuAlignmentTerms, ...Object.values(builtInThemes)] : [])));
   const modesMatch = panelModeIds.filter((id) => matches("Panel modes", panelModeNames[id],
     panelModeName(id, preferences.panelModes), ...panelModeSettingsLabels));
   const showSortGroups = matches("Sort groups", "Use sort groups", "Filename mask", "Before unmatched items", "After unmatched items");
@@ -237,8 +238,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     }
   }
 
-  function apply(closeAfter: boolean, draft = preferences) {
-    if (invalidModes.length || invalidSettings) return;
+  async function apply(closeAfter: boolean, draft = preferences) {
+    if (saving || invalidModes.length || invalidSettings) return;
     if (JSON.stringify(draft) === JSON.stringify(saved)) {
       if (closeAfter) close();
       return;
@@ -249,13 +250,16 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
       setSchemeNaming({ id: unnamed.id, closeAfter });
       return;
     }
+    setSaving(true);
     try {
       const schemes = draft.schemes.map(({ suggestedName, ...scheme }) => scheme);
-      onChange(applyPreferences({ ...draft, schemes }));
+      onChange(await applyPreferences({ ...draft, schemes }));
       setSaveError("");
       if (closeAfter) close();
     } catch (error) {
       setSaveError(errorText(describeError(error)));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -281,8 +285,8 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
     }
   }
 
-  function applyImport(patch: Partial<Preferences>) {
-    const applied = applyPreferences({ ...saved, ...patch });
+  async function applyImport(patch: Partial<Preferences>) {
+    const applied = await applyPreferences({ ...saved, ...patch });
     const draft = { ...applied };
     for (const key of Object.keys(preferences) as (keyof Preferences)[]) {
       if (!Object.hasOwn(patch, key) && JSON.stringify(preferences[key]) !== JSON.stringify(saved[key])) {
@@ -391,16 +395,16 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
   const duplicateSchemeName = Boolean(schemeName) && schemeNameTaken(schemeName, renameScheme ? activeScheme?.id : undefined);
 
   return <SettingsSearchTerms value={terms}>
-    <Dialog title={t("Options")} font="options" helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={close}
+    <Dialog title={t("Options")} font="options" helpTopic={selection ? "appearance" : optionsHelpTopic(page)} onClose={() => { if (!saving) close(); }}
       wide resizeKey={standalone ? undefined : "options"} standalone={standalone} suspended={picking && !standalone} footer={<>
       {saveError && <p className="dialog-error settings-save-error" role="alert">
         {t("Could not save settings. Try again, or close Options to discard unapplied changes.")} {saveError}
       </p>}
-      {(standalone || modePage) && <Button type="button" onClick={close}>{t("Cancel")}</Button>}
-      <Button type="button" disabled={!hasChanges || invalidModes.length > 0 || invalidSettings} onClick={() => apply(false)}>{t("Apply")}</Button>
-      <Button type="button" className="primary" disabled={invalidModes.length > 0 || invalidSettings} onClick={() => apply(true)}>{t("Done")}</Button>
+      {(standalone || modePage) && <Button type="button" disabled={saving} onClick={close}>{t("Cancel")}</Button>}
+      <Button type="button" disabled={saving || !hasChanges || invalidModes.length > 0 || invalidSettings} onClick={() => void apply(false)}>{t("Apply")}</Button>
+      <Button type="button" className="primary" disabled={saving || invalidModes.length > 0 || invalidSettings} onClick={() => void apply(true)}>{t("Done")}</Button>
     </>}>
-      <div className="settings-layout">
+      <div className="settings-layout" inert={saving}>
         <aside className="settings-sidebar">
           <div className="settings-search-actions">
           <label className="settings-search"><Search aria-hidden="true" />

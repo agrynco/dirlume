@@ -8,6 +8,28 @@ const pane = (page, side) => page.getByRole("region", { name: `${side} pane`, ex
 const hostnames = ["first.example.test", "second.example.test", "production.example.test"];
 const routeText = (...hosts) => ["This computer", ...hosts].join(" → ");
 
+async function verifyTabBar(popup) {
+  await popup.waitFor();
+  assert.equal(await popup.evaluate((element) => Math.round(element.getBoundingClientRect().width)), 520);
+  const tabs = popup.getByRole("tablist", { name: "NetBox settings pages" });
+  assert.equal(await tabs.evaluate((element) => getComputedStyle(element).scrollbarWidth), "none");
+  assert.equal(await button(popup, "Previous settings page").isVisible(), true);
+  assert.equal(await button(popup, "Next settings page").isVisible(), true);
+}
+
+async function verifyCheckbox(popup, name) {
+  const checkbox = popup.getByRole("checkbox", { name, exact: true });
+  const layout = await checkbox.evaluate((input) => {
+    const label = input.closest("label");
+    const text = label.querySelector("span");
+    return { left: input.getBoundingClientRect().left, right: input.getBoundingClientRect().right,
+      textLeft: text.getBoundingClientRect().left, rowLeft: label.getBoundingClientRect().left };
+  });
+  assert.ok(Math.abs(layout.left - layout.rowLeft) < 1, name + " checkbox starts at the row edge");
+  assert.ok(layout.right < layout.textLeft, name + " checkbox precedes the label");
+  return checkbox;
+}
+
 async function chooseSource(page, side, shortcut) {
   const panel = pane(page, side);
   await button(panel, `Locations for ${side} pane`).click();
@@ -78,14 +100,18 @@ try {
         transformCallback: () => 1,
         invoke: async (command, args) => {
           if (command === "locations") return [{ label: "Home", path: root }];
-          if (command === "list_directory") return { path: args.path, parent: null, entries: [], omitted: 0 };
+          if (command === "list_directory") return { path: args.path, parent: null, entries: [
+            { name: "reference.txt", directory: false, hidden: false, link: false, modified: null, size: 1 },
+          ], omitted: 0 };
           if (command === "file_icons") return args.items.map(() => null);
-          if (command === "ftp_profiles") return [];
+          if (command === "ftp_profiles") return JSON.parse(localStorage.getItem("fixture.ftp.profiles") ?? "[]");
           if (command === "ssh_profiles") return profile() ? [profile()] : [];
           if (command === "save_ssh_profile") {
             const safe = ({ secret, clearSecret, ...host }) => ({ ...host, hasSecret: !!secret || !clearSecret });
-            const { jumpHosts, ...destination } = args.input;
-            const saved = { ...safe(destination), id: "production", jumpHosts: jumpHosts.map((host, index) => ({
+            const { jumpHosts, proxy, ...destination } = args.input;
+            const { password, ...publicProxy } = proxy;
+            const saved = { ...safe(destination), id: "production", proxy: { ...publicProxy, hasPassword: Boolean(password) },
+              jumpHosts: jumpHosts.map((host, index) => ({
               ...safe(host), id: host.id ?? `jump-${index}`,
             })) };
             localStorage.setItem("fixture.ssh.profile", JSON.stringify(saved));
@@ -93,6 +119,10 @@ try {
           }
           if (command === "test_ssh_connection" || command === "connect_ssh") {
             const settings = args.input ?? profile();
+            if (settings.proxy?.host !== "proxy.example.test" || settings.proxy.mode !== "socks5" ||
+                (command === "test_ssh_connection" && settings.proxy.password !== "proxy-fixture-password")) {
+              throw new Error("The expected proxy route was not submitted.");
+            }
             const route = [...settings.jumpHosts.map(({ host }) => host), settings.host];
             if (route.join(",") !== hostnames.join(",")) throw new Error("The route is in the wrong order.");
             const approved = args.approvals ?? [];
@@ -111,10 +141,18 @@ try {
     }, { hostnames, ftpSources, sshSources, nextPageKey: /Linux/.test(platform) ? "Ctrl+Alt+N" : null,
       previousPageDisabled: /Macintosh/.test(platform) });
     await page.goto("http://dirlume.test/");
+    const localFiles = page.getByRole("listbox", { name: "left files", exact: true });
+    await localFiles.getByRole("option", { name: /^reference.txt/ }).click();
+    await localFiles.press("F5");
+    const copy = dialog(page, "Copy");
+    await verifyCheckbox(copy, "Also ask about read-only files");
+    await verifyCheckbox(copy, "Process multiple destinations");
+    await button(copy, "Cancel").click();
     const left = await chooseSource(page, "left", expectedShortcut);
     await left.getByText("No saved connections.", { exact: true }).waitFor();
     await button(left, "Add connection").click();
     const add = dialog(page, "Add NetBox connection");
+    await verifyTabBar(add);
     assert.equal(await add.getByLabel("Protocol", { exact: true }).inputValue(), "sftp");
     await add.getByLabel("Connection name", { exact: true }).fill("Production");
     const tabs = add.getByRole("tablist", { name: "NetBox settings pages", exact: true });
@@ -127,14 +165,55 @@ try {
     await next.click();
     assert.equal(await selected("Environment"), "true");
     assert.equal(await add.getByLabel("Filename code page").count(), 0);
+    const preserveTimes = await verifyCheckbox(add, "Preserve modification times on downloads");
+    const recycle = await verifyCheckbox(add, "Move deleted items to the remote recycle bin");
+    await verifyCheckbox(add, "Keep previous versions of overwritten SFTP files");
+    const wasChecked = await preserveTimes.isChecked();
+    await add.getByText("Preserve modification times on downloads", { exact: true }).click();
+    assert.equal(await preserveTimes.isChecked(), !wasChecked);
+    await preserveTimes.press("Space");
+    assert.equal(await preserveTimes.isChecked(), wasChecked);
+    assert.equal(await recycle.isChecked(), false);
+    const overwriteName = "Keep previous versions of overwritten SFTP files";
+    const overwritten = add.getByRole("checkbox", { name: overwriteName, exact: true });
+    const overwriteLabel = add.getByText(overwriteName, { exact: true });
+    await add.evaluate((element) => { element.style.width = "245px"; });
+    for (const caption of ["Зберігати попередні версії перезаписаних файлів SFTP",
+      "Сохранять предыдущие версии перезаписанных файлов SFTP"]) {
+      const wrapsToTheRight = await overwritten.evaluate((input, caption) => {
+        const text = input.closest("label").querySelector("span");
+        const content = text.firstChild;
+        const original = content.nodeValue;
+        content.nodeValue = caption;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const lines = [...range.getClientRects()];
+        const check = input.getBoundingClientRect();
+        content.nodeValue = original;
+        return lines.length > 1 && lines.every((line) => line.left >= check.right);
+      }, caption);
+      assert.equal(wrapsToTheRight, true, caption);
+    }
+    await overwriteLabel.waitFor();
+    await add.evaluate((element) => { element.style.removeProperty("width"); });
     await next.click();
     assert.equal(await selected("Directories"), "true");
     await next.click();
+    assert.equal(await selected("SFTP"), "true");
+    await add.getByLabel("SFTP server command").fill("fixture-sftp");
+    await add.getByLabel("Interpret SFTP modification times as signed").check();
+    await next.click();
+    assert.equal(await selected("Shell"), "true");
+    await add.getByLabel("SSH terminal shell", { exact: true }).selectOption("zsh");
+    await next.click();
     assert.equal(await selected("Connection"), "true");
+    await next.click();
+    assert.equal(await selected("Proxy"), "true");
     assert.equal(await next.isDisabled(), true);
     await tab("Session").click();
     const protocol = add.getByLabel("Protocol", { exact: true });
     await protocol.selectOption("ftp");
+    await verifyTabBar(add);
     const encryption = add.getByLabel("Encryption", { exact: true });
     const ftpPort = add.getByLabel("Port", { exact: true });
     assert.equal(await encryption.inputValue(), "plain");
@@ -145,6 +224,7 @@ try {
     assert.equal(await ftpPort.inputValue(), "21");
     await encryption.selectOption("plain");
     await add.evaluate((element) => { element.style.width = "194px"; });
+    assert.equal(await tabs.evaluate((element) => getComputedStyle(element).scrollbarWidth), "none");
     await tab("Session").focus();
     if (/Linux/.test(platform)) {
       await page.keyboard.press("Control+PageDown");
@@ -181,7 +261,7 @@ try {
       document.activeElement instanceof HTMLInputElement && document.activeElement.value === "70000");
     await next.click();
     const directories = add.getByRole("tabpanel", { name: "Directories" });
-    assert.equal(await directories.getByLabel("Resolve directory symbolic links").isDisabled(), true);
+    assert.equal(await (await verifyCheckbox(directories, "Resolve directory symbolic links")).isDisabled(), true);
     assert.equal(await directories.getByLabel("Keep directory cache after closing Dirlume").isDisabled(), true);
     await directories.getByLabel("Starting folder").fill("/configured");
     await directories.getByLabel("Cache directory changes").check();
@@ -238,6 +318,18 @@ try {
     assert.equal(await settings.getByLabel("Connection keepalive").inputValue(), "disabled");
     assert.equal(await settings.getByLabel("IP address family").inputValue(), "ipv6");
     assert.equal(await settings.getByLabel("Use larger FTP data buffers").count(), 0);
+    await tab("Proxy").click();
+    const proxy = add.getByRole("tabpanel", { name: "Proxy" });
+    assert.equal(await proxy.getByLabel("Proxy host").count(), 0);
+    await proxy.getByLabel("Proxy type").selectOption("httpConnect");
+    assert.equal(await proxy.getByLabel("Proxy port").inputValue(), "8080");
+    await proxy.getByLabel("Proxy type").selectOption("socks5");
+    assert.equal(await proxy.getByLabel("Proxy port").inputValue(), "1080");
+    await proxy.getByLabel("Proxy host").fill("proxy.example.test");
+    await proxy.getByLabel("Proxy username").fill("proxy-fixture");
+    await proxy.getByLabel("Proxy password").fill("proxy-fixture-password");
+    await proxy.getByLabel("Resolve destination names").selectOption("local");
+    await proxy.getByLabel("Connect directly to localhost and loopback addresses").check();
     await tab("Session").click();
     await hostDetails(add, hostnames[2], "destination", "test-password");
     const route = add.getByLabel("Route", { exact: true });
@@ -273,7 +365,22 @@ try {
     await production.click();
     await right.press("F4");
     const edit = dialog(page, "Edit NetBox connection");
+    await verifyTabBar(edit);
+    await edit.getByRole("tab", { name: "SFTP", exact: true }).click();
+    assert.equal(await edit.getByLabel("SFTP server command").inputValue(), "fixture-sftp");
+    assert.equal(await edit.getByLabel("Interpret SFTP modification times as signed").isChecked(), true);
+    await edit.getByRole("tab", { name: "Shell", exact: true }).click();
+    assert.equal(await edit.getByLabel("SSH terminal shell", { exact: true }).inputValue(), "zsh");
     assert.equal(await edit.getByLabel("Route", { exact: true }).textContent(), routeText(hostnames[0], second, hostnames[2]));
+    await edit.getByRole("tab", { name: "Proxy", exact: true }).click();
+    const savedProxy = edit.getByRole("tabpanel", { name: "Proxy" });
+    assert.equal(await savedProxy.getByLabel("Proxy host").inputValue(), "proxy.example.test");
+    assert.equal(await savedProxy.getByLabel("Proxy password").inputValue(), "");
+    assert.equal(await savedProxy.getByLabel("Proxy password").getAttribute("placeholder"), "Keep saved password");
+    assert.equal(await savedProxy.getByLabel("Resolve destination names").inputValue(), "local");
+    assert.equal(await savedProxy.getByLabel("Connect directly to localhost and loopback addresses").isChecked(), true);
+    await savedProxy.getByText("The proxy connects to the first SSH jump host. SSH handles the remaining hops.").waitFor();
+    await edit.getByRole("tab", { name: "Session", exact: true }).click();
     await button(edit, "Edit jump host 2").click();
     const reopened = edit.getByRole("group", { name: "Edit jump host", exact: true });
     assert.equal(await reopened.getByLabel("Username", { exact: true }).inputValue(), "updated-admin");
@@ -286,9 +393,23 @@ try {
     await right.press("Enter");
     await verifyHosts(page, "Trust and connect");
     await right.getByRole("option", { name: /^server.txt/ }).waitFor();
+    await page.evaluate(() => localStorage.setItem("fixture.ftp.profiles", JSON.stringify([{
+      id: "ftp-fixture", label: "FTP fixture", host: "ftp.example.test", port: 21, username: "", codePage: null,
+    }])));
+    await page.reload();
+    const ftpFiles = await chooseSource(page, "left", expectedShortcut);
+    await ftpFiles.getByRole("option", { name: /^FTP fixture/ }).click();
+    await ftpFiles.press("F4");
+    await verifyTabBar(edit);
+    const nextFtpPage = button(edit, "Next settings page");
+    for (const name of ["Environment", "Directories", "FTP(S)", "Connection", "Proxy"]) {
+      await nextFtpPage.click();
+      assert.equal(await edit.getByRole("tab", { name, exact: true }).getAttribute("aria-selected"), "true");
+    }
+    assert.equal(await nextFtpPage.isDisabled(), true);
     await page.close();
   }
-  console.log("Verified NetBox page navigation, shortcut migration, cross-page validation, jump host editing, and per-server approvals.");
+  console.log("Verified NetBox tab sizing and navigation, proxy settings, cross-page validation, jump hosts, and per-server approvals.");
 } finally {
   await browser.close();
 }

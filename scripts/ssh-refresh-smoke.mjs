@@ -86,7 +86,7 @@ async function fixture(browser, refresh) {
           const path = "/" + args.segments.join("/");
           state.listings.push([args.id, path]);
           if (args.reuseSudo) state.requests.push(["ssh", args.id, path]);
-          if (args.id === state.offline) {
+          if (args.id === state.offline || (args.id === 37 && path === state.lostPath)) {
             if (state.deferLoss) {
               state.deferLoss = false;
               await new Promise((done) => { state.releaseLoss = done; });
@@ -240,7 +240,7 @@ async function verifyConnectionLoss(browser) {
     await waitPath(explicit, "left", "/destination");
     const address = await editPaneAddress(explicit, "left");
     await address.fill("/elsewhere");
-    await explicit.evaluate(() => { window.sshFixture.offline = 37; });
+    await explicit.evaluate(() => { window.sshFixture.lostPath = "/elsewhere"; });
     await address.press("Enter");
     await waitPath(explicit, "left", "NetBox");
     await waitPath(explicit, "right", "/destination");

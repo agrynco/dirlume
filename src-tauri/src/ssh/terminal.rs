@@ -95,10 +95,12 @@ pub fn open_shell(
     let bash = quote(&crate::terminal::unix_prompt("bash", true));
     let zsh = quote(&crate::terminal::unix_prompt("zsh", true));
     let fallback = quote(&crate::terminal::unix_prompt("sh", true));
+    let shell = client.1.compatibility.shell.assignment();
     let command = format!(
         "CDPATH= cd -- {} || exit\n\
-        shell=${{SHELL:-/bin/sh}}\n\
+        {shell}\n\
         case \"${{shell##*/}}\" in bash|zsh|sh|dash|ksh) ;; *) shell=/bin/sh ;; esac\n\
+        command -v \"$shell\" >/dev/null 2>&1 || {{ printf '%s\\n' 'The selected SSH shell is unavailable.' >&2; exit 127; }}\n\
         case \"${{shell##*/}}\" in bash) DIRLUME_SHELL_INIT={bash} ;; zsh) DIRLUME_SHELL_INIT={zsh} ;; *) DIRLUME_SHELL_INIT={fallback} ;; esac\n\
         export DIRLUME_SHELL_INIT DIRLUME_PROMPT_TOKEN={prompt_token}\n\
         printf '\\033]2;{prompt_token}:init\\007'\n\

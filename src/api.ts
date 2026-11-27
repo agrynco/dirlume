@@ -90,8 +90,9 @@ export interface CopyOptions {
   mask?: string;
 }
 
+type SmbMount = { server: string; root: string; share: string };
 type SmbConnection =
-  | { kind: "opened"; listing: LocalListing; warning: string | null }
+  | { kind: "opened"; listing: LocalListing; warning: string | null; mount?: SmbMount }
   | { kind: "shares"; server: string; names: string[]; warning: string | null }
   | { kind: "credentials_required"; error: string | null };
 
@@ -113,7 +114,7 @@ export interface ComputerSharing {
 }
 
 export type FileLocation =
-  | { kind: "local"; path: string; parent: string | null }
+  | { kind: "local"; path: string; parent: string | null; smb?: SmbMount }
   | { kind: "smbRoot"; path: string }
   | { kind: "server"; id: number; share: string; address: string; origin: string; segments: string[]; pairedComputer?: boolean; profileId?: string }
   | { kind: "ftp"; id: number; profileId: string; address: string; origin: string; segments: string[];
@@ -196,7 +197,21 @@ export interface FtpProfile {
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
+  proxy?: ProxySettings;
 }
+
+export type ProxyMode = "none" | "socks5" | "httpConnect";
+export interface ProxySettings {
+  mode: ProxyMode;
+  host: string;
+  port: number;
+  username: string;
+  skipLoopback: boolean;
+  resolveLocally: boolean;
+  hasPassword?: boolean;
+}
+export type ProxyInput = Omit<ProxySettings, "hasPassword"> & { password?: string };
+type FtpProfileInput = Omit<FtpProfile, "id" | "proxy"> & { id?: string; password?: string; proxy?: ProxyInput };
 
 export type FtpEncryption = "plain" | "explicitTls" | "implicitTls";
 export interface FtpOptions {
@@ -256,6 +271,14 @@ export interface SshProfile extends SshHostSettings {
   directories?: DirectoryPreferences;
   environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
+  proxy?: ProxySettings;
+  compatibility?: SshCompatibility;
+}
+
+export interface SshCompatibility {
+  sftpCommand: string;
+  signedTimestamps: boolean;
+  shell: "automatic" | "bash" | "zsh" | "sh";
 }
 
 export interface SshHostVerification {
@@ -273,6 +296,8 @@ export type SshHostInput = SshHostSettings & { secret?: string; clearSecret?: bo
 type SshProfileInput = SshHostInput & {
   id?: string; label: string; jumpHosts?: (SshHostInput & { id?: string })[]; directories?: DirectoryPreferences; environment?: EnvironmentPreferences;
   connectionOptions?: ConnectionPreferences;
+  proxy?: ProxyInput;
+  compatibility?: SshCompatibility;
 };
 
 export interface NamedFile {
@@ -343,6 +368,19 @@ export interface GitDetails {
 
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
+export interface GitIndexSnapshot {
+  headRef: string | null;
+  head: string | null;
+  gitDir: string;
+  index: string;
+}
+export interface GitWorkingIndex {
+  snapshot: GitIndexSnapshot;
+  writeBlocked: boolean;
+  submodules: string[];
+  changes: GitWorkingChange[];
+}
+export type GitIndexAction = "stage" | "unstage";
 export interface GitWorkingDiff {
   workingPath: string | null;
   workingText: boolean;
@@ -382,10 +420,12 @@ export interface EnvironmentSave {
   integration: EnvironmentOutcome | null;
 }
 
-export type TerminalOutput = { event: "data"; data: string } | { event: "closed" | "disconnected" };
+import type { MenuRun, MenuEntry, MenuSource, MenuSourceVersion } from "./userMenu";
+
+export type TerminalOutput = { event: "data"; data: string } | { event: "finished"; code: number } | { event: "closed" | "disconnected" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
-  ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });
+  ({ kind: "local"; userMenu?: MenuRun } | { kind: "ssh"; connection: number; address: string; segments: string[] });
 export type CommandCompletion = { index: number; length: number; exclusive?: boolean; matches: { label: string; text: string; directory: boolean }[] };
 export type ShellCompletionEnvironment = Record<string, string | null>;
 export type TerminalCompletionContext = { searchPath?: string; environment?: ShellCompletionEnvironment };
@@ -423,13 +463,31 @@ export type TransferSource =
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
 export type TransferEntryDetails = { size: number; modified: number | null; directory: boolean };
 export type TransferConflict = {
-  path: string; directory: boolean; readOnly: boolean; replaceable: boolean; allowRemember: boolean;
+  path: string; directory: boolean; readOnly: boolean; confirmReadOnly: boolean; replaceable: boolean; allowRemember: boolean;
   incoming: TransferEntryDetails | null; existing: TransferEntryDetails;
 };
 export type TransferOutcome = { kind: "completed" | "skipped" }
   | { kind: "source_retained"; destination: string; source: string; error: string };
 export type TransferProgress = { file: string; path?: string; bytes: number; total: number | null };
 export type TransferEvent = ({ kind: "progress" } & TransferProgress) | { kind: "conflict"; conflict: TransferConflict };
+
+export type FileHistoryDirection = "undo" | "redo";
+export interface FileHistory {
+  entries: {
+    id: number;
+    moving: boolean;
+    source: string;
+    destination: string;
+    time: number;
+    outcome: string;
+    reason: string | null;
+    rows: { source: string; destination: string; outcome: string; error: string | null }[];
+  }[];
+  undo: number | null;
+  redo: number | null;
+  pending: FileHistoryDirection | null;
+  changed: boolean;
+}
 
 interface Connection {
   id: number;
@@ -442,6 +500,18 @@ export interface TextDocument {
   text: string;
   encoding: TextEncoding;
   revision?: string;
+}
+
+export interface TextPages {
+  id: number;
+  encoding: TextEncoding;
+  length: number;
+  pageCount: number;
+}
+
+export interface TextPage {
+  text: string;
+  original: { start: number; end: number };
 }
 
 export interface BytePage {
@@ -489,8 +559,9 @@ export const api = {
   buildVersion: () => invoke<string>("build_version"),
   readSettingsArchive: (title: string) => invoke<string | null>("read_settings_archive", { title }),
   writeSettingsArchive: (title: string, contents: string) => invoke<boolean>("write_settings_archive", { title, contents }),
-  readPortableState: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_portable_state"),
-  savePortablePreferences: (preferences: object) => invoke<void>("save_portable_preferences", { preferences }),
+  readWindowsSettings: () => invoke<{ preferences: object | null; settingsError: string | null; updateError: string | null } | null>("read_windows_settings"),
+  saveWindowsPreferences: (preferences: object, onlyIfMissing = false) =>
+    invoke<boolean>("save_windows_preferences", { preferences, onlyIfMissing }),
   errorLog: () => invoke<string | null>("error_log"),
   clearErrorLog: () => invoke<void>("clear_error_log"),
   checkForUpdate: (trigger: "automatic" | "manual") => invoke<AppUpdate | null>("check_for_update", { trigger }),
@@ -512,7 +583,11 @@ export const api = {
   gitRepository: (path: string) => invoke<GitRepository>("git_repository", { path }),
   gitHistory: (root: string, tip: string, offset: number) => invoke<GitHistory>("git_history", { root, tip, offset }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
-  gitWorkingChanges: (root: string) => invoke<GitWorkingChange[]>("git_working_changes", { root }),
+  gitIndexState: (root: string) => invoke<GitWorkingIndex>("git_index_state", { root }),
+  gitUpdateIndex: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange, action: GitIndexAction, replace: boolean) =>
+    invoke<void>("git_update_index", { root, expected, change, action, replace }),
+  gitCommitChanges: (root: string, expected: GitIndexSnapshot, message: string) =>
+    invoke<string>("git_commit_changes", { root, expected, message }),
   gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
@@ -583,9 +658,9 @@ export const api = {
   disconnect: (id: number) => invoke<void>("disconnect_server", { id }),
   ftpProfiles: () => invoke<FtpProfile[]>("ftp_profiles"),
   ftpWindowsCodePage: () => invoke<number | null>("ftp_windows_code_page"),
-  saveFtpProfile: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }) =>
+  saveFtpProfile: (input: FtpProfileInput) =>
     invoke<string>("save_ftp_profile", { input }),
-  testFtpConnection: (input: Omit<FtpProfile, "id"> & { id?: string; password?: string }, signal?: AbortSignal) =>
+  testFtpConnection: (input: FtpProfileInput, signal?: AbortSignal) =>
     netBoxRequest(signal, (request) => invoke<void>("test_ftp_connection", { input, request })),
   removeFtpProfile: (id: string) => invoke<void>("remove_ftp_profile", { id }),
   connectFtp: (id: string, segments?: string[], remembered?: string[], signal?: AbortSignal) =>
@@ -630,6 +705,20 @@ export const api = {
     invoke<Listing>("list_server", { id, segments }),
   readText: (directory: string, name: string, surface?: TextReadSurface) =>
     invoke<TextDocument>("read_text", { directory, name, surface }),
+  openLocalTextPages: (directory: string, name: string, editing: boolean) =>
+    invoke<TextPages | null>("open_local_text_pages", { directory, name, editing }),
+  openArchiveTextPages: (id: number, segments: string[], editing: boolean) =>
+    invoke<TextPages | null>("open_archive_text_pages", { id, segments, editing }),
+  openFtpTextPages: (id: number, segments: string[], editing: boolean) =>
+    invoke<TextPages | null>("open_ftp_text_pages", { id, segments, editing }),
+  openSshTextPages: (id: number, segments: string[], editing: boolean, sudoPassword?: string) =>
+    invoke<TextPages | null>("open_ssh_text_pages", { id, segments, editing, sudoPassword }),
+  openServerTextPages: (id: number, segments: string[]) =>
+    invoke<TextPages | null>("open_server_text_pages", { id, segments }),
+  readTextPage: (id: number, index: number) => invoke<TextPage>("read_text_page", { id, index }),
+  editTextPage: (id: number, index: number, text: string) => invoke<boolean>("edit_text_page", { id, index, text }),
+  saveTextPages: (id: number, sudoPassword?: string) => invoke<TextPages>("save_text_pages", { id, sudoPassword }),
+  closeTextPages: (id: number) => invoke<void>("close_text_pages", { id }),
   resolveTextLink: (directory: string, destination: string) =>
     invoke<{ directory: string; name: string }>("resolve_text_link", { directory, destination }),
   openWebLink: (href: string) => invoke<void>("open_web_link", { href }),
@@ -654,9 +743,13 @@ export const api = {
     invoke<Listing & { parent: string | null; drives?: ComputerDrive[] | null }>("list_kswitcher", { directory, peer, path }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
   computerName: () => invoke<string | null>("computer_name"),
+  userMenuSources: (folder: string) => invoke<MenuSource[]>("user_menu_sources", { folder }),
+  approveUserMenu: (source: MenuSourceVersion) => invoke<void>("approve_user_menu", { source }),
+  saveUserMenu: (source: MenuSourceVersion, entries: MenuEntry[]) => invoke<MenuSource>("save_user_menu", { source, entries }),
   openTerminal: (session: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<boolean>("open_terminal", { request: { id: session.id, directory: session.path, promptToken, rows, cols,
       refreshEnvironment: session.refreshEnvironment,
+      userMenu: session.kind === "local" ? session.userMenu : undefined,
       ssh: session.kind === "ssh" ? { connection: session.connection, segments: session.segments } : undefined,
     }, output }),
   completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean, shellEnvironment?: ShellCompletionEnvironment) =>
@@ -672,7 +765,11 @@ export const api = {
     { kind: "ftp"; connection: number; segments: string[] }, names: string[], output: Channel<SizeResult>) =>
     invoke<void>("measure_folders", { id, source, names, output }),
   cancelMeasurement: (id: number) => invoke<void>("cancel_measurement", { id }),
-  beginTransfer: (id: number) => invoke<void>("begin_transfer", { id }),
+  beginTransfer: (id: number, history?: { moving: boolean; source: string; destination: string; multipleDestinations: boolean }) =>
+    invoke<void>("begin_transfer", { id, history }),
+  fileOperationHistory: () => invoke<FileHistory>("file_operation_history"),
+  reverseFileOperation: (direction: FileHistoryDirection, expected: number) =>
+    invoke<FileHistory>("reverse_file_operation", { direction, expected }),
   deleteSelection: (id: number, selection: Deletion, onProgress: Channel<DeletionEvent>) =>
     invoke<DeletionResult>("delete_selection", { id, ...selection, onProgress }),
   cancelDeletion: (id: number) => invoke<void>("cancel_deletion", { id }),
@@ -680,7 +777,7 @@ export const api = {
     invoke<void>("resolve_deletion", { id, token, decision }),
   cancelTransfer: (id: number) => invoke<void>("cancel_transfer", { id }),
   finishTransfer: (id: number) => invoke<void>("finish_transfer", { id }),
-  resolveTransfer: (id: number, decision: "overwrite" | "skip", remember: boolean) =>
+  resolveTransfer: (id: number, decision: "overwrite" | "overwrite_all" | "skip", remember: boolean) =>
     invoke<void>("resolve_transfer", { id, decision, remember }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; multiple: boolean; moving: boolean;
@@ -694,11 +791,16 @@ export function placePath(place: Place) {
   return place.kind === "connections" ? connectionSourceNames[place.source] : place.path;
 }
 
+export function placeAddress(place: Place) {
+  return place.kind === "local" && place.smb ? mountedSmbPath(place.path, place.smb) : placePath(place);
+}
+
 export function documentPath({ place, name }: NamedFile) {
   if (place.kind === "server" || isFileServer(place)) {
     return place.origin + "/" + [...place.segments, name].map(encodeURIComponent).join("/");
   }
   if (place.kind === "local") {
+    if (place.smb) return mountedSmbPath(place.path, place.smb) + "/" + encodeURIComponent(name);
     const [host, ...segments] = uncParts(place.path);
     if (host && segments.length) return "smb://" + host + "/" + [...segments, name].map(encodeURIComponent).join("/");
   }
@@ -710,10 +812,15 @@ export function documentPath({ place, name }: NamedFile) {
 export function smbLocation(result: Exclude<SmbConnection, { kind: "credentials_required" }>): { place: SmbPlace; listing: Listing } {
   if (result.kind === "opened") {
     const { path, parent } = result.listing;
-    return { place: { kind: "local", path, parent }, listing: result.listing };
+    return { place: { kind: "local", path, parent, smb: result.mount }, listing: result.listing };
   }
   const entries = result.names.map((name) => ({ name, directory: true, link: false, hidden: false, size: null, modified: null }));
   return { place: { kind: "smbRoot", path: result.server }, listing: { entries, omitted: 0 } };
+}
+
+export function mountedSmbPath(path: string, mount: SmbMount) {
+  const segments = path.slice(mount.root.length).split("/").filter(Boolean).map(encodeURIComponent);
+  return [mount.share, ...segments].join("/");
 }
 
 export async function connectFtpLocation(profileId: string, segments?: string[], remembered?: string[], signal?: AbortSignal) {
@@ -723,6 +830,15 @@ export async function connectFtpLocation(profileId: string, segments?: string[],
 }
 
 type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp";
+
+export function openPlaceTextPages({ place, name }: NamedFile, editing: boolean, sudoPassword?: string) {
+  if (place.kind === "local") return api.openLocalTextPages(place.path, name, editing);
+  const segments = [...place.segments, name];
+  if (place.kind === "archive") return api.openArchiveTextPages(place.id, segments, editing);
+  if (place.kind === "ftp") return api.openFtpTextPages(place.id, segments, editing);
+  if (place.kind === "ssh") return api.openSshTextPages(place.id, segments, editing, sudoPassword);
+  return api.openServerTextPages(place.id, segments);
+}
 
 export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: TextReadSurface) {
   const { place, name } = file;
@@ -804,6 +920,10 @@ export function folderLabel(place: Place) {
   if (place.kind === "server" || isFileServer(place)) return place.segments.at(-1) ?? place.address;
   if (place.kind === "archive" && place.segments.length) return place.segments.at(-1)!;
   if (place.kind === "kswitcher" && !place.path) return place.address;
+  if (place.kind === "smbRoot" && /^smb:\/\//i.test(place.path)) return smbHost(place) ?? place.path;
+  if (place.kind === "local" && place.smb?.root === place.path) {
+    return decodeURIComponent(place.smb.share.slice(place.smb.share.lastIndexOf("/") + 1));
+  }
   return place.path.split(windowsClient ? /[\\/]/ : "/").filter(Boolean).at(-1) ?? place.path;
 }
 
@@ -819,6 +939,11 @@ export function uncParts(path: string) {
 }
 
 export function smbHost(place: Place | null) {
+  const url = place?.kind === "local" ? place.smb?.server :
+    place?.kind === "smbRoot" && /^smb:\/\//i.test(place.path) ? place.path : undefined;
+  if (url) {
+    try { return new URL(url).host; } catch { return undefined; }
+  }
   return place?.kind === "local" || place?.kind === "smbRoot" ? uncParts(place.path)[0] : undefined;
 }
 

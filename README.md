@@ -99,7 +99,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Default keys | Action |
 | --- | --- |
 | F1 | Open offline Help for the control under the pointer or the most recent keyboard focus. In an open dialog, Help stays within that dialog. Use Search Help to find topics and passages across the current language, then press Esc to return to the previous control. Configure Help and Search Help under Options → Keyboard shortcuts. |
-| Alt or F9 | Show or hide the main menu. Use the arrow keys to browse, Enter to run a command, and Esc to hide the menu and return to the previous control. |
+| Alt or F9 | Focus the main menu and reveal it if its title-bar display is disabled. Use the arrow keys to browse, Enter to run a command, and Esc to return to the previous control. |
 | Tab, arrows, Insert | Switch panes, navigate, and mark files. Ctrl-click or Shift-click also selects multiple items. |
 | Shift+↑ / Shift+↓ | Toggle the mark on the file or folder under the cursor, then move one row in that direction when possible. At either end of the list, the cursor stays in place and the mark still toggles. |
 | Alt+F1 / Alt+F2 | Open sources for the left or right pane. On Windows, select a drive by letter to open the other pane's local folder on that drive, or open the drive root. |
@@ -116,6 +116,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
 | F2 | Rename the selected file or folder in its row. |
+| Configurable | Open **User Menu** from a local file pane. Set **Open User Menu** in **Options → Keyboard shortcuts**. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
@@ -131,6 +132,10 @@ Drag the Options title bar to position it independently of the main window. Drag
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
+
+Open **Commands → User Menu** to run saved commands from the captured local pane. The current folder's `.dirlume-menu.json` takes precedence over the personal menu. Use **Menu source** to switch to a parent or personal menu, and **Manage menus** to edit commands, submenus, and separators. Assign a letter, digit, or function key within each menu level. Choose a visibility rule and use **Show hidden entries** to find filtered commands.
+
+Use **Insert token** to add the active folder, opposite folder, focused name, path, stem or extension, marked paths, or a named prompt. Enter shell steps one per line. Put tokens where arguments go, without adding extra quotes. Folder definitions require a review and approval of their current contents for the session. The preview shows substituted values before prompted commands run. Commands run in order in their own PowerShell, sh, dash, Bash, or Zsh session. The Terminal reports failures and exit status. **Stop** cancels remaining steps. Completed steps can leave changes.
 
 The shell receives keystrokes while its input has focus. A hint in the status bar, or beside the close button in the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Use the question-mark button to open offline Help and return to your command when you close it. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 
@@ -164,7 +169,9 @@ Press **F3** to open a PNG, JPEG, GIF, WebP, or BMP up to 16 MiB in the image Vi
 
 Use **F4** on a local single-frame PNG or JPEG to edit it, or **F6** to switch between its saved view and your editing draft. Rotate 90° with **[** or **]**. Use **Crop** to draw a rectangle or set its position and size in image pixels, and choose free, original, preset, or custom proportions. **Apply crop** adds the selection to the draft. **Save a copy** saves in the source format without overwriting a file. **Replace original** asks for confirmation and checks whether the original changed. Camera and color profile metadata may be lost on export. The editor supports images up to 16 MiB and 32 megapixels.
 
-With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Git View works offline with locally available objects and leaves the working tree and index intact. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
+With Git installed, choose **Git View** beside **Quick View** from a local repository folder. The active pane lists local and remote-tracking branches. The opposite pane shows the selected branch or detached HEAD history. Open a commit to see its message and changed paths, or select **Load more** to continue through older commits. For a merge, the changed paths are relative to the first parent. **Refresh** rereads local Git data. Toggle **Git View** again to resume file browsing. Configure the shortcut in **Options → Keyboard shortcuts**.
+
+In **Changes**, use **Stage** or **Unstage** in the preview pane to update the selected path in the index. Replacing a staged version with the full working file requires confirmation. **Commit…** opens a review of every staged path, including paths hidden by the filter. Choose a path to inspect the staged diff, enter a message, and confirm to create a local commit on the checked-out branch. If the branch or index changed since the review, refresh and confirm again. Git executes configured hooks and signing without an interactive terminal. A hook that changes the reviewed commit contents cancels the commit. Use a terminal for interactive Git operations.
 
 Select **Changes** to review staged, unstaged, and untracked files across the repository. Filter by path and use the arrow keys to read each inline diff in the opposite pane. Staged changes compare HEAD with the index, and unstaged changes compare the index with the working file. **Open in Viewer** or **Open in Editor** opens the current working file. Saving refreshes Changes and leaves staged content intact. Use **Refresh** to pick up changes made in other applications.
 
@@ -243,7 +250,7 @@ With a writable, unencrypted ZIP or 7z archive open, select local files or folde
 
 ## Remote sources
 
-Choose **NetBox**, **SMB** (Windows), or **Remote machine** from either pane's sources menu to open saved connections. NetBox shows FTP and SFTP profiles together with their name, protocol, and host. Press **2** in the sources menu to open NetBox, **Shift+F4** to add a profile, **F4** to edit it, and **Enter** to connect. Configure the shortcuts in **Options → Keyboard shortcuts**.
+Choose **NetBox**, **SMB**, or **Remote machine** from either pane's sources menu to open saved connections. NetBox shows FTP and SFTP profiles together with their name, protocol, and host. Press **2** in the sources menu to open NetBox, **Shift+F4** to add a profile, **F4** to edit it, and **Enter** to connect. Configure the shortcuts in **Options → Keyboard shortcuts**.
 
 While browsing a remote folder, choose the source breadcrumb or its entry in the sources menu to open saved connections in the same pane. NetBox selects the current connection. Use the dimmed path to return directly to a folder on that connection. **Back** returns to the remote folder, and **Forward** opens the list again.
 
@@ -254,6 +261,10 @@ On **Directories**, enter an absolute starting folder or leave the field empty f
 On **Environment**, choose LF or CRLF for text files with no existing line endings. Editing preserves detected line endings, and binary transfers keep the original bytes. FTP profiles can also use a legacy filename encoding. For legacy FTP LIST timestamps, choose a fixed server offset from UTC or use this computer’s time zone. The local option can use the offset on each file’s date or today’s offset for all dates. SFTP and FTP MLSD timestamps already specify UTC and are used as received. **Preserve modification times on downloads** controls whether copies to local files receive the remote modification time.
 
 Use **Test connection** to check credentials and list the server's initial directory before saving. Approval of a new SSH host key applies only to that test.
+
+On **SFTP**, leave **SFTP server command** blank to use the standard subsystem. Enter a command only when the server requires a different way to start SFTP. Use **Interpret SFTP modification times as signed** with servers that encode dates before 1970 as signed 32-bit seconds. The bundled client uses SFTP version 3 and applies the server's supported transfer limits. Choosing other versions or manual packet caps requires a client with those controls. Symlink argument order applies to link creation, which Dirlume does not offer in SFTP. On **Shell**, choose the server's default shell, Bash, Zsh, or sh for the SSH terminal.
+
+On **Proxy**, choose **SOCKS5** or **HTTP CONNECT** and enter the proxy address and optional credentials. Dirlume stores the proxy password in the system credential store. Destination names resolve at the proxy by default. Select **On this computer** to resolve them before connecting, or enable the loopback option to connect directly to localhost and loopback addresses. A configured proxy failure is reported on the saved route. FTP and FTPS use the proxy for control and passive data connections. SFTP and the SSH terminal use the same route. With SSH jump hosts, the proxy connects to the first hop and SSH forwards the rest.
 
 If the destination is reachable through bastion servers, add each server under **Jump hosts** in the SSH or SFTP profile. Put the host this computer can reach first, followed by the remaining hosts in connection order. Enter the credentials for each hop and check the **Route** preview. Each jump server must permit SSH TCP forwarding to the next server's SSH port. **Test connection** follows the route and lists the destination's initial SFTP directory. A saved route also applies to the SSH terminal, bookmark reconnects, and file transfers. An empty jump-host list connects directly.
 
@@ -298,7 +309,7 @@ Use the client's tool list for argument schemas. The server works with the locat
 | Confirmed actions | Trash or permanently delete local regular files and folders, and forcibly end specific processes. |
 
 For a confirmed action, Dirlume presents the exact paths or process IDs in its window. A dismissed, expired, or unavailable dialog leaves the targets untouched. Remote deletions, link deletions, and terminal execution are unavailable through the MCP tool set. Custom schemes appear in **Options → Appearance → Color scheme** and persist across restarts.
-On Windows, add an **SMB** connection using a server name, IP address, or UNC share path such as `\\server\documents`. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** stores a successful sign-in separately in Windows Credential Manager.
+Add an **SMB** connection on Windows, macOS, or Ubuntu using a server name, IP address, or share address such as `smb://server/documents`. Windows also supports UNC paths. Opening a saved server shows its shares as folders. At a share's root, use **Parent folder** to return to the share list. **Remember credentials** saves a successful sign-in in the system credential store. Ubuntu uses the `gvfs-backends` and `gvfs-fuse` packages to open shares from a desktop session.
 
 ## Desktop diagnostics
 
@@ -353,6 +364,8 @@ To publish manually, open **Actions → CI and releases → Run workflow** and s
 For an explicitly versioned release, update `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the lockfiles, then push the matching tag. CI rejects stale versions, a mismatched tag or package, and a tag pointing to a different commit. The release contains desktop installers, portable ZIPs, standalone server archives, and SHA-256 checksums. The distributed Windows builds use no Windows developer signing certificate.
 
 The **Downloads** table on the release page links to the installer or disk image and portable ZIP for each platform. Extract the ZIP and open `Dirlume.exe` on Windows, `Dirlume.AppImage` on Linux, or `Dirlume.app` on macOS. The optional standalone server is in the `server/` folder. Windows requires the WebView2 runtime. macOS builds use ad hoc code signing and may require approval in **System Settings → Privacy & Security** on first launch.
+
+On Windows, ordinary and administrator launches of the same executable read Options preferences from `dirlume-settings.json` beside `Dirlume.exe`. An existing settings file takes precedence. On upgrade, the first ordinary launch copies older preferences to that file if the folder allows writes. If saving is denied, Dirlume reports the error and keeps the previous settings. An administrator window opened from Dirlume can initialize a missing settings file from the preferences of the ordinary window.
 
 Windows Portable uses **Install and restart** to update its current folder. Extract it into a folder you can write to. Move the whole folder to carry the portable marker and `dirlume-settings.json` with the app. Copies in separate folders keep separate Options preferences. For earlier ZIPs that lack the portable marker, extract a current ZIP to start using in-place updates.
 

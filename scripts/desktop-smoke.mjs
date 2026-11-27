@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { close, fixture, port, withServer } from "./server-smoke.mjs";
 import { testFtp } from "./ftp-smoke.mjs";
 import { testNativeJumpHosts } from "./ssh-jump-native-smoke.mjs";
-import { testSmbNavigation } from "./smb-navigation-smoke.mjs";
+import { testMountedSmbNavigation, testSmbNavigation } from "./smb-navigation-smoke.mjs";
 import { testSyntaxMenu } from "./syntax-menu-smoke.mjs";
 import { testSystemTheme } from "./system-theme-smoke.mjs";
 import { testMarkdown, testViewerReadingArea } from "./markdown-smoke.mjs";
@@ -54,6 +54,7 @@ if (process.platform !== "win32") throw new Error("This smoke test uses Windows 
 const profile = process.env.DIRLUME_BUILD_PROFILE ?? "release";
 if (process.env.CI) {
   await testSmbNavigation();
+  await testMountedSmbNavigation();
   await testFolderMeasurement();
   await testFolderNavigationHeader();
   await testSyntaxMenu();
@@ -62,6 +63,12 @@ if (process.env.CI) {
   await testAlertDialogStyles();
 }
 const temp = await fixture("desktop-");
+const build = resolve(`src-tauri/target/${profile}`);
+const executable = join(temp, "Dirlume.exe");
+await copyFile(join(build, "dirlume.exe"), executable);
+await cp(join(build, "archive-tools"), join(temp, "archive-tools"), { recursive: true }).catch((error) => {
+  if (error.code !== "ENOENT") throw error;
+});
 const dockerCompletionFixture = await makeDockerFixture(temp);
 const src = join(temp, "from");
 const dst = join(temp, "to");
@@ -111,7 +118,7 @@ let lockedBy;
 
 async function startDesktop() {
   const debuggingPort = await port();
-  child = spawn(resolve(`src-tauri/target/${profile}/dirlume.exe`), [], {
+  child = spawn(executable, [], {
     windowsHide: true,
     env: {
       ...process.env,
@@ -969,15 +976,14 @@ try {
   const conflict = page.getByRole("dialog", { name: "File already exists" });
   await conflict.waitFor();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Previous version\n");
-  await conflict.getByRole("button", { name: "Overwrite" }).click();
+  await conflict.getByRole("button", { name: "Overwrite", exact: true }).click();
   await waitForCompletedTransfer();
   assert.equal(await readFile(join(dst, "notes.txt"), "utf8"), "Dirlume\n");
-  const folderConflict = page.getByRole("dialog", { name: "Folder already exists" });
   await navigate("left", src);
   await left.getByRole("option", { name: /^overlap/ }).click();
   await page.keyboard.press("F5");
   await startTransfer("Copy");
-  await folderConflict.getByRole("button", { name: "Merge", exact: true }).click();
+  assert.equal(await page.getByRole("dialog", { name: "Folder already exists" }).count(), 0);
   await conflict.getByText("Incoming", { exact: true }).waitFor();
   await conflict.getByText("2 B", { exact: true }).waitFor();
   assert.equal(await conflict.getByRole("button", { name: "Skip", exact: true }).evaluate((button) => document.activeElement === button), true);
@@ -1205,19 +1211,32 @@ try {
   await navigate("left", attributes);
   const attributeRow = (name) => left.locator(`.file-row[data-tooltip="${name}"]`);
   const attributeName = (name) => attributeRow(name).locator(".file-name");
+  const selectionForeground = (name) => attributeName(name).evaluate((element) => {
+    const sample = document.createElement("span");
+    sample.style.color = "var(--panel-selected-ink)";
+    element.append(sample);
+    const color = getComputedStyle(sample).color;
+    sample.remove();
+    return color;
+  });
   assert.equal(await attributeRow("hidden.rs").count(), 0);
   assert.equal(await attributeRow("system-hidden.dll").count(), 0);
+  const ordinary = attributeRow("ordinary.sys");
+  const currentOrdinary = ordinary.and(page.locator('[data-current="true"]'));
+  await ordinary.click();
+  await currentOrdinary.waitFor();
   assert.equal(await foreground(attributeName("system-folder")), attributeColors.system);
   assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
   await left.press("Control+h");
+  await currentOrdinary.waitFor();
   assert.equal(await foreground(attributeName(".metadata")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("hidden.rs")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
   await attributeRow("system-hidden.dll").click();
-  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), await selectionForeground("system-hidden.dll"));
   await attributeRow("system-hidden.dll").click({ modifiers: ["Control"] });
   assert.match(await attributeRow("system-hidden.dll").getAttribute("class"), /marked/);
-  assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
+  assert.equal(await foreground(attributeName("system-hidden.dll")), await selectionForeground("system-hidden.dll"));
   if (process.env.DIRLUME_ATTRIBUTES_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_ATTRIBUTES_SCREENSHOT, scale: "css" });
   await left.press("Control+h");
   const properties = page.getByRole("dialog", { name: "Attributes", exact: true });
@@ -1237,15 +1256,15 @@ try {
   assert.ok(await properties.getByText("Owner", { exact: true }).isVisible());
   await flag("System attribute").check();
   await cancelAttributes();
-  assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
+  assert.notEqual(await attributeRow("ordinary.sys").getAttribute("data-file-color"), "file-system");
   await left.press("Control+a");
   await flag("System attribute").check();
   await flag("Read-only").check();
   await applyAttributes();
   await properties.getByText("Attributes saved.", { exact: true }).waitFor();
   assert.equal(await flag("Read-only").isChecked(), true);
-  await page.waitForFunction((expected) =>
-    getComputedStyle(document.querySelector('#left-files [data-tooltip="ordinary.sys"] .file-name')).color === expected, attributeColors.system);
+  await attributeRow("ordinary.sys").and(page.locator('[data-file-color="file-system"]')).waitFor();
+  assert.equal(await foreground(attributeName("ordinary.sys")), await selectionForeground("ordinary.sys"));
   await flag("Read-only").uncheck();
   await flag("System attribute").uncheck();
   await applyAttributes();
@@ -1957,13 +1976,13 @@ try {
   for (const layout of ["twin", "classic"]) {
     await layoutSelect.selectOption(layout);
     await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
-    assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
+    await page.locator(`.app[data-layout="${layout}"]`).waitFor();
     assert.ok(await leftDrives.getByRole("button").count() > 0);
     assert.equal(await actionBarDisplay(), "grid");
   }
   await layoutSelect.selectOption("standard");
   await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
-  assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
+  await page.locator('.app[data-layout="standard"]').waitFor();
   assert.equal(await leftDrives.count(), 0);
   assert.equal(await actionBarDisplay(), "grid");
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
@@ -2154,7 +2173,7 @@ try {
   await about.getByText(buildNumber ? `${productVersion}+${buildNumber}` : productVersion, { exact: true }).waitFor();
   await about.getByRole("button", { name: "Donate via monobank", exact: true }).waitFor();
   assert.ok(await about.locator("img").evaluate((image) => image.complete && image.naturalWidth > 0));
-  await about.getByText("bitcodepro", { exact: true }).waitFor();
+  await about.locator(".about-details").getByText("Anatolii Hrynchuk", { exact: true }).waitFor();
   await about.getByRole("button", { name: "Report an issue", exact: true }).waitFor();
   await about.getByRole("button", { name: "Releases", exact: true }).waitFor();
   await about.getByRole("button", { name: "User guide", exact: true }).click();
@@ -2324,12 +2343,16 @@ try {
     await otherRow.click();
     const original = await colors();
     await row.click();
-    assert.deepEqual(await colors(), ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
+    const selected = await colors();
+    assert.deepEqual(selected, ["rgb(0, 128, 128)", "rgb(255, 255, 255)", "rgb(255, 255, 255)"]);
     await row.click({ modifiers: ["Control"] });
     await attributeList.press("Home");
+    assert.match(await row.getAttribute("class"), /\bmarked\b/);
+    assert.notEqual(await row.getAttribute("data-current"), "true");
     const marked = await colors();
     assert.notEqual(marked[0], original[0]);
-    assert.equal(marked[1], original[1]);
+    assert.notEqual(marked[1], original[1]);
+    assert.equal(marked[1], selected[1]);
   }
   if (process.env.DIRLUME_CLASSIC_SCREENSHOT) await page.screenshot({ path: process.env.DIRLUME_CLASSIC_SCREENSHOT, scale: "css" });
   await exitDesktop(page);
@@ -2387,7 +2410,7 @@ try {
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);
-  await testMarkdownOptionsDismissal(page, attributes);
+  await testMarkdownOptionsDismissal(page, attributes, temp);
   if (process.env.DIRLUME_SSH_FIXTURE_PYTHON) {
     await testNativeJumpHosts(page, temp, dst, join(temp, "ssh-config"), async () => {
       await exitDesktop(page);

@@ -194,6 +194,11 @@ export function AppearanceSettings({ section, preferences, onChange, fontGroup, 
         <MenuAlignmentSetting label="Main menu alignment" value={preferences.mainMenuAlignment}
           onChange={(mainMenuAlignment) => onChange({ ...preferences, mainMenuAlignment })} />
         <label className="field-checkbox">
+          <input type="checkbox" checked={preferences.showMainMenu}
+            onChange={(event) => onChange({ ...preferences, showMainMenu: event.target.checked })} />
+          <SettingSearchLabel label="Always show the main menu" />
+        </label>
+        <label className="field-checkbox">
           <SettingSearchLabel label="Show color scheme switcher in the title bar" />
           <input type="checkbox" checked={preferences.showTitlebarScheme}
             onChange={(event) => onChange({ ...preferences, showTitlebarScheme: event.target.checked })} />

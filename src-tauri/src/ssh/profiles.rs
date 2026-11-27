@@ -10,11 +10,14 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+use super::compatibility::Compatibility;
+
 use crate::{
     desktop::{blocking, message, Result},
     netbox_connection::ConnectionPreferences,
     netbox_directories::DirectoryPreferences,
     netbox_environment::EnvironmentPreferences,
+    netbox_proxy as proxy,
 };
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -74,9 +77,21 @@ pub(super) struct SavedProfile {
     pub(super) environment: EnvironmentPreferences,
     #[serde(default, skip_serializing_if = "ConnectionPreferences::is_default")]
     pub(super) connection_options: ConnectionPreferences,
+    #[serde(default, skip_serializing_if = "proxy::Stored::is_default")]
+    pub(super) proxy: proxy::Stored,
+    #[serde(default, skip_serializing_if = "Compatibility::is_default")]
+    pub(super) compatibility: Compatibility,
 }
 
 impl SavedProfile {
+    pub(super) fn proxy_route(&self) -> Result<Option<proxy::Route>> {
+        let first = self
+            .jump_hosts
+            .first()
+            .map_or(&self.destination, |jump| &jump.host);
+        self.proxy.route(&first.settings.endpoint.host)
+    }
+
     pub fn route(&self) -> impl Iterator<Item = &SavedHost> {
         let destination = std::slice::from_ref(&self.destination);
         self.jump_hosts
@@ -195,6 +210,8 @@ pub struct ProfileSummary {
     directories: DirectoryPreferences,
     environment: EnvironmentPreferences,
     connection_options: ConnectionPreferences,
+    proxy: proxy::Summary,
+    compatibility: Compatibility,
 }
 
 impl From<SavedProfile> for ProfileSummary {
@@ -205,6 +222,8 @@ impl From<SavedProfile> for ProfileSummary {
             directories: item.directories,
             environment: item.environment,
             connection_options: item.connection_options,
+            proxy: item.proxy.summary(),
+            compatibility: item.compatibility,
             destination: item.destination.into(),
             jump_hosts: item
                 .jump_hosts
@@ -230,6 +249,8 @@ pub struct ProfileInput {
     directories: Option<DirectoryPreferences>,
     environment: Option<EnvironmentPreferences>,
     connection_options: Option<ConnectionPreferences>,
+    proxy: Option<proxy::Input>,
+    compatibility: Option<Compatibility>,
 }
 
 #[derive(Deserialize)]
@@ -338,6 +359,30 @@ struct DraftProfile {
 }
 
 impl ProfileInput {
+    pub(super) fn compatibility(&self, config: &Config) -> Result<Compatibility> {
+        let previous = self.id.map(|id| config.profile(id)).transpose()?;
+        self.compatibility
+            .clone()
+            .or_else(|| previous.map(|profile| profile.compatibility.clone()))
+            .unwrap_or_default()
+            .validated()
+    }
+    pub(super) fn proxy_route(&self, config: &Config) -> Result<Option<proxy::Route>> {
+        let empty = proxy::Stored::default();
+        let previous = self
+            .id
+            .map(|id| config.profile(id))
+            .transpose()?
+            .map_or(&empty, |item| &item.proxy);
+        let first = self
+            .jump_hosts
+            .first()
+            .map_or(&self.destination, |jump| &jump.host);
+        match &self.proxy {
+            Some(input) => input.test_route(previous, first.host.trim()),
+            None => previous.route(first.host.trim()),
+        }
+    }
     pub(super) fn connection_preferences(&self, config: &Config) -> Result<ConnectionPreferences> {
         let previous = self.id.map(|id| config.profile(id)).transpose()?;
         self.connection_options
@@ -483,7 +528,7 @@ pub async fn ssh_profiles(app: AppHandle) -> Result<Vec<ProfileSummary>> {
 }
 
 #[tauri::command]
-pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<ProfileSummary> {
+pub async fn save_ssh_profile(mut input: ProfileInput, app: AppHandle) -> Result<ProfileSummary> {
     let path = config_path(&app)?;
     blocking(move || {
         let label = input.label.trim().to_owned();
@@ -515,6 +560,17 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             .or_else(|| previous.map(|profile| profile.connection_options))
             .unwrap_or_default()
             .validated()?;
+        let previous_proxy = previous.map(|old| old.proxy.clone()).unwrap_or_default();
+        let compatibility = input.compatibility(&config)?;
+        let proxy_save = input
+            .proxy
+            .take()
+            .map(|proxy| proxy.save(&previous_proxy))
+            .transpose()?;
+        let proxy = proxy_save
+            .as_ref()
+            .map(|save| save.stored.clone())
+            .unwrap_or(previous_proxy);
         let draft = input.prepare(previous)?;
         let mut new_credentials = NewCredentials::default();
         let item = SavedProfile {
@@ -523,6 +579,8 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             directories,
             environment,
             connection_options,
+            proxy,
+            compatibility,
             destination: new_credentials.save(draft.destination)?,
             jump_hosts: draft
                 .jump_hosts
@@ -542,6 +600,9 @@ pub async fn save_ssh_profile(input: ProfileInput, app: AppHandle) -> Result<Pro
             config.profiles.push(item.clone());
         }
         config.persist(&path)?;
+        if let Some(save) = proxy_save {
+            save.finish();
+        }
         new_credentials.0.clear();
         let retained = item.credentials().collect::<HashSet<_>>();
         for key in old_keys {
@@ -560,9 +621,12 @@ pub async fn remove_ssh_profile(id: Uuid, app: AppHandle) -> Result<()> {
     blocking(move || {
         let _lock = lock(&path)?;
         let mut config = Config::load(&path)?;
-        let keys = config.profile(id)?.credentials().collect::<Vec<_>>();
+        let profile = config.profile(id)?;
+        let keys = profile.credentials().collect::<Vec<_>>();
+        let proxy = profile.proxy.clone();
         config.profiles.retain(|item| item.id != id);
         config.persist(&path)?;
+        proxy.clear();
         for key in keys {
             delete_credential(key);
         }

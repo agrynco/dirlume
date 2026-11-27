@@ -27,7 +27,7 @@ pub struct Entry {
     #[serde(default)]
     system: bool,
     size: Option<u64>,
-    modified: Option<u64>,
+    modified: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,11 +91,15 @@ impl Entry {
             changed: None,
             allocated: None,
             allocation_id: None,
-            modified: modified.and_then(|value| {
-                value
-                    .duration_since(UNIX_EPOCH)
-                    .ok()
-                    .map(|time| time.as_secs())
+            modified: modified.and_then(|value| match value.duration_since(UNIX_EPOCH) {
+                Ok(time) => i64::try_from(time.as_secs()).ok(),
+                Err(error) => {
+                    let elapsed = error.duration();
+                    i64::try_from(elapsed.as_secs())
+                        .ok()?
+                        .checked_neg()?
+                        .checked_sub(i64::from(elapsed.subsec_nanos() != 0))
+                }
             }),
         }
     }
@@ -415,17 +419,19 @@ pub fn copy_to(
         &CopyOptions::default(),
         &mut Vec::new(),
         progress,
+        |_| Ok(()),
     )
 }
 
-pub fn copy_with_options(
+pub fn copy_with_options<T>(
     source: &Path,
     target: &Path,
     replace: bool,
     options: &CopyOptions,
     ancestors: &mut Vec<PathBuf>,
     mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
-) -> io::Result<()> {
+    before_commit: impl FnOnce(&Path) -> io::Result<T>,
+) -> io::Result<T> {
     let target = transfer_path(source, target)?;
     let directory = target.parent().expect("transfer path has a parent");
     let metadata = options.metadata(source)?;
@@ -438,11 +444,13 @@ pub fn copy_with_options(
     let staged = workspace.path().join("copy");
     copy_entry(source, &staged, metadata, options, ancestors, &mut progress)?;
     progress(source, 0, None)?;
+    let receipt = before_commit(&staged)?;
     if replace {
         replace_file(&staged, &target)
     } else {
         renamest::rename_exclusive(staged, target)
-    }
+    }?;
+    Ok(receipt)
 }
 
 pub fn transfer_path(source: &Path, target: &Path) -> io::Result<PathBuf> {

@@ -14,6 +14,8 @@ use tauri::{ipc::Channel, State};
 
 use crate::local;
 
+#[cfg(target_os = "macos")]
+mod macos_walk;
 #[cfg(windows)]
 mod mft;
 #[cfg(windows)]
@@ -247,10 +249,92 @@ fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
         }
     }
     let boundary = platform::boundary(root, &fs::metadata(root)?);
+    #[cfg(target_os = "macos")]
+    if platform::is_apfs(root) {
+        match macos_walk::scan(root, &boundary, out) {
+            Err(macos_walk::ScanError::Fallback) => out.start("walk")?,
+            Err(macos_walk::ScanError::Io(error)) => return Err(error),
+            Ok(()) => return Ok(()),
+        }
+    }
+    #[cfg(target_os = "linux")]
+    let lookup = if platform::has_ext_mount_id(root, &boundary) {
+        MetadataLookup::Statx
+    } else {
+        MetadataLookup::Generic
+    };
+    #[cfg(not(target_os = "linux"))]
+    let lookup = MetadataLookup::Generic;
+    walk_entries(root, out, &boundary, lookup)
+}
+
+#[derive(Clone, Copy)]
+enum MetadataLookup {
+    Generic,
+    #[cfg(target_os = "linux")]
+    Statx,
+}
+
+#[derive(PartialEq, Eq, Debug)]
+enum Child {
+    Directory,
+    File {
+        size: u64,
+        allocated: Option<u64>,
+        identity: Option<(u64, u128)>,
+    },
+}
+
+fn metadata_for_scan(
+    lookup: MetadataLookup,
+    item: &fs::DirEntry,
+    path: &Path,
+    boundary: &platform::Boundary,
+) -> io::Result<Option<Child>> {
+    match lookup {
+        MetadataLookup::Generic => {}
+        #[cfg(target_os = "linux")]
+        MetadataLookup::Statx => {
+            if let Some(child) = platform::statx_child(path, boundary) {
+                return Ok(child);
+            }
+        }
+    }
+    Ok(generic_child(path, &item.metadata()?, boundary))
+}
+
+fn generic_child(
+    path: &Path,
+    metadata: &fs::Metadata,
+    boundary: &platform::Boundary,
+) -> Option<Child> {
+    if local::is_link(metadata)
+        || !(metadata.is_dir() || metadata.is_file())
+        || platform::boundary(path, metadata) != *boundary
+    {
+        return None;
+    }
+    if metadata.is_dir() {
+        return Some(Child::Directory);
+    }
+    let (allocated, identity) = platform::usage(path, metadata);
+    Some(Child::File {
+        size: metadata.len(),
+        allocated,
+        identity,
+    })
+}
+
+fn walk_entries(
+    root: &Path,
+    out: &mut Output<'_>,
+    boundary: &platform::Boundary,
+    lookup: MetadataLookup,
+) -> io::Result<()> {
     let mut jobs = vec![(0, root.to_path_buf())];
     while let Some((parent, folder)) = jobs.pop() {
         out.check()?;
-        let children = directory(&folder, &boundary);
+        let children = directory(&folder, boundary);
         let items = match children {
             Ok(items) => items,
             Err(error) if parent == 0 => return Err(error),
@@ -264,34 +348,30 @@ fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
             out.check()?;
             let child = item.and_then(|item| {
                 let path = item.path();
-                let metadata = item.metadata()?;
-                if local::is_link(&metadata)
-                    || !(metadata.is_dir() || metadata.is_file())
-                    || platform::boundary(&path, &metadata) != boundary
-                {
+                let Some(kind) = metadata_for_scan(lookup, &item, &path, boundary)? else {
                     return Ok(None);
-                }
+                };
                 let name = item
                     .file_name()
                     .into_string()
                     .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
                 local::name_component(&name)?;
-                Ok(Some((path, name, metadata)))
+                Ok(Some((path, name, kind)))
             });
             match child {
-                Ok(Some((path, name, metadata))) if metadata.is_dir() => {
+                Ok(Some((path, name, Child::Directory))) => {
                     jobs.push((out.entry(parent, name, true, None, None, None)?, path));
                 }
-                Ok(Some((path, name, metadata))) => {
-                    let (allocated, identity) = platform::usage(&path, &metadata);
-                    out.entry(
-                        parent,
-                        name,
-                        false,
-                        Some(metadata.len()),
+                Ok(Some((
+                    _,
+                    name,
+                    Child::File {
+                        size,
                         allocated,
                         identity,
-                    )?;
+                    },
+                ))) => {
+                    out.entry(parent, name, false, Some(size), allocated, identity)?;
                 }
                 Ok(None) => {}
                 Err(_) => omitted = true,
@@ -303,6 +383,11 @@ fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
 }
 
 fn directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::ReadDir> {
+    checked_directory(path, boundary)?;
+    fs::read_dir(path)
+}
+
+fn checked_directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     if local::is_link(&metadata)
         || platform::boundary(path, &metadata) != *boundary
@@ -313,7 +398,7 @@ fn directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::ReadD
             "The folder is outside the scan scope.",
         ));
     }
-    fs::read_dir(path)
+    Ok(metadata)
 }
 
 #[derive(Serialize)]
@@ -500,6 +585,11 @@ mod platform {
 
     #[cfg(target_os = "linux")]
     fn mount_id(path: &Path) -> Option<u64> {
+        statx(path, libc::STATX_MNT_ID).map(|info| info.stx_mnt_id)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn statx(path: &Path, mask: libc::c_uint) -> Option<libc::statx> {
         let path = CString::new(path.as_os_str().as_bytes()).ok()?;
         let mut info = MaybeUninit::<libc::statx>::zeroed();
         let result = unsafe {
@@ -507,7 +597,7 @@ mod platform {
                 libc::AT_FDCWD,
                 path.as_ptr(),
                 libc::AT_SYMLINK_NOFOLLOW | libc::AT_STATX_DONT_SYNC,
-                libc::STATX_MNT_ID,
+                mask,
                 info.as_mut_ptr(),
             )
         };
@@ -515,7 +605,41 @@ mod platform {
             return None;
         }
         let info = unsafe { info.assume_init() };
-        (info.stx_mask & libc::STATX_MNT_ID != 0).then_some(info.stx_mnt_id)
+        (info.stx_mask & mask == mask).then_some(info)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn has_ext_mount_id(path: &Path, boundary: &Boundary) -> bool {
+        const EXT_SUPER_MAGIC: libc::c_long = 0xef53;
+        boundary.1.is_some() && filesystem(path).is_ok_and(|fs| fs.f_type == EXT_SUPER_MAGIC)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn statx_child(path: &Path, boundary: &Boundary) -> Option<Option<Child>> {
+        let info = statx(
+            path,
+            libc::STATX_TYPE
+                | libc::STATX_NLINK
+                | libc::STATX_INO
+                | libc::STATX_SIZE
+                | libc::STATX_BLOCKS
+                | libc::STATX_MNT_ID,
+        )?;
+        let device = libc::makedev(info.stx_dev_major, info.stx_dev_minor);
+        if (device, Some(info.stx_mnt_id)) != *boundary {
+            return Some(None);
+        }
+        let result = match libc::mode_t::from(info.stx_mode) & libc::S_IFMT {
+            libc::S_IFDIR => Some(Child::Directory),
+            libc::S_IFREG => Some(Child::File {
+                size: info.stx_size,
+                allocated: info.stx_blocks.checked_mul(512),
+                identity: (info.stx_nlink > 1 && info.stx_ino != 0)
+                    .then_some((device, u128::from(info.stx_ino))),
+            }),
+            _ => None,
+        };
+        Some(result)
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -546,6 +670,14 @@ mod platform {
         #[cfg(not(target_os = "linux"))]
         let share = false;
         Ok((root.to_path_buf(), share))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn is_apfs(path: &Path) -> bool {
+        filesystem(path).is_ok_and(|info| {
+            // Darwin fills this fixed-size field with a NUL-terminated filesystem name.
+            unsafe { std::ffi::CStr::from_ptr(info.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
+        })
     }
 
     #[cfg(target_os = "macos")]
@@ -655,6 +787,64 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn statx_walk_matches_the_generic_entries_and_accounting() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("root");
+        let empty = root.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        let file = root.join(".allocated");
+        fs::write(&file, [42; 4096]).unwrap();
+        fs::hard_link(&file, root.join("hard-link")).unwrap();
+        let sparse = root.join("sparse");
+        fs::File::create(&sparse)
+            .unwrap()
+            .set_len(256 * 1024)
+            .unwrap();
+        std::os::unix::fs::symlink(fixture.path(), root.join("redirect")).unwrap();
+        let root = root.canonicalize().unwrap();
+        let boundary = platform::boundary(&root, &fs::metadata(&root).unwrap());
+        if boundary.1.is_none() {
+            return;
+        }
+        for path in [&file, &empty, &sparse] {
+            assert!(platform::statx_child(path, &boundary).is_some());
+        }
+        let collect = |lookup| {
+            let mut changes = Vec::new();
+            let mut output = Output {
+                send: &mut |event| {
+                    if let ScanEvent::Batch { changes: batch } = event {
+                        changes.extend(
+                            batch
+                                .into_iter()
+                                .map(|change| serde_json::to_value(change).unwrap()),
+                        );
+                    }
+                    Ok(())
+                },
+                stop: &AtomicBool::new(false),
+                changes: Vec::new(),
+                identities: HashSet::new(),
+                next_id: 1,
+                last: Instant::now(),
+            };
+            walk_entries(&root, &mut output, &boundary, lookup).unwrap();
+            output.flush().unwrap();
+            changes
+        };
+        let generic = collect(MetadataLookup::Generic);
+        assert_eq!(collect(MetadataLookup::Statx), generic);
+        assert_eq!(
+            generic
+                .iter()
+                .filter(|change| change["shared"] == true)
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn measures_logical_sizes_within_the_scan_boundary() {

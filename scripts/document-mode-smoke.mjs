@@ -32,6 +32,11 @@ export async function testDocumentReturn(page, root) {
     if (name) assert.equal(await row(side, name).getAttribute("aria-selected"), "true");
   };
   const close = (window) => window.getByRole("button", { name: "Close document", exact: true }).click();
+  const switchMode = async (window, title) => {
+    const menu = window.getByRole("menubar", { name: "Document menu" });
+    await menu.getByRole("menuitem", { name: "File", exact: true }).click();
+    await menu.getByRole("menuitem", { name: title, exact: true }).click();
+  };
   const target = textWindow("target.md");
   const editor = textWindow("target.md", true);
   const origin = textWindow("origin.md");
@@ -48,7 +53,7 @@ export async function testDocumentReturn(page, root) {
   await verifyFiles("right", "target.md");
 
   await show("right", "target.md");
-  await target.press("F6");
+  await switchMode(target, "Open in Editor");
   await editor.locator(".cm-content").fill("Unsaved text");
   await editor.press("Escape");
   const unsaved = page.getByRole("dialog", { name: "Unsaved changes", exact: true });
@@ -59,8 +64,8 @@ export async function testDocumentReturn(page, root) {
   await verifyFiles("right", "target.md");
 
   await show("right", "target.md");
-  await target.press("F6");
-  await editor.press("F6");
+  await switchMode(target, "Open in Editor");
+  await switchMode(editor, "Open in Viewer");
   const menu = target.getByRole("menubar", { name: "Document menu", exact: true });
   await menu.getByRole("menuitem", { name: "File", exact: true }).click();
   await menu.getByRole("menuitem", { name: "Close", exact: true }).click();
@@ -188,6 +193,7 @@ export async function testDocumentMode(page, root) {
     await options.getByRole("button", { name: `Add shortcut for ${label}`, exact: true }).click();
     await options.getByRole("textbox", { name: `New shortcut for ${label}`, exact: true }).press("F6");
   });
+  await verifyViewerShortcutHint("F6");
   await viewer.press("F10");
   await pane.press("F6");
   const rename = page.getByRole("dialog", { name: "Rename or move", exact: true });

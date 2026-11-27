@@ -3,7 +3,6 @@ use std::{
     fs,
     future::Future,
     io::{self, Read, Write},
-    net::SocketAddr,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
@@ -35,6 +34,7 @@ use crate::{
     netbox_connection::{self, ConnectionPreferences},
     netbox_directories::{list_initial, DirectoryPreferences, InitialListingError},
     netbox_environment::EnvironmentPreferences,
+    netbox_proxy as proxy,
     protocol::{file_server_origin, RemoteListing},
     remote_recycle::{protect_path, RecoveryPath},
 };
@@ -124,6 +124,16 @@ struct SavedProfile {
     #[serde(flatten)]
     profile: Profile,
     credential: Option<String>,
+    #[serde(default, skip_serializing_if = "proxy::Stored::is_default")]
+    proxy: proxy::Stored,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileSummary {
+    #[serde(flatten)]
+    profile: Profile,
+    proxy: proxy::Summary,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +151,7 @@ pub struct ProfileInput {
     directories: Option<DirectoryPreferences>,
     environment: Option<EnvironmentPreferences>,
     connection_options: Option<ConnectionPreferences>,
+    proxy: Option<proxy::Input>,
 }
 
 #[derive(Default)]
@@ -234,13 +245,16 @@ pub fn ftp_windows_code_page() -> Option<u16> {
 }
 
 #[tauri::command]
-pub async fn ftp_profiles(app: AppHandle) -> Result<Vec<Profile>> {
+pub async fn ftp_profiles(app: AppHandle) -> Result<Vec<ProfileSummary>> {
     let path = profiles_path(&app)?;
     blocking(move || {
         let _lock = lock_profiles(&path)?;
         Ok(load_profiles(&path)?
             .into_iter()
-            .map(|item| item.profile)
+            .map(|item| ProfileSummary {
+                profile: item.profile,
+                proxy: item.proxy.summary(),
+            })
             .collect())
     })
     .await
@@ -332,6 +346,9 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
         if input.connection_options.is_none() {
             profile.connection_options = previous.map(|old| old.profile.connection_options).unwrap_or_default();
         }
+        let previous_proxy = previous.map(|old| old.proxy.clone()).unwrap_or_default();
+        let proxy_save = input.proxy.map(|proxy| proxy.save(&previous_proxy)).transpose()?;
+        let proxy = proxy_save.as_ref().map(|save| save.stored.clone()).unwrap_or(previous_proxy);
         let mut key = previous.filter(|old| old.profile.same_login(&profile)).and_then(|old| old.credential.clone());
         let updated_key = if let Some(password) = input.password {
             key = None;
@@ -349,13 +366,14 @@ pub async fn save_ftp_profile(input: ProfileInput, app: AppHandle) -> Result<Uui
         };
         let old_key = previous.and_then(|old| old.credential.clone()).filter(|old| Some(old) != key.as_ref());
         let id = profile.id;
-        let item = SavedProfile { profile, credential: key };
+        let item = SavedProfile { profile, credential: key, proxy };
         if let Some(index) = index { saved[index] = item; } else { saved.push(item); }
         if let Err(error) = persist_profiles(&path, &saved) {
             if let Some(key) = updated_key { delete_credential(&key); }
             return Err(error);
         }
         if let Some(key) = old_key { delete_credential(&key); }
+        if let Some(save) = proxy_save { save.finish(); }
         Ok(id)
     }).await
 }
@@ -375,6 +393,7 @@ pub async fn remove_ftp_profile(id: Uuid, app: AppHandle) -> Result<()> {
         if let Some(key) = removed.credential {
             delete_credential(&key);
         }
+        removed.proxy.clear();
         Ok(())
     })
     .await
@@ -383,6 +402,7 @@ pub async fn remove_ftp_profile(id: Uuid, app: AppHandle) -> Result<()> {
 pub struct Connection {
     profile: Profile,
     password: String,
+    proxy: Option<proxy::Route>,
 }
 
 fn read_password(key: Option<&str>) -> Result<String> {
@@ -409,12 +429,6 @@ pub async fn test_ftp_connection(
         let mut profile = input.profile()?;
         let saved = input
             .id
-            .filter(|_| {
-                input.password.is_none()
-                    || input.connection_options.is_none()
-                    || input.encryption.is_none()
-                    || input.ftp_options.is_none()
-            })
             .map(|id| {
                 let _lock = lock_profiles(&path)?;
                 load_profiles(&path)?
@@ -444,7 +458,18 @@ pub async fn test_ftp_connection(
                     .and_then(|saved| saved.credential.as_deref()),
             )?,
         };
-        let mut session = Connection { profile, password }.open_with_cancel(stop)?;
+        let empty_proxy = proxy::Stored::default();
+        let previous_proxy = saved.as_ref().map_or(&empty_proxy, |saved| &saved.proxy);
+        let proxy = match input.proxy {
+            Some(draft) => draft.test_route(previous_proxy, &profile.host)?,
+            None => previous_proxy.route(&profile.host)?,
+        };
+        let mut session = Connection {
+            profile,
+            password,
+            proxy,
+        }
+        .open_with_cancel(stop)?;
         let directory = parse_path(&session.pwd().map_err(message)?)?;
         session.list(&directory)?;
         Ok(())
@@ -498,13 +523,11 @@ fn configure_socket(
 }
 
 async fn dial(
-    address: SocketAddr,
+    target: &proxy::Target,
     options: ConnectionPreferences,
     data: bool,
 ) -> FtpResult<TcpStream> {
-    let socket = TcpStream::connect(address)
-        .await
-        .map_err(FtpError::ConnectionError)?;
+    let socket = target.connect().await.map_err(FtpError::ConnectionError)?;
     configure_socket(&socket, options, data).map_err(FtpError::ConnectionError)?;
     Ok(socket)
 }
@@ -589,7 +612,7 @@ fn tls_name(host: &str) -> Result<String> {
 }
 
 async fn open_control(
-    address: SocketAddr,
+    target: &proxy::Target,
     options: ConnectionPreferences,
     encryption: Encryption,
     tls: Option<&Arc<rustls::ClientConfig>>,
@@ -600,10 +623,10 @@ async fn open_control(
         if raw_iac {
             // This constructor accepts a control adapter before reading the greeting.
             // The plain adapter adds no TLS layer.
-            let connector = wire::Connector::new(None, true, options);
-            return FtpStream::connect_secure_implicit(address, connector, "").await;
+            let connector = wire::Connector::new(None, true, options).with_target(target.clone());
+            return FtpStream::connect_secure_implicit(target.socket, connector, "").await;
         }
-        let stream = dial(address, options, false).await?;
+        let stream = dial(target, options, false).await?;
         return FtpStream::connect_with_stream(stream).await;
     }
     let config =
@@ -613,9 +636,14 @@ async fn open_control(
     )));
     let connector = wire::Connector::new(Some(tls), raw_iac, options);
     if encryption == Encryption::ImplicitTls {
-        return FtpStream::connect_secure_implicit(address, connector, name).await;
+        return FtpStream::connect_secure_implicit(
+            target.socket,
+            connector.with_target(target.clone()),
+            name,
+        )
+        .await;
     }
-    let stream = FtpStream::connect_with_stream(dial(address, options, false).await?).await?;
+    let stream = FtpStream::connect_with_stream(dial(target, options, false).await?).await?;
     stream.into_secure(connector, name).await.map_err(|error| {
         FtpError::SecureError(format!(
             "Could not negotiate explicit TLS or protected data connections. {error}"
@@ -646,10 +674,21 @@ impl Connection {
             timeout: options.response_timeout(TIMEOUT),
             stop,
         };
+        if ftp_options.active_mode
+            && self
+                .proxy
+                .as_ref()
+                .is_some_and(|route| route.applies(&self.profile.host))
+        {
+            return Err("FTP proxy connections require passive data mode.".to_owned());
+        }
         let addresses = limits
-            .io(options
-                .address_family
-                .resolve(&self.profile.host, self.profile.port))
+            .io(proxy::targets(
+                self.proxy.as_ref(),
+                options.address_family,
+                &self.profile.host,
+                self.profile.port,
+            ))
             .map_err(message)?;
         let encryption = self.profile.encryption;
         let name = if encryption.is_plain() {
@@ -662,9 +701,9 @@ impl Connection {
             io::ErrorKind::AddrNotAvailable,
             "Could not reach the FTP server.",
         );
-        for address in addresses {
+        for target in addresses {
             match limits.call(open_control(
-                address,
+                &target,
                 options,
                 encryption,
                 tls.as_ref(),
@@ -672,11 +711,14 @@ impl Connection {
                 ftp_options.raw_iac_commands,
             )) {
                 Ok(stream) => {
-                    control = Some((stream, address.ip()));
+                    control = Some((stream, target));
                     break;
                 }
                 Err(FtpError::ConnectionError(error))
-                    if error.kind() != io::ErrorKind::Interrupted =>
+                    if !matches!(
+                        error.kind(),
+                        io::ErrorKind::Interrupted | io::ErrorKind::PermissionDenied
+                    ) =>
                 {
                     last = error;
                 }
@@ -685,12 +727,14 @@ impl Connection {
         }
         let (stream, peer) =
             control.ok_or_else(|| message(options.address_family.connect_error(last)))?;
+        let ipv6 = peer.ipv6();
         let mut stream = stream.passive_stream_builder(move |address| {
-            Box::pin(dial(SocketAddr::new(peer, address.port()), options, true))
+            let target = peer.with_port(address.port());
+            Box::pin(async move { dial(&target, options, true).await })
         });
         if ftp_options.active_mode {
             stream = stream.active_mode(limits.timeout.unwrap_or(ACTIVE_TIMEOUT));
-        } else if peer.is_ipv6() {
+        } else if ipv6 {
             stream.set_mode(Mode::ExtendedPassive);
         }
         let user = if self.profile.username.is_empty() {
@@ -792,7 +836,7 @@ pub async fn connect_ftp(
     let path = profiles_path(&app)?;
     let stop = requests.token(request)?;
     let (connection, start) = blocking(move || {
-        let (profile, password) = {
+        let (profile, password, proxy) = {
             let _lock = lock_profiles(&path)?;
             let item = load_profiles(&path)?
                 .into_iter()
@@ -803,9 +847,14 @@ pub async fn connect_ftp(
             } else {
                 read_password(item.credential.as_deref())?
             };
-            (item.profile, password)
+            let proxy = item.proxy.route(&item.profile.host)?;
+            (item.profile, password, proxy)
         };
-        let connection = Arc::new(Connection { profile, password });
+        let connection = Arc::new(Connection {
+            profile,
+            password,
+            proxy,
+        });
         let mut session = connection.open_with_cancel(stop)?;
         let start = list_initial(
             &connection.profile.directories,
@@ -1209,7 +1258,7 @@ impl Session {
     pub fn download(
         &mut self,
         segments: &[String],
-        output: &mut impl Write,
+        output: &mut (impl Write + ?Sized),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
         let mut stream = self
@@ -1605,7 +1654,8 @@ mod tests {
     async fn data_and_control_sockets_inherit_the_profile_settings() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();
-        let default = dial(address, ConnectionPreferences::default(), false)
+        let target = proxy::Target::direct(address);
+        let default = dial(&target, ConnectionPreferences::default(), false)
             .await
             .unwrap();
         let default = SockRef::from(&default);
@@ -1617,8 +1667,8 @@ mod tests {
         .unwrap()
         .validated()
         .unwrap();
-        let control = dial(address, options, false).await.unwrap();
-        let data = dial(address, options, true).await.unwrap();
+        let control = dial(&target, options, false).await.unwrap();
+        let data = dial(&target, options, true).await.unwrap();
         let control = SockRef::from(&control);
         let data = SockRef::from(&data);
         assert!(control.keepalive().unwrap() && data.keepalive().unwrap());

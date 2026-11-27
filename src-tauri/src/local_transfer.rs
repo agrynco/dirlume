@@ -25,6 +25,7 @@ pub enum Policy {
 #[serde(rename_all = "snake_case")]
 pub enum Decision {
     Overwrite,
+    OverwriteAll,
     Skip,
 }
 
@@ -69,6 +70,7 @@ pub struct Conflict {
     path: String,
     pub directory: bool,
     read_only: bool,
+    pub confirm_read_only: bool,
     pub replaceable: bool,
     pub allow_remember: bool,
     incoming: Option<EntryDetails>,
@@ -86,6 +88,7 @@ impl Conflict {
             path,
             directory: existing.directory,
             read_only: false,
+            confirm_read_only: false,
             replaceable,
             allow_remember: replaceable,
             incoming: Some(EntryDetails::from(incoming)),
@@ -99,6 +102,7 @@ impl Conflict {
                 .unwrap_or_else(|_| target.to_string_lossy().into_owned()),
             directory: existing.is_dir(),
             read_only: existing.permissions().readonly(),
+            confirm_read_only: false,
             replaceable: false,
             allow_remember: false,
             incoming: None,
@@ -173,11 +177,14 @@ pub(crate) fn plan_target(
     let read_only = existing.permissions().readonly();
     let existing_directory = existing.is_dir() && !local::is_link(&existing);
     let regular = existing.is_file() && !local::is_link(&existing) && incoming.regular;
-    let merge = incoming.details.directory && existing_directory;
-    let replaceable = merge || regular;
-    let force_ask = read_only
+    if incoming.details.directory && existing_directory {
+        plan.merge = Some(same_file::Handle::from_path(target)?);
+        return Ok(Some(plan));
+    }
+    let force_ask = regular
+        && read_only
         && options.ask_read_only
-        && !matches!(options.policy, Policy::Skip | Policy::Rename);
+        && matches!(options.policy, Policy::Ask | Policy::Newer);
     let policy = if force_ask
         || (options.policy == Policy::Newer
             && !incoming.details.directory
@@ -203,17 +210,15 @@ pub(crate) fn plan_target(
     if regular {
         plan.replace = Some(FileRevision::capture(target, &existing)?);
     }
-    if merge {
-        plan.merge = Some(same_file::Handle::from_path(target)?);
-    }
-    if policy == Policy::Ask || !replaceable {
+    if policy == Policy::Ask || !regular {
         let conflict = Conflict {
             path: local::display_path(target)
                 .unwrap_or_else(|_| target.to_string_lossy().into_owned()),
             directory: existing_directory,
             read_only,
-            replaceable,
-            allow_remember: !force_ask && replaceable,
+            confirm_read_only: force_ask,
+            replaceable: regular,
+            allow_remember: regular,
             incoming: Some(incoming.details),
             existing: EntryDetails::from(&existing),
         };
@@ -221,7 +226,7 @@ pub(crate) fn plan_target(
             return Ok(None);
         }
     }
-    if !replaceable {
+    if !regular {
         return Err(io::Error::new(
             ErrorKind::AlreadyExists,
             "The destination cannot be replaced.",
@@ -234,6 +239,7 @@ pub(crate) fn plan_target(
 pub(crate) struct MoveResume {
     folders: HashMap<PathBuf, MovingFolder>,
     skipped: HashMap<PathBuf, same_file::Handle>,
+    pub(crate) history: Option<Vec<crate::file_history::Commit>>,
 }
 
 struct MovingFolder {
@@ -317,6 +323,9 @@ fn transfer_entry(
 
     if options.moving && merge.is_none() {
         progress(source, 0, None)?;
+        let proof = (resume.history.is_some() && ancestors.is_empty() && replace.is_none())
+            .then(|| crate::file_history::Proof::original(source, &target, &incoming).ok())
+            .flatten();
         let result = if let Some(existing) = &replace {
             existing.verify(&target)?;
             local::replace_file(source, &target)
@@ -324,7 +333,12 @@ fn transfer_entry(
             local::move_item(source, target.clone())
         };
         match result {
-            Ok(()) => return Ok(true),
+            Ok(()) => {
+                if let Some(history) = &mut resume.history {
+                    history.push(crate::file_history::Commit::new(source, &target, proof));
+                }
+                return Ok(true);
+            }
             Err(error) if error.kind() == ErrorKind::CrossesDevices => {}
             Err(error) => return Err(error),
         }
@@ -348,6 +362,9 @@ fn transfer_entry(
             if let Err(error) = local::preserve_access(source, &target, &incoming) {
                 let _ = fs::remove_dir(&target);
                 return Err(error);
+            }
+            if let Some(history) = &mut resume.history {
+                history.push(crate::file_history::Commit::new(source, &target, None));
             }
         }
         let target_folder = same_file::Handle::from_path(&target)?;
@@ -387,6 +404,9 @@ fn transfer_entry(
         if options.moving && all_transferred {
             verify_folder(source, &source_folder)?;
             fs::remove_dir(source)?;
+            if let Some(history) = &mut resume.history {
+                history.push(crate::file_history::Commit::new(source, &target, None));
+            }
             resume.folders.remove(source);
         }
         return Ok(all_transferred);
@@ -397,7 +417,11 @@ fn transfer_entry(
     } else {
         None
     };
-    local::copy_with_options(
+    let proof =
+        (!options.moving && resume.history.is_some() && ancestors.is_empty() && replace.is_none())
+            .then(|| crate::file_history::Proof::original(source, &target, &incoming).ok())
+            .flatten();
+    let proof = local::copy_with_options(
         source,
         &target,
         replace.is_some(),
@@ -415,7 +439,13 @@ fn transfer_entry(
             }
             Ok(())
         },
+        |staged| {
+            Ok(proof.and_then(|proof| proof.copied_to(source, staged, options.copy.clone()).ok()))
+        },
     )?;
+    if let Some(history) = &mut resume.history {
+        history.push(crate::file_history::Commit::new(source, &target, proof));
+    }
     if let Some(original) = original {
         remove_original(source, &original).map_err(|error| {
             io::Error::other(format!(
@@ -517,6 +547,16 @@ impl FileRevision {
 }
 
 pub(crate) fn remove_original(source: &Path, original: &FileRevision) -> io::Result<()> {
+    with_verified_original(source, original, |staged| {
+        local::with_writable_file(staged, || fs::remove_file(staged))
+    })
+}
+
+pub(crate) fn with_verified_original(
+    source: &Path,
+    original: &FileRevision,
+    publish: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     original.verify(source)?;
     let parent = source
         .parent()
@@ -531,9 +571,7 @@ pub(crate) fn remove_original(source: &Path, original: &FileRevision) -> io::Res
     // Keep the staged original if it cannot be restored because another file
     // appeared at the source path. Never delete an unverified replacement.
     let recovery = workspace.keep();
-    let result = original
-        .verify(&staged)
-        .and_then(|()| local::with_writable_file(&staged, || fs::remove_file(&staged)));
+    let result = original.verify(&staged).and_then(|()| publish(&staged));
     if let Err(error) = result {
         if let Err(restore) = local::move_item(&staged, source.to_owned()) {
             return Err(io::Error::other(format!(
@@ -601,8 +639,11 @@ mod tests {
         let target = fixture.path().join("target");
         fs::create_dir(&source).unwrap();
         fs::create_dir(&target).unwrap();
-        fs::write(source.join("keep"), "incoming").unwrap();
-        fs::write(target.join("keep"), "original").unwrap();
+        fs::create_dir(source.join("nested")).unwrap();
+        fs::create_dir(target.join("nested")).unwrap();
+        fs::write(source.join("nested/keep"), "incoming").unwrap();
+        fs::write(target.join("nested/keep"), "original").unwrap();
+        fs::write(target.join("nested/destination-only"), "preserved").unwrap();
         fs::write(source.join("new"), "created").unwrap();
         let options = Options {
             moving: false,
@@ -617,21 +658,23 @@ mod tests {
             &mut MoveResume::default(),
             |_, _, _| Ok(()),
             |conflict| {
-                Ok(if conflict.directory {
-                    Decision::Overwrite
-                } else {
-                    Decision::Skip
-                })
+                assert!(!conflict.directory);
+                assert!(conflict.path.ends_with("keep"));
+                Ok(Decision::Skip)
             },
         )
         .unwrap();
         assert!(!completed);
-        assert_eq!(fs::read(target.join("keep")).unwrap(), b"original");
+        assert_eq!(fs::read(target.join("nested/keep")).unwrap(), b"original");
+        assert_eq!(
+            fs::read(target.join("nested/destination-only")).unwrap(),
+            b"preserved"
+        );
         assert_eq!(fs::read(target.join("new")).unwrap(), b"created");
     }
 
     #[test]
-    fn retry_resumes_a_partially_moved_folder_without_repeating_its_merge_decision() {
+    fn retry_resumes_a_partially_moved_folder_without_prompting() {
         let fixture = tempfile::tempdir().unwrap();
         let source = fixture.path().join("source");
         let target = fixture.path().join("target");
@@ -657,7 +700,7 @@ mod tests {
                 }
                 Ok(())
             },
-            |_| Ok(Decision::Overwrite),
+            |_| panic!("An existing folder must merge without a prompt"),
         );
         assert!(result.is_err());
         assert_eq!(fs::read_dir(&source).unwrap().count(), 1);
@@ -668,11 +711,48 @@ mod tests {
             &options,
             &mut resume,
             |_, _, _| Ok(()),
-            |_| panic!("The merge was already approved")
+            |_| panic!("An existing folder must merge without a prompt")
         )
         .unwrap());
         assert!(!source.exists());
         assert_eq!(fs::read_to_string(target.join("one")).unwrap(), "first");
         assert_eq!(fs::read_to_string(target.join("two")).unwrap(), "second");
+    }
+
+    #[test]
+    fn overwrite_all_setup_covers_read_only_files_in_nested_folders() {
+        for moving in [false, true] {
+            let fixture = tempfile::tempdir().unwrap();
+            let source = fixture.path().join("source");
+            let target = fixture.path().join("target");
+            fs::create_dir_all(source.join("nested")).unwrap();
+            fs::create_dir_all(target.join("nested")).unwrap();
+            for name in ["regular", "nested/readonly"] {
+                fs::write(source.join(name), "incoming").unwrap();
+                fs::write(target.join(name), "original").unwrap();
+            }
+            let path = target.join("nested/readonly");
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&path, permissions).unwrap();
+            let options = Options {
+                moving,
+                policy: Policy::Overwrite,
+                ask_read_only: true,
+                copy: Default::default(),
+            };
+            assert!(transfer(
+                &source,
+                &target,
+                &options,
+                &mut MoveResume::default(),
+                |_, _, _| Ok(()),
+                |_| panic!("Overwrite all must cover regular and read-only files"),
+            )
+            .unwrap());
+            assert_eq!(fs::read(target.join("regular")).unwrap(), b"incoming");
+            assert_eq!(fs::read(path).unwrap(), b"incoming");
+            assert_eq!(source.exists(), !moving);
+        }
     }
 }

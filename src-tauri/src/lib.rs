@@ -23,6 +23,8 @@ mod file_attributes;
 #[cfg(feature = "desktop")]
 mod file_clipboard;
 #[cfg(feature = "desktop")]
+mod file_history;
+#[cfg(feature = "desktop")]
 mod folders;
 #[cfg(feature = "desktop")]
 mod ftp;
@@ -45,6 +47,8 @@ mod netbox_connection;
 mod netbox_directories;
 #[cfg(feature = "desktop")]
 mod netbox_environment;
+#[cfg(feature = "desktop")]
+mod netbox_proxy;
 #[cfg(all(feature = "desktop", windows))]
 mod portable;
 #[cfg(feature = "desktop")]
@@ -58,6 +62,11 @@ mod remote_transfer;
 mod screen_color;
 #[cfg(any(feature = "server", feature = "desktop"))]
 pub mod server;
+#[cfg(all(
+    feature = "desktop",
+    any(windows, target_os = "linux", target_os = "macos")
+))]
+mod smb;
 #[cfg(feature = "desktop")]
 mod space_analyzer;
 #[cfg(feature = "desktop")]
@@ -65,9 +74,13 @@ mod ssh;
 #[cfg(feature = "desktop")]
 mod terminal;
 #[cfg(feature = "desktop")]
+mod text_pages;
+#[cfg(feature = "desktop")]
 mod timestamps;
 #[cfg(feature = "desktop")]
 mod updates;
+#[cfg(feature = "desktop")]
+mod user_menu;
 #[cfg(feature = "desktop")]
 mod watch;
 #[cfg(all(feature = "desktop", windows))]

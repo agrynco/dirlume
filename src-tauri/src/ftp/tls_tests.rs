@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, BufReader, Cursor},
-    net::{TcpListener, TcpStream as BlockingStream},
+    net::{SocketAddr, TcpListener, TcpStream as BlockingStream},
     thread,
 };
 
@@ -84,6 +84,7 @@ pub(super) fn connection(port: u16, encryption: Encryption) -> Connection {
         directories: None,
         environment: None,
         connection_options: None,
+        proxy: None,
     }
     .profile()
     .unwrap();
@@ -92,6 +93,7 @@ pub(super) fn connection(port: u16, encryption: Encryption) -> Connection {
     Connection {
         profile,
         password: "fixture-password".to_owned(),
+        proxy: None,
     }
 }
 
@@ -217,16 +219,24 @@ fn exercise_server(
 
 #[test]
 fn explicit_and_implicit_ftps_protect_transfers_and_reuse_the_control_session() {
-    for (encryption, active_mode) in [
-        (Encryption::ExplicitTls, false),
-        (Encryption::ExplicitTls, true),
-        (Encryption::ImplicitTls, false),
-        (Encryption::ImplicitTls, true),
+    for (encryption, active_mode, proxy_mode) in [
+        (Encryption::ExplicitTls, false, None),
+        (Encryption::ExplicitTls, true, None),
+        (Encryption::ImplicitTls, false, None),
+        (Encryption::ImplicitTls, true, None),
+        (Encryption::ExplicitTls, false, Some(proxy::Mode::Socks5)),
+        (
+            Encryption::ImplicitTls,
+            false,
+            Some(proxy::Mode::HttpConnect),
+        ),
     ] {
         let (server, roots) = credentials("127.0.0.1", false);
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut connection = connection(listener.local_addr().unwrap().port(), encryption);
         connection.profile.ftp_options.active_mode = active_mode;
+        let proxy = proxy_mode.map(proxy::fixture::Proxy::start);
+        connection.proxy = proxy.as_ref().map(proxy::fixture::Proxy::route);
         let server = thread::spawn(move || exercise_server(listener, server, encryption));
         let mut session = connection
             .open_session(None, Some(client_tls_config(roots).unwrap()))
@@ -244,6 +254,18 @@ fn explicit_and_implicit_ftps_protect_transfers_and_reuse_the_control_session() 
         session.rename_stage(&stage, &target).unwrap();
         session.limits.call(session.stream.quit()).unwrap();
         assert_eq!(server.join().unwrap().unwrap(), b"encrypted upload");
+        if let Some(proxy) = proxy {
+            let requests = proxy.requests();
+            assert_eq!(requests[0], ("127.0.0.1".into(), connection.profile.port));
+            assert_eq!(
+                requests.len(),
+                4,
+                "FTPS control and three passive data connections"
+            );
+            assert!(requests[1..]
+                .iter()
+                .all(|(_, port)| *port != connection.profile.port));
+        }
     }
 }
 

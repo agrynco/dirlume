@@ -102,6 +102,10 @@ export const commands = {
   createArchive: { label: "Create archive", key: "Shift+F1" },
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
+  fileOperationHistory: { label: "File operation history", key: "" },
+  userMenu: { label: "Open User Menu", key: "" },
+  undoFileOperation: { label: "Undo file operation", key: "" },
+  redoFileOperation: { label: "Redo file operation", key: "" },
   mkdir: { label: "New folder", key: "F7" },
   search: { label: "Find files", key: "Alt+F7" },
   copyClipboard: { label: "Copy files to clipboard", key: "Ctrl+C" },
@@ -318,6 +322,7 @@ export interface Preferences {
   actionButtonWidth: ActionButtonWidth;
   hideActionButtonIcons: boolean;
   mainMenuAlignment: MenuPosition;
+  showMainMenu: boolean;
   systemLightScheme: string;
   systemDarkScheme: string;
   showTitlebarScheme: boolean;
@@ -539,6 +544,7 @@ function customSchemeReference(value: unknown) {
 export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefinition<K> } = {
   language: { group: "general", portable: true, read: readLanguage },
   mainMenuAlignment: { group: "general", portable: true, read: (value) => readMenuAlignment(value) ?? "center" },
+  showMainMenu: { group: "appearance", portable: true, read: (value) => value !== false },
   provider: { group: "general", portable: true, read: (value) => value === "kswitcher" ? "kswitcher" : "server" },
   kswitcher: { group: "general", portable: false, read: (value) => typeof value === "string" ? value : "" },
   theme: { group: "appearance", portable: true, read: readTheme },
@@ -622,9 +628,9 @@ export function normalizePreferences(value: unknown): Preferences {
   return settings;
 }
 
-export function readPreferences(): Preferences {
+export function readPreferences(value?: unknown): Preferences {
   try {
-    const saved = preferenceValues(JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
+    const saved = preferenceValues(value ?? JSON.parse(localStorage.getItem(preferenceKey) ?? "null"));
     return normalizePreferences(saved.independentViewerZoom === true ? saved :
       { ...saved, viewFontSizes: migrateSharedViewerZoom(saved.viewFontSizes) });
   } catch (error) {
@@ -633,30 +639,55 @@ export function readPreferences(): Preferences {
   }
 }
 
-let portableSettings = false;
-let portableSnapshot: string | undefined;
-let pendingPortableWrite = Promise.resolve();
-let writeQueue = pendingPortableWrite;
+let windowsSettings = false;
+let settingsReadError: string | null = null;
+let diskSnapshot: string | undefined;
+let writeQueue = Promise.resolve();
 
-export async function restorePortablePreferences(main: boolean, isolated = false) {
+export async function restoreWindowsPreferences(main: boolean, administrator: boolean, handoff?: object) {
   if (!windowsClient || !isTauri()) return null;
   try {
-    const state = await api.readPortableState();
+    const state = await api.readWindowsSettings();
     if (!state) return null;
-    portableSettings = !state.settingsError && !isolated;
-    if (state.preferences && !isolated) {
-      portableSnapshot = JSON.stringify(state.preferences);
-      if (main) localStorage.setItem(preferenceKey, portableSnapshot);
+    windowsSettings = true;
+    settingsReadError = state.settingsError;
+    if (state.preferences || state.settingsError || !main ||
+        (!handoff && (administrator || localStorage.getItem(preferenceKey) === null))) {
+      return state;
     }
-    return state;
+    try {
+      const preferences = preferenceSnapshot(handoff ? normalizePreferences(handoff) : readPreferences());
+      if (await api.saveWindowsPreferences(preferences, true)) return { ...state, preferences };
+      const current = await api.readWindowsSettings();
+      settingsReadError = current?.settingsError ?? null;
+      return current ? { ...current, updateError: state.updateError } : state;
+    } catch (error) {
+      return { ...state, settingsError: error instanceof Error ? error.message : String(error) };
+    }
   } catch (error) {
     reportFrontendError("portable_settings", error);
-    return null;
+    windowsSettings = true;
+    settingsReadError = error instanceof Error ? error.message : String(error);
+    return { preferences: null, settingsError: settingsReadError, updateError: null };
   }
 }
 
-export function flushPortablePreferences() {
-  return pendingPortableWrite;
+export function acceptWindowsPreferences(preferences: Preferences, cache = false) {
+  if (!windowsSettings) return;
+  diskSnapshot = JSON.stringify(preferenceSnapshot(preferences));
+  if (cache) cacheWindowsPreferences(diskSnapshot);
+}
+
+function cacheWindowsPreferences(snapshot: string) {
+  try {
+    localStorage.setItem(preferenceKey, snapshot);
+  } catch (error) {
+    reportFrontendError("save_preferences", error);
+  }
+}
+
+export function flushWindowsPreferences() {
+  return writeQueue;
 }
 
 export function preferenceSnapshot(preferences: Preferences) {
@@ -666,19 +697,22 @@ export function preferenceSnapshot(preferences: Preferences) {
   return settings;
 }
 
-export function persistPreferences(preferences: Preferences) {
+export async function persistPreferences(preferences: Preferences) {
   const settings = preferenceSnapshot(preferences);
   const snapshot = JSON.stringify(settings);
-  localStorage.setItem(preferenceKey, snapshot);
-  if (!portableSettings || portableSnapshot === snapshot) return;
-  portableSnapshot = snapshot;
-  pendingPortableWrite = writeQueue.then(() => api.savePortablePreferences(settings));
-  writeQueue = pendingPortableWrite.catch((error: unknown) => {
-    if (portableSnapshot === snapshot) portableSnapshot = undefined;
-    window.dispatchEvent(new CustomEvent("dirlume-portable-settings-error", {
-      detail: error instanceof Error ? error.message : String(error),
-    }));
+  if (!windowsSettings) {
+    localStorage.setItem(preferenceKey, snapshot);
+    return;
+  }
+  const pending = writeQueue.then(async () => {
+    if (diskSnapshot === snapshot) return;
+    if (settingsReadError) throw new Error(settingsReadError);
+    await api.saveWindowsPreferences(settings);
+    diskSnapshot = snapshot;
+    cacheWindowsPreferences(snapshot);
   });
+  writeQueue = pending.catch(() => {});
+  await pending;
 }
 
 const heldControl = new Set<"ControlLeft" | "ControlRight">();

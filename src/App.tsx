@@ -1,4 +1,5 @@
 import { workspaceResources, type Resource } from "./workspaceResources";
+import appIcon from "../src-tauri/icons/128x128.png";
 import { Button } from "./Button";
 import { WindowControls } from "./WindowControls";
 import { WindowResizeMarker } from "./ResizeGrip";
@@ -12,8 +13,8 @@ import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHist
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
-  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
-  ScanEye, Search, Settings2, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
+  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, Redo2, RefreshCw,
+  ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -33,6 +34,9 @@ import { ReleaseNotes } from "./ReleaseNotes";
 import { KSwitcherUnavailableError, reportFrontendError, SshConnectionLostError } from "./diagnostics";
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
+import { FileHistoryDialog } from "./FileHistoryDialog";
+import { UserMenuDialog } from "./UserMenuDialog";
+import type { MenuContext, MenuRun } from "./userMenu";
 import { VerifyHostDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
@@ -84,7 +88,7 @@ import {
   updateSearchMatches, visibleEntries, type DeniedSshListing, type FilePaneView, type ListingAction, type PaneState, type SearchMatch,
   type SearchQuery, type Side, type SortColumn,
 } from "./panes";
-import { commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushPortablePreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
+import { acceptWindowsPreferences, commandNames, commands, commandScope, driveSourceCommand, eventShortcut, flushWindowsPreferences, folderGroupCommand, persistPreferences, bindingMatches, commandPanelMode, panelModeCommand, commandSortMode,
   compactShortcut, preferenceKey, preferenceSnapshot, quickSearchSeed, readPreferences, shortcutBindings, showShortcut, type Command, type Preferences, type SpaceAnalyzerView } from "./preferences";
 import { countText, errorText, setLanguage, t } from "./i18n";
 import type { TerminalCompletionContext } from "./api";
@@ -166,6 +170,8 @@ type Modal =
   | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; side: Side; transfer: Transfer }
+  | { kind: "fileHistory"; direction?: "undo" | "redo" }
+  | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" }> }
@@ -231,11 +237,11 @@ function swapSides<T>(panes: Record<Side, T>): Record<Side, T> {
   return { left: panes.right, right: panes.left };
 }
 
-export default function App({ initialPreferences, portableUpdateError, portableSettingsError, administrator,
+export default function App({ initialPreferences, portableUpdateError, windowsSettingsError, administrator,
   administratorWorkspace, administratorWorkspaceUnavailable }: {
   initialPreferences: Preferences;
   portableUpdateError?: string | null;
-  portableSettingsError?: string | null;
+  windowsSettingsError?: string | null;
   administrator?: boolean;
   administratorWorkspace?: AdministratorWorkspace | null;
   administratorWorkspaceUnavailable?: boolean;
@@ -314,6 +320,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [userMenuOutput, setUserMenuOutput] = useState(false);
+  const userMenuInProgress = useRef<number | null>(null);
   const [fileOpensVisible, setFileOpensVisible] = useState(false);
   const fileOpens = useFileOpens();
   const [terminalCompletion, setTerminalCompletion] = useState<Record<number, TerminalCompletionContext & { id: number }>>({});
@@ -340,7 +348,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const commandLineHistory = useMemo(() => historyItems.filter(({ source }) => source !== "ssh").map(({ text }) => text), [historyItems]);
   const historyIndex = useRef(-1);
   const selectionAnchor = useRef<{ left: string | null; right: string | null }>({ left: null, right: null });
-  const startupError = (administratorWorkspaceUnavailable ? t("Could not restore the administrator workspace.") : undefined) ?? portableUpdateError ?? portableSettingsError;
+  const startupError = (administratorWorkspaceUnavailable ? t("Could not restore the administrator workspace.") : undefined) ?? portableUpdateError ??
+    (windowsSettingsError ? errorText(windowsSettingsError) : undefined);
   const [status, setStatus] = useState<WorkspaceStatus>({ text: startupError ?? "Ready", error: !!startupError });
   const [folderShortcuts, setFolderShortcuts] = useState(readFolderShortcuts);
   const request = useRef({ left: 0, right: 0 });
@@ -448,6 +457,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   const terminalPlace = terminalLocation?.kind === "local" || terminalLocation?.kind === "ssh" ? terminalLocation : null;
   const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
   const terminal = terminalKey ? terminals[terminalKey] : undefined;
+  const terminalViewKey = userMenuOutput && terminals.userMenu ? "userMenu" : terminalKey;
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
@@ -888,21 +898,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
   }, [leftRemote, rightRemote, load, leftAnalyzing, rightAnalyzing, showingGit, leftEnvironment, rightEnvironment, recentPanes]);
 
   useEffect(() => {
-    persistPreferences(preferences);
+    void persistPreferences(preferences).catch((error: unknown) => {
+      setStatus({ text: errorText(describeError(error)), error: true });
+    });
   }, [preferences]);
-
-  useEffect(() => {
-    function onError(event: Event) {
-      setStatus({ text: (event as CustomEvent<string>).detail, error: true });
-    }
-    window.addEventListener("dirlume-portable-settings-error", onError);
-    return () => window.removeEventListener("dirlume-portable-settings-error", onError);
-  }, []);
 
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key !== preferenceKey) return;
       const next = readPreferences();
+      acceptWindowsPreferences(next);
       setLanguage(next.language);
       setPreferences(next);
     };
@@ -1050,7 +1055,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     setModal({ kind: "installUpdate", version: update.version });
     const progress = new Channel<UpdateProgress>();
     progress.onmessage = setUpdateProgress;
-    void flushPortablePreferences().then(() => api.installUpdate(update.version, progress)).catch((error: unknown) => {
+    void flushWindowsPreferences().then(() => api.installUpdate(update.version, progress)).catch((error: unknown) => {
       installingUpdate.current = false;
       setModal(null);
       setStatus({ text: describeError(error), error: true });
@@ -1996,19 +2001,17 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       ? { ...pane, selected: entry.name } : pane);
   }
 
-  async function setFilePaneView(side: Side, view: FilePaneView) {
+  function setFilePaneView(side: Side, view: FilePaneView) {
     const pane = panes[side];
     if (pane.loading || pane.search || pane.place?.kind !== "local" || preferences.paneViews[side] === view) return;
-    if (view === "list" && pane.selected?.includes("/")) {
-      const row = trees[side].lookup(pane, pane.selected);
-      const item = paneItem(pane, row ?? undefined);
-      if (item && !await load(side, item.place, "push", item.entry.name)) return;
-    }
+    const nested = view === "list" && pane.selected?.includes("/") ? trees[side].lookup(pane, pane.selected) : null;
+    const item = nested && paneItem(pane, nested);
     if (view === "list") updatePane(side, (current) => ({ ...current,
       selected: current.selected?.includes("/") ? null : current.selected,
       marked: current.marked.filter((key) => !key.includes("/")),
     }));
     setPreferences((before) => ({ ...before, paneViews: { ...before.paneViews, [side]: view } }));
+    if (item) void load(side, item.place, "push", item.entry.name);
     requestAnimationFrame(() => focus(side));
   }
 
@@ -2084,9 +2087,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     const other = opposite(side);
     const otherPlace = visiblePanes.current[other].place;
     const otherAnalyzer = analysisPanes[other]?.root;
-    return api.openElevated({ directory, side, selected, split, preferences: preferenceSnapshot(preferences),
+    return flushWindowsPreferences().then(() => api.openElevated({ directory, side, selected, split, preferences: preferenceSnapshot(preferences),
       otherFolder: otherPlace?.kind === "local" ? otherPlace.path : undefined,
-      otherAnalyzer: otherAnalyzer?.kind === "local" ? otherAnalyzer.path : undefined });
+      otherAnalyzer: otherAnalyzer?.kind === "local" ? otherAnalyzer.path : undefined }));
   }
 
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
@@ -2124,6 +2127,38 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     refresh("left");
     refresh("right");
     setFileRevision((revision) => revision + 1);
+  }
+
+  function openUserMenu() {
+    if (modal || !local || smbHost(local) || !filesAvailable || pane.search || panelsHidden) return;
+    const otherSide = opposite(active);
+    const other = panes[otherSide];
+    const itemDetails = (item: typeof currentItem) => item?.place.kind === "local" && !smbHost(item.place)
+      ? { path: placePath(childPlace(item.place, item.entry.name)), name: item.entry.name, directory: item.entry.directory } : null;
+    const marked = pane.marked.flatMap((name) => {
+      const row = trees[active].enabled ? trees[active].lookup(pane, name) : pane.entries.find((entry) => entry.name === name);
+      const item = itemDetails(paneItem(pane, row ?? undefined));
+      return item ? [item.path] : [];
+    });
+    setModal({ kind: "userMenu", side: active, context: { folder: local.path,
+      opposite: !other.search && !processPanels[otherSide] && other.place?.kind === "local" && !smbHost(other.place) ? other.place.path : null,
+      focused: itemDetails(currentItem), marked } });
+  }
+
+  function runUserMenu(userMenu: MenuRun) {
+    if (userMenuInProgress.current !== null) return false;
+    const session: TerminalSession = { id: ++nextSession.current, kind: "local", path: userMenu.source.folder,
+      refreshEnvironment: preferences.refreshEnvironment, userMenu };
+    userMenuInProgress.current = session.id;
+    const previous = terminals.userMenu;
+    if (previous) clearTerminalState(previous.id);
+    terminalFocus.current = session.id;
+    setTerminals((current) => ({ ...current, userMenu: session }));
+    setUserMenuOutput(true);
+    setFileOpensVisible(false);
+    setTerminalShare(terminalHeight);
+    setModal(null);
+    return true;
   }
 
   function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace,
@@ -2511,6 +2546,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
 
   function toggleTerminal() {
     if (terminalVisible) showCommandLine();
+    else if (userMenuOutput && terminals.userMenu) setTerminalShare(terminalHeight);
     else if (!terminalPlace && fileOpens.history.length) {
       setTerminalShare(terminalHeight);
       setFileOpensVisible(true);
@@ -2586,8 +2622,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       else if (!analysis && currentRow) open(active, currentRow);
       return;
     }
-    const session = openTerminal(!terminalVisible);
+    const session = openTerminal(!terminalVisible || userMenuOutput);
     if (!session || !terminalPlace) return;
+    setUserMenuOutput(false);
     if (!terminalVisible) setTerminalShare(terminalHeight);
     setPendingCommands((commands) => ({
       ...commands, [session.id]: [...(commands[session.id] ?? []), { command: commandLine, directory: placePath(terminalPlace) }],
@@ -2987,6 +3024,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         break;
       }
       case "commandHistory": setModal({ kind: "commandHistory" }); break;
+      case "userMenu": openUserMenu(); break;
       case "mark": {
         if (current) {
           selectRow(active, current, false, true);
@@ -3004,6 +3042,9 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         break;
       case "copy": if (!busy) transfer("copy"); break;
       case "move": if (!busy) transfer("move"); break;
+      case "fileOperationHistory": if (!modal) setModal({ kind: "fileHistory" }); break;
+      case "undoFileOperation": if (!modal) setModal({ kind: "fileHistory", direction: "undo" }); break;
+      case "redoFileOperation": if (!modal) setModal({ kind: "fileHistory", direction: "redo" }); break;
       case "copyClipboard": if (current) void copyClipboard(active, current); break;
       case "lockingProcesses": if (current) showLockingProcesses(active, currentItem); break;
       case "pasteClipboard": void pasteClipboard(active); break;
@@ -3147,6 +3188,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "userMenu" && (!onFiles || inField || event.repeat)) return;
     if (command === "quickViewPrevious" || command === "quickViewNext") {
       if (quickViewSource !== null && !inField && !target.closest("[role=menu]") &&
           (onFiles?.id === quickViewSource + "-files" || target.closest(".quick-view"))) {
@@ -3318,6 +3360,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
       commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
       commandWithIcon(History, "commandHistory", activeDocument !== null),
+      commandWithIcon(TerminalIcon, "userMenu", !filesAvailable || !local || !!smbHost(local) || !!pane.search || !!modal, "User Menu"),
+      commandWithIcon(History, "fileOperationHistory", !!modal || activeDocument !== null),
+      commandWithIcon(Undo2, "undoFileOperation", !!modal || activeDocument !== null),
+      commandWithIcon(Redo2, "redoFileOperation", !!modal || activeDocument !== null),
       commandWithIcon(Bookmark, "folderShortcuts", !panesAvailable),
       commandWithIcon(TerminalIcon, "toggleTerminal", activeDocument !== null),
       ...(isTauri() ? [
@@ -3358,10 +3404,10 @@ export default function App({ initialPreferences, portableUpdateError, portableS
       <header className={windowsClient && isTauri() ? "topbar window-titlebar" : "topbar"} data-help-topic="workspace"
         data-menu-position={preferences.mainMenuAlignment} data-tauri-drag-region={windowsClient && isTauri() ? "deep" : undefined}>
         <div className="brand">
-          <span className="brand-icon"><FolderTree /></span><h1 aria-label={administratorTitle}>Dirlume</h1>
-          {administrator && <span className="administrator-label" aria-hidden="true">{t("Administrator")}</span>}
+          <img className="brand-icon" src={appIcon} alt="" /><h1 aria-label={administratorTitle}>Dirlume</h1>
+          {administrator && <span className="administrator-label" aria-hidden="true"><ShieldAlert />{t("Administrator")}</span>}
         </div>
-        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault />
+        <MainMenu ref={mainMenu} groups={menuGroups} shortcut={keyLabel("menu")} hiddenByDefault={!preferences.showMainMenu} />
         <div className="top-actions">
           <Button type="button" className="icon-button donation-button titlebar-donation" aria-label={t("Donate via monobank")}
             data-tauri-drag-region="false" onClick={() => {
@@ -3647,12 +3693,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {Object.entries(terminals).map(([key, session]) => (
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
-            visible={key === terminalKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
+            visible={key === terminalViewKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
             fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
             focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
-            watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
+            watchEnvironment={session.kind === "local" && !session.userMenu && preferences.refreshEnvironment}
             copyShortcut={shortcuts.copyTerminalText} pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
             onTerminalError={(message) => setStatus({ text: message, error: true })}
@@ -3667,12 +3713,16 @@ export default function App({ initialPreferences, portableUpdateError, portableS
               const { [session.id]: _closed, ...remaining } = current;
               return remaining;
             })}
-            onRestart={session.kind === "local" && terminalPlace?.kind === "local"
+            onRestart={session.kind === "local" && !session.userMenu && terminalPlace?.kind === "local"
               ? () => openTerminal(true, terminalPlace, session.id) : undefined}
             onFileOpens={showFileOpens}
-            onClose={() => { dropTerminal(key); showCommandLine(); }} />
+            onRunFinished={key === "userMenu" ? () => {
+              if (userMenuInProgress.current === session.id) userMenuInProgress.current = null;
+              fileLocationsChanged();
+            } : undefined}
+            onClose={() => { dropTerminal(key); if (key === "userMenu") setUserMenuOutput(false); showCommandLine(); }} />
         ))}
-        {!terminal && terminalPlaceholder}
+        {!(terminalViewKey && terminals[terminalViewKey]) && terminalPlaceholder}
       </Suspense>
       {terminalVisible && fileOpensVisible && activeDocument === null &&
         <FileOpensTerminal history={fileOpens.history} onBack={backFromFileOpens} onClose={() => showCommandLine()} />}
@@ -3680,6 +3730,11 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>
+        {terminalVisible && terminals.userMenu && <Button type="button" onClick={() => {
+          if (userMenuOutput && !openTerminal()) return;
+          setUserMenuOutput(!userMenuOutput);
+          setFileOpensVisible(false);
+        }}>{t(userMenuOutput ? "Interactive terminal" : "User Menu output")}</Button>}
         <span data-tooltip={terminalLocation ? placePath(terminalLocation) : undefined}>{terminalLocation ? placePath(terminalLocation) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] || terminalPlace?.kind !== "local" ? null : terminalPlace.path}
           remote={!processPanels[active] && terminalPlace?.kind === "ssh" ? terminalPlace : null}
@@ -3733,7 +3788,8 @@ export default function App({ initialPreferences, portableUpdateError, portableS
         {!resizeInDocuments && !resizeInFileActions && <WindowResizeMarker />}
       </>}
       {modal?.kind === "settings" && <Settings initialPage={modal.page} preferences={preferences}
-        onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={(next) => {
+        onPick={() => new Promise((resolve) => setLocalAppearancePick(() => resolve))} onChange={async (next) => {
+        await persistPreferences(next);
         setLanguage(next.language);
         setPreferences(next);
         return next;
@@ -3823,6 +3879,12 @@ export default function App({ initialPreferences, portableUpdateError, portableS
             if (success) setStatus({ text: "Transfer complete" });
           }} />
       )}
+      {modal?.kind === "fileHistory" && (
+        <FileHistoryDialog initial={modal.direction} onClose={() => { setModal(null); requestAnimationFrame(() => focus(active)); }}
+          onChanged={fileLocationsChanged} />
+      )}
+      {modal?.kind === "userMenu" && <UserMenuDialog context={modal.context} onRun={runUserMenu}
+        onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }} />}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
           onReveal={(directory, name) => revealResult(modal.side, directory, name)}
@@ -4093,7 +4155,7 @@ export default function App({ initialPreferences, portableUpdateError, portableS
           updatePane(side, (pane) => ({ ...pane, marked: names, selected: names[0] ?? pane.selected }));
           setActive(side);
         },
-        setPreferences: (next) => { persistPreferences(next); setPreferences(next); },
+        setPreferences: async (next) => { await persistPreferences(next); setPreferences(next); },
         setShortcuts: (next) => { persistFolderShortcuts(next); setFolderShortcuts(next); },
       }} />
     </div>

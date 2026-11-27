@@ -42,7 +42,8 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
   const bar = useRef<HTMLElement>(null);
   const priorFocus = useRef<HTMLElement | null>(null);
   const [active, setActive] = useState(0);
-  const [visible, setVisible] = useState(!hiddenByDefault);
+  const [temporarilyVisible, setTemporarilyVisible] = useState(false);
+  const visible = !hiddenByDefault || temporarilyVisible;
   const [expanded, setExpanded] = useState<number | null>(null);
   const [cursor, setCursor] = useState(0);
   const [submenu, setSubmenu] = useState<{ item: number; cursor: number } | null>(null);
@@ -50,7 +51,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
   function close(restore: boolean) {
     setExpanded(null);
     setSubmenu(null);
-    if (hiddenByDefault) setVisible(false);
+    setTemporarilyVisible(false);
     if (restore) {
       if (priorFocus.current?.isConnected) priorFocus.current.focus();
       else if (bar.current?.contains(document.activeElement) && document.activeElement instanceof HTMLElement) {
@@ -68,14 +69,16 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
 
   useImperativeHandle(ref, () => ({
     open: () => {
-      if (hiddenByDefault && !visible) {
-        const focused = document.activeElement;
+      const focused = document.activeElement;
+      if (expanded !== null || bar.current?.contains(focused)) {
+        close(true);
+      } else {
         priorFocus.current = focused instanceof HTMLElement ? focused : null;
-        setVisible(true);
-      } else if (hiddenByDefault || expanded !== null) close(true);
-      else open(active);
+        if (hiddenByDefault) setTemporarilyVisible(true);
+        else bar.current?.querySelector<HTMLElement>(`[data-menu-group="${active}"]`)?.focus();
+      }
     },
-  }), [active, expanded, hiddenByDefault, visible]);
+  }), [active, expanded, hiddenByDefault]);
 
   useLayoutEffect(() => {
     if (hiddenByDefault && visible) bar.current?.querySelector<HTMLElement>('[data-menu-group][tabindex="0"]')?.focus();
@@ -184,7 +187,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
       }}
       onBlur={(event) => { if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) close(false); }}
       onKeyDown={keyDown}>
-      {groups.map(({ label, items }, index) => {
+      <div className="main-menu-strip" role="none">{groups.map(({ label, items }, index) => {
         const shown = expanded === index;
         return <div key={label} className="main-menu-group" role="none">
           <Button type="button" role="menuitem" data-menu-group={index} tabIndex={active === index ? 0 : -1}
@@ -236,7 +239,7 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
             </div>
           )}
         </div>;
-      })}
+      })}</div>
     </nav>
   );
 }
@@ -282,7 +285,7 @@ export function AboutDialog({ onClose, onOpenGuide }: { onClose: () => void; onO
         <dd>{version ? <code>{version}</code> :
           error ? <p role="alert" className="dialog-error">{errorText(error)}</p> : <p role="status">{t("Reading version…")}</p>}</dd>
         <dt>{t("Created by")}</dt>
-        <dd>bitcodepro</dd>
+        <dd>Anatolii Hrynchuk</dd>
         <dt>{t("License")}</dt>
         <dd><a href={licenseUrl} onAuxClick={(event) => event.preventDefault()} onClick={(event) => {
           event.preventDefault();
