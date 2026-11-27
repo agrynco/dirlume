@@ -1258,7 +1258,7 @@ impl Session {
     pub fn download(
         &mut self,
         segments: &[String],
-        output: &mut impl Write,
+        output: &mut (impl Write + ?Sized),
         mut progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
         let mut stream = self

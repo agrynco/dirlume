@@ -537,16 +537,26 @@ impl Connection {
         payload: impl Serialize,
         timeout: Duration,
     ) -> Result<Response> {
+        self.request_with_timeout(action, payload, Some(timeout))
+            .await
+    }
+
+    async fn request_with_timeout(
+        &self,
+        action: &str,
+        payload: impl Serialize,
+        timeout: Option<Duration>,
+    ) -> Result<Response> {
         let url = self.invitation.address.join(action).map_err(message)?;
-        let response = self
+        let mut request = self
             .client
             .post(url)
             .bearer_auth(&self.invitation.token)
-            .timeout(timeout)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(message)?;
+            .json(&payload);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let response = request.send().await.map_err(message)?;
         if !response.status().is_success() {
             return Err(format!(
                 "Dirlume server returned HTTP {}.",
@@ -2042,7 +2052,7 @@ fn read_regular_file(path: &Path) -> std::result::Result<fs::File, TextReadFailu
     fs::File::open(path).map_err(|error| TextReadFailure::io(ReadStage::Open, error))
 }
 
-fn open_regular_file(path: &Path) -> Result<fs::File> {
+pub(crate) fn open_regular_file(path: &Path) -> Result<fs::File> {
     read_regular_file(path).map_err(|error| error.message)
 }
 
@@ -2229,6 +2239,16 @@ mod text_read_tests {
     use super::*;
 
     #[test]
+    fn a_regular_text_edit_can_save_past_the_paging_threshold() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("threshold.txt");
+        fs::write(&path, "original").unwrap();
+        let text = "x".repeat(TEXT_LIMIT as usize + 1);
+        save_local_text(&path, "original", &text).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), text.as_bytes());
+    }
+
+    #[test]
     fn classifies_file_selection_open_and_decoding_failures() {
         let folder = tempfile::tempdir().unwrap();
         let missing = read_regular_file(&folder.path().join("missing.txt")).unwrap_err();
@@ -2382,6 +2402,53 @@ async fn read_server_text(
     decode_text(bytes.as_slice())
 }
 
+#[tauri::command]
+async fn open_server_text_pages(
+    id: u32,
+    segments: Vec<String>,
+    connections: State<'_, Connections>,
+    state: State<'_, crate::text_pages::Documents>,
+) -> Result<Option<crate::text_pages::PageInfo>> {
+    use crate::text_pages::{Document, Source};
+    use tokio::io::AsyncWriteExt as _;
+
+    let connection = connections.get(id)?;
+    let idle = Duration::from_secs(45);
+    let mut response = tokio::time::timeout(
+        idle,
+        connection.request_with_timeout("v1/download", RemotePath { segments }, None),
+    )
+    .await
+    .map_err(message)??;
+    let length = response
+        .content_length()
+        .ok_or("The server did not report the file size.")?;
+    if length <= TEXT_LIMIT {
+        return Ok(None);
+    }
+    let file = blocking(|| tempfile::tempfile().map_err(message)).await?;
+    let mut file = tokio::fs::File::from_std(file);
+    let mut received = 0;
+    while let Some(chunk) = tokio::time::timeout(idle, response.chunk())
+        .await
+        .map_err(message)?
+        .map_err(message)?
+    {
+        received += chunk.len() as u64;
+        if received > length {
+            return Err("The server file changed while it was being opened.".into());
+        }
+        file.write_all(&chunk).await.map_err(message)?;
+    }
+    if received != length {
+        return Err("The server file changed while it was being opened.".into());
+    }
+    file.flush().await.map_err(message)?;
+    let file = file.into_std().await;
+    let document = blocking(move || Document::new(Source::ReadOnly, file, None)).await?;
+    state.insert(document).map(Some)
+}
+
 const PREVIEW_IMAGE_LIMIT: usize = 16 * 1024 * 1024;
 
 pub(crate) fn check_preview_image_size(length: u64) -> Result<()> {
@@ -2522,7 +2589,7 @@ async fn read_server_bytes(
     serde_json::from_slice(&bytes).map_err(message)
 }
 
-pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
+pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Vec<u8> {
     let mut buffer = Vec::new();
     match encoding {
         Encoding::Utf8 => buffer.extend_from_slice(text.as_bytes()),
@@ -2542,14 +2609,11 @@ pub(crate) fn encode_text(encoding: Encoding, text: &str) -> Result<Vec<u8>> {
             }
         }
     }
-    if buffer.len() as u64 > TEXT_LIMIT {
-        return Err("Text files can be at most 8 MiB.".into());
-    }
-    Ok(buffer)
+    buffer
 }
 
 fn create_encoded_file(path: &Path, encoding: Encoding) -> Result<()> {
-    let bytes = encode_text(encoding, "")?;
+    let bytes = encode_text(encoding, "");
     if bytes.is_empty() {
         return fs::File::create_new(path).map(drop).map_err(message);
     }
@@ -2661,8 +2725,8 @@ async fn save_ssh_text(
             if document.revision.as_deref() != Some(revision.as_str()) {
                 return Err(changed.into());
             }
-            let bytes = encode_text(document.encoding, &text)?;
-            session.replace_text(&segments, &original, &bytes, |session| {
+            let bytes = encode_text(document.encoding, &text);
+            session.replace_text(&segments, &original, bytes.as_slice(), |session| {
                 if load_ssh_text(session, &segments)?.0.revision == document.revision {
                     Ok(())
                 } else {
@@ -2743,7 +2807,7 @@ async fn save_ftp_text(
         if document.revision.as_deref() != Some(revision.as_str()) {
             return Err("The FTP file changed on the server. Reopen it before saving.".to_owned());
         }
-        let buffer = encode_text(document.encoding, &text)?;
+        let buffer = encode_text(document.encoding, &text);
         let staged = session.upload_to_stage(&segments, &mut buffer.as_slice(), |_| Ok(()))?;
         let result = (|| {
             if load_ftp_text(&mut session, &segments)?.revision != document.revision {
@@ -2809,7 +2873,7 @@ fn save_local_text(path: &Path, original: &str, text: &str) -> Result<()> {
     #[cfg(windows)]
     local::preserve_access(path, staged.path(), &metadata).map_err(message)?;
     staged
-        .write_all(&encode_text(document.encoding, text)?)
+        .write_all(&encode_text(document.encoding, text))
         .map_err(message)?;
     #[cfg(unix)]
     {
@@ -2885,7 +2949,7 @@ async fn save_text_as(path: String, encoding: Encoding, text: String) -> Result<
         let directory = path.parent().ok_or("Choose a parent folder.")?;
         let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(message)?;
         staged
-            .write_all(&encode_text(encoding, &text)?)
+            .write_all(&encode_text(encoding, &text))
             .map_err(message)?;
         staged.as_file().sync_all().map_err(message)?;
         staged.persist_noclobber(path).map_err(|error| {
@@ -2990,6 +3054,7 @@ pub fn run() {
         .manage(crate::processes::ProcessMonitor::default())
         .manage(crate::mcp::McpService::default())
         .manage(crate::image_edit::ImageEdits::default())
+        .manage(crate::text_pages::Documents::default())
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
@@ -3135,6 +3200,15 @@ pub fn run() {
         read_ssh_bytes,
         save_ssh_text,
         read_text,
+        crate::text_pages::open_local_text_pages,
+        crate::text_pages::open_ftp_text_pages,
+        crate::text_pages::open_ssh_text_pages,
+        crate::archives::open_archive_text_pages,
+        open_server_text_pages,
+        crate::text_pages::read_text_page,
+        crate::text_pages::edit_text_page,
+        crate::text_pages::save_text_pages,
+        crate::text_pages::close_text_pages,
         read_preview_image,
         crate::image_edit::open_image_edit,
         crate::image_edit::read_image_edit,

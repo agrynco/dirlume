@@ -9,6 +9,7 @@ use std::{
     },
 };
 
+use ring::digest::{self, Digest, SHA256};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
@@ -22,6 +23,7 @@ use crate::{
     local,
     local_transfer::{Conflict, Decision, FileRevision, Options},
     protocol::{BytePage, RemoteListing, BYTE_PAGE_SIZE},
+    text_pages,
 };
 
 mod updates;
@@ -177,6 +179,37 @@ pub async fn read_archive_text(
 }
 
 #[tauri::command]
+pub(crate) async fn open_archive_text_pages(
+    id: u32,
+    segments: Vec<String>,
+    editing: bool,
+    archives: State<'_, Archives>,
+    state: State<'_, text_pages::Documents>,
+) -> Result<Option<text_pages::PageInfo>> {
+    let archive = archives.get(id)?;
+    let document = blocking(move || {
+        let member = archive.lock().map_err(message)?;
+        let entry = member.file(&segments)?;
+        if entry.size <= TEXT_LIMIT {
+            return Ok(None);
+        }
+        let (file, baseline) = text_pages::snapshot(editing && member.writable, |writer| {
+            member.extract(entry, writer, |_| Ok(())).map(drop)
+        })?;
+        let revision = member.generation.clone();
+        drop(member);
+        text_pages::Document::new(
+            text_pages::Source::Archive(archive, segments, revision),
+            file,
+            baseline,
+        )
+        .map(Some)
+    })
+    .await?;
+    document.map(|document| state.insert(document)).transpose()
+}
+
+#[tauri::command]
 pub async fn read_archive_bytes(
     id: u32,
     segments: Vec<String>,
@@ -207,8 +240,8 @@ pub async fn save_archive_text(
             return Err("The archive changed. Reopen the file before saving.".to_owned());
         }
         archive.file(&segments)?;
-        let data = encode_text(encoding, &text)?;
-        archive.write(&[segments], Some(data))?;
+        let data = encode_text(encoding, &text);
+        archive.write_member(&segments, &data)?;
         Ok(TextDocument {
             text,
             encoding,
@@ -229,6 +262,11 @@ pub async fn delete_archive_entries(
 }
 
 const HEX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+struct MemberUpdate<'a> {
+    bytes: &'a mut dyn Read,
+    length: u64,
+    digest: &'a Digest,
+}
 struct MemberCache {
     name: Vec<String>,
     start: u64,
@@ -414,7 +452,53 @@ impl Archive {
         )
     }
 
-    fn write(&mut self, selected: &[Vec<String>], updated: Option<Vec<u8>>) -> Result<()> {
+    fn write_member(&mut self, segments: &[String], data: &[u8]) -> Result<()> {
+        let mut bytes = data;
+        let checksum = digest::digest(&SHA256, data);
+        self.write(
+            &[segments.to_vec()],
+            Some(MemberUpdate {
+                bytes: &mut bytes,
+                length: data.len() as u64,
+                digest: &checksum,
+            }),
+        )
+    }
+
+    pub(crate) fn save_paged_member(
+        &mut self,
+        segments: &[String],
+        revision: &str,
+        snapshot: &mut fs::File,
+        length: u64,
+        previous: &Digest,
+        replacement: &Digest,
+    ) -> Result<String> {
+        let changed = "The archive changed. Reopen the file before saving.";
+        if self.generation != revision {
+            return Err(changed.into());
+        }
+        let entry = self.file(segments)?;
+        let actual = text_pages::hash(|writer| self.extract(entry, writer, |_| Ok(())).map(drop))?;
+        if actual.as_ref() != previous.as_ref() {
+            return Err(changed.into());
+        }
+        self.write(
+            &[segments.to_vec()],
+            Some(MemberUpdate {
+                bytes: snapshot,
+                length,
+                digest: replacement,
+            }),
+        )?;
+        Ok(self.generation.clone())
+    }
+
+    fn write(
+        &mut self,
+        selected: &[Vec<String>],
+        mut updated: Option<MemberUpdate<'_>>,
+    ) -> Result<()> {
         self.verify()?;
         if !self.writable {
             return Err("The archive is read-only.".to_owned());
@@ -430,7 +514,7 @@ impl Archive {
         let modifies =
             |name: &[String]| selected.iter().any(|selection| name.starts_with(selection));
         let mut command;
-        if let Some(contents) = updated.as_deref() {
+        if let Some(contents) = updated.as_mut() {
             let root = workspace.path().join("update");
             // 7-Zip requires the actual relative member name for the replacement.
             let path = selected[0]
@@ -441,7 +525,11 @@ impl Archive {
                     .ok_or("The archive member has no directory.")?,
             )
             .map_err(message)?;
-            fs::write(&path, contents).map_err(message)?;
+            let mut file = fs::File::create(&path).map_err(message)?;
+            if io::copy(contents.bytes, &mut file).map_err(message)? != contents.length {
+                return Err("The edited file could not be staged.".to_owned());
+            }
+            drop(file);
             let list = archive_engine::list_file(workspace.path(), [selected[0].join("/")])?;
             command = self.engine.command("a");
             command
@@ -476,11 +564,12 @@ impl Archive {
             let member = new_index
                 .members
                 .get(&selected[0])
-                .filter(|item| item.size == data.len() as u64)
+                .filter(|item| item.size == data.length)
                 .ok_or("The edited file was not saved into the archive.")?;
-            let actual =
-                extract_member(&self.engine, &staged, None, member, Vec::new(), |_| Ok(()))?;
-            if actual != data {
+            let actual = text_pages::hash(|writer| {
+                extract_member(&self.engine, &staged, None, member, writer, |_| Ok(())).map(drop)
+            })?;
+            if actual.as_ref() != data.digest.as_ref() {
                 return Err("The edited file was not saved into the archive.".to_owned());
             }
         } else if new_index.members.keys().any(|name| modifies(name)) {
@@ -832,9 +921,7 @@ mod tests {
                     |_| panic!("unexpected question")
                 )
                 .unwrap());
-            archive
-                .write(&[note.clone().to_vec()], Some(b"updated text".to_vec()))
-                .unwrap();
+            archive.write_member(&note, b"updated text").unwrap();
             assert!(archive.byte_cache.is_none());
             assert_eq!(archive.byte_page(&note, 0).unwrap().data, b"updated text");
             assert_eq!(extract(&archive, &note), b"updated text");

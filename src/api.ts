@@ -482,6 +482,18 @@ export interface TextDocument {
   revision?: string;
 }
 
+export interface TextPages {
+  id: number;
+  encoding: TextEncoding;
+  length: number;
+  pageCount: number;
+}
+
+export interface TextPage {
+  text: string;
+  original: { start: number; end: number };
+}
+
 export interface BytePage {
   length: number;
   data: number[];
@@ -673,6 +685,20 @@ export const api = {
     invoke<Listing>("list_server", { id, segments }),
   readText: (directory: string, name: string, surface?: TextReadSurface) =>
     invoke<TextDocument>("read_text", { directory, name, surface }),
+  openLocalTextPages: (directory: string, name: string, editing: boolean) =>
+    invoke<TextPages | null>("open_local_text_pages", { directory, name, editing }),
+  openArchiveTextPages: (id: number, segments: string[], editing: boolean) =>
+    invoke<TextPages | null>("open_archive_text_pages", { id, segments, editing }),
+  openFtpTextPages: (id: number, segments: string[], editing: boolean) =>
+    invoke<TextPages | null>("open_ftp_text_pages", { id, segments, editing }),
+  openSshTextPages: (id: number, segments: string[], editing: boolean, sudoPassword?: string) =>
+    invoke<TextPages | null>("open_ssh_text_pages", { id, segments, editing, sudoPassword }),
+  openServerTextPages: (id: number, segments: string[]) =>
+    invoke<TextPages | null>("open_server_text_pages", { id, segments }),
+  readTextPage: (id: number, index: number) => invoke<TextPage>("read_text_page", { id, index }),
+  editTextPage: (id: number, index: number, text: string) => invoke<boolean>("edit_text_page", { id, index, text }),
+  saveTextPages: (id: number, sudoPassword?: string) => invoke<TextPages>("save_text_pages", { id, sudoPassword }),
+  closeTextPages: (id: number) => invoke<void>("close_text_pages", { id }),
   resolveTextLink: (directory: string, destination: string) =>
     invoke<{ directory: string; name: string }>("resolve_text_link", { directory, destination }),
   openWebLink: (href: string) => invoke<void>("open_web_link", { href }),
@@ -776,6 +802,15 @@ export async function connectFtpLocation(profileId: string, segments?: string[],
 }
 
 type TextReadSurface = "viewer" | "editor" | "compare" | "sort_metadata" | "mcp";
+
+export function openPlaceTextPages({ place, name }: NamedFile, editing: boolean, sudoPassword?: string) {
+  if (place.kind === "local") return api.openLocalTextPages(place.path, name, editing);
+  const segments = [...place.segments, name];
+  if (place.kind === "archive") return api.openArchiveTextPages(place.id, segments, editing);
+  if (place.kind === "ftp") return api.openFtpTextPages(place.id, segments, editing);
+  if (place.kind === "ssh") return api.openSshTextPages(place.id, segments, editing, sudoPassword);
+  return api.openServerTextPages(place.id, segments);
+}
 
 export function readPlaceText(file: NamedFile, sudoPassword?: string, surface?: TextReadSurface) {
   const { place, name } = file;

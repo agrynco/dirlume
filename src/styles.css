@@ -1110,6 +1110,8 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
   border-radius: var(--radius); background: var(--surface); color: var(--ink);
 }
 .text-window[hidden], .source-surface[hidden] { display: none; }
+.text-page-controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.text-page-controls input { width: 8ch; }
 .text-window:focus { outline: none; }
 .document-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px 8px; padding: 6px 12px;
   background: var(--document-header); border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
