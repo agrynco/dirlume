@@ -82,12 +82,15 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
 async function start(page, names, move = false, policy = "ask") {
   const source = page.locator('#left-files[aria-busy="false"]');
   await page.locator("dialog[open]").waitFor({ state: "hidden" });
-  const row = (name) => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`);
+  const row = (name, attributes = "") => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]${attributes}`);
   // Use selection events so the estimate test does not depend on how the
   // runner schedules animation frames after Playwright installs a clock.
   await row(names[0]).dispatchEvent("click", { button: 0 });
   if (names.length > 1) for (const name of names) await row(name).dispatchEvent("click", { button: 0, ctrlKey: true });
-  await source.press(move ? "F6" : "F5");
+  await row(names.at(-1), '[data-current="true"]').waitFor();
+  await page.locator("#left-pane.active").waitFor();
+  const action = page.getByRole("navigation", { name: "File actions" }).locator(`[data-command="${move ? "move" : "copy"}"]:enabled`);
+  await action.dispatchEvent("click");
   const setup = dialog(page, move ? "Rename or move" : "Copy");
   if (policy !== "ask") {
     const choice = setup.getByRole("combobox", { name: "Existing files", exact: true });
