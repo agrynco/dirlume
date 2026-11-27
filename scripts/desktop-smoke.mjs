@@ -186,9 +186,10 @@ async function testDirectComputerPairing(guest) {
   await copyFile(executable, hostProgram);
   const host = await launchDesktop(hostProgram, hostStorage);
   const systemDrive = process.env.SystemDrive ?? "C:";
+  let name;
   try {
     assert.notEqual(host.process.pid, child.pid);
-    const name = await host.page.evaluate(() => window.__TAURI_INTERNALS__.invoke("computer_name")) ?? "127.0.0.1";
+    name = await host.page.evaluate(() => window.__TAURI_INTERNALS__.invoke("computer_name")) ?? "127.0.0.1";
     const share = await host.page.evaluate(() =>
       window.__TAURI_INTERNALS__.invoke("start_desktop_computer_share", { address: "127.0.0.1" }));
     await guest.bringToFront();
@@ -226,7 +227,7 @@ async function testDirectComputerPairing(guest) {
     console.log("Verified native Dirlume-to-Dirlume pairing, drives in both panes, and revocation on a separate host process.");
   } finally {
     try {
-      if (!guest.isClosed()) await guest.evaluate(async (label) => {
+      if (name && !guest.isClosed()) await guest.evaluate(async (label) => {
         const key = "dirlume.remote-connections";
         const profiles = JSON.parse(localStorage.getItem(key) ?? "[]");
         const paired = profiles.find((profile) => profile.label === label && profile.lan === true);
