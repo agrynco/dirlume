@@ -26,7 +26,9 @@ export const panelNameOptions = {
   lowercaseUppercaseFiles: "Show uppercase file names in lowercase",
 } as const;
 export type PanelNameOption = keyof typeof panelNameOptions;
-export type PanelMode = Record<PanelNameOption, boolean> & { name: string; list: PanelColumn[]; status: PanelColumn[] };
+export type PanelMode = Record<PanelNameOption, boolean> & {
+  name: string; list: PanelColumn[]; status: PanelColumn[]; columnSizingVersion: 1;
+};
 export type PanelModes = Record<PanelModeId, PanelMode>;
 
 const columns = (...values: [PanelField, number][]): PanelColumn[] =>
@@ -36,12 +38,12 @@ const nameStatus = columns(["rightName", 0]);
 
 function mode(list: PanelColumn[], status = basicStatus): PanelMode {
   return {
-    name: "", list, status, alignFiles: true, alignFolders: false, uppercaseFolders: false,
+    name: "", list, status, columnSizingVersion: 1, alignFiles: true, alignFolders: false, uppercaseFolders: false,
     lowercaseFiles: false, lowercaseUppercaseFiles: false,
   };
 }
 
-export const defaultPanelModes: PanelModes = {
+const legacyPanelModes: PanelModes = {
   brief: mode(columns(["name", 0], ["name", 0], ["name", 0])),
   medium: mode(columns(["name", 0], ["name", 0])),
   full: mode(columns(["name", 0], ["size", 0], ["date", 0], ["time", 5]), nameStatus),
@@ -50,6 +52,12 @@ export const defaultPanelModes: PanelModes = {
   links: mode(columns(["name", 0], ["size", 6], ["links", 3])),
   alternativeFull: mode(columns(["markedName", 0], ["bytes", 10], ["date", 0]), nameStatus),
 };
+
+export const defaultPanelModes = Object.fromEntries(panelModeIds.map((id) => {
+  const { list, status, ...settings } = legacyPanelModes[id];
+  const automatic = (fields: PanelColumn[]) => fields.map(({ field }) => ({ field, width: "0" }));
+  return [id, { ...settings, list: automatic(list), status: automatic(status) }];
+})) as PanelModes;
 
 export function isPanelMode(value: unknown): value is PanelModeId {
   return typeof value === "string" && Object.hasOwn(panelModeNames, value);
@@ -94,7 +102,13 @@ export function readPanelModes(value: unknown): PanelModes {
       const fields = item[key];
       if (Array.isArray(fields) && fields.every((column) => column && Object.hasOwn(panelFields, column.field) &&
           typeof column.width === "string" && validPanelWidth(column.width)) &&
-          panelWidthsFit(fields) && (key === "status" || fields.some(({ field }) => isNameField(field)))) mode[key] = fields;
+          panelWidthsFit(fields) && (key === "status" || fields.some(({ field }) => isNameField(field)))) {
+        // Older saves included the full stock layout, even when no widths were edited.
+        const legacy = legacyPanelModes[id][key];
+        const wasDefault = item.columnSizingVersion !== 1 && fields.length === legacy.length &&
+          fields.every(({ field, width }, index) => field === legacy[index].field && width === legacy[index].width);
+        if (!wasDefault) mode[key] = fields;
+      }
     }
     result[id] = mode;
   }

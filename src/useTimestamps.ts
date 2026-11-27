@@ -1,5 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 
 type Style = Parameters<typeof api.formatTimestamps>[1];
@@ -63,7 +63,7 @@ export function useTimestamps(values: readonly Timestamp[], style: Style = "date
     return () => { mounted = false; };
   }, [labels, missing, refresh, style]);
 
-  return (value: Timestamp) => value == null ? null : labels?.get(value) ?? null;
+  return useCallback((value: Timestamp) => value == null ? null : labels?.get(value) ?? null, [labels]);
 }
 
 export function timestampSeconds(milliseconds: number | null) {

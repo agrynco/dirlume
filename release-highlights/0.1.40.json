@@ -3,6 +3,7 @@
   "highlights": [
     "Find newly attached drives when reopening the source menu for a paired Dirlume computer.",
     "Clear the error log from the diagnostic viewer’s File menu.",
-    "Open the creator’s website from the About dialog."
+    "Open the creator’s website from the About dialog.",
+    "Fit file pane columns automatically so file sizes and units stay visible when there is space."
   ]
 }
