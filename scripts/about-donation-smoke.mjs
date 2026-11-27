@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
 const destination = "https://send.monobank.ua/jar/6ZninEa3R4";
+const creatorUrl = "https://hrynco.com/";
 const platforms = {
   windows: "Windows NT 10.0; Win64; x64",
   ubuntu: "X11; Linux x86_64",
@@ -150,6 +151,15 @@ try {
         await page.keyboard.press("Enter");
         await page.waitForFunction(() => window.donationRequests.length === 3);
         assert.deepEqual(await page.evaluate(() => window.donationRequests), [destination, destination, destination]);
+        const creator = dialog.getByRole("link", { name: "Anatolii Hrynchuk", exact: true });
+        assert.equal(await creator.getAttribute("href"), creatorUrl);
+        await creator.click();
+        await dialog.getByRole("link", { name: "MIT", exact: true }).focus();
+        await page.keyboard.press("Shift+Tab");
+        assert.equal(await creator.evaluate((element) => element === document.activeElement), true);
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => window.donationRequests.length === 5);
+        assert.deepEqual(await page.evaluate(() => window.donationRequests.slice(3)), [creatorUrl, creatorUrl]);
       }
       await close.click();
       await dialog.waitFor({ state: "hidden" });
@@ -159,6 +169,7 @@ try {
   for (const [language, labels] of Object.entries(copy)) {
     const page = await fixture(browser, "ubuntu", language, true);
     const dialog = await openAbout(page, labels);
+    assert.equal(await dialog.getByRole("link", { name: "Anatolii Hrynchuk", exact: true }).getAttribute("href"), creatorUrl);
     await checkFooter(dialog, labels, true);
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });

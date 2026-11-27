@@ -11,8 +11,10 @@ import { SudoDialog } from "./SudoDialog";
 import { bindingMatches, eventShortcut, showShortcut, type Bindings } from "./preferences";
 import { normalized, preferredLineEnding, restoreLineEndings } from "./textFormat";
 import { viewFontStyle } from "./viewFonts";
+import { MainMenu } from "./MainMenu";
 
 export function PagedTextWindow({ initial, file, active, editing, shortcuts, fontSize,
+  textTabWidth, showTextWhitespace, onToggleTextWhitespace,
   onOptions, onCopyPath, onSwitchMode, onDirtyChange, onSaved, onClose }: {
   initial: TextPages;
   file: NamedFile;
@@ -20,6 +22,9 @@ export function PagedTextWindow({ initial, file, active, editing, shortcuts, fon
   editing: boolean;
   shortcuts: Bindings;
   fontSize?: number;
+  textTabWidth: number;
+  showTextWhitespace: boolean;
+  onToggleTextWhitespace: () => void;
   onOptions: () => void;
   onCopyPath: (path: string) => void;
   onSwitchMode: () => void;
@@ -149,6 +154,9 @@ export function PagedTextWindow({ initial, file, active, editing, shortcuts, fon
     }}>
     <header className="document-heading text-document-heading">
       <div className="document-menu">
+        {!hex && <MainMenu label="Document menu" groups={[{ label: "Display", items: [
+          { label: "Show whitespace", checked: showTextWhitespace, checkbox: true, run: onToggleTextWhitespace },
+        ] }]} />}
         <Button type="button" onClick={onOptions}>{t("Options")}</Button>
       </div>
       <div className="document-path">
@@ -197,7 +205,7 @@ export function PagedTextWindow({ initial, file, active, editing, shortcuts, fon
     {hex ? <HexViewer file={file} revision={0} /> :
       page && <div className="source-surface">
         <CodeSurface key={index} file={file} editing={editing} locked={busy || editing && !writable} active={active}
-          fontSize={fontSize} value={text} onChange={setText} />
+          fontSize={fontSize} value={text} onChange={setText} textTabWidth={textTabWidth} showTextWhitespace={showTextWhitespace} />
       </div>}
     {confirm && <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setConfirm(false)}>
       <div className="dialog-body"><p><Message text="Discard the unsaved changes to {0}?"><strong>{file.name}</strong></Message></p></div>

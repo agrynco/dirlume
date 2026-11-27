@@ -183,7 +183,6 @@ type Modal =
   | { kind: "sortMenu"; side: Side }
   | { kind: "sortCriteria"; side: Side; mode: SortMode }
   | { kind: "about" | "commandHistory" | "mcp" }
-  | { kind: "clearErrorLog"; clearing?: boolean; error?: string }
   | { kind: "exit"; update?: AppUpdate }
   | { kind: "update"; update: AppUpdate }
   | { kind: "whatsNew" }
@@ -1378,18 +1377,6 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Ready" });
     } catch (error) {
       setStatus({ text: describeError(error), error: true });
-    }
-  }
-
-  async function clearErrorLog() {
-    if (modal?.kind !== "clearErrorLog" || modal.clearing) return;
-    setModal({ kind: "clearErrorLog", clearing: true });
-    try {
-      await api.clearErrorLog();
-      setModal(null);
-      setStatus({ text: "Error log cleared." });
-    } catch (error) {
-      setModal({ kind: "clearErrorLog", error: describeError(error) });
     }
   }
 
@@ -3432,8 +3419,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { label: "Help", items: [menuCommand("help"),
       ...(installedRelease ? [{ label: "What's new", run: () => setModal({ kind: "whatsNew" }) }] : []),
       { label: "About", run: () => setModal({ kind: "about" }) },
-      { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() },
-      { label: "Clear error log", run: () => setModal({ kind: "clearErrorLog" }) }] },
+      { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
   const showFileActions = !showingGit && !environmentActive && !recentActive && activeDocument === null;
@@ -3718,6 +3704,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes}
+            textTabWidth={preferences.textTabWidth} showTextWhitespace={preferences.showTextWhitespace}
+            onToggleTextWhitespace={() => setPreferences((previous) => ({ ...previous, showTextWhitespace: !previous.showTextWhitespace }))}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
             onCopyPath={copyPath}
             onSwitchMode={() => openDocument(file, !editing, { origin: returnTo })}
@@ -3854,19 +3842,6 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         setLocalAppearancePick(null);
         localAppearancePick(pick);
       }} />}
-      {modal?.kind === "clearErrorLog" && (
-        <Dialog title={t("Clear error log")} tone="warning" onClose={() => { if (!modal.clearing) setModal(null); }}>
-          <div className="dialog-body">
-            <p>{t("Permanently clear all entries in the error log?")}</p>
-            {modal.error && <p role="alert" className="dialog-error">{errorText(modal.error)}</p>}
-          </div>
-          <footer className="dialog-footer">
-            <Button type="button" data-initial-focus disabled={modal.clearing} onClick={() => setModal(null)}>{t("Cancel")}</Button>
-            <Button type="button" className="alert-confirm" disabled={modal.clearing} onClick={() => void clearErrorLog()}>
-              {t("Clear error log")}</Button>
-          </footer>
-        </Dialog>
-      )}
       {modal?.kind === "exit" && (
         <Dialog title={t("Unsaved changes")} tone="warning" onClose={() => setModal(modal.update ? { kind: "update", update: modal.update } : null)}>
           <div className="dialog-body"><p>{t(modal.update ? "Some editors have unsaved changes. Discard them and install the update?" :

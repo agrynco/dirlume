@@ -344,6 +344,8 @@ export interface Preferences {
   activeSettingsProfile: string | null;
   settingsProfiles: SettingsProfile[];
   viewFontSizes: ViewFontSizes;
+  textTabWidth: number;
+  showTextWhitespace: boolean;
   viewerContentWidth?: number;
   viewerMarkdownContentWidth?: number | "full";
   mermaidScale?: number;
@@ -351,6 +353,8 @@ export interface Preferences {
 }
 
 export const minViewerContentWidth = 320;
+export const defaultTextTabWidth = 4;
+export const maxTextTabWidth = 32;
 export const maxViewerContentWidth = 2400;
 export const minMermaidScale = 25;
 export const maxMermaidScale = 400;
@@ -584,6 +588,8 @@ export const preferenceDefinitions: { [K in keyof Preferences]-?: PreferenceDefi
   terminalPasteOnRightClick: { group: "terminal", portable: true, read: (value) => value === true },
   terminalResizeRows: { group: "terminal", portable: true, read: (value) => readInteger(value, 1, maxTerminalResizeRows) ?? 1 },
   viewerContentWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
+  textTabWidth: { group: "viewer", portable: true, read: (value) => readInteger(value, 1, maxTextTabWidth) ?? defaultTextTabWidth },
+  showTextWhitespace: { group: "viewer", portable: true, read: (value) => value === true },
   viewerMarkdownContentWidth: { group: "viewer", portable: true, read: (value) => value === "full" ? "full" :
     readInteger(value, minViewerContentWidth, maxViewerContentWidth) },
   mermaidScale: { group: "viewer", portable: true, read: (value) => readInteger(value, minMermaidScale, maxMermaidScale) },

@@ -145,6 +145,7 @@ export function Settings({ preferences: saved, onChange: applyPreferences, onClo
         ...Object.values(viewerColors), ...Object.values(mermaidColors)] :
       feature === "terminal" ? ["Resize step (rows)", "Paste on right-click", ...(windowsClient ? ["Automatically refresh environment variables"] : [])] : [];
     return matches(label, fontGroups[font].label, "Font family", "Installed fonts", "Size (px)", "font size",
+      ...(feature === "viewer" || feature === "editor" ? ["Tab width"] : []),
       ...(views.length ? ["zoom", "wheel"] : []), ...views.map((view) => viewFonts[view].label), ...terms,
       ...surfaceTerms(feature === "filePanels" ? [] : optionSurfaces[feature]));
   });

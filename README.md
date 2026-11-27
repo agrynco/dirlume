@@ -40,7 +40,7 @@ Choose a file panel mode from the **Left** or **Right** menu. The active pane al
 
 In Brief and Medium, **Up** and **Down** follow the sort order from the bottom of one column to the top of the next. **Left**, **Right**, **Page Up**, and **Page Down** move by a whole screen of files. **Home** and **End** go to the first and last entries.
 
-In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Set a width in characters or as a percentage of the remaining space, or enter **0** for automatic sizing. Right-click the headings to show or hide columns for the current pane and mode. Each pane remembers its settings and selected mode.
+In **Options → Panel modes**, edit the name, columns, current-item status line, and filename display for each mode. **Align file extensions** displays the final extension without its separating dot, such as `archive.tar` with aligned `gz`. Built-in modes set widths to **0** for automatic sizing. The list fits headings and values when space allows, including file size units. Name takes the space left by the metadata columns. To set your own widths, enter a character count or a percentage of the remaining space. Right-click the headings to show or hide columns for the current pane and mode. Each pane sizes its columns independently.
 
 The built-in **Full** mode uses automatic Size and Date widths. These widths follow the displayed values in the current pane font. The Size column widens as needed to show full folder measurements, even with a saved width. Set a column width to **0** to fit its displayed values automatically.
 
@@ -187,7 +187,7 @@ In **New file** (**Shift+F4**), choose UTF-8, UTF-8 with BOM, UTF-16 LE, or UTF-
 
 In Markdown preview, a link to another Markdown document navigates in the current viewer tab. Ctrl+Click opens the target in a separate viewer tab. Heading links scroll to the heading, and HTTP and HTTPS links open in your browser. Use **Back** and **Forward** to revisit documents and restore reading positions in the current tab. **Search** finds text in the rendered document. Clicking a task checkbox saves the changed marker in a local or writable FTP file. If the editor already contains unsaved changes, the checkbox becomes part of that draft and is written when you save. Task checkboxes on read-only sources are disabled.
 
-The Viewer and Editor have document-specific menus that show configured shortcuts. The Editor also has a shortcut strip. In Text Viewer, use **File** to open an editable file in the Editor or close the document. **Navigate** offers **Search** in rendered Markdown and **Hex** in source and hexadecimal views. The header shows the active file's full path and document status. Choose **Options** beside the document menu to open the settings for that mode.
+The Viewer and Editor have document-specific menus that show configured shortcuts. The Editor also has a shortcut strip. In Text Viewer, use **File** to open an editable file in the Editor or close the document. **Navigate** offers **Search** in rendered Markdown and **Hex** in source and hexadecimal views. In text and source views, **Display → Show whitespace** reveals spaces and tabs. Set the shared **Tab width** in **Options → Viewer** or **Options → Editor**. It defaults to four columns and applies with markers on or off. Both settings are saved and leave copied and saved text intact. The header shows the active file's full path and document status.
 
 In the local text Viewer, click beside a line number or use **Navigate → Bookmark line**. In local Markdown **Preview**, select text and choose **Navigate → Bookmark selection**. Both actions use the configurable bookmark shortcut, **Ctrl+Alt+B** by default. **File bookmarks** in the Viewer shows the current file's bookmarks. **Commands → File bookmarks** in the file panes shows every saved bookmark, including entries for closed files. Press **Enter** to open an entry at its saved source line or highlight the saved passage in Preview. Preview bookmarks match the saved text and its surroundings. If the passage cannot be distinguished or found, the entry stays available to retry or remove. You can rename or remove either kind of bookmark from both lists. Bookmarks persist across restarts.
 
@@ -288,7 +288,7 @@ Inside an FTP pane, **F3** or **Enter** opens a file in the viewer. **F3** also 
 
 **Dirlume server** runs as a separate process on Windows, Ubuntu, and macOS and shares one folder with read access over TLS. Browse and download files and directories, or open and compare text in Dirlume. [Server setup and autostart](docs/server.md).
 
-**Dirlume LAN** lists available remote drives under their computer name in either pane's sources. To pair with another Dirlume instance, open **Options → Computers** on the host, generate and copy its pairing code, then save the computer in **Options → Computers** on the guest. The guest can browse and download from the host's local locations while the host keeps access enabled. Stopping access or exiting the host invalidates the current code.
+**Dirlume LAN** lists available remote drives under their computer name in either pane's sources. To pair with another Dirlume instance, open **Options → Computers** on the host, generate and copy its pairing code, then save the computer in **Options → Computers** on the guest. The guest can browse and download from the host's local locations while the host keeps access enabled. Reopen the pane sources to refresh attached drives. Stopping access or exiting the host invalidates the current code.
 
 On Windows, authorize `Dirlume.exe` in **KSwitcher → Computers → Trusted clients** to use the resident KSwitcher LAN service. Each online paired computer appears under **Dirlume LAN** in either pane's sources. Choose a drive to open it directly. Dirlume can browse and download regular files using the existing LAN pair’s permissions. If the executable changes, add it again in KSwitcher.
 
@@ -313,7 +313,7 @@ Add an **SMB** connection on Windows, macOS, or Ubuntu using a server name, IP a
 
 ## Desktop diagnostics
 
-Choose **Help → Open error log** to inspect the journal or **Help → Clear error log** to remove its entries after confirmation. Dirlume continues recording new errors after the log is cleared.
+Choose **Help → Open error log** to inspect the journal. In the viewer, choose **File → Clear error log** to remove its entries after confirmation. Dirlume continues recording new errors after the log is cleared.
 
 Use **Help → Open error log** to see the latest entries first, with local timestamps down to the millisecond. Expand an entry to inspect its fields and recent actions. A warning icon marks panics, and partial lines can be opened individually. Select **Source** to copy the original JSONL in file order. Opening a JSONL file from a file pane uses the regular text viewer.
 

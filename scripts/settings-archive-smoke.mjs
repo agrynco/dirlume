@@ -27,6 +27,7 @@ try {
       layout: "standard", mainMenuAlignment: "right", showMainMenu: false, schemes: [local, evening], activeScheme: null,
       kswitcher: "Fixture installation folder",
       viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150,
+      textTabWidth: 8, showTextWhitespace: true,
       activeShortcutScheme: "custom-keys", bindingDefaults: 7,
       shortcutSchemes: [{ id: "custom-keys", name: "My keys", bindings: { newFile: ["Ctrl+Alt+N"] } }],
     }));
@@ -195,7 +196,9 @@ try {
   assert.equal(Object.hasOwn(settingsFile.groups.general, "kswitcher"), false);
   assert.deepEqual(settingsFile.groups.shortcuts.shortcutSchemes[0].bindings.newFile, ["Ctrl+Alt+N"]);
   assert.equal(settingsFile.groups.filePanels.hideActionButtonIcons, true);
-  assert.deepEqual(settingsFile.groups.viewer, { viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150 });
+  assert.deepEqual(settingsFile.groups.viewer, {
+    viewerContentWidth: 630, viewerMarkdownContentWidth: "full", mermaidScale: 150, textTabWidth: 8, showTextWhitespace: true,
+  });
   await button(options, "Main File Panels").click();
   await visibility.uncheck();
   await button(options, "Apply").click();
@@ -306,6 +309,8 @@ try {
     delete saved.viewerContentWidth;
     delete saved.viewerMarkdownContentWidth;
     delete saved.mermaidScale;
+    delete saved.textTabWidth;
+    delete saved.showTextWhitespace;
     localStorage.setItem(key, JSON.stringify({ ...saved, schemes: [], shortcutSchemes: [], activeShortcutScheme: null }));
   });
   await page.reload();
@@ -322,6 +327,8 @@ try {
   assert.equal((await readPreferences()).viewerContentWidth, 640);
   assert.equal((await readPreferences()).viewerMarkdownContentWidth, undefined);
   assert.equal((await readPreferences()).mermaidScale, undefined);
+  assert.equal((await readPreferences()).textTabWidth, 4);
+  assert.equal((await readPreferences()).showTextWhitespace, false);
   await startImport(archive({ shortcuts: settingsFile.groups.shortcuts, viewer: settingsFile.groups.viewer }, []));
   await button(importDialog, "Import").click();
   const restored = await readPreferences();
@@ -330,6 +337,8 @@ try {
   assert.equal(restored.viewerContentWidth, 630);
   assert.equal(restored.viewerMarkdownContentWidth, "full");
   assert.equal(restored.mermaidScale, 150);
+  assert.equal(restored.textTabWidth, 8);
+  assert.equal(restored.showTextWhitespace, true);
   const localBefore = restored.schemes.find(({ id }) => id === local.id);
   const openManagement = async () => {
     const search = options.getByRole("searchbox", { name: "Search settings" });
