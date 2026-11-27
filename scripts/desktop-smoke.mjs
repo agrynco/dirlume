@@ -2410,7 +2410,7 @@ try {
   await navigate("left", attributes);
   await testNativeSpaceAnalyzer(page);
   await testViewerReadingArea(page, attributes);
-  await testMarkdownOptionsDismissal(page, attributes);
+  await testMarkdownOptionsDismissal(page, attributes, temp);
   if (process.env.DIRLUME_SSH_FIXTURE_PYTHON) {
     await testNativeJumpHosts(page, temp, dst, join(temp, "ssh-config"), async () => {
       await exitDesktop(page);
