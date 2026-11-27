@@ -248,6 +248,8 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     const snippetInput = windowsClient && !menuRun && term.textarea?.parentElement
       ? document.createElement("input") : null;
     let snippetTicket = "";
+    let snippetInputHasTerminalFocus = false;
+    let returnSnippetFocusTimer = 0;
     if (snippetInput) {
       snippetInput.className = "dirlume-terminal-snippet-input";
       snippetInput.tabIndex = -1;
@@ -255,13 +257,17 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       snippetInput.setAttribute("aria-label", t("Insert KSwitcher snippet"));
       term.textarea?.parentElement?.append(snippetInput);
       snippetInput.addEventListener("input", insertSnippet);
+      snippetInput.addEventListener("focus", () => {
+        // WebView2 focuses the receiver before applying an accessibility edit.
+        returnSnippetFocusTimer = window.setTimeout(restoreSnippetFocus, 100);
+      });
     }
 
     function snippetDraft() {
       const buffer = term.buffer.active;
       return atPrompt && !closed && !stopped && clipboard.current.visible &&
-        buffer.type === "normal" && buffer.viewportY === buffer.baseY &&
-        document.hasFocus() && term.textarea === document.activeElement ? editable : null;
+        buffer.type === "normal" && buffer.viewportY === buffer.baseY
+        ? editable : null;
     }
 
     function syncSnippetInput() {
@@ -274,7 +280,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
 
     function insertSnippet() {
       if (!snippetInput) return;
-      const input = snippetDraft();
+      const focus = document.activeElement;
+      const input = document.hasFocus() &&
+        (focus === term.textarea || snippetInputHasTerminalFocus && focus === snippetInput) && snippetDraft();
       const replacement = input && snippetTicket && replaceTerminalSnippet(input, snippetTicket, snippetInput.value,
         term.modes.applicationCursorKeysMode, term.modes.bracketedPasteMode);
       if (replacement) {
@@ -283,6 +291,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
         hideSuggestions();
         send(replacement.data, false);
       }
+      restoreSnippetFocus();
+    }
+
+    function restoreSnippetFocus() {
+      window.clearTimeout(returnSnippetFocusTimer);
+      const restore = snippetInputHasTerminalFocus && document.hasFocus() && !closed && !stopped &&
+        clipboard.current.visible && document.activeElement === snippetInput;
+      snippetInputHasTerminalFocus = false;
+      if (restore) term.focus();
       syncSnippetInput();
     }
 
@@ -383,14 +400,15 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       activeRequest = null;
       hideSuggestions();
     };
-    function blurTerminal() {
-      syncSnippetInput();
+    function blurTerminal(event: FocusEvent) {
+      snippetInputHasTerminalFocus = snippetInput !== null && event.relatedTarget === snippetInput;
+      if (event.relatedTarget && !snippetInputHasTerminalFocus) {
+        snippetTicket = "";
+        syncSnippetInput();
+      }
       hideSuggestions();
     }
-    term.textarea?.addEventListener("focus", syncSnippetInput);
     term.textarea?.addEventListener("blur", blurTerminal);
-    window.addEventListener("focus", syncSnippetInput);
-    window.addEventListener("blur", syncSnippetInput);
 
     function runQueuedCommand() {
       if (closed || stopped || !opened || (tracksPrompt && (!atPrompt || draft))) return false;
@@ -737,6 +755,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     return () => {
       stopped = true;
       clearTimeout(startupTimer);
+      clearTimeout(returnSnippetFocusTimer);
       hideLinkTooltip();
       hideSuggestions();
       suspendSuggestions.current = () => {};
@@ -749,10 +768,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       resized.dispose();
       scrolled.dispose();
       outputChanged.dispose();
-      term.textarea?.removeEventListener("focus", syncSnippetInput);
       term.textarea?.removeEventListener("blur", blurTerminal);
-      window.removeEventListener("focus", syncSnippetInput);
-      window.removeEventListener("blur", syncSnippetInput);
       surface.removeEventListener("mousedown", preserveSelection, true);
       surface.removeEventListener("mousemove", trackLinkDrag, true);
       surface.removeEventListener("contextmenu", openContextMenu, true);
