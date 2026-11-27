@@ -7,12 +7,12 @@ use std::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, State};
 
 use crate::{
     desktop::{blocking, blocking_for, message, Result},
     diagnostics::{failure, FailureCode},
-    local, ssh,
+    local, ssh, user_menu,
 };
 
 #[cfg(windows)]
@@ -245,6 +245,7 @@ impl Terminals {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Output {
     Data { data: String },
+    Finished { code: u32 },
     Closed,
     Disconnected,
 }
@@ -268,6 +269,7 @@ pub struct OpenTerminal {
     cols: u16,
     refresh_environment: bool,
     ssh: Option<SshSource>,
+    user_menu: Option<user_menu::Run>,
 }
 
 #[derive(Deserialize)]
@@ -289,9 +291,6 @@ pub fn shell_program() -> std::ffi::OsString {
 
 fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<Terminal>>, bool)> {
     let cwd = local::absolute(&request.directory).map_err(message)?;
-    let pair = native_pty_system()
-        .openpty(size(request.rows, request.cols))
-        .map_err(message)?;
     let shell = shell_program();
     #[cfg(windows)]
     let mut command = {
@@ -323,6 +322,31 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
     command.env("DIRLUME_PROMPT_TOKEN", request.prompt_token);
+    let terminal = start_pty(
+        command,
+        size(request.rows, request.cols),
+        output,
+        None,
+        #[cfg(unix)]
+        zsh_startup,
+    )?;
+    #[cfg(not(windows))]
+    let tracks_prompt = zsh_tracks_prompt
+        || install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer)
+            .map_err(message)?;
+    #[cfg(windows)]
+    let tracks_prompt = true;
+    Ok((terminal, tracks_prompt))
+}
+
+fn start_pty(
+    command: CommandBuilder,
+    dimensions: PtySize,
+    output: Channel<Output>,
+    menu_label: Option<String>,
+    #[cfg(unix)] zsh_startup: Option<tempfile::TempDir>,
+) -> Result<Arc<Mutex<Terminal>>> {
+    let pair = native_pty_system().openpty(dimensions).map_err(message)?;
     let mut reader = pair.master.try_clone_reader().map_err(message)?;
     let writer = pair.master.take_writer().map_err(message)?;
     let mut child = pair.slave.spawn_command(command).map_err(message)?;
@@ -337,6 +361,15 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
     std::thread::Builder::new()
         .name("dirlume-terminal".into())
         .spawn(move || {
+            if let Some(label) = &menu_label {
+                let label: String = label
+                    .chars()
+                    .filter(|character| !character.is_control())
+                    .collect();
+                let _ = output.send(Output::Data {
+                    data: STANDARD.encode(format!("{label}\r\n")),
+                });
+            }
             let mut bytes = [0; 8192];
             loop {
                 let length = match reader.read(&mut bytes) {
@@ -363,27 +396,36 @@ fn create(request: OpenTerminal, output: Channel<Output>) -> Result<(Arc<Mutex<T
                     break;
                 }
             }
-            let _ = output.send(Output::Closed);
-            if let Err(error) = child.wait() {
-                failure("wait_terminal", FailureCode::Io, error.raw_os_error());
+            if menu_label.is_none() {
+                let _ = output.send(Output::Closed);
+            }
+            match child.wait() {
+                Ok(status) if menu_label.is_some() => {
+                    let _ = output.send(Output::Finished {
+                        code: status.exit_code(),
+                    });
+                }
+                Err(error) => {
+                    failure("wait_terminal", FailureCode::Io, error.raw_os_error());
+                    if menu_label.is_some() {
+                        let _ = output.send(Output::Closed);
+                    }
+                }
+                _ => (),
             }
         })
         .map_err(message)?;
-    #[cfg(not(windows))]
-    let tracks_prompt = zsh_tracks_prompt
-        || install_prompt(&shell, &mut *terminal.lock().map_err(message)?.writer)
-            .map_err(message)?;
-    #[cfg(windows)]
-    let tracks_prompt = true;
-    Ok((terminal, tracks_prompt))
+    Ok(terminal)
 }
 
 #[tauri::command]
 pub async fn open_terminal(
-    request: OpenTerminal,
+    mut request: OpenTerminal,
     output: Channel<Output>,
     state: State<'_, Terminals>,
     ssh_state: State<'_, ssh::SshState>,
+    app: AppHandle,
+    menus: State<'_, user_menu::UserMenus>,
 ) -> Result<bool> {
     let id = request.id;
     let connection = request
@@ -391,6 +433,15 @@ pub async fn open_terminal(
         .as_ref()
         .map(|source| ssh_state.connection(source.connection))
         .transpose()?;
+    let user_menu = request
+        .user_menu
+        .take()
+        .map(|run| user_menu::config_path(&app).map(|personal| (run, personal)))
+        .transpose()?;
+    if connection.is_some() && user_menu.is_some() {
+        return Err("Choose a local file pane to use the User Menu.".into());
+    }
+    let menus = menus.inner().clone();
     let (terminal, tracks_prompt) = blocking_for("open_terminal", move || {
         if let (Some(source), Some(connection)) = (&request.ssh, connection) {
             let dimensions = size(request.rows, request.cols);
@@ -403,6 +454,17 @@ pub async fn open_terminal(
                 output,
             )?;
             Ok((SharedTerminal::Ssh(Arc::new(terminal)), true))
+        } else if let Some((run, personal)) = user_menu {
+            let (command, label) = menus.prepare(run, &personal, request.refresh_environment)?;
+            let terminal = start_pty(
+                command,
+                size(request.rows, request.cols),
+                output,
+                Some(label),
+                #[cfg(unix)]
+                None,
+            )?;
+            Ok((SharedTerminal::Local(terminal), false))
         } else {
             create(request, output)
                 .map(|(terminal, tracks_prompt)| (SharedTerminal::Local(terminal), tracks_prompt))
@@ -614,6 +676,7 @@ mod tests {
                 cols: 120,
                 refresh_environment: false,
                 ssh: None,
+                user_menu: None,
             },
             output,
         )

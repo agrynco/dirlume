@@ -80,6 +80,8 @@ mod timestamps;
 #[cfg(feature = "desktop")]
 mod updates;
 #[cfg(feature = "desktop")]
+mod user_menu;
+#[cfg(feature = "desktop")]
 mod watch;
 #[cfg(all(feature = "desktop", windows))]
 mod windows_elevation;
