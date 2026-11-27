@@ -771,24 +771,29 @@ mod tests {
     #[test]
     #[ignore = "writes a 2 GiB temporary file"]
     fn reads_the_beginning_middle_and_end_of_a_multi_gigabyte_text_file() {
-        let mut source = tempfile::tempfile().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.txt");
+        let mut source = File::create(&path).unwrap();
         let half = 1024 * 1024 * 1024;
         source.write_all(b"start\r\n").unwrap();
         io::copy(&mut io::repeat(b'x').take(half - 7), &mut source).unwrap();
         source.write_all(b"middle\r\n").unwrap();
         io::copy(&mut io::repeat(b'y').take(half - 8), &mut source).unwrap();
         source.write_all(b"end\r\n").unwrap();
-        let mut document = TextPages::open(source).unwrap();
-        assert!(document.page(0).unwrap().text.starts_with("start\r\n"));
-        assert!(document
-            .page(half / PAGE_BYTES)
-            .unwrap()
-            .text
-            .starts_with("middle\r\n"));
-        assert_eq!(
-            document.page(document.page_count() - 1).unwrap().text,
-            "end\r\n"
-        );
+        drop(source);
+        for editing in [false, true] {
+            let mut document = Document::open_local(path.clone(), editing)
+                .unwrap()
+                .unwrap();
+            let pages = &mut document.pages;
+            assert!(pages.page(0).unwrap().text.starts_with("start\r\n"));
+            assert!(pages
+                .page(half / PAGE_BYTES)
+                .unwrap()
+                .text
+                .starts_with("middle\r\n"));
+            assert_eq!(pages.page(pages.page_count() - 1).unwrap().text, "end\r\n");
+        }
     }
 
     #[test]
