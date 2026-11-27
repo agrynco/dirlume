@@ -23,7 +23,7 @@ import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type SavedConnection, type SshHostVerification } from "./api";
-import { isLanGroupPlace, type LanGroupPlace } from "./api";
+import { isLanGroupPlace, supportsFileTree, type FileServerPlace, type LanGroupPlace } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -290,6 +290,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [sshUploadRefresh, setSshUploadRefresh] = useState<number | null>(null);
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
   const folderScanSudo = useSudoFolderScan();
+  const treeBrowseSudo = useSudoFolderScan("browse");
   const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
@@ -414,14 +415,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const rightSort = useFileSortMetadata(panes.right, preferences.sortSettings, showingSortMenu === "right");
   const leftCanSort = leftSort.canSort;
   const rightCanSort = rightSort.canSort;
-  const leftRoot = !panes.left.search && (panes.left.place?.kind === "local" || isLanGroupPlace(panes.left.place)) ? panes.left.place : null;
-  const rightRoot = !panes.right.search && (panes.right.place?.kind === "local" || isLanGroupPlace(panes.right.place)) ? panes.right.place : null;
+  const leftRoot = !panes.left.search && supportsFileTree(panes.left.place) ? panes.left.place : null;
+  const rightRoot = !panes.right.search && supportsFileTree(panes.right.place) ? panes.right.place : null;
   const leftTreeOn = preferences.paneViews.left === "tree";
   const rightTreeOn = preferences.paneViews.right === "tree";
   const leftRevision = usePaneTreeRevision(leftRoot?.kind === "local" ? leftRoot.path : undefined, leftTreeOn, fileRevision);
   const rightRevision = usePaneTreeRevision(rightRoot?.kind === "local" ? rightRoot.path : undefined, rightTreeOn, fileRevision);
-  const leftTree = useFilePaneTree(leftRoot, leftTreeOn, leftRevision);
-  const rightTree = useFilePaneTree(rightRoot, rightTreeOn, rightRevision);
+  const leftTree = useFilePaneTree(leftRoot, leftTreeOn, leftRevision, treeBrowseSudo.authorize);
+  const rightTree = useFilePaneTree(rightRoot, rightTreeOn, rightRevision, treeBrowseSudo.authorize);
   const trees = { left: leftTree, right: rightTree };
   const folderSizes = {
     left: usePaneFolderSizes(panes.left, folderSizesEnabled.left, leftTreeOn),
@@ -469,15 +470,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const state = panes[side];
     if (!trees[side].enabled || !state.selected) return null;
     const item = paneItem(state, trees[side].lookup(state, state.selected) ?? undefined);
-    if (!item || item.place.kind !== "local" && !isLanGroupPlace(item.place)) return null;
+    if (!item || !supportsFileTree(item.place)) return null;
     const folder = item.entry.directory ? childPlace(item.place, item.entry.name) : item.place;
     return folder.kind === "local" ? { ...folder, parent: parentPath(folder.path, windowsClient) } :
-      isLanGroupPlace(folder) ? folder : null;
+      supportsFileTree(folder) ? folder : null;
   }
-  async function selectChangedLanItem(side: Side, directory: LanGroupPlace, name: string) {
+  async function selectChangedRemoteItem(side: Side, directory: LanGroupPlace | FileServerPlace, name: string) {
     const pane = latest.current[side];
     const root = pane.place;
-    if (trees[side].enabled && isLanGroupPlace(root) && sameConnection(root, directory) &&
+    if (trees[side].enabled && (isLanGroupPlace(root) || isFileServer(root)) && sameConnection(root, directory) &&
       root.segments.every((part, index) => part === directory.segments[index])) {
       const segments = directory.segments.slice(root.segments.length);
       const branch = segments.length ? trees[side].lookup(pane, segments.join("/")) : null;
@@ -2152,7 +2153,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   function setFilePaneView(side: Side, view: FilePaneView) {
     const pane = panes[side];
-    if (pane.loading || pane.search || pane.place?.kind !== "local" && !isLanGroupPlace(pane.place) ||
+    if (pane.loading || pane.search || !supportsFileTree(pane.place) ||
         preferences.paneViews[side] === view) return;
     const nested = view === "list" && pane.selected?.includes("/") ? trees[side].lookup(pane, pane.selected) : null;
     const item = nested && paneItem(pane, nested);
@@ -2415,14 +2416,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isLanGroupPlace(source) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     if (kind === "move" && source.kind === "ftp") {
-      setModal({ kind: "rename", path: placePath(source), name: selected.name, remote: source });
+      const item = paneItem(state, selected);
+      if (item?.place.kind === "ftp") setModal({ kind: "rename", path: placePath(item.place), name: item.entry.name, remote: item.place, side });
       return;
     }
     const otherPane = panes[targetSide];
     const target = otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
         processPanels[targetSide] || otherPane.loading) ? null :
-      isLanGroupPlace(otherPane.place) ? treeFolder(targetSide) ?? otherPane.place : otherPane.place;
+      treeFolder(targetSide) ?? otherPane.place;
     if (kind === "move" && target?.kind === "ftp") {
       setStatus({ text: "Choose a local destination. FTP does not support moving local files." });
     }
@@ -2912,7 +2914,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (!measurePlace || !measureEntries.length) return;
     cancelScan(active);
     const id = ++measureId.current;
-    const controller = measurePlace.kind === "local" || measurePlace.kind === "ftp" ? undefined : new AbortController();
+    const nativeMeasure = measurePlace.kind === "local" || measurePlace.kind === "ftp" && !trees[active].enabled;
+    const controller = nativeMeasure ? undefined : new AbortController();
     scans.current[active] = { id, controller };
     const names = measureEntries.map(({ name }) => name);
     updatePane(active, (pane) => ({ ...pane, measuring: names }));
@@ -2928,7 +2931,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     };
     async function run() {
       if (!measurePlace) return;
-      if (measurePlace.kind === "local" || measurePlace.kind === "ftp") {
+      if (nativeMeasure && (measurePlace.kind === "local" || measurePlace.kind === "ftp")) {
         const source = measurePlace.kind === "ftp" ? { kind: "ftp" as const, connection: measurePlace.id, segments: measurePlace.segments }
           : { kind: "local" as const, directory: measurePlace.path };
         const output = new Channel<SizeResult>(storeResult);
@@ -2937,13 +2940,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         return;
       }
       const signal = controller!.signal;
-      for (const name of names) {
+      for (const entry of measureEntries) {
         if (signal.aborted) break;
-        const child = childPlace(measurePlace, name);
+        const child = (entry.tree?.segments ?? [entry.name]).reduce<FileLocation>((place, name) => childPlace(place, name), measurePlace);
         if (child.kind === "smbRoot") continue;
         await scanSpace(child, signal, (result) => {
           if (result.phase === "scanning") return;
-          storeResult({ name, bytes: result.root.logical,
+          storeResult({ name: entry.name, bytes: result.root.logical,
             incomplete: result.phase !== "complete" || result.root.missingLogical > 0 });
         }, folderScanSudo.authorize);
       }
@@ -3274,8 +3277,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       case "mkdir":
         if (!pane.search && !busy && !pane.loading) {
-          const tree = lanGroupPlace ? treeFolder(active) : null;
-          const place = local ?? fileServer ?? (isLanGroupPlace(tree) ? tree : lanGroupPlace) ??
+          const place = treeFolder(active) ?? local ?? fileServer ?? lanGroupPlace ??
             (archive?.canAdd ? archive : undefined) ?? kswitcher;
           if (place) setModal({ kind: "mkdir", side: active, place });
         }
@@ -3287,7 +3289,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }
         break;
       case "rename": {
-        const place = current?.tree && currentItem?.place.kind === "local" ? currentItem.place : local ?? ftp;
+        const nested = current?.tree ? currentItem?.place : undefined;
+        const place = nested?.kind === "local" || nested?.kind === "ftp" ? nested : local ?? ftp;
         if (place && current && !pane.search && !busy && !pane.loading) {
           setRowRename({ side: active, place, name: currentItem?.entry.name ?? current.name, treeKey: current.tree ? current.name : undefined });
         } else if (currentItem?.place.kind === "ssh" && !pane.search && !busy && !pane.loading) {
@@ -3304,8 +3307,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       }
       case "newFile": {
-        const tree = lanGroupPlace ? treeFolder(active) : null;
-        const place = local ?? fileServer ?? (isLanGroupPlace(tree) ? tree : lanGroupPlace) ?? kswitcher;
+        const place = treeFolder(active) ?? local ?? fileServer ?? lanGroupPlace ?? kswitcher;
         if (place && !pane.search && !busy && !pane.loading) {
           setModal({ kind: "newFile", side: active, path: placePath(place), name: "",
             kswitcher: place.kind === "kswitcher" ? place : undefined,
@@ -3326,7 +3328,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       case "view":
       case "edit": {
         if (command === "view" && measureEntries.length) {
-          if (trees[active].enabled && !measureParent) {
+          if (local && trees[active].enabled && !measureParent) {
             const folder = measureEntries[0];
             folderSizes[active].measureBranch(folder.tree?.segments ?? [folder.name]);
           }
@@ -4155,6 +4157,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         setHelpTopic("files");
       }} />}
       {folderScanSudo.prompt}
+      {treeBrowseSudo.prompt}
       {modal?.kind === "sudoBrowse" && <SudoDialog operation="browse" address={modal.target.place.address}
         path={placePath(modal.target.place)} onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
         onConfirm={async (password) => {
@@ -4199,7 +4202,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
               else openTransfer("copy", item.place, items,
                 target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null :
-                  isLanGroupPlace(target.place) ? treeFolder(opposite(side)) ?? target.place : target.place, false, side);
+                  treeFolder(opposite(side)) ?? target.place, false, side);
             }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
             {isLanGroupPlace(item.place) && item.place.segments.length > 0 && entry && !state.search && !state.loading && !busy && <>
               {!item.entry.directory && !item.entry.link && <Button role="menuitem" onClick={() => {
@@ -4341,7 +4344,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         remote={isFileServer(modal.place) || isLanGroupPlace(modal.place) ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
-          if (isLanGroupPlace(modal.place)) await selectChangedLanItem(modal.side, modal.place, name);
+          if (isLanGroupPlace(modal.place) || isFileServer(modal.place)) await selectChangedRemoteItem(modal.side, modal.place, name);
           else await load(modal.side, modal.place, "refresh", name);
           refresh(opposite(modal.side));
         }} />}
@@ -4403,7 +4406,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
                 openDocument({ place: lan, name: operation.name }, true, { fromPane: modal.side });
               } else if (operation?.kind === "rename") {
                 await api.changeLanItem(lan, [operation.name], { kind: "rename", name: operation.new_name });
-                if (modal.side) await selectChangedLanItem(modal.side, lan, operation.new_name);
+                if (modal.side) await selectChangedRemoteItem(modal.side, lan, operation.new_name);
               }
             } finally {
               fileLocationsChanged();
@@ -4499,10 +4502,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             if (operation.kind === "create_file" && remote) {
               await api.createRemoteTextFile(remote, operation.name, operation.encoding ?? "utf8", sudoPassword);
               invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+              if (modal.side) await selectChangedRemoteItem(modal.side, remote, operation.name);
             } else if (operation.kind === "rename" && remote?.kind === "ssh") {
               await api.renameSsh(remote.id, [...remote.segments, operation.name], operation.new_name, sudoPassword);
               invalidateDirectories({ kind: remote.kind, id: remote.profileId });
-              if (modal.side) await load(modal.side, remote, "refresh", operation.new_name);
+              if (modal.side) await selectChangedRemoteItem(modal.side, remote, operation.new_name);
             } else if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);
             fileLocationsChanged();

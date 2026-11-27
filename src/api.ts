@@ -149,7 +149,7 @@ export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
 export type FileServerPlace = FtpPlace | SshPlace;
 export type LanGroupPlace = Extract<Place, { kind: "server" }> & { groupPeer: string };
-export type TreePlace = Extract<Place, { kind: "local" }> | LanGroupPlace;
+export type TreePlace = Extract<Place, { kind: "local" }> | LanGroupPlace | FileServerPlace;
 export type LanChange = { kind: "folder" } | { kind: "create_text"; encoding: TextEncoding } |
   { kind: "delete"; recursive: boolean } | { kind: "rename"; name: string };
 export function isLanGroupPlace(place: Place | null | undefined): place is LanGroupPlace {
@@ -158,6 +158,9 @@ export function isLanGroupPlace(place: Place | null | undefined): place is LanGr
 export type FileServer = Pick<FileServerPlace, "kind" | "id">;
 export function isFileServer(place: Place | null | undefined): place is FileServerPlace {
   return place?.kind === "ftp" || place?.kind === "ssh";
+}
+export function supportsFileTree(place: Place | null | undefined): place is TreePlace {
+  return place?.kind === "local" || isFileServer(place) || isLanGroupPlace(place);
 }
 export type ArchivePlace = Extract<Place, { kind: "archive" }>;
 export type ArchiveChange = { kind: "folder"; parent: string[]; name: string }
