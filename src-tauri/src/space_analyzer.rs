@@ -14,6 +14,8 @@ use tauri::{ipc::Channel, State};
 
 use crate::local;
 
+#[cfg(target_os = "macos")]
+mod macos_walk;
 #[cfg(windows)]
 mod mft;
 #[cfg(windows)]
@@ -247,6 +249,14 @@ fn walk(root: &Path, out: &mut Output<'_>) -> io::Result<()> {
         }
     }
     let boundary = platform::boundary(root, &fs::metadata(root)?);
+    #[cfg(target_os = "macos")]
+    if platform::is_apfs(root) {
+        match macos_walk::scan(root, &boundary, out) {
+            Err(macos_walk::ScanError::Fallback) => out.start("walk")?,
+            Err(macos_walk::ScanError::Io(error)) => return Err(error),
+            Ok(()) => return Ok(()),
+        }
+    }
     #[cfg(target_os = "linux")]
     let lookup = if platform::has_ext_mount_id(root, &boundary) {
         MetadataLookup::Statx
@@ -290,22 +300,29 @@ fn metadata_for_scan(
             }
         }
     }
-    let metadata = item.metadata()?;
-    if local::is_link(&metadata)
+    Ok(generic_child(path, &item.metadata()?, boundary))
+}
+
+fn generic_child(
+    path: &Path,
+    metadata: &fs::Metadata,
+    boundary: &platform::Boundary,
+) -> Option<Child> {
+    if local::is_link(metadata)
         || !(metadata.is_dir() || metadata.is_file())
-        || platform::boundary(path, &metadata) != *boundary
+        || platform::boundary(path, metadata) != *boundary
     {
-        return Ok(None);
+        return None;
     }
     if metadata.is_dir() {
-        return Ok(Some(Child::Directory));
+        return Some(Child::Directory);
     }
-    let (allocated, identity) = platform::usage(path, &metadata);
-    Ok(Some(Child::File {
+    let (allocated, identity) = platform::usage(path, metadata);
+    Some(Child::File {
         size: metadata.len(),
         allocated,
         identity,
-    }))
+    })
 }
 
 fn walk_entries(
@@ -366,6 +383,11 @@ fn walk_entries(
 }
 
 fn directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::ReadDir> {
+    checked_directory(path, boundary)?;
+    fs::read_dir(path)
+}
+
+fn checked_directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     if local::is_link(&metadata)
         || platform::boundary(path, &metadata) != *boundary
@@ -376,7 +398,7 @@ fn directory(path: &Path, boundary: &platform::Boundary) -> io::Result<fs::ReadD
             "The folder is outside the scan scope.",
         ));
     }
-    fs::read_dir(path)
+    Ok(metadata)
 }
 
 #[derive(Serialize)]
@@ -648,6 +670,14 @@ mod platform {
         #[cfg(not(target_os = "linux"))]
         let share = false;
         Ok((root.to_path_buf(), share))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn is_apfs(path: &Path) -> bool {
+        filesystem(path).is_ok_and(|info| {
+            // Darwin fills this fixed-size field with a NUL-terminated filesystem name.
+            unsafe { std::ffi::CStr::from_ptr(info.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
+        })
     }
 
     #[cfg(target_os = "macos")]
