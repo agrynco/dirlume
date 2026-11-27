@@ -403,7 +403,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <option value="inherit">{t("Inherit from destination")}</option>
               </select>
             </label>}
-            <label className={moving ? "setting transfer-conflict-policy" : "setting"}><span>{t("Existing files")}</span>
+            <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">{t(sameServerMove || sameArchiveMove || transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
                 <option value="skip">{t("Skip")}</option>
