@@ -2258,62 +2258,37 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openTransfer(kind: Transfer["kind"], source: Transfer["source"], items: Transfer["items"], target: Place | null,
     chooseOperation = false, side = active) {
     if (!items.length) return;
-    if (kind === "move" && source.kind === "archive" && (!source.writable || target && target.kind !== "local" && target.kind !== "archive")) {
-      setStatus({ text: source.writable ? "Choose a local folder or writable archive for the archive move." : "The archive is read-only.", error: true });
-      return;
-    }
-    if (kind === "move" && isFileServer(source) && target && target.kind !== "local" && !isFileServer(target)) {
-      setStatus({ text: "Choose a local, FTP, or SFTP destination for this move.", error: true });
+    if (kind === "move" && (source.kind === "archive" && !source.writable ||
+      source.kind === "server" && !isWritableServerPlace(source))) {
+      setStatus({ text: "This source is read-only.", error: true });
       return;
     }
     const remoteDestination = isFileServer(target) ? target : undefined;
     const serverDestination = isWritableServerPlace(target) ? target : undefined;
+    const archiveDestination = target?.kind === "archive" ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
     const fromKSwitcher = source.kind === "kswitcher";
-    const kswitcherBroker = !serverDestination && Boolean(kswitcherDestination || fromKSwitcher && source.capabilities?.write);
+    const kswitcherBroker = Boolean(
+      kswitcherDestination && source.kind === "local" ||
+      fromKSwitcher && (source.capabilities?.write || kind === "move" && source.capabilities?.delete) &&
+        (!target || target.kind === "local" || kswitcherDestination),
+    );
     if (target?.kind === "server" && !serverDestination) {
       setStatus({ text: isLanGroupPlace(target) ? "Choose a location inside a remote drive." : "This source is read-only.", error: true });
       return;
     }
-    const sameServerShare = serverDestination && isWritableServerPlace(source) && source.share === serverDestination.share;
-    if (serverDestination && items.some(({ place, entry }) => entry.link ||
-      kind === "move" && !sameServerShare && place.kind !== "local" && !isWritableServerPlace(place))) {
-      setStatus({ text: kind === "move" ? "Choose local or shared files and folders without links." :
-        "Choose files or folders without links to copy to the shared folder.", error: true });
-      return;
-    }
-    if (kind === "move" && isWritableServerPlace(source) && !sameServerShare &&
-      (!serverDestination && target && target.kind !== "local" || items.some(({ entry }) => entry.link))) {
-      setStatus({ text: "Choose shared files or folders without links and a local or writable share destination.", error: true });
-      return;
-    }
-    if (kswitcherDestination && source.kind !== "local" && !fromKSwitcher) {
-      setStatus({ text: "Choose a local or KSwitcher LAN source.", error: true });
-      return;
-    }
     if (kswitcherDestination && !kswitcherDestination.capabilities?.write ||
-      fromKSwitcher && kswitcherDestination && !source.capabilities?.write ||
-      kind === "move" && (kswitcherDestination && !kswitcherDestination.capabilities?.delete ||
-        fromKSwitcher && !source.capabilities?.delete)) {
+      kind === "move" && fromKSwitcher && !source.capabilities?.delete) {
       setStatus({ text: "Grant the required file permission in Trusted clients.", error: true });
       return;
     }
-    const archiveDestination = (source.kind === "local" || source.kind === "archive") && target?.kind === "archive" ? target : undefined;
-    if (archiveDestination && (!archiveDestination.canAdd || items.some(({ entry }) => entry.link))) {
-      setStatus({ text: archiveDestination.canAdd ? "Choose local files and folders without symbolic links." :
-        "Choose a writable ZIP or 7z archive.", error: true });
+    if (archiveDestination && !archiveDestination.canAdd) {
+      setStatus({ text: "Choose a writable ZIP or 7z archive.", error: true });
       return;
     }
-    if (kind === "move" && remoteDestination && items.some(({ place, entry }) => place.kind !== "local" && !isFileServer(place) || entry.link)) {
-      setStatus({ text: "Choose local, FTP, or SFTP items without symbolic links.", error: true });
-      return;
-    }
-    if (remoteDestination && source.kind !== "local" && !isFileServer(source)) {
-      setStatus({ text: "Choose a local, FTP, or SFTP source for this copy.", error: true });
-      return;
-    }
-    if ((source.kind !== "local" || kswitcherBroker) && items.some(({ entry }) => entry.link)) {
-      setStatus({ text: "Choose remote files or folders without links.", error: true });
+    if ((source.kind !== "local" || remoteDestination || serverDestination || archiveDestination || kswitcherBroker) &&
+      items.some(({ entry }) => entry.link)) {
+      setStatus({ text: "Choose files or folders without symbolic links.", error: true });
       return;
     }
     setModal({ kind: "transfer", side, transfer: {
@@ -2429,7 +2404,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isWritableServerPlace(source) &&
       !(source.kind === "archive" && source.writable) &&
-      (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
+      (source.kind !== "kswitcher" || !source.capabilities?.delete))) return;
     const otherPane = panes[targetSide];
     const target = otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
@@ -3496,7 +3471,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: "Move", Icon: ArrowLeftRight,
       disabled: Boolean(collectionPanes[opposite(active)]) ||
-        (!local && !fileServer && !writableServer && !archive?.writable && !(kswitcherWrite && kswitcherDelete)) ||
+        (!local && !fileServer && !writableServer && !archive?.writable && !kswitcherDelete) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !fileServer && !writableServer && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher || writableServer) && current.link) || busy },
@@ -4134,6 +4109,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             }
             const destination = modal.transfer.remoteDestination;
             if (destination) invalidateDirectories({ kind: destination.kind, id: destination.profileId });
+            if (modal.transfer.kind === "move") {
+              for (const { place } of modal.transfer.items) {
+                if (isFileServer(place)) invalidateDirectories({ kind: place.kind, id: place.profileId });
+              }
+            }
             if (destination?.kind === "ssh") {
               setSshUploadRefresh(destination.id);
               if (modal.transfer.kind === "move") refresh(modal.side);
@@ -4230,11 +4210,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
             {kswitcherItem?.path && !state.search && !state.loading && !busy && <>
+              {!item.entry.link && kswitcherItem.capabilities?.delete && !toCollection && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                transfer("move", side, entry);
+              }}>{t("Move")}</Button>}
               {!item.entry.link && kswitcherItem.capabilities?.write && <>
-                {kswitcherItem.capabilities.delete && !toCollection && <Button role="menuitem" onClick={() => {
-                  setFileMenu(null);
-                  transfer("move", side, entry);
-                }}>{t("Move")}</Button>}
                 <Button role="menuitem" onClick={() => {
                   setFileMenu(null);
                   setModal({ kind: "rename", side, path: kswitcherItem.path, name: item.entry.name, kswitcher: kswitcherItem });
@@ -4255,10 +4235,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               const place = item.place;
               if (place.kind === "ssh") setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, remote: place });
             }}>{t("Rename")}</Button>}
-            {item.place.kind === "ssh" && entry && !toCollection && !state.search && !state.loading && !busy &&
-              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
-            {item.place.kind === "ftp" && (target.place?.kind === "local" || isFileServer(target.place)) && !target.search && entry &&
-              !toCollection && !state.search && !state.loading && !busy &&
+            {isFileServer(item.place) && entry && !toCollection && !state.search && !state.loading && !busy &&
               <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
             {item.place.kind === "archive" && item.place.writable && entry && !state.search && !state.loading && !busy && (() => {
               const archive = item.place;

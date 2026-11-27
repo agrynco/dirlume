@@ -301,7 +301,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "source_retained") {
-          setError(t(transfer.kswitcherBroker || isWritableServerPlace(item.place) || isFileServer(item.place) || item.place.kind === "archive" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+          setError(t(transfer.kswitcherBroker || item.place.kind !== "local" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
             "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
           setBlocked(item);
           return;

@@ -32,10 +32,10 @@ pub(crate) use crate::{message, Result};
 
 #[path = "desktop_lan_transfer.rs"]
 mod lan_transfer;
-#[path = "desktop_netbox_transfer.rs"]
-mod netbox_transfer;
+#[path = "desktop_remote_transfer.rs"]
+mod remote_provider_transfer;
 #[cfg(test)]
-pub(crate) use netbox_transfer::verify_file_server_relays;
+pub(crate) use remote_provider_transfer::verify_file_server_relays;
 #[path = "desktop_ssh_transfer.rs"]
 mod ssh_transfer;
 
@@ -2236,11 +2236,19 @@ async fn transfer_item(
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
     if request.server_destination.is_none()
-        && (request.kswitcher_broker || request.kswitcher_destination.is_some())
+        && request.ftp_destination.is_none()
+        && request.ssh_destination.is_none()
+        && request.archive_destination.is_none()
+        && request.kswitcher_broker
+        && matches!(
+            &request.source,
+            TransferSource::Local { .. } | TransferSource::Kswitcher { .. }
+        )
     {
         return session
             .interrupt(transfer_kswitcher(&request, &session, &output))
-            .await;
+            .await
+            .map(|(outcome, _)| outcome);
     }
     let connection = match &request.source {
         TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
@@ -2280,6 +2288,7 @@ async fn transfer_item(
         ssh_destination.is_some(),
         server_destination.is_some(),
         archive_destination.is_some(),
+        request.kswitcher_destination.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -2329,6 +2338,58 @@ async fn transfer_item(
             progress(Path::new(name), 0, None).map_err(message)?;
 
             let mut ask = |conflict| session.ask(conflict, &output);
+            use remote_provider_transfer::{Endpoint, Relay};
+            let relay_source: Option<(Endpoint<'_>, &[String])> = match &request.source {
+                TransferSource::Ftp { segments, .. } => ftp_source
+                    .as_deref()
+                    .map(|item| (Endpoint::Ftp(item), segments.as_slice())),
+                TransferSource::Ssh { segments, .. } => ssh_source
+                    .as_ref()
+                    .map(|item| (Endpoint::Ssh(item), segments.as_slice())),
+                TransferSource::Server { segments, .. } => connection
+                    .as_deref()
+                    .map(|item| (Endpoint::Server(item), segments.as_slice())),
+                TransferSource::Archive { segments, .. } => archive
+                    .as_deref()
+                    .map(|item| (Endpoint::Archive(item), segments.as_slice())),
+                TransferSource::Kswitcher { peer, name, .. } => {
+                    Some((Endpoint::Kswitcher(peer), std::slice::from_ref(name)))
+                }
+                _ => None,
+            };
+            let relay_destination = ftp_destination
+                .as_deref()
+                .map(Endpoint::Ftp)
+                .or_else(|| ssh_destination.as_ref().map(Endpoint::Ssh))
+                .or_else(|| server_destination.as_deref().map(Endpoint::Server))
+                .or_else(|| archive_destination.as_deref().map(Endpoint::Archive))
+                .or_else(|| {
+                    request
+                        .kswitcher_destination
+                        .as_deref()
+                        .map(Endpoint::Kswitcher)
+                });
+            if let (Some((source, segments)), Some(destination)) = (relay_source, relay_destination)
+            {
+                if !matches!(
+                    (&source, &destination),
+                    (Endpoint::Server(_), Endpoint::Server(_))
+                        | (Endpoint::Archive(_), Endpoint::Archive(_))
+                ) {
+                    return Relay {
+                        request: &request,
+                        transfer: &session,
+                        output: &output,
+                    }
+                    .run(
+                        source,
+                        segments,
+                        destination,
+                        &mut progress,
+                        &mut ask,
+                    );
+                }
+            }
             if let Some(destination) = archive_destination {
                 if let TransferSource::Archive { segments, .. } = &request.source {
                     let archive = archive.as_ref().ok_or("Open the source archive first.")?;
@@ -2464,13 +2525,6 @@ async fn transfer_item(
                     staged = staging
                         .path()
                         .join(local::name_component(name).map_err(message)?);
-                    let options = local_transfer::Options {
-                        moving: false,
-                        policy: local_transfer::Policy::Ask,
-                        ask_read_only: true,
-                        copy: local::CopyOptions::default(),
-                    };
-                    let mut no_commit = |_: &Path, _: &Path| {};
                     match &request.source {
                         TransferSource::Server {
                             segments,
@@ -2521,51 +2575,6 @@ async fn transfer_item(
                                 finish_downloaded_file(&file, *modified).map_err(message)?;
                             }
                         }
-                        TransferSource::Ftp { segments, .. } => {
-                            let mut source = ftp_source
-                                .ok_or("Connect to the FTP server first.")?
-                                .open_with_cancel(Some(session.cancelled.clone()))?;
-                            remote_transfer::download(
-                                &mut source,
-                                segments,
-                                &staged,
-                                &options,
-                                &mut progress,
-                                &mut ask,
-                                &mut no_commit,
-                            )?;
-                        }
-                        TransferSource::Ssh { segments, .. } => {
-                            let connection = ssh_source
-                                .as_ref()
-                                .ok_or("Connect to the SSH server first.")?;
-                            let mut source = ssh_transfer::SshTransfer::open(
-                                connection, true, &session, &output,
-                            )?;
-                            remote_transfer::download(
-                                &mut source,
-                                segments,
-                                &staged,
-                                &options,
-                                &mut progress,
-                                &mut ask,
-                                &mut no_commit,
-                            )?;
-                        }
-                        TransferSource::Archive { segments, .. } => {
-                            archive
-                                .ok_or("Open the archive first.")?
-                                .lock()
-                                .map_err(message)?
-                                .copy_to(
-                                    segments,
-                                    &staged,
-                                    &options,
-                                    &mut progress,
-                                    &mut ask,
-                                    &mut no_commit,
-                                )?;
-                        }
                         TransferSource::Kswitcher {
                             peer, path, folder, ..
                         } => {
@@ -2589,9 +2598,7 @@ async fn transfer_item(
                                 ))?;
                             }
                         }
-                        TransferSource::Local { .. } => {
-                            unreachable!("local source is resolved before staging")
-                        }
+                        _ => return Err("Choose a supported transfer source.".to_owned()),
                     }
                     &staged
                 };
@@ -2645,52 +2652,9 @@ async fn transfer_item(
                 ) {
                     return Err(format!("Choose a supported {protocol} copy option."));
                 }
-                if source.is_none() {
-                    use netbox_transfer::{Endpoint, Relay};
-                    let source = match &request.source {
-                        TransferSource::Ftp { segments, .. } => (
-                            Endpoint::Ftp(
-                                ftp_source
-                                    .as_deref()
-                                    .ok_or("Connect to the FTP server first.")?,
-                            ),
-                            segments,
-                        ),
-                        TransferSource::Ssh { segments, .. } => (
-                            Endpoint::Ssh(
-                                ssh_source
-                                    .as_ref()
-                                    .ok_or("Connect to the SSH server first.")?,
-                            ),
-                            segments,
-                        ),
-                        _ => {
-                            return Err(format!(
-                                "Choose a local, FTP, or SFTP source for the {protocol} upload."
-                            ))
-                        }
-                    };
-                    let destination = match (ftp_destination.as_deref(), ssh_destination.as_ref()) {
-                        (Some(connection), None) => Endpoint::Ftp(connection),
-                        (None, Some(connection)) => Endpoint::Ssh(connection),
-                        _ => return Err("Choose one destination connection.".to_owned()),
-                    };
-                    return Relay {
-                        request: &request,
-                        transfer: &session,
-                        output: &output,
-                    }
-                    .run(
-                        source.0,
-                        source.1,
-                        destination,
-                        &mut progress,
-                        &mut ask,
-                    );
-                }
-                let source = source
-                    .as_deref()
-                    .ok_or_else(|| format!("Choose a local source for the {protocol} upload."))?;
+                let source = source.as_deref().ok_or_else(|| {
+                    format!("Choose a supported source for the {protocol} upload.")
+                })?;
                 if let Some(connection) = ssh_destination {
                     let mut remote =
                         ssh_transfer::SshTransfer::open(&connection, false, &session, &output)?;
@@ -3023,12 +2987,13 @@ async fn transfer_kswitcher(
     request: &TransferRequest,
     session: &Arc<TransferSession>,
     output: &Channel<TransferEvent>,
-) -> Result<TransferOutcome> {
+) -> Result<(TransferOutcome, PathBuf)> {
     use crate::kswitcher_lan::Endpoint;
     use local_transfer::Policy;
     if request.ftp_destination.is_some()
         || request.ssh_destination.is_some()
         || request.server_destination.is_some()
+        || request.archive_destination.is_some()
     {
         return Err("Choose a local or KSwitcher LAN destination.".into());
     }
@@ -3131,16 +3096,17 @@ async fn transfer_kswitcher(
         },
     )
     .await?;
-    match result {
-        crate::kswitcher_lan::TransferResult::Finished(copied) => Ok(transfer_outcome(copied)),
+    let outcome = match result {
+        crate::kswitcher_lan::TransferResult::Finished(copied) => transfer_outcome(copied),
         crate::kswitcher_lan::TransferResult::SourceCleanupFailed(error) => {
-            Ok(TransferOutcome::SourceRetained {
+            TransferOutcome::SourceRetained {
                 destination: target_path.to_string_lossy().into_owned(),
                 source: source_path.to_string_lossy().into_owned(),
                 error,
-            })
+            }
         }
-    }
+    };
+    Ok((outcome, target_path))
 }
 
 #[derive(Default)]

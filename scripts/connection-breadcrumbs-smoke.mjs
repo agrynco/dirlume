@@ -280,6 +280,25 @@ async function checkKSwitcherOperations(page) {
     peer: "fixture-peer", path: "D:\\notes.txt", text: "Remote notes\nUpdated remotely",
     encoding: "utf8", revision: "123",
   });
+  await button(editor, "Close document").click();
+  await page.evaluate(() => { window.connectionFixture.directorySettings = { startingFolder: "" }; });
+  await enterFromCatalog(page, "right", "NetBox", "Saved FTP");
+  await row(page, "right", folders[0]).click();
+  await list(page, "right").press("F5");
+  await button(copy, "Copy").click();
+  await copy.waitFor({ state: "hidden" });
+  await row(page, "left", "subfolder").click();
+  await list(page, "left").press("F6");
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  const [toPaired, toFtp] = await page.evaluate(() => window.connectionFixture.transfers.slice(2));
+  assert.equal(toPaired.source.kind, "ftp");
+  assert.equal(toPaired.kswitcherDestination, "fixture-peer");
+  assert.equal(toPaired.kswitcherBroker, false);
+  assert.equal(toFtp.source.kind, "kswitcher");
+  assert.equal(toFtp.source.path, "C:\\subfolder");
+  assert.equal(toFtp.ftpDestination, 4);
+  assert.equal(toFtp.moving, true);
 }
 
 async function checkDirectoryCache(page) {
@@ -737,6 +756,25 @@ async function checkWritableServer(page) {
   assert.deepEqual(state.edits[0].segments, [folders[0], "new.txt"]);
   assert.equal(state.transfers[0].serverDestination, 6);
   assert.equal(state.transfers[0].destination, "/" + folders[0]);
+  await page.evaluate(() => { window.connectionFixture.directorySettings = { startingFolder: "" }; });
+  await enterFromCatalog(page, "right", "NetBox", "Saved FTP");
+  await row(page, "right", folders[0]).waitFor();
+  await row(page, side, folders[0]).click();
+  await list(page, side).press("F6");
+  const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  await row(page, "right", folders[0]).click();
+  await list(page, "right").press("F5");
+  await button(copy, "Copy").click();
+  await copy.waitFor({ state: "hidden" });
+  const [serverToFtp, ftpToServer] = await page.evaluate(() => window.connectionFixture.transfers.slice(1));
+  assert.deepEqual(serverToFtp.source, {
+    kind: "server", connection: 6, segments: [folders[0]], folder: true, writable_server: true,
+  });
+  assert.equal(serverToFtp.ftpDestination, 4);
+  assert.equal(ftpToServer.source.kind, "ftp");
+  assert.equal(ftpToServer.serverDestination, 6);
 }
 
 async function checkLan(page, side) {
@@ -844,7 +882,7 @@ try {
   console.log("Verified parent-row measures through KSwitcher and archived uncompressed file sizes.");
   console.log("Verified read-only Server and archive Trees, nested archive changes, and moves between a local folder or archive folder.");
   console.log("Verified copy and move routing between local, FTP, and SFTP panes.");
-  console.log("Verified a writable Dirlume Server share can create at the root and edit, rename, delete, and receive items in a nested Tree folder.");
+  console.log("Verified Dirlume Server changes in Tree and copy and move routing between Dirlume Server and FTP panes.");
 } finally {
   await browser.close();
 }

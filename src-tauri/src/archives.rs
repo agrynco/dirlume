@@ -301,7 +301,7 @@ impl Write for CacheWriter {
 }
 
 impl Archive {
-    fn open(engine: Engine, path: PathBuf, password: Option<String>) -> Result<Self> {
+    pub(crate) fn open(engine: Engine, path: PathBuf, password: Option<String>) -> Result<Self> {
         let metadata = fs::symlink_metadata(&path).map_err(message)?;
         if !metadata.is_file() || local::is_link(&metadata) {
             return Err("Choose a regular archive file.".to_owned());
