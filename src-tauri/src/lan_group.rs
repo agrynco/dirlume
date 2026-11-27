@@ -546,8 +546,59 @@ mod tests {
                         .unwrap();
                     result.unwrap();
                     assert!(host.join("Renamed").join("note.txt").is_file());
+                    std::fs::write(occupied.join("note.txt"), b"Existing").unwrap();
+                    let move_item = |name: &str| {
+                        request(
+                            &["Renamed", "note.txt"],
+                            LanChange::Move {
+                                destination: vec![drive.into(), "Occupied".into(), name.into()],
+                            },
+                        )
+                    };
+                    for (name, accepted) in [("note.txt", false), ("moved.txt", true)] {
+                        let result: Result<()> = post("v1/lan/change")
+                            .json(&move_item(name))
+                            .send()
+                            .await
+                            .unwrap()
+                            .json()
+                            .await
+                            .unwrap();
+                        assert_eq!(result.is_ok(), accepted);
+                        assert_ne!(host.join("Renamed").join("note.txt").exists(), accepted);
+                    }
+                    assert_eq!(
+                        std::fs::read(occupied.join("note.txt")).unwrap(),
+                        b"Existing"
+                    );
+                    assert_eq!(
+                        std::fs::read(occupied.join("moved.txt")).unwrap(),
+                        new_contents
+                    );
+                    std::fs::write(host.join("Renamed").join("note.txt"), &new_contents).unwrap();
+                    let folder_move = request(
+                        &["Renamed"],
+                        LanChange::Move {
+                            destination: vec![drive.into(), "Occupied".into(), "Relocated".into()],
+                        },
+                    );
+                    let result: Result<()> = post("v1/lan/change")
+                        .json(&folder_move)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    result.unwrap();
+                    assert!(!host.join("Renamed").exists());
+                    assert_eq!(
+                        std::fs::read(occupied.join("Relocated/note.txt")).unwrap(),
+                        new_contents
+                    );
                     for recursive in [false, true] {
-                        let deletion = request(&["Renamed"], LanChange::Delete { recursive });
+                        let deletion =
+                            request(&["Occupied", "Relocated"], LanChange::Delete { recursive });
                         let result: Result<()> = post("v1/lan/change")
                             .json(&deletion)
                             .send()
@@ -558,7 +609,7 @@ mod tests {
                             .unwrap();
                         assert_eq!(result.is_ok(), recursive);
                     }
-                    assert!(!host.join("Renamed").exists());
+                    assert!(!occupied.join("Relocated").exists());
                     use crate::protocol::{LanUpload, LanUploadReply, LAN_UPLOAD_CHUNK};
                     let upload =
                         |operation: &LanUpload| post("v1/lan/upload").json(operation).send();
@@ -619,7 +670,7 @@ mod tests {
                         std::fs::read(host.join("copied.bin")).unwrap(),
                         b"Edited outside Dirlume"
                     );
-                    assert_eq!(std::fs::read_dir(host).unwrap().count(), 2);
+                    assert_eq!(std::fs::read_dir(&host).unwrap().count(), 2);
                     let path = vec![drive.to_owned(), "copied.bin".to_owned()];
                     let stat: Result<LanUploadReply> = upload(&LanUpload::Stat {
                         segments: path.clone(),

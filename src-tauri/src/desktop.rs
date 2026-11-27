@@ -1665,10 +1665,46 @@ async fn transfer_item(
 
             let mut ask = |conflict| session.ask(conflict, &output);
             if let Some(destination) = lan_destination {
-                if request.moving {
-                    let source = source
-                        .as_deref()
-                        .ok_or("Choose a regular local file to move to a Dirlume LAN folder.")?;
+                if let TransferSource::Server {
+                    lan_group: true,
+                    segments,
+                    ..
+                } = &request.source
+                {
+                    if request.moving
+                        && connection.as_ref().is_some_and(|server| {
+                            server.invitation.certificate == destination.invitation.certificate
+                        })
+                    {
+                        let mut client = lan_transfer::LanTransfer {
+                            connection: &destination,
+                            transfer: &session,
+                        };
+                        let target = remote_transfer::upload_destination(
+                            &mut client,
+                            &request.destination,
+                            name,
+                            request.multiple,
+                        )?;
+                        if &target == segments {
+                            return Ok(TransferOutcome::Skipped);
+                        }
+                        use remote_transfer::Session;
+                        if request.policy == local_transfer::Policy::Skip
+                            && client.stat(&target)?.is_some()
+                        {
+                            return Ok(TransferOutcome::Skipped);
+                        }
+                        client.change(
+                            segments,
+                            crate::protocol::LanChange::Move {
+                                destination: target,
+                            },
+                        )?;
+                        return Ok(TransferOutcome::Completed);
+                    }
+                }
+                if let Some(source) = source.as_deref().filter(|_| request.moving) {
                     return move_uploaded_file(
                         &mut lan_transfer::LanTransfer {
                             connection: &destination,
@@ -1682,6 +1718,28 @@ async fn transfer_item(
                         &mut ask,
                     );
                 }
+                let remote_move = if request.moving {
+                    let TransferSource::Server {
+                        lan_group: true,
+                        folder: false,
+                        segments,
+                        ..
+                    } = &request.source
+                    else {
+                        return Err(
+                            "Choose regular files to move between Dirlume LAN computers."
+                                .to_owned(),
+                        );
+                    };
+                    let mut client = lan_transfer::LanTransfer {
+                        connection: connection.as_ref().ok_or("Connect to Dirlume LAN first.")?,
+                        transfer: &session,
+                    };
+                    let expected = client.file_snapshot(segments)?;
+                    Some((client, segments, expected))
+                } else {
+                    None
+                };
                 let staging;
                 let staged;
                 let source = if let Some(path) = source.as_deref() {
@@ -1700,7 +1758,10 @@ async fn transfer_item(
                     let mut no_commit = |_: &Path, _: &Path| {};
                     match &request.source {
                         TransferSource::Server {
-                            segments, folder, ..
+                            segments,
+                            folder,
+                            modified,
+                            ..
                         } => {
                             let server = connection
                                 .as_ref()
@@ -1742,6 +1803,7 @@ async fn transfer_item(
                                     &session,
                                     &mut progress,
                                 )?;
+                                finish_downloaded_file(&file, *modified).map_err(message)?;
                             }
                         }
                         TransferSource::Ftp { segments, .. } => {
@@ -1815,11 +1877,42 @@ async fn transfer_item(
                     }
                     &staged
                 };
+                let mut client = lan_transfer::LanTransfer {
+                    connection: &destination,
+                    transfer: &session,
+                };
+                if let Some((remote, segments, expected)) = remote_move {
+                    let digest = crate::protocol::lan_file_digest(
+                        fs::File::open(source).map_err(message)?,
+                        || session.ensure_running(),
+                    )
+                    .map_err(message)?;
+                    let target = remote_transfer::upload_destination(
+                        &mut client,
+                        &request.destination,
+                        name,
+                        request.multiple,
+                    )?;
+                    if !remote_transfer::upload(
+                        &mut client,
+                        source,
+                        &target,
+                        request.policy,
+                        &mut progress,
+                        &mut ask,
+                        &mut |_, _| {},
+                    )? {
+                        return Ok(TransferOutcome::Skipped);
+                    }
+                    return Ok(remote.finish_move(
+                        segments,
+                        expected,
+                        digest,
+                        format!("/{}", target.join("/")),
+                    ));
+                }
                 return upload_remote(
-                    lan_transfer::LanTransfer {
-                        connection: &destination,
-                        transfer: &session,
-                    },
+                    client,
                     &request,
                     name,
                     source,
@@ -2034,23 +2127,12 @@ async fn transfer_item(
                     )?;
                     if matches!(outcome, TransferOutcome::Completed) {
                         if let (Some(expected), Some(digest)) = (expected, digest) {
-                            if let Err(error) =
-                                session.ensure_running().map_err(message).and_then(|()| {
-                                    client.change(
-                                        &segments,
-                                        crate::protocol::LanChange::DeleteCompared {
-                                            expected,
-                                            digest,
-                                        },
-                                    )
-                                })
-                            {
-                                return Ok(TransferOutcome::SourceRetained {
-                                    source: format!("/{}", segments.join("/")),
-                                    destination: display(&target),
-                                    error,
-                                });
-                            }
+                            return Ok(client.finish_move(
+                                &segments,
+                                expected,
+                                digest,
+                                display(&target),
+                            ));
                         }
                     }
                     Ok(outcome)

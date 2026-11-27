@@ -16,6 +16,7 @@ pub(crate) enum LanChange {
     Delete { recursive: bool },
     DeleteCompared { expected: LanStat, digest: String },
     Rename { name: String },
+    Move { destination: Vec<String> },
 }
 
 #[cfg(feature = "desktop")]
@@ -70,7 +71,7 @@ pub(crate) enum LanUploadReply {
 }
 
 #[cfg(feature = "desktop")]
-#[derive(Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
 pub(crate) struct LanStat {
     pub name: String,
     pub directory: bool,

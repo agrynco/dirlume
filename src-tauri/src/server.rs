@@ -605,7 +605,11 @@ fn apply_lan_change(
         LanChange::CreateText { encoding } => lan_create_text(&directory, &path, encoding),
         LanChange::Rename { name } => {
             let target = local::name_component(&name).map_err(crate::message)?;
-            rename_lan_exclusive(&directory, &path, target)
+            rename_lan_exclusive(&directory, &path, &directory, target)
+        }
+        LanChange::Move { destination } => {
+            let (parent, target) = writable_lan_item(share, destination)?;
+            rename_lan_exclusive(&directory, &path, &parent, &target)
         }
         LanChange::DeleteCompared { expected, digest } => {
             remove_compared_lan_file(&directory, &path, &expected, &digest)
@@ -652,7 +656,12 @@ fn remove_compared_lan_file(
 }
 
 #[cfg(all(feature = "desktop", windows))]
-fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Result<()> {
+fn rename_lan_exclusive(
+    directory: &Dir,
+    source: &Path,
+    target_directory: &Dir,
+    target: &Path,
+) -> io::Result<()> {
     use cap_std::fs::OpenOptionsExt;
     use std::{
         mem::{align_of, offset_of, size_of},
@@ -686,7 +695,7 @@ fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Re
     let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
     let mut completion = IO_STATUS_BLOCK::default();
     let result = unsafe {
-        (*info).RootDirectory = directory.as_raw_handle();
+        (*info).RootDirectory = target_directory.as_raw_handle();
         (*info).FileNameLength = name_bytes as u32;
         let destination = buffer.as_mut_ptr().cast::<u8>().add(offset).cast::<u16>();
         std::ptr::copy_nonoverlapping(name.as_ptr(), destination, name.len());
@@ -708,7 +717,12 @@ fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Re
 }
 
 #[cfg(all(feature = "desktop", unix))]
-fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Result<()> {
+fn rename_lan_exclusive(
+    directory: &Dir,
+    source: &Path,
+    target_directory: &Dir,
+    target: &Path,
+) -> io::Result<()> {
     use std::{
         ffi::CString,
         os::{fd::AsRawFd, unix::ffi::OsStrExt},
@@ -721,7 +735,7 @@ fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Re
         libc::renameat2(
             dir,
             source.as_ptr(),
-            dir,
+            target_directory.as_raw_fd(),
             target.as_ptr(),
             libc::RENAME_NOREPLACE,
         )
@@ -731,7 +745,7 @@ fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Re
         libc::renameatx_np(
             dir,
             source.as_ptr(),
-            dir,
+            target_directory.as_raw_fd(),
             target.as_ptr(),
             libc::RENAME_EXCL,
         )

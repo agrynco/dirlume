@@ -252,7 +252,12 @@ impl UploadStage {
             self.directory
                 .rename(&self.temporary, &self.directory, &self.target)
         } else {
-            rename_lan_exclusive(&self.directory, &self.temporary, &self.target)
+            rename_lan_exclusive(
+                &self.directory,
+                &self.temporary,
+                &self.directory,
+                &self.target,
+            )
         }
     }
 }

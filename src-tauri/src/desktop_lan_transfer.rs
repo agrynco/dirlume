@@ -7,7 +7,7 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use uuid::Uuid;
 
-use super::{collect_response, Connection, TransferSession, VerifiedUpload};
+use super::{collect_response, Connection, TransferOutcome, TransferSession, VerifiedUpload};
 use crate::{
     message,
     protocol::{LanChange, LanChangeRequest, LanStat, LanUpload, LanUploadReply, LAN_UPLOAD_CHUNK},
@@ -45,6 +45,28 @@ impl LanTransfer<'_> {
         self.stat(segments)?
             .filter(|entry| entry.file)
             .ok_or_else(|| "Choose a regular Dirlume LAN file to move.".to_owned())
+    }
+
+    pub(super) fn finish_move(
+        &self,
+        segments: &[String],
+        expected: LanStat,
+        digest: String,
+        destination: String,
+    ) -> TransferOutcome {
+        match self
+            .transfer
+            .ensure_running()
+            .map_err(message)
+            .and_then(|()| self.change(segments, LanChange::DeleteCompared { expected, digest }))
+        {
+            Ok(()) => TransferOutcome::Completed,
+            Err(error) => TransferOutcome::SourceRetained {
+                source: format!("/{}", segments.join("/")),
+                destination,
+                error,
+            },
+        }
     }
 
     fn upload_action(&self, request: LanUpload) -> Result<LanUploadReply> {

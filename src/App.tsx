@@ -2250,13 +2250,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Choose a location inside a remote drive.", error: true });
       return;
     }
-    if (lanDestination && items.some(({ place, entry }) => entry.link || kind === "move" && (place.kind !== "local" || entry.directory))) {
-      setStatus({ text: kind === "move" ? "Choose regular local files to move to a Dirlume LAN folder." :
+    const sameLanComputer = lanDestination && isLanGroupPlace(source) && source.groupPeer === lanDestination.groupPeer;
+    if (lanDestination && items.some(({ place, entry }) => entry.link ||
+      kind === "move" && !sameLanComputer && (entry.directory || place.kind !== "local" && !isLanGroupPlace(place)))) {
+      setStatus({ text: kind === "move" ? "Choose regular files for moves between computers." :
         "Choose files or folders without links to copy to Dirlume LAN.", error: true });
       return;
     }
-    if (kind === "move" && isLanGroupPlace(source) &&
-      (target && target.kind !== "local" || items.some(({ entry }) => entry.directory || entry.link))) {
+    if (kind === "move" && isLanGroupPlace(source) && !sameLanComputer &&
+      (!lanDestination && target && target.kind !== "local" || items.some(({ entry }) => entry.directory || entry.link))) {
       setStatus({ text: "Choose regular Dirlume LAN files and a local destination.", error: true });
       return;
     }
@@ -4185,13 +4187,18 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               const items = transferItems(side, entry!, state.marked.includes(entry!.name));
               if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
               else openTransfer("copy", item.place, items,
-                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null : target.place, false, side);
+                target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null :
+                  isLanGroupPlace(target.place) ? treeFolder(opposite(side)) ?? target.place : target.place, false, side);
             }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
             {isLanGroupPlace(item.place) && item.place.segments.length > 0 && entry && !state.search && !state.loading && !busy && <>
               {!item.entry.directory && !item.entry.link && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
                 openDocument({ place: item.place, name: item.entry.name }, true, { fromPane: side });
               }}>{t("Edit")}</Button>}
+              {!toCollection && <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                transfer("move", side, entry);
+              }}>{t("Move")}</Button>}
               {!item.entry.link && <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
                 const place = item.place;

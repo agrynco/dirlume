@@ -1546,6 +1546,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Choose regular local files to move to an SSH/SFTP folder.": ["Виберіть звичайні локальні файли для перенесення до папки SSH/SFTP.", "Выберите обычные локальные файлы для перемещения в папку SSH/SFTP."],
   "Choose regular local files to move to a Dirlume LAN folder.": ["Виберіть звичайні локальні файли для перенесення до папки Dirlume LAN.", "Выберите обычные локальные файлы для перемещения в папку Dirlume LAN."],
   "Choose regular Dirlume LAN files and a local destination.": ["Виберіть звичайні файли Dirlume LAN і локальну папку призначення.", "Выберите обычные файлы Dirlume LAN и локальную папку назначения."],
+  "Choose regular files for moves between computers.": ["Виберіть звичайні файли для переміщення між комп’ютерами.", "Выберите обычные файлы для перемещения между компьютерами."],
   "Choose files or folders without links to copy to Dirlume LAN.": ["Виберіть файли або папки без посилань для копіювання до Dirlume LAN.", "Выберите файлы или папки без ссылок для копирования в Dirlume LAN."],
   "Choose a local destination. FTP does not support moving local files.": ["Виберіть локальну папку призначення. FTP не підтримує перенесення локальних файлів.", "Выберите локальную папку назначения. FTP не поддерживает перемещение локальных файлов."],
   "Uploaded to {0}. Could not remove local source {1}. {2}": ["Завантажено до {0}. Не вдалося видалити локальний файл {1}. {2}", "Загружено в {0}. Не удалось удалить локальный файл {1}. {2}"],

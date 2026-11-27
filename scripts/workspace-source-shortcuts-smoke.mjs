@@ -353,13 +353,28 @@ try {
       id: 10, segments: ["Files", "nested", "note.txt"], change: { kind: "delete", recursive: false },
     });
     await button(pane("left"), "List").click();
+    await files("right").press("Alt+F2");
+    await button(sources("right"), "Downloads").click();
+    await waitForPath("right", downloads);
     await files("right").getByRole("option", { name: /^note\.txt/ }).click();
     await files("right").press("F5");
     const uploadDialog = page.getByRole("dialog", { name: "Copy", exact: true });
-    assert.equal(await uploadDialog.getByRole("textbox", { name: "Destination", exact: true }).inputValue(), "/Files");
+    assert.equal(await uploadDialog.getByRole("textbox", { name: "Destination", exact: true }).inputValue(), "/Files/nested");
     await button(uploadDialog, "Copy").click();
     await uploadDialog.waitFor({ state: "hidden" });
     assert.equal(await page.evaluate(() => window.lastTransfer.lanDestination), 10);
+    await files("left").getByRole("option", { name: /^note\.txt/ }).click();
+    await files("left").press("F6");
+    const lanMove = page.getByRole("dialog", { name: "Rename or move", exact: true });
+    await button(lanMove, "Move").click();
+    await lanMove.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => ({
+      moving: window.lastTransfer.moving,
+      source: window.lastTransfer.source,
+    })), {
+      moving: true,
+      source: { kind: "server", connection: 10, segments: ["Files", "nested", "note.txt"], folder: false, lan_group: true },
+    });
     await button(page, "Options").click();
     await button(options, "Computers").click();
     await button(group, "Leave group").click();

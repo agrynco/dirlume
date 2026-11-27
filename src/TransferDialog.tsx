@@ -105,6 +105,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const archiveTarget = transfer.archiveDestination;
   const lanTarget = transfer.lanDestination;
   const lanMove = moving && (lanTarget || transfer.items.some(({ place }) => isLanGroupPlace(place)));
+  const sameLanMove = moving && lanTarget && isLanGroupPlace(transfer.source) && transfer.source.groupPeer === lanTarget.groupPeer;
   const kswitcherTarget = transfer.kswitcherDestination;
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
     (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
@@ -275,7 +276,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "source_retained") {
-          setError(t(transfer.kswitcherBroker ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) ? "Copied to {0}. Could not finish removing source {1}. {2}" :
             "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
           setBlocked(item);
           return;
@@ -376,9 +377,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
             </label>}
             <label className="setting"><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
-                <option value="ask">{t(transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
+                <option value="ask">{t(sameLanMove || transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
                 <option value="skip">{t("Skip")}</option>
-                {replaceable && <option value="overwrite">{t("Overwrite all")}</option>}
+                {replaceable && !sameLanMove && <option value="overwrite">{t("Overwrite all")}</option>}
                 {replaceable && localTarget && !transfer.kswitcherBroker && !lanMove && <>
                   <option value="rename">{t("Rename incoming item")}</option>
                   <option value="newer">{t("Overwrite older files only")}</option>
