@@ -1,54 +1,160 @@
-name: Install signed desktop updates
+name: Benchmark local scanner for issue 646
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: dirlume-updater-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  upgrade:
-    name: Verify installed update (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+  benchmark:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-2025, ubuntu-22.04, macos-15, macos-15-intel]
+        runner: [macos-15, ubuntu-22.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Install Linux desktop prerequisites
-        if: runner.os == 'Linux'
+      - name: Compare the scanner backends
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 patchelf \
-            xvfb openbox x11-utils dbus-x11
-      - name: Prepare Windows WebView2 runtime
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/ensure-webview.ps1
-      - name: Install pinned Rust toolchain
-        run: rustup show active-toolchain
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: updater-cargo-${{ matrix.runner }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
-      - run: npm ci
-      - name: Test install, signature rejection, saved preferences, and release highlights
-        env:
-          DIRLUME_TEST_DEBIAN_UPGRADE: ${{ runner.os == 'Linux' && '1' || '0' }}
-        run: node scripts/updater-smoke.mjs
+          set -euo pipefail
+          mkdir -p /tmp/scanbench/src
+          cp src-tauri/src/space_analyzer/macos_walk.rs /tmp/scanbench/src/
+          cat >/tmp/scanbench/Cargo.toml <<'EOF'
+          [package]
+          name = "dirlume-ext4-scan-check"
+          version = "0.0.0"
+          edition = "2021"
+          [dependencies]
+          libc = "0.2"
+          serde = { version = "1", features = ["derive"] }
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          code = Path('src-tauri/src/space_analyzer.rs').read_text()
+          fragment = code[:code.index('use tauri')].replace('HashMap, ', '').replace('    Arc, Mutex,\n', '')
+          fragment += code[code.index('#[cfg(target_os = "macos")]\nmod macos_walk;'):code.index('#[derive(Default)]')]
+          fragment += code[code.index('#[derive(Serialize)]'):code.index('#[tauri::command]')]
+          fragment += code[code.index('fn walk(root:'):code.index('#[derive(Serialize)]\npub struct Mount')]
+          fragment += code[code.index('#[cfg(unix)]\nmod platform'):code.index('#[cfg(test)]\nmod tests')]
+          Path('/tmp/scanbench/src/main.rs').write_text(fragment)
+          PY
+          cat >>/tmp/scanbench/src/main.rs <<'EOF'
+          
+          mod local {
+              use std::{io, fs, path::Path};
+              pub fn is_link(metadata: &fs::Metadata) -> bool { metadata.is_symlink() }
+              pub fn name_component(name: &str) -> io::Result<&Path> {
+                  let path = Path::new(name);
+                  if path.file_name() == Some(name.as_ref()) { Ok(path) }
+                  else { Err(io::ErrorKind::InvalidData.into()) }
+              }
+          }
+          
+          fn test(root: &Path, fast: bool) -> (f64, f64, (usize, u64, u64)) {
+              let start = Instant::now();
+              let stop = AtomicBool::new(false);
+              let mut first = None;
+              let mut counts = (0, 0, 0);
+              let mut send = |event| {
+                  if let ScanEvent::Batch { changes } = event {
+                      for change in changes {
+                          match change {
+                              Change::Entry { size, allocated, .. } => {
+                                  first.get_or_insert_with(|| start.elapsed().as_secs_f64() * 1000.0);
+                                  counts.0 += 1;
+                                  counts.1 += size.unwrap_or(0);
+                                  counts.2 += allocated.unwrap_or(0);
+                              }
+                              Change::Closed { partial, .. } => assert!(!partial),
+                          }
+                      }
+                  }
+                  Ok(())
+              };
+              let mut output = Output { send: &mut send, stop: &stop, changes: Vec::new(), identities: HashSet::new(), next_id: 1, last: Instant::now() };
+              let boundary = platform::boundary(root, &fs::metadata(root).unwrap());
+              output.start("walk").unwrap();
+              #[cfg(target_os = "macos")]
+              {
+                  assert!(platform::is_apfs(root));
+                  if fast { macos_walk::scan(root, &boundary, &mut output).unwrap(); }
+                  else { walk_entries(root, &mut output, &boundary, MetadataLookup::Generic).unwrap(); }
+              }
+              #[cfg(target_os = "linux")]
+              {
+                  assert!(platform::has_ext_mount_id(root, &boundary));
+                  let lookup = if fast { MetadataLookup::Statx } else { MetadataLookup::Generic };
+                  walk_entries(root, &mut output, &boundary, lookup).unwrap();
+              }
+              output.flush().unwrap();
+              (first.unwrap_or_default(), start.elapsed().as_secs_f64() * 1000.0, counts)
+          }
+          
+          fn median(mut values: Vec<f64>) -> f64 {
+              values.sort_by(f64::total_cmp);
+              values[values.len() / 2]
+          }
+          
+          fn main() {
+              let root = PathBuf::from(std::env::args().nth(1).unwrap());
+              let depth = 100;
+              let mut wide = root.join("wide");
+              let mut deep = root.join("deep");
+              for path in [&wide, &deep] { fs::create_dir(path).unwrap(); }
+              for i in 0..100_000 { fs::File::create(wide.join(format!("entry{i:06}"))).unwrap(); }
+              for level in 0..depth {
+                  for i in 0..1_000 { fs::File::create(deep.join(format!("entry{i:04}"))).unwrap(); }
+                  if level + 1 != depth { deep.push("child"); fs::create_dir(&deep).unwrap(); }
+              }
+              wide.push(".sparse");
+              let sparse = fs::File::create(&wide).unwrap();
+              sparse.set_len(8 * 1024 * 1024).unwrap();
+              fs::hard_link(&wide, root.join("wide/sparse-link")).unwrap();
+              std::os::unix::fs::symlink(root.join("deep"), root.join("wide/symlink")).unwrap();
+              fs::write(root.join("wide/.ordinary"), [42; 4096]).unwrap();
+              fs::hard_link(root.join("wide/.ordinary"), root.join("wide/ordinary-link")).unwrap();
+              for (folder, cache) in [("wide", "warm"), ("deep", "warm"), ("wide", "cold"), ("deep", "cold")] {
+                  let folder_path = root.join(folder);
+                  let _ = test(&folder_path, false);
+                  let _ = test(&folder_path, true);
+                  let mut base = Vec::new();
+                  let mut fast = Vec::new();
+                  let mut expected = None;
+                  for repetition in 0..if cache == "warm" { 7 } else { 3 } {
+                      let (order, other) = if repetition % 2 == 0 {
+                          (false, true)
+                      } else {
+                          (true, false)
+                      };
+                      for path in [order, other] {
+                          if cache == "cold" {
+                              use std::process::Command;
+                              assert!(Command::new("sync").status().unwrap().success());
+                              #[cfg(target_os = "macos")]
+                              let status = Command::new("sudo").args(["-n", "/usr/sbin/purge"]).status().unwrap();
+                              #[cfg(target_os = "linux")]
+                              let status = Command::new("sudo").args(["-n", "sh", "-c", "echo 3 > /proc/sys/vm/drop_caches"]).status().unwrap();
+                              assert!(status.success(), "cache reset failed");
+                          }
+                          let result = test(&folder_path, path);
+                          assert_eq!(result.2, *expected.get_or_insert(result.2));
+                          if path { fast.push(result); } else { base.push(result); }
+                      }
+                  }
+                  let (count, logical, allocated) = expected.unwrap();
+                  let med = |times: &[(f64, f64, (usize, u64, u64))], completion| median(times.iter().map(|entry| if completion { entry.1 } else { entry.0 }).collect());
+                  let (a, b) = (med(&base, true), med(&fast, true));
+                  println!("{folder} {cache}: {count} entries, logical={logical}, allocated={allocated}. First entry batch {:.3} ms to {:.3} ms, completion {:.2} ms to {:.2} ms ({:.1}% lower).", med(&base, false), med(&fast, false), a, b, (a-b)*100.0/a);
+              }
+          }
+          EOF
+          scratch="$(mktemp -d "$PWD/dirlume-scan.XXXXXX")"
+          trap 'find "$scratch" -depth -delete' EXIT
+          
+          cargo test --release --manifest-path /tmp/scanbench/Cargo.toml
+          cargo run --release --manifest-path /tmp/scanbench/Cargo.toml -- "$scratch"
