@@ -1113,8 +1113,9 @@ try {
   assert.equal(await optionsContent.locator("mark, .setting-search-alias").count(), 0);
   await optionsDialog.getByRole("button", { name: "Computers", exact: true }).click();
   await optionsDialog.getByRole("heading", { name: "Computers", exact: true }).waitFor();
-  await optionsDialog.getByLabel("Group code", { exact: true }).waitFor();
-  assert.equal(await optionsDialog.getByRole("button", { name: "Pair computer", exact: true }).isEnabled(), false);
+  const lanGroup = optionsDialog.getByRole("group", { name: "Dirlume LAN group", exact: true });
+  await lanGroup.getByLabel("Group code", { exact: true }).waitFor();
+  assert.equal(await lanGroup.getByRole("button", { name: "Join group", exact: true }).isEnabled(), false);
   assert.equal(await optionsDialog.getByLabel("KSwitcher installation folder", { exact: true }).count(), 0);
   await closeToolWindow(optionsPage);
   await showOptions(() => page.locator("#left-files").dispatchEvent("keydown", { key: "і", code: "KeyS", ctrlKey: true, altKey: true }));
