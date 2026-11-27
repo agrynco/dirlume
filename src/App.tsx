@@ -2266,6 +2266,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Choose a local destination for the SSH/SFTP move.", error: true });
       return;
     }
+    if (kind === "move" && source.kind === "ftp" && target && target.kind !== "local") {
+      setStatus({ text: "Choose a local destination for the FTP move.", error: true });
+      return;
+    }
     const remoteDestination = isFileServer(target) ? target : undefined;
     const lanDestination = isLanGroupPlace(target) && target.segments.length ? target : undefined;
     const kswitcherDestination = target?.kind === "kswitcher" && target.path ? target : undefined;
@@ -2298,15 +2302,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Grant the required file permission in Trusted clients.", error: true });
       return;
     }
-    const archiveDestination = source.kind === "local" && target?.kind === "archive" && kind === "copy" ? target : undefined;
+    const archiveDestination = source.kind === "local" && target?.kind === "archive" ? target : undefined;
     if (archiveDestination && (!archiveDestination.canAdd || items.some(({ entry }) => entry.link))) {
       setStatus({ text: archiveDestination.canAdd ? "Choose local files and folders without symbolic links." :
         "Choose a writable ZIP or 7z archive.", error: true });
       return;
     }
-    if (kind === "move" && remoteDestination && (remoteDestination.kind !== "ssh" ||
-      items.some(({ place, entry }) => place.kind !== "local" || entry.link))) {
-      setStatus({ text: "Choose local files and folders without links for the SSH/SFTP move.", error: true });
+    if (kind === "move" && remoteDestination && items.some(({ place, entry }) => place.kind !== "local" || entry.link)) {
+      setStatus({ text: "Choose local files or folders without symbolic links.", error: true });
       return;
     }
     if (remoteDestination && source.kind !== "local") {
@@ -2432,21 +2435,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && !isFileServer(source) && !isLanGroupPlace(source) &&
       !(source.kind === "archive" && source.writable) &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
-    if (kind === "move" && source.kind === "ftp") {
-      const item = paneItem(state, selected);
-      if (item?.place.kind === "ftp") setModal({ kind: "rename", path: placePath(item.place), name: item.entry.name, remote: item.place, side });
-      return;
-    }
     const otherPane = panes[targetSide];
     const target = otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
         processPanels[targetSide] || otherPane.loading) ? null :
       treeFolder(targetSide) ?? otherPane.place;
-    if (kind === "move" && target?.kind === "ftp" && source.kind !== "archive") {
-      setStatus({ text: "Choose a local destination. FTP does not support moving local files." });
-    }
-    openTransfer(kind, source, transferItems(side, selected),
-      kind === "move" && target?.kind === "ftp" && source.kind !== "archive" ? null : target, false, side);
+    openTransfer(kind, source, transferItems(side, selected), target, false, side);
   }
 
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
@@ -3505,7 +3499,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       ? currentFile.place.kind !== "kswitcher" : writableTextPlace(currentFile.place)) },
     { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
       Icon: Copy, disabled: !canTransfer || busy },
-    { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
+    { command: "move", label: "Move", Icon: ArrowLeftRight,
       disabled: Boolean(collectionPanes[opposite(active)]) ||
         (!local && !fileServer && !lanGroupPlace && !archive?.writable && !(kswitcherWrite && kswitcherDelete)) ||
         !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
@@ -3517,7 +3511,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       disabled: (!local && !fileServer && !lanGroupPlace && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
-  ] as const).filter(({ command }) => !ftp || command !== "rename");
+  ] as const);
   const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !recentActive && !processPanels[active] && !pane.loading;
   const systemFolder = currentRow?.name === ".." ? pane.place :
     currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
@@ -4267,6 +4261,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               if (place.kind === "ssh") setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, remote: place });
             }}>{t("Rename")}</Button>}
             {item.place.kind === "ssh" && entry && !toCollection && !state.search && !state.loading && !busy &&
+              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
+            {item.place.kind === "ftp" && target.place?.kind === "local" && !target.search && entry &&
+              !toCollection && !state.search && !state.loading && !busy &&
               <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
             {item.place.kind === "archive" && item.place.writable && entry && !state.search && !state.loading && !busy && (() => {
               const archive = item.place;

@@ -368,7 +368,7 @@ impl Archive {
         Ok(BytePage { length, data })
     }
 
-    fn verify(&self) -> Result<()> {
+    pub(crate) fn verify(&self) -> Result<()> {
         self.revision
             .verify(&self.path)
             .map_err(|_| "The archive changed on disk. Open it again.".to_owned())
@@ -1093,6 +1093,38 @@ mod tests {
                     b"\xEF\xBB\xBF"
                 );
                 assert!(archive.list(&moved_folder).is_err());
+                let incoming_move = fixture.path().join(format!("incoming-move-{kind}.txt"));
+                fs::write(&incoming_move, b"archived contents").unwrap();
+                let destination_name = "incoming-move.txt".to_owned();
+                let target = [parent[0].clone(), destination_name.clone()];
+                let copy = archive
+                    .copy_for_move(
+                        &parent,
+                        (incoming_move.clone(), destination_name.clone()),
+                        Policy::Ask,
+                        |_, _, _| Ok(()),
+                        |_| panic!("no conflict"),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(extract(&archive, &target), b"archived contents");
+                copy.verify_file(&target, fs::File::open(&incoming_move).unwrap(), || Ok(()))
+                    .unwrap();
+                fs::write(&incoming_move, b"source has changed").unwrap();
+                assert!(copy
+                    .verify_file(&target, fs::File::open(&incoming_move).unwrap(), || Ok(()))
+                    .is_err());
+                assert_eq!(fs::read(&incoming_move).unwrap(), b"source has changed");
+                assert!(archive
+                    .copy_for_move(
+                        &parent,
+                        (incoming_move, destination_name),
+                        Policy::Skip,
+                        |_, _, _| Ok(()),
+                        |_| panic!("skip existing file"),
+                    )
+                    .unwrap()
+                    .is_none());
                 let before = fs::read(&path).unwrap();
                 assert!(archive
                     .create_text(&parent, "note.txt", Encoding::Utf8, |_| Ok(()))

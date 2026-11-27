@@ -125,6 +125,10 @@ async function fixture(browser, platform, nestedLocal = false) {
         if (command === "transfer_item") {
           state.transfers.push(args.request);
           if (args.request.source.kind === "archive" && args.request.moving) delete state.archivedFolder;
+          if (args.request.archiveDestination && args.request.moving) {
+            state.archivedFolder = args.request.source.name;
+            state.localArchiveInput = false;
+          }
           return { kind: "completed" };
         }
         if (command === "change_kswitcher") {
@@ -141,7 +145,9 @@ async function fixture(browser, platform, nestedLocal = false) {
           if (!args.path.startsWith(smbRoot)) {
             const last = args.path.lastIndexOf(separator);
             const parent = args.path.startsWith(home + separator) ? args.path.slice(0, last) : null;
-            return { path: args.path, parent, entries: args.path === home ? [{ ...folder("fixture.zip"), directory: false }] : [], omitted: 0 };
+            const entries = args.path === home ? [{ ...folder("fixture.zip"), directory: false }] : [];
+            if (args.path === home && state.localArchiveInput) entries.push(folder("local-folder"));
+            return { path: args.path, parent, entries, omitted: 0 };
           }
           return remote({ path: args.path, parent: args.path.slice(0, args.path.lastIndexOf("\\")), entries: [], omitted: 0 });
         }
@@ -580,6 +586,46 @@ async function checkTreeSources(page) {
   assert.equal(request.moving, true);
   assert.deepEqual(request.source, { kind: "archive", archive: 7, segments: [folders[0], "move-directory"] });
   assert.equal(request.destination, "/fixture");
+  await page.evaluate(() => { window.connectionFixture.localArchiveInput = true; });
+  await button(pane(page, "right"), "Refresh folder").click();
+  await directRow(folders[0]).click();
+  await row(page, "right", "local-folder").click();
+  await list(page, "right").press("F6");
+  assert.equal(await move.locator("#transfer-destination").inputValue(), "/fixture/fixture.zip!/" + folders[0]);
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  await directRow(folders[0] + "/local-folder").waitFor();
+  await row(page, "right", "local-folder").waitFor({ state: "detached" });
+  const inbound = await page.evaluate(() => window.connectionFixture.transfers[1]);
+  assert.equal(inbound.moving, true);
+  assert.deepEqual(inbound.source, { kind: "local", directory: "/fixture", name: "local-folder" });
+  assert.deepEqual(inbound.archiveDestination, { id: 7, segments: [folders[0]] });
+}
+
+async function checkFtpMoves(page) {
+  await page.evaluate(() => {
+    window.connectionFixture.directorySettings = { startingFolder: "" };
+    window.connectionFixture.localArchiveInput = true;
+  });
+  await button(pane(page, "left"), "Refresh folder").click();
+  await enterFromCatalog(page, "right", "NetBox", "Saved FTP");
+  await row(page, "right", folders[0]).waitFor();
+  const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+  await row(page, "left", "local-folder").click();
+  await list(page, "left").press("F6");
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  await row(page, "right", folders[0]).click();
+  await list(page, "right").press("F6");
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  const [upload, download] = await page.evaluate(() => window.connectionFixture.transfers);
+  assert.equal(upload.moving, true);
+  assert.equal(upload.ftpDestination, 4);
+  assert.deepEqual(upload.source, { kind: "local", directory: "/fixture", name: "local-folder" });
+  assert.equal(download.moving, true);
+  assert.equal(download.destination, "/fixture");
+  assert.deepEqual(download.source, { kind: "ftp", connection: 4, segments: [folders[0]] });
 }
 
 async function checkLan(page, side) {
@@ -677,9 +723,13 @@ try {
   const treeSources = await fixture(browser, platforms[1]);
   await checkTreeSources(treeSources.page);
   await treeSources.page.close();
+  const ftpMoves = await fixture(browser, platforms[1]);
+  await checkFtpMoves(ftpMoves.page);
+  await ftpMoves.page.close();
   console.log("Verified KSwitcher transfer routing across drives, revision-checked editing, rename, folder creation, and remote Trash.");
   console.log("Verified parent-row measures through KSwitcher and archived uncompressed file sizes.");
-  console.log("Verified read-only Server and archive Trees and nested archive create, rename, delete, and move to a local pane.");
+  console.log("Verified read-only Server and archive Trees and nested archive create, rename, delete, and moves in both directions.");
+  console.log("Verified FTP F6 transfer routing in both directions.");
 } finally {
   await browser.close();
 }

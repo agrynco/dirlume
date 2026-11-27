@@ -121,7 +121,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const archiveTarget = transfer.archiveDestination;
   const lanTarget = transfer.lanDestination;
   const remoteMove = moving && (lanTarget || transfer.items.some(({ place }) =>
-    isLanGroupPlace(place) || place.kind === "ssh" || place.kind === "archive"));
+    isLanGroupPlace(place) || isFileServer(place) || place.kind === "archive"));
   const sameLanMove = moving && lanTarget && isLanGroupPlace(transfer.source) && transfer.source.groupPeer === lanTarget.groupPeer;
   const kswitcherTarget = transfer.kswitcherDestination;
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
@@ -233,8 +233,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
     session.current = id;
     running.current = id;
     failedDecision.current = false;
-    const jobs = archiveTarget ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
-    estimate.current = new TransferEstimate(archiveTarget ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
+    const archiveCopy = moving ? undefined : archiveTarget;
+    const jobs = archiveCopy ? [] : targets.flatMap((destination) => transfer.items.map((item) => ({ destination, item })));
+    estimate.current = new TransferEstimate(archiveCopy ? [null] : jobs.slice(processed).map(({ item }) => item.entry), performance.now());
     setEstimatedTime(undefined);
     setPhase("working");
     setError("");
@@ -258,13 +259,13 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           await api.prepareCollectionFolders(target, transfer.collection.folders);
         }
       }
-      if (archiveTarget && !cancelled.current) {
+      if (archiveCopy && !cancelled.current) {
         const sources = transfer.items.map(({ place, entry }) => {
           if (place.kind !== "local") throw new Error(t("Choose local files or folders to copy into the archive."));
           return { directory: place.path, name: entry.name };
         });
         const output = transferEvents(id);
-        const result = await api.copyIntoArchive(id, archiveTarget, sources, policy, output)
+        const result = await api.copyIntoArchive(id, archiveCopy, sources, policy, output)
           .finally(() => { output.onmessage = () => {}; });
         const written = result.filter(Boolean).length;
         skippedItems = result.length - written;
@@ -291,6 +292,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
           sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
           lanDestination: lanTarget?.id,
+          archiveDestination: archiveTarget ? { id: archiveTarget.id, segments: archiveTarget.segments } : undefined,
           kswitcherDestination: kswitcherTarget?.peer, kswitcherBroker: transfer.kswitcherBroker,
           multiple: !!transfer.collection || itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
@@ -298,7 +300,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const output = transferEvents(id);
         const result = await api.transfer(id, request, output).finally(() => { output.onmessage = () => {}; });
         if (result.kind === "source_retained") {
-          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) || item.place.kind === "ssh" || item.place.kind === "archive" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
+          setError(t(transfer.kswitcherBroker || isLanGroupPlace(item.place) || isFileServer(item.place) || item.place.kind === "archive" ? "Copied to {0}. Could not finish removing source {1}. {2}" :
             "Uploaded to {0}. Could not remove local source {1}. {2}", result.destination, result.source, errorText(result.error)));
           setBlocked(item);
           return;

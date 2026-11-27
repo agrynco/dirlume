@@ -1120,12 +1120,20 @@ enum TransferSource {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ArchiveDestination {
+    id: u32,
+    segments: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TransferRequest {
     source: TransferSource,
     destination: String,
     ftp_destination: Option<u32>,
     ssh_destination: Option<u32>,
     lan_destination: Option<u32>,
+    archive_destination: Option<ArchiveDestination>,
     kswitcher_destination: Option<String>,
     #[serde(default)]
     kswitcher_broker: bool,
@@ -1429,6 +1437,77 @@ impl VerifiedUpload for ssh::Session {
     }
 }
 
+impl VerifiedUpload for ftp::Session {
+    fn verify_uploaded(
+        &mut self,
+        target: &[String],
+        input: &mut fs::File,
+        session: &TransferSession,
+    ) -> Result<()> {
+        let original = crate::ftp_transfer::local_digest(input, || session.ensure_running())?;
+        let uploaded = crate::ftp_transfer::file_digest(self, target, || session.ensure_running())?;
+        if original.as_ref() != uploaded.as_ref() {
+            return Err("The local file differs from the uploaded FTP copy.".to_owned());
+        }
+        Ok(())
+    }
+}
+
+fn move_ftp_to_local(
+    ftp: &mut ftp::Session,
+    source: &[String],
+    target: &Path,
+    transfer: &TransferSession,
+    options: &local_transfer::Options,
+    progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let mut cleanup = None;
+    let outcome = copy_downloaded_item(
+        target,
+        transfer,
+        options,
+        progress,
+        ask,
+        |staged, progress| {
+            let temporary = local_transfer::Options {
+                moving: false,
+                policy: local_transfer::Policy::Skip,
+                ask_read_only: true,
+                copy: local::CopyOptions::default(),
+            };
+            if !remote_transfer::download(
+                ftp,
+                source,
+                staged,
+                &temporary,
+                progress,
+                |_| Ok(local_transfer::Decision::Skip),
+                |_, _| {},
+            )? {
+                return Err("Could not stage the complete FTP move source.".to_owned());
+            }
+            cleanup = Some(crate::ftp_transfer::MoveCleanup::capture(
+                ftp,
+                source,
+                staged,
+                || transfer.ensure_running(),
+            )?);
+            Ok(())
+        },
+    )?;
+    if let (TransferOutcome::Completed, Some(cleanup)) = (&outcome, cleanup) {
+        if let Err(error) = cleanup.finish(ftp, || transfer.ensure_running()) {
+            return Ok(TransferOutcome::SourceRetained {
+                source: format!("/{}", source.join("/")),
+                destination: crate::file_history::display(target),
+                error,
+            });
+        }
+    }
+    Ok(outcome)
+}
+
 enum LocalOriginal {
     Folder(same_file::Handle),
     File(local_transfer::FileRevision),
@@ -1500,23 +1579,9 @@ fn move_local_folder<S: VerifiedUpload>(
         return Ok(TransferOutcome::Skipped);
     }
     for item in items {
-        let result = (|| {
-            transfer.ensure_running().map_err(message)?;
-            match item.original {
-                LocalOriginal::Folder(original) => {
-                    local_transfer::verify_folder(&item.path, &original).map_err(message)?;
-                    fs::remove_dir(&item.path).map_err(message)
-                }
-                LocalOriginal::File(original) => {
-                    original.verify(&item.path).map_err(message)?;
-                    let mut input = fs::File::open(&item.path).map_err(message)?;
-                    client.verify_uploaded(&item.target, &mut input, transfer)?;
-                    drop(input);
-                    transfer.ensure_running().map_err(message)?;
-                    local_transfer::remove_original(&item.path, &original).map_err(message)
-                }
-            }
-        })();
+        let result = remove_local_move_item(item, transfer, |target, mut input| {
+            client.verify_uploaded(target, &mut input, transfer)
+        });
         if let Err(error) = result {
             return Ok(TransferOutcome::SourceRetained {
                 source: crate::file_history::display(source),
@@ -1526,6 +1591,142 @@ fn move_local_folder<S: VerifiedUpload>(
         }
     }
     Ok(TransferOutcome::Completed)
+}
+
+fn remove_local_move_item(
+    item: LocalMoveItem,
+    transfer: &TransferSession,
+    verify_copy: impl FnOnce(&[String], fs::File) -> Result<()>,
+) -> Result<()> {
+    transfer.ensure_running().map_err(message)?;
+    match item.original {
+        LocalOriginal::Folder(original) => {
+            local_transfer::verify_folder(&item.path, &original).map_err(message)?;
+            fs::remove_dir(&item.path).map_err(message)
+        }
+        LocalOriginal::File(original) => {
+            original.verify(&item.path).map_err(message)?;
+            verify_copy(&item.target, fs::File::open(&item.path).map_err(message)?)?;
+            transfer.ensure_running().map_err(message)?;
+            local_transfer::remove_original(&item.path, &original).map_err(message)
+        }
+    }
+}
+
+fn move_local_to_archive(
+    archive: &mut crate::archives::Archive,
+    source: &Path,
+    name: &str,
+    request: &TransferRequest,
+    transfer: &TransferSession,
+    progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+    ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+) -> Result<TransferOutcome> {
+    let segments = &request
+        .archive_destination
+        .as_ref()
+        .ok_or("Choose a destination archive.")?
+        .segments;
+    let target = remote_transfer::child(segments, name);
+    let mut items = Vec::new();
+    collect_local_move(source, &target, transfer, &mut items)?;
+    let Some(copy) = archive.copy_for_move(
+        segments,
+        (source.to_owned(), name.to_owned()),
+        request.policy,
+        progress,
+        ask,
+    )?
+    else {
+        return Ok(TransferOutcome::Skipped);
+    };
+    for item in items {
+        let result = archive.verify().and_then(|()| {
+            remove_local_move_item(item, transfer, |target, input| {
+                copy.verify_file(target, input, || transfer.ensure_running())?;
+                archive.verify()
+            })
+        });
+        if let Err(error) = result {
+            return Ok(TransferOutcome::SourceRetained {
+                source: crate::file_history::display(source),
+                destination: format!("{}/{name}", request.destination.trim_end_matches('/')),
+                error,
+            });
+        }
+    }
+    Ok(TransferOutcome::Completed)
+}
+
+#[cfg(test)]
+pub(crate) fn verify_ftp_folder_moves(ftp: &mut ftp::Session, host: &Path) {
+    use crate::local_transfer::{Decision, Policy};
+    let transfer = TransferSession::default();
+    let fixture = tempfile::tempdir().unwrap();
+    let input = fixture.path().join("Move fixture");
+    fs::create_dir_all(input.join("nested/empty")).unwrap();
+    fs::write(input.join("nested/note.txt"), b"FTP contents").unwrap();
+    let remote = ["Move fixture".to_owned()];
+    let mut progress = |_: &Path, _, _| Ok(());
+    let mut ask = |_| panic!("unexpected conflict");
+    assert!(matches!(
+        move_local_folder(
+            ftp,
+            &input,
+            &remote,
+            Policy::Ask,
+            &transfer,
+            &mut progress,
+            &mut ask
+        )
+        .unwrap(),
+        TransferOutcome::Completed,
+    ));
+    assert!(!input.exists());
+    assert_eq!(
+        fs::read(host.join("Move fixture/nested/note.txt")).unwrap(),
+        b"FTP contents"
+    );
+    fs::create_dir_all(input.join("nested")).unwrap();
+    fs::write(input.join("nested/note.txt"), b"Keep the existing file").unwrap();
+    let options = local_transfer::Options {
+        moving: true,
+        policy: Policy::Ask,
+        ask_read_only: true,
+        copy: Default::default(),
+    };
+    assert!(matches!(
+        move_ftp_to_local(
+            ftp,
+            &remote,
+            &input,
+            &transfer,
+            &options,
+            &mut progress,
+            |_| Ok(Decision::Skip)
+        )
+        .unwrap(),
+        TransferOutcome::Skipped,
+    ));
+    assert_eq!(
+        fs::read(host.join("Move fixture/nested/note.txt")).unwrap(),
+        b"FTP contents"
+    );
+    assert_eq!(
+        fs::read(input.join("nested/note.txt")).unwrap(),
+        b"Keep the existing file"
+    );
+    let output = fixture.path().join("Move output");
+    assert!(matches!(
+        move_ftp_to_local(ftp, &remote, &output, &transfer, &options, progress, ask).unwrap(),
+        TransferOutcome::Completed,
+    ));
+    assert!(!host.join("Move fixture").exists());
+    assert_eq!(
+        fs::read(output.join("nested/note.txt")).unwrap(),
+        b"FTP contents"
+    );
+    assert!(output.join("nested/empty").is_dir());
 }
 
 fn move_uploaded_file<S: VerifiedUpload>(
@@ -1540,6 +1741,7 @@ fn move_uploaded_file<S: VerifiedUpload>(
     let connection = request
         .ssh_destination
         .or(request.lan_destination)
+        .or(request.ftp_destination)
         .ok_or("Choose a remote destination.")?;
     let mut attempt = session.upload_move.lock().map_err(message)?;
     if !request.retry {
@@ -1596,7 +1798,7 @@ fn move_uploaded_file<S: VerifiedUpload>(
     }
     let completed = attempt.as_ref().expect("successful remote upload");
     let result = (|| {
-        if retry_cleanup {
+        if retry_cleanup || S::SOURCE == "FTP" {
             session.ensure_running().map_err(message)?;
             completed.original.verify(source).map_err(message)?;
             let mut input = fs::File::open(source).map_err(message)?;
@@ -1808,6 +2010,7 @@ pub(crate) fn verify_ssh_moves(remote: &mut ssh::Session, local_root: &Path, rem
         ftp_destination: None,
         ssh_destination: Some(12),
         lan_destination: None,
+        archive_destination: None,
         kswitcher_destination: None,
         kswitcher_broker: false,
         multiple: false,
@@ -1961,10 +2164,16 @@ async fn transfer_item(
         .lan_destination
         .map(|id| connections.get(id))
         .transpose()?;
+    let archive_destination = request
+        .archive_destination
+        .as_ref()
+        .map(|destination| archives.get(destination.id))
+        .transpose()?;
     if [
         ftp_destination.is_some(),
         ssh_destination.is_some(),
         lan_destination.is_some(),
+        archive_destination.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -2014,6 +2223,23 @@ async fn transfer_item(
             progress(Path::new(name), 0, None).map_err(message)?;
 
             let mut ask = |conflict| session.ask(conflict, &output);
+            if let Some(archive) = archive_destination {
+                let source = source
+                    .as_deref()
+                    .filter(|_| request.moving)
+                    .ok_or("Choose local files or folders to move into the archive.")?;
+                actual_source = display(source);
+                let mut archive = archive.lock().map_err(message)?;
+                return move_local_to_archive(
+                    &mut archive,
+                    source,
+                    name,
+                    &request,
+                    &session,
+                    progress,
+                    ask,
+                );
+            }
             if let Some(destination) = lan_destination {
                 if let TransferSource::Server {
                     lan_group: true,
@@ -2290,14 +2516,12 @@ async fn transfer_item(
                 } else {
                     "FTP"
                 };
-                if (request.moving && ftp_destination.is_some())
-                    || !matches!(
-                        request.policy,
-                        local_transfer::Policy::Ask
-                            | local_transfer::Policy::Skip
-                            | local_transfer::Policy::Overwrite
-                    )
-                {
+                if !matches!(
+                    request.policy,
+                    local_transfer::Policy::Ask
+                        | local_transfer::Policy::Skip
+                        | local_transfer::Policy::Overwrite
+                ) {
                     return Err(format!("Choose a supported {protocol} copy option."));
                 }
                 let source = source
@@ -2346,8 +2570,39 @@ async fn transfer_item(
                     );
                 }
                 if let Some(connection) = ftp_destination {
+                    let mut remote =
+                        connection.open_with_cancel(Some(session.cancelled.clone()))?;
+                    if request.moving {
+                        let metadata = fs::symlink_metadata(source).map_err(message)?;
+                        if metadata.is_dir() && !local::is_link(&metadata) {
+                            let target = remote_transfer::upload_destination(
+                                &mut remote,
+                                &request.destination,
+                                name,
+                                request.multiple,
+                            )?;
+                            return move_local_folder(
+                                &mut remote,
+                                source,
+                                &target,
+                                request.policy,
+                                &session,
+                                &mut progress,
+                                &mut ask,
+                            );
+                        }
+                        return move_uploaded_file(
+                            &mut remote,
+                            &request,
+                            source,
+                            name,
+                            &session,
+                            &mut progress,
+                            &mut ask,
+                        );
+                    }
                     return upload_remote(
-                        connection.open_with_cancel(Some(session.cancelled.clone()))?,
+                        remote,
                         &request,
                         name,
                         source,
@@ -2418,12 +2673,14 @@ async fn transfer_item(
                     .map(transfer_outcome);
             }
             if let TransferSource::Ftp { segments, .. } = &request.source {
-                if request.moving {
-                    return Err("Use Copy to download FTP items.".to_owned());
-                }
                 let mut ftp = ftp_source
                     .ok_or("Connect to the FTP server first.")?
                     .open_with_cancel(Some(session.cancelled.clone()))?;
+                if request.moving {
+                    return move_ftp_to_local(
+                        &mut ftp, segments, &target, &session, &options, progress, ask,
+                    );
+                }
                 return remote_transfer::download(
                     &mut ftp, segments, &target, &options, progress, ask, committed,
                 )

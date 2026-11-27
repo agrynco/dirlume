@@ -1412,6 +1412,31 @@ impl Session {
         result
     }
 
+    pub(crate) fn remove_move_file(
+        &mut self,
+        segments: &[String],
+        expected: &FtpEntry,
+    ) -> Result<()> {
+        if !self.matches_file(segments, expected)? {
+            return Err("The FTP file changed during the move.".to_owned());
+        }
+        self.limits
+            .call(self.stream.rm(absolute(segments)?))
+            .map_err(message)
+    }
+
+    pub(crate) fn remove_empty_move_folder(&mut self, segments: &[String]) -> Result<()> {
+        if !self
+            .stat(segments)?
+            .is_some_and(|entry| entry.is_directory())
+        {
+            return Err("The FTP folder changed during the move.".to_owned());
+        }
+        self.limits
+            .call(self.stream.rmdir(absolute(segments)?))
+            .map_err(message)
+    }
+
     fn remove(&mut self, segments: &[String], recursive: bool) -> Result<()> {
         let file = self
             .stat(segments)?
@@ -1676,6 +1701,17 @@ mod tls_tests;
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn moves_nested_folders_with_a_real_ftp_server() {
+        let Some(port) = std::env::var("DIRLUME_FTP_MOVE_TEST_PORT").ok() else {
+            return;
+        };
+        let root = std::env::var_os("DIRLUME_FTP_MOVE_TEST_ROOT").unwrap();
+        let connection = super::tls_tests::connection(port.parse().unwrap(), Encryption::Plain);
+        let mut session = connection.open().unwrap();
+        crate::desktop::verify_ftp_folder_moves(&mut session, Path::new(&root));
+    }
 
     #[tokio::test]
     async fn data_and_control_sockets_inherit_the_profile_settings() {

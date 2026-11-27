@@ -8,6 +8,26 @@ use crate::remote_transfer::{self, Session, UploadSession};
 
 use super::*;
 
+pub(crate) struct ArchiveMoveCopy(tempfile::TempDir);
+
+impl ArchiveMoveCopy {
+    pub(crate) fn verify_file(
+        &self,
+        target: &[String],
+        source: fs::File,
+        mut check: impl FnMut() -> io::Result<()>,
+    ) -> Result<()> {
+        let staged =
+            fs::File::open(member_path(&self.0.path().join("update"), target)?).map_err(message)?;
+        let source = crate::protocol::lan_file_digest(source, &mut check).map_err(message)?;
+        let staged = crate::protocol::lan_file_digest(staged, &mut check).map_err(message)?;
+        if source != staged {
+            return Err("The local file differs from the archived copy.".to_owned());
+        }
+        Ok(())
+    }
+}
+
 impl Archive {
     pub(super) fn can_add(&self) -> bool {
         self.writable && matches!(self.index.format.as_str(), "zip" | "7z")
@@ -148,9 +168,37 @@ impl Archive {
         parent: &[String],
         sources: &[(PathBuf, String)],
         policy: Policy,
+        progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        ask: impl FnMut(Conflict) -> io::Result<Decision>,
+    ) -> Result<Vec<bool>> {
+        self.copy_from_local(parent, sources, policy, progress, ask)
+            .map(|(result, _)| result)
+    }
+
+    pub(crate) fn copy_for_move(
+        &mut self,
+        parent: &[String],
+        source: (PathBuf, String),
+        policy: Policy,
+        progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        ask: impl FnMut(Conflict) -> io::Result<Decision>,
+    ) -> Result<Option<ArchiveMoveCopy>> {
+        let (result, workspace) = self.copy_from_local(parent, &[source], policy, progress, ask)?;
+        Ok(result
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .then_some(ArchiveMoveCopy(workspace)))
+    }
+
+    fn copy_from_local(
+        &mut self,
+        parent: &[String],
+        sources: &[(PathBuf, String)],
+        policy: Policy,
         mut progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
         mut ask: impl FnMut(Conflict) -> io::Result<Decision>,
-    ) -> Result<Vec<bool>> {
+    ) -> Result<(Vec<bool>, tempfile::TempDir)> {
         self.require_folder(parent)?;
         if sources.is_empty() || !matches!(policy, Policy::Ask | Policy::Overwrite | Policy::Skip) {
             return Err("Choose local files and folders and a supported copy option.".to_owned());
@@ -193,7 +241,7 @@ impl Archive {
             let path = self.path.clone();
             self.commit_update(&staged, index, || progress(&path, 0, None).map_err(message))?;
         }
-        Ok(results)
+        Ok((results, workspace))
     }
 }
 

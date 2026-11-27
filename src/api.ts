@@ -850,6 +850,7 @@ export const api = {
     invoke<void>("decline_transfer_sudo", { id, ticket }),
   transfer: (id: number, request: {
     source: TransferSource; destination: string; ftpDestination?: number; sshDestination?: number; lanDestination?: number;
+    archiveDestination?: Pick<ArchivePlace, "id" | "segments">;
     kswitcherDestination?: string; kswitcherBroker?: boolean; multiple: boolean; moving: boolean;
     policy: ConflictPolicy; askReadOnly: boolean; retry?: boolean; copyOptions?: CopyOptions;
   }, output: Channel<TransferEvent>) => invoke<TransferOutcome>("transfer_item", { id, request, output }),
