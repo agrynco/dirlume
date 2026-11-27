@@ -313,7 +313,7 @@ Add an **SMB** connection on Windows, macOS, or Ubuntu using a server name, IP a
 
 ## Desktop diagnostics
 
-Choose **Help → Open error log** to inspect the journal or **Help → Clear error log** to remove its entries after confirmation. Dirlume continues recording new errors after the log is cleared.
+Choose **Help → Open error log** to inspect the journal. In the viewer, choose **File → Clear error log** to remove its entries after confirmation. Dirlume continues recording new errors after the log is cleared.
 
 Use **Help → Open error log** to see the latest entries first, with local timestamps down to the millisecond. Expand an entry to inspect its fields and recent actions. A warning icon marks panics, and partial lines can be opened individually. Select **Source** to copy the original JSONL in file order. Opening a JSONL file from a file pane uses the regular text viewer.
 
