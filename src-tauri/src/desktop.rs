@@ -4042,7 +4042,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(crate::updates::PendingUpdate::default())
         .manage(Connections::default())
-        .manage(crate::desktop_share::DesktopShare::default())
+        .manage(crate::desktop_share::DesktopShare::new(
+            &context.config().identifier,
+        ))
         .manage(crate::archives::Archives::default())
         .manage(crate::archive_create::ArchiveJobs::default())
         .manage(crate::deletion::DeleteJobs::default())
@@ -4064,13 +4066,14 @@ pub fn run() {
         .manage(crate::file_clipboard::FileClipboard::default());
     #[cfg(windows)]
     let builder = builder.manage(crate::windows_shell::ShellIcons::default());
-    #[cfg(windows)]
     let builder = builder.setup(|app| {
         #[cfg(windows)]
         if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
             window.set_decorations(false)?;
         }
+        #[cfg(windows)]
         crate::windows_environment::attach(app.handle());
+        crate::desktop_share::restore_group_on_start(app.handle());
         Ok(())
     });
     #[cfg(feature = "ui-automation")]
@@ -4169,8 +4172,7 @@ pub fn run() {
         crate::folders::create_folders,
         crate::folders::prepare_collection_folders,
         crate::desktop_share::active_desktop_share,
-        crate::desktop_share::active_lan_group,
-        crate::desktop_share::lan_group_writable,
+        crate::desktop_share::lan_group_status,
         crate::desktop_share::set_lan_group_writable,
         crate::desktop_share::start_lan_group,
         crate::desktop_share::copy_lan_group_code,

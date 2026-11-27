@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, describeError, type ComputerSharing, type SavedConnection } from "./api";
+import { api, describeError, type ComputerSharing, type LanGroupStatus, type SavedConnection } from "./api";
 import { Button } from "./Button";
 import { errorText, t } from "./i18n";
 import { RemoveConnectionDialog } from "./SavedConnectionDialog";
@@ -14,20 +14,22 @@ export function ComputersSettings() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [groupActive, setGroupActive] = useState(false);
+  const [group, setGroup] = useState<LanGroupStatus | null>(null);
   const [groupCode, setGroupCode] = useState("");
   const [groupCopied, setGroupCopied] = useState(false);
   const [groupError, setGroupError] = useState("");
-  const [groupWritable, setGroupWritable] = useState(false);
   const [groupPeers, setGroupPeers] = useState<Awaited<ReturnType<typeof api.lanGroupPeers>>>([]);
 
   useEffect(() => {
     let current = true;
     void api.computerName().then((name) => { if (current) setName(name ?? ""); }).catch(() => {});
-    void api.activeLanGroup().then((active) => { if (current) setGroupActive(Boolean(active)); })
-      .catch((failure: unknown) => { if (current) setGroupError(describeError(failure)); });
-    void api.lanGroupWritable().then((writable) => { if (current) setGroupWritable(Boolean(writable)); })
-      .catch((failure: unknown) => { if (current) setGroupError(describeError(failure)); });
+    void api.lanGroupStatus().then((status) => { if (current) setGroup(status); })
+      .catch((failure: unknown) => {
+        if (current) {
+          setGroupError(describeError(failure));
+          setGroup({ active: false, remembered: false, writable: false, storageError: null });
+        }
+      });
     void api.activeComputerSharing().then((sharing) => { if (current) setActiveSharing(sharing); })
       .catch((error: unknown) => { if (current) setError(describeError(error)); });
     const refresh = () => setComputers(readRemoteProfiles());
@@ -37,6 +39,24 @@ export function ComputersSettings() {
       window.removeEventListener("storage", refresh);
     };
   }, []);
+
+  const groupActive = group?.active ?? false;
+  const groupRestoring = !!group?.remembered && !group.active && !group.storageError;
+  useEffect(() => {
+    if (!groupRestoring || working) return;
+    let current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      try {
+        const status = await api.lanGroupStatus();
+        if (current) setGroup(status);
+      } finally {
+        if (current) timer = setTimeout(() => void refresh().catch(() => {}), 2_000);
+      }
+    }
+    timer = setTimeout(() => void refresh().catch(() => {}), 2_000);
+    return () => { current = false; clearTimeout(timer); };
+  }, [groupRestoring, working]);
 
   useEffect(() => {
     if (!groupActive) return;
@@ -88,23 +108,32 @@ export function ComputersSettings() {
 
   function startGroup(code?: string) {
     void runGroup(async () => {
-      await api.startLanGroup(code);
+      setGroup(await api.startLanGroup(code));
       setGroupCode("");
-      setGroupWritable(false);
-      setGroupActive(true);
+    });
+  }
+
+  function leaveGroup() {
+    void runGroup(async () => {
+      setGroup(await api.leaveLanGroup());
+      setGroupPeers([]);
     });
   }
 
   return <div className="dialog-body settings-general">
     {name && <div className="setting"><span>{t("This computer")}</span><strong>{name}</strong></div>}
-    <fieldset disabled={working}>
+    <fieldset disabled={working || !group}>
       <legend>{t("Dirlume LAN group")}</legend>
       {groupActive ? <>
         <p role="status">{t("Your drives are shared with this group while Dirlume is running.")}</p>
+        {!group?.remembered && <p>{t("Join the group again after restarting Dirlume.")}</p>}
         <label className="field-checkbox">
-          <input type="checkbox" checked={groupWritable} onChange={(event) => {
+          <input type="checkbox" checked={group?.writable} onChange={(event) => {
             const writable = event.target.checked;
-            void runGroup(async () => { await api.setLanGroupWritable(writable); setGroupWritable(writable); });
+            void runGroup(async () => {
+              await api.setLanGroupWritable(writable);
+              setGroup((status) => status && { ...status, writable });
+            });
           }} />
           {t("Allow group members to change files and folders")}
         </label>
@@ -113,17 +142,18 @@ export function ComputersSettings() {
             await api.copyLanGroupCode();
             setGroupCopied(true);
           })}>{t("Copy group code")}</Button>
-          <Button type="button" onClick={() => void runGroup(async () => {
-            await api.leaveLanGroup();
-            setGroupActive(false);
-            setGroupPeers([]);
-          })}>{t("Leave group")}</Button>
+          <Button type="button" onClick={leaveGroup}>{t("Leave group")}</Button>
         </div>
         {groupCopied && <p role="status">{t("Group code copied. Paste the same code on each computer.")}</p>}
         {groupPeers.length ? <ul className="computer-settings-list" aria-label={t("Group members")}>
           {groupPeers.map((peer) => <li key={peer.id}><span>{peer.name}</span>
             {!peer.online && <span>{t("Offline")}</span>}</li>)}
         </ul> : <p role="status">{t("Waiting for group members…")}</p>}
+      </> : group?.remembered ? <>
+        {groupRestoring && <p role="status">{t("Waiting for the local network to reconnect to your group…")}</p>}
+        <div className="dialog-actions">
+          <Button type="button" onClick={leaveGroup}>{t("Leave group")}</Button>
+        </div>
       </> : <>
         <p>{t("Create a group on one computer and join it with the same code on the others. Members can browse and download from each other's drives.")}</p>
         <div className="dialog-actions">
@@ -138,6 +168,7 @@ export function ComputersSettings() {
         </form>
       </>}
       {groupError && <p role="alert" className="dialog-error">{errorText(groupError)}</p>}
+      {group?.storageError && <p role="alert" className="dialog-error">{errorText(group.storageError)}</p>}
     </fieldset>
     <fieldset>
       <legend>{t("Saved computers")}</legend>

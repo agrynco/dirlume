@@ -11,8 +11,9 @@ use std::{
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ring::{
-    aead, digest, hmac,
+    aead, hmac,
     rand::{SecureRandom, SystemRandom},
+    signature::{self, Ed25519KeyPair, KeyPair},
 };
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, Socket, Type};
@@ -34,9 +35,45 @@ const INTERVAL: Duration = Duration::from_secs(2);
 const OFFLINE_AFTER: Duration = Duration::from_secs(12);
 const PACKET_LIMIT: usize = 1200;
 const NONCE_LENGTH: usize = 12;
+const PUBLIC_KEY_LENGTH: usize = 32;
+const SIGNATURE_LENGTH: usize = 64;
 const MAX_MEMBERS: usize = 128;
 
+#[cfg(test)]
+pub(crate) static DISCOVERY_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub(crate) struct GroupKey(Zeroizing<[u8; 32]>);
+
+pub(crate) fn valid_code(code: &str) -> bool {
+    GroupKey::parse(code).is_ok()
+}
+
+pub(crate) struct GroupIdentity(Zeroizing<[u8; 32]>);
+
+impl GroupIdentity {
+    pub(crate) fn generate() -> Result<Self> {
+        let mut seed = Zeroizing::new([0; 32]);
+        SystemRandom::new()
+            .fill(&mut *seed)
+            .map_err(|_| "Could not generate a Dirlume LAN identity.")?;
+        Ok(Self(seed))
+    }
+
+    pub(crate) fn decode(value: &str) -> Option<Self> {
+        let mut seed = Zeroizing::new([0; 32]);
+        let count = URL_SAFE_NO_PAD.decode_slice(value, &mut *seed).ok()?;
+        (count == seed.len()).then_some(Self(seed))
+    }
+
+    pub(crate) fn encode(&self) -> Zeroizing<String> {
+        Zeroizing::new(URL_SAFE_NO_PAD.encode(self.0.as_slice()))
+    }
+
+    fn signer(&self) -> Result<Ed25519KeyPair> {
+        Ed25519KeyPair::from_seed_unchecked(&self.0[..])
+            .map_err(|_| "Could not initialize the Dirlume LAN identity.".to_owned())
+    }
+}
 
 impl GroupKey {
     fn generate() -> Result<Self> {
@@ -96,9 +133,11 @@ struct Announcement {
 }
 
 impl Announcement {
-    fn packet(&mut self, key: &aead::LessSafeKey) -> Result<Vec<u8>> {
+    fn packet(&mut self, key: &aead::LessSafeKey, identity: &Ed25519KeyPair) -> Result<Vec<u8>> {
         self.time = now();
-        let mut bytes = serde_json::to_vec(self).map_err(message)?;
+        let payload = serde_json::to_vec(self).map_err(message)?;
+        let proof = identity.sign(&payload);
+        let mut bytes = [identity.public_key().as_ref(), proof.as_ref(), &payload].concat();
         let mut nonce = [0; NONCE_LENGTH];
         SystemRandom::new()
             .fill(&mut nonce)
@@ -117,11 +156,16 @@ impl Announcement {
         Ok(packet)
     }
 
-    fn read(packet: &mut [u8], sender: IpAddr, key: &aead::LessSafeKey) -> Option<Self> {
+    fn read(packet: &mut [u8], sender: IpAddr, key: &aead::LessSafeKey) -> Option<(String, Self)> {
         let (nonce, body) = packet.split_at_mut_checked(NONCE_LENGTH)?;
         let nonce = aead::Nonce::try_assume_unique_for_key(nonce).ok()?;
         let body = key.open_in_place(nonce, aead::Aad::empty(), body).ok()?;
-        let value: Self = serde_json::from_slice(body).ok()?;
+        let (public, body) = body.split_at_checked(PUBLIC_KEY_LENGTH)?;
+        let (proof, payload) = body.split_at_checked(SIGNATURE_LENGTH)?;
+        signature::UnparsedPublicKey::new(&signature::ED25519, public)
+            .verify(payload, proof)
+            .ok()?;
+        let value: Self = serde_json::from_slice(payload).ok()?;
         let url = &value.address;
         let valid_address = matches!(url.host(), Some(url::Host::Ipv4(ip)) if sender == IpAddr::V4(ip) && valid_ip(ip))
             && url.scheme() == "https"
@@ -138,7 +182,7 @@ impl Announcement {
             && !value.name.chars().any(char::is_control)
             && !value.certificate.is_empty()
             && value.certificate.len() < PACKET_LIMIT)
-            .then_some(value)
+            .then(|| (URL_SAFE_NO_PAD.encode(public), value))
     }
 }
 
@@ -168,10 +212,6 @@ fn discovery_socket(ip: Ipv4Addr) -> Result<UdpSocket> {
     UdpSocket::from_std(socket.into()).map_err(message)
 }
 
-fn peer_id(certificate: &str) -> String {
-    URL_SAFE_NO_PAD.encode(digest::digest(&digest::SHA256, certificate.as_bytes()).as_ref())
-}
-
 struct Member {
     announcement: Announcement,
     seen: Instant,
@@ -190,18 +230,22 @@ pub(crate) struct LanGroup {
     writable: Arc<AtomicBool>,
     members: Arc<Mutex<BTreeMap<String, Member>>>,
     discovery: JoinHandle<()>,
+    #[cfg(test)]
+    pub(crate) id: String,
 }
 
 impl LanGroup {
     pub(crate) async fn start(
         ip: Ipv4Addr,
         code: Option<&str>,
+        identity: &GroupIdentity,
         locations: impl Fn() -> Vec<(String, PathBuf)> + Send + Sync + 'static,
     ) -> Result<Self> {
         if !valid_ip(ip) {
             return Err("Enter a local network IP address.".to_owned());
         }
         let key = code.map_or_else(GroupKey::generate, GroupKey::parse)?;
+        let signer = identity.signer()?;
         let socket = discovery_socket(ip)?;
         let writable = Arc::new(AtomicBool::new(false));
         let server = DesktopServer::start_computer_with_group(
@@ -219,12 +263,15 @@ impl LanGroup {
             time: 0,
         };
         let discovery_key = key.discovery_key()?;
-        announcement.packet(&discovery_key)?;
+        announcement.packet(&discovery_key, &signer)?;
+        #[cfg(test)]
+        let id = URL_SAFE_NO_PAD.encode(signer.public_key().as_ref());
         let members = Arc::new(Mutex::new(BTreeMap::new()));
         let discovery = tokio::spawn(discover(
             socket,
             announcement,
             discovery_key,
+            signer,
             Arc::clone(&members),
         ));
         Ok(Self {
@@ -233,6 +280,8 @@ impl LanGroup {
             writable,
             members,
             discovery,
+            #[cfg(test)]
+            id,
         })
     }
 
@@ -293,25 +342,27 @@ async fn discover(
     socket: UdpSocket,
     mut own: Announcement,
     key: aead::LessSafeKey,
+    signer: Ed25519KeyPair,
     members: Arc<Mutex<BTreeMap<String, Member>>>,
 ) {
     let destination = SocketAddr::V4(SocketAddrV4::new(MULTICAST_ADDRESS, PORT));
     let mut tick = tokio::time::interval(INTERVAL);
     let mut packet = vec![0; u16::MAX as usize];
+    let own_id = URL_SAFE_NO_PAD.encode(signer.public_key().as_ref());
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                if let Ok(packet) = own.packet(&key) {
+                if let Ok(packet) = own.packet(&key, &signer) {
                     let _ = socket.send_to(&packet, destination).await;
                 }
             }
             received = socket.recv_from(&mut packet) => {
                 let Ok((length, sender)) = received else { break };
                 if length > PACKET_LIMIT { continue }
-                let Some(announcement) = Announcement::read(&mut packet[..length], sender.ip(), &key) else { continue };
-                if announcement.certificate == own.certificate { continue }
+                let Some((id, announcement)) = Announcement::read(&mut packet[..length], sender.ip(), &key) else { continue };
+                let own_address = matches!(own.address.host(), Some(url::Host::Ipv4(ip)) if !ip.is_loopback() && sender.ip() == IpAddr::V4(ip));
+                if id == own_id || own_address { continue }
                 let Ok(mut members) = members.lock() else { break };
-                let id = peer_id(&announcement.certificate);
                 if members.get(&id).is_some_and(|member| announcement.time <= member.announcement.time) { continue }
                 if !members.contains_key(&id) && members.len() >= MAX_MEMBERS {
                     let oldest = members.iter().min_by_key(|(_, member)| member.seen).map(|(id, _)| id.clone());
@@ -341,7 +392,10 @@ mod tests {
             time: 0,
         };
         let key = joined.discovery_key().unwrap();
-        let mut packet = announcement.packet(&root.discovery_key().unwrap()).unwrap();
+        let identity = GroupIdentity::generate().unwrap().signer().unwrap();
+        let mut packet = announcement
+            .packet(&root.discovery_key().unwrap(), &identity)
+            .unwrap();
         let sender = "192.168.1.10".parse().unwrap();
         assert!(Announcement::read(&mut packet.clone(), sender, &key).is_some());
         assert!(Announcement::read(
@@ -360,6 +414,7 @@ mod tests {
 
     #[tokio::test]
     async fn three_computers_discover_one_another_using_one_code() {
+        let _network = DISCOVERY_TEST_LOCK.lock().await;
         let fixture = tempfile::tempdir().unwrap();
         let locations = |name: &str| {
             let name = name.to_owned();
@@ -368,22 +423,31 @@ mod tests {
             move || vec![(name.clone(), root.clone())]
         };
         let ip = Ipv4Addr::LOCALHOST;
-        let a = LanGroup::start(ip, None, locations("Drive A"))
-            .await
-            .unwrap();
+        let a = LanGroup::start(
+            ip,
+            None,
+            &GroupIdentity::generate().unwrap(),
+            locations("Drive A"),
+        )
+        .await
+        .unwrap();
         let code = a.code();
-        let b = LanGroup::start(ip, Some(&code), locations("Drive B"))
+        let identity_b = GroupIdentity::generate().unwrap();
+        let locations_b = locations("Drive B");
+        let b = LanGroup::start(ip, Some(&code), &identity_b, locations_b.clone())
             .await
             .unwrap();
-        let c = LanGroup::start(ip, Some(&code), locations("Drive C"))
-            .await
-            .unwrap();
+        let c = LanGroup::start(
+            ip,
+            Some(&code),
+            &GroupIdentity::generate().unwrap(),
+            locations("Drive C"),
+        )
+        .await
+        .unwrap();
         let groups = [(&a, "Drive A"), (&b, "Drive B"), (&c, "Drive C")];
         let identities = groups
-            .map(|(group, drive)| {
-                let invitation = Invitation::parse(&group.server.invitation).unwrap();
-                (peer_id(&invitation.certificate), drive)
-            })
+            .map(|(group, drive)| (group.id.clone(), drive))
             .into_iter()
             .collect::<BTreeMap<_, _>>();
         tokio::time::timeout(Duration::from_secs(8), async {
@@ -732,8 +796,31 @@ mod tests {
                 }
             }
         }
-        a.stop().await.unwrap();
+        let old_id = b.id.clone();
+        let old_certificate = Invitation::parse(&a.invitation(&old_id).unwrap())
+            .unwrap()
+            .certificate;
         b.stop().await.unwrap();
+        let restarted = LanGroup::start(ip, Some(&code), &identity_b, locations_b)
+            .await
+            .unwrap();
+        assert_eq!(restarted.id, old_id);
+        tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                let current = a
+                    .invitation(&old_id)
+                    .and_then(|value| Invitation::parse(&value));
+                if current.is_ok_and(|current| current.certificate != old_certificate) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(a.peers().unwrap().len(), 2);
+        restarted.stop().await.unwrap();
+        a.stop().await.unwrap();
         c.stop().await.unwrap();
     }
 }

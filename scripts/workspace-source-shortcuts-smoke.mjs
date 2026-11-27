@@ -76,12 +76,20 @@ try {
               if (command.startsWith("create_ssh") && args.sudoPassword === undefined) throw "SSH permission denied.";
               return null;
             case "computer_name": return "This test PC";
-            case "active_lan_group": return Boolean(window.fixtureLanGroup);
-            case "lan_group_writable": return Boolean(window.fixtureGroupWritable);
+            case "lan_group_status": return {
+              active: Boolean(window.fixtureLanGroup), remembered: Boolean(window.fixtureLanGroup || window.fixtureSavedGroup),
+              writable: Boolean(window.fixtureGroupWritable), storageError: null,
+            };
             case "set_lan_group_writable": window.fixtureGroupWritable = args.writable; return null;
-            case "start_lan_group": window.fixtureLanGroup = args.code ?? "generated"; return null;
+            case "start_lan_group":
+              window.fixtureLanGroup = args.code ?? "generated";
+              window.fixtureGroupWritable = false;
+              return { active: true, remembered: true, writable: false, storageError: null };
             case "copy_lan_group_code": return null;
-            case "leave_lan_group": window.fixtureLanGroup = null; return null;
+            case "leave_lan_group":
+              window.fixtureLanGroup = null;
+              window.fixtureSavedGroup = false;
+              return { active: false, remembered: false, writable: false, storageError: null };
             case "list_lan_group_peers": return window.fixtureLanGroup ?
               [{ id: "group-peer", name: "Group test PC", online: true }] : [];
             case "list_lan_group_drives": return pairedDrives();
@@ -377,6 +385,19 @@ try {
     });
     await button(page, "Options").click();
     await button(options, "Computers").click();
+    await button(group, "Leave group").click();
+    await group.getByLabel("Group code", { exact: true }).waitFor();
+    await button(options, "Done").click();
+    await page.evaluate(() => { window.fixtureSavedGroup = true; });
+    await button(page, "Options").click();
+    await button(options, "Computers").click();
+    await group.getByText("Waiting for the local network to reconnect to your group…", { exact: true }).waitFor();
+    await page.evaluate(() => {
+      window.fixtureLanGroup = "same-fixture-code";
+      window.fixtureGroupWritable = false;
+    });
+    await button(group, "Copy group code").waitFor();
+    assert.equal(await group.getByLabel("Allow group members to change files and folders").isChecked(), false);
     await button(group, "Leave group").click();
     await group.getByLabel("Group code", { exact: true }).waitFor();
     await button(options, "Done").click();

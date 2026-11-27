@@ -113,6 +113,13 @@ export interface ComputerSharing {
   invitation: string;
 }
 
+export interface LanGroupStatus {
+  active: boolean;
+  remembered: boolean;
+  writable: boolean;
+  storageError: string | null;
+}
+
 export type FileLocation =
   | { kind: "local"; path: string; parent: string | null; smb?: SmbMount }
   | { kind: "smbRoot"; path: string }
@@ -681,12 +688,11 @@ export const api = {
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),
   listSavedComputerDrives: (credential: string) => invoke<ComputerDrive[]>("list_saved_computer_drives", { credential }),
   listConnectedComputerDrives: (id: number) => invoke<ComputerDrive[]>("list_connected_computer_drives", { id }),
-  activeLanGroup: () => invoke<boolean>("active_lan_group"),
-  lanGroupWritable: () => invoke<boolean>("lan_group_writable"),
+  lanGroupStatus: () => invoke<LanGroupStatus>("lan_group_status"),
   setLanGroupWritable: (writable: boolean) => invoke<void>("set_lan_group_writable", { writable }),
-  startLanGroup: (code?: string) => invoke<void>("start_lan_group", { code }),
+  startLanGroup: (code?: string) => invoke<LanGroupStatus>("start_lan_group", { code }),
   copyLanGroupCode: () => invoke<void>("copy_lan_group_code"),
-  leaveLanGroup: () => invoke<void>("leave_lan_group"),
+  leaveLanGroup: () => invoke<LanGroupStatus>("leave_lan_group"),
   lanGroupPeers: () => invoke<{ id: string; name: string; online: boolean }[]>("list_lan_group_peers"),
   listLanGroupDrives: (peer: string) => invoke<ComputerDrive[]>("list_lan_group_drives", { peer }),
   connectLanGroupPeer: (peer: string, segments: string[]) =>
