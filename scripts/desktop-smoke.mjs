@@ -1221,9 +1221,14 @@ try {
   });
   assert.equal(await attributeRow("hidden.rs").count(), 0);
   assert.equal(await attributeRow("system-hidden.dll").count(), 0);
+  const ordinary = attributeRow("ordinary.sys");
+  const currentOrdinary = ordinary.and(page.locator('[data-current="true"]'));
+  await ordinary.click();
+  await currentOrdinary.waitFor();
   assert.equal(await foreground(attributeName("system-folder")), attributeColors.system);
   assert.notEqual(await foreground(attributeName("ordinary.sys")), attributeColors.system);
   await left.press("Control+h");
+  await currentOrdinary.waitFor();
   assert.equal(await foreground(attributeName(".metadata")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("hidden.rs")), attributeColors.hidden);
   assert.equal(await foreground(attributeName("system-hidden.dll")), attributeColors.system);
