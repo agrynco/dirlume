@@ -88,10 +88,12 @@ try {
             case "connect_lan_group_peer":
               window.groupTarget = { peer: args.peer, segments: args.segments };
               return { id: 10, address: "fixture", origin: "https://fixture", share: "group", listing: remoteListing(args.segments) };
-            case "create_lan_folder":
+            case "change_lan_item":
               if (!window.fixturePeerAllowsCreate) throw "The remote computer allows read access only.";
-              window.createdLanFolder = args.segments;
+              window.lastLanChange = args;
               return null;
+            case "read_server_text": return { text: "", encoding: "utf8", revision: "remote-start" };
+            case "save_lan_text": window.savedLanText = args; return "remote-saved";
             case "verify_computer_pairing": return "Name from the remote host";
             case "save_server_invitation": return "new-fixture-credential";
             case "list_saved_computer_drives": return pairedDrives();
@@ -290,7 +292,7 @@ try {
     const group = options.getByRole("group", { name: "Dirlume LAN group", exact: true });
     await group.getByLabel("Group code", { exact: true }).fill("same-fixture-code");
     await button(group, "Join group").click();
-    await group.getByLabel("Allow group members to create folders", { exact: true }).check();
+    await group.getByLabel("Allow group members to change files and folders", { exact: true }).check();
     await page.waitForFunction(() => window.fixtureGroupWritable === true);
     await button(group, "Copy group code").click();
     await group.getByText("Group code copied. Paste the same code on each computer.", { exact: true }).waitFor();
@@ -309,7 +311,48 @@ try {
     await page.evaluate(() => { window.fixturePeerAllowsCreate = true; });
     await button(lanMkdir, "Create").click();
     await lanMkdir.waitFor({ state: "hidden" });
-    assert.deepEqual(await page.evaluate(() => window.createdLanFolder), ["Files", "Projects"]);
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange.segments), ["Files", "Projects"]);
+    await button(pane("left"), "Tree").click();
+    const lanBranch = files("left").getByRole("treeitem", { name: /^nested/ });
+    await lanBranch.click();
+    await files("left").press("F7");
+    await lanMkdir.getByRole("textbox", { name: "Name", exact: true }).fill("Child");
+    await button(lanMkdir, "Create").click();
+    await lanMkdir.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange.segments), ["Files", "nested", "Child"]);
+    await lanBranch.click();
+    await files("left").press("Shift+F4");
+    const lanNewFile = page.getByRole("dialog", { name: "New file", exact: true });
+    await lanNewFile.getByRole("textbox", { name: "Name", exact: true }).fill("draft.txt");
+    await button(lanNewFile, "Create").click();
+    const lanEditor = page.getByRole("region", { name: "draft.txt", exact: true });
+    const lanContent = lanEditor.locator(".cm-content");
+    await lanContent.fill("Updated from the other computer.");
+    await lanContent.press(client === "macOS" ? "Meta+s" : "Control+s");
+    await page.waitForFunction(() => window.savedLanText);
+    assert.deepEqual(await page.evaluate(() => window.savedLanText), {
+      id: 10, segments: ["Files", "nested", "draft.txt"], revision: "remote-start", text: "Updated from the other computer.",
+    });
+    await button(lanEditor, "Close document").click();
+    const lanChild = files("left").getByRole("treeitem", { level: 2, name: /note\.txt/ });
+    await lanChild.click();
+    await files("left").press("F2");
+    const lanRename = page.getByRole("dialog", { name: "Rename", exact: true });
+    await lanRename.getByRole("textbox", { name: "Name", exact: true }).fill("renamed.txt");
+    await button(lanRename, "Rename").click();
+    await lanRename.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange), {
+      id: 10, segments: ["Files", "nested", "note.txt"], change: { kind: "rename", name: "renamed.txt" },
+    });
+    await lanChild.click();
+    await files("left").press("Shift+Delete");
+    const lanDelete = page.getByRole("dialog", { name: "Delete permanently", exact: true });
+    await button(lanDelete, "Delete permanently").click();
+    await lanDelete.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastLanChange), {
+      id: 10, segments: ["Files", "nested", "note.txt"], change: { kind: "delete", recursive: false },
+    });
+    await button(pane("left"), "List").click();
     await button(page, "Options").click();
     await button(options, "Computers").click();
     await button(group, "Leave group").click();

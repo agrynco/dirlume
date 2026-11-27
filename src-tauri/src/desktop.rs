@@ -2090,20 +2090,42 @@ async fn connect_lan_group_peer(
 }
 
 #[tauri::command]
-async fn create_lan_folder(
+async fn change_lan_item(
     id: u32,
     segments: Vec<String>,
+    change: crate::protocol::LanChange,
     state: State<'_, Connections>,
 ) -> Result<()> {
     let connection = state.get(id)?;
-    let action = crate::protocol::LanChangeRequest {
-        segments,
-        change: crate::protocol::LanChange::Folder,
-    };
+    let action = crate::protocol::LanChangeRequest { segments, change };
     let response = connection
         .request("v1/lan/change", action, Duration::from_secs(15))
         .await?;
     serde_json::from_slice::<Result<()>>(&collect_response(response, 8 * 1024).await?)
+        .map_err(message)?
+}
+
+#[tauri::command]
+async fn save_lan_text(
+    id: u32,
+    segments: Vec<String>,
+    revision: String,
+    text: String,
+    state: State<'_, Connections>,
+) -> Result<String> {
+    if text.len() as u64 > TEXT_LIMIT {
+        return Err("The file is too large to edit in this remote editor.".to_owned());
+    }
+    let connection = state.get(id)?;
+    let request = crate::protocol::LanTextSave {
+        segments,
+        revision,
+        text,
+    };
+    let response = connection
+        .request("v1/lan/save-text", request, Duration::from_secs(45))
+        .await?;
+    serde_json::from_slice::<Result<String>>(&collect_response(response, 8 * 1024).await?)
         .map_err(message)?
 }
 
@@ -2896,7 +2918,9 @@ async fn read_server_text(
         )
         .await?;
     let bytes = collect_response(response, TEXT_LIMIT as usize + 1).await?;
-    decode_text(bytes.as_slice())
+    let mut document = decode_text(bytes.as_slice())?;
+    document.revision = Some(crate::protocol::lan_text_revision(&bytes));
+    Ok(document)
 }
 
 #[tauri::command]
@@ -3754,7 +3778,8 @@ pub fn run() {
         crate::desktop_share::leave_lan_group,
         list_lan_group_drives,
         connect_lan_group_peer,
-        create_lan_folder,
+        change_lan_item,
+        save_lan_text,
         connect_server,
         crate::desktop_share::start_desktop_computer_share,
         crate::desktop_share::stop_desktop_share,

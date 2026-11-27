@@ -14,7 +14,7 @@ export interface Entry extends Partial<PanelMetadata> {
   description?: string | null;
   allocationId?: string;
   tree?: {
-    parent: Extract<Place, { kind: "local" }>;
+    parent: TreePlace;
     segments: readonly string[];
     expanded: boolean;
     loading: boolean;
@@ -142,6 +142,9 @@ export type FtpPlace = Extract<Place, { kind: "ftp" }>;
 export type SshPlace = Extract<Place, { kind: "ssh" }>;
 export type FileServerPlace = FtpPlace | SshPlace;
 export type LanGroupPlace = Extract<Place, { kind: "server" }> & { groupPeer: string };
+export type TreePlace = Extract<Place, { kind: "local" }> | LanGroupPlace;
+export type LanChange = { kind: "folder" } | { kind: "create_text"; encoding: TextEncoding } |
+  { kind: "delete"; recursive: boolean } | { kind: "rename"; name: string };
 export function isLanGroupPlace(place: Place | null | undefined): place is LanGroupPlace {
   return place?.kind === "server" && typeof place.groupPeer === "string";
 }
@@ -688,8 +691,10 @@ export const api = {
   listLanGroupDrives: (peer: string) => invoke<ComputerDrive[]>("list_lan_group_drives", { peer }),
   connectLanGroupPeer: (peer: string, segments: string[]) =>
     invoke<Connection & { share: string }>("connect_lan_group_peer", { peer, segments }),
-  createLanFolder: (place: LanGroupPlace, name: string) =>
-    invoke<void>("create_lan_folder", { id: place.id, segments: [...place.segments, name] }),
+  changeLanItem: (place: LanGroupPlace, relative: string[], change: LanChange) =>
+    invoke<void>("change_lan_item", { id: place.id, segments: [...place.segments, ...relative], change }),
+  saveLanText: (place: LanGroupPlace, name: string, revision: string, text: string) =>
+    invoke<string>("save_lan_text", { id: place.id, segments: [...place.segments, name], revision, text }),
   activeComputerSharing: () => invoke<ComputerSharing | null>("active_desktop_share"),
   startComputerSharing: () => invoke<ComputerSharing>("start_desktop_computer_share"),
   stopComputerSharing: () => invoke<void>("stop_desktop_share"),
@@ -931,7 +936,12 @@ export async function savePlaceText({ place, name }: NamedFile, document: TextDo
     if (!document.revision) throw new Error("Reopen the SSH file before saving again.");
     return api.saveSshText(place.id, [...place.segments, name], document.revision, text, sudoPassword);
   }
-  if (place.kind === "server") throw new Error("This source is read-only.");
+  if (place.kind === "server") {
+    if (!isLanGroupPlace(place)) throw new Error("This source is read-only.");
+    if (!document.revision) throw new Error("Reopen the Dirlume LAN file before saving again.");
+    const revision = await api.saveLanText(place, name, document.revision, text);
+    return { ...document, text, revision };
+  }
   await api.saveText(place.path, name, document.text, text);
   return { ...document, text };
 }
@@ -947,7 +957,7 @@ export function readPlaceBytes({ place, name }: NamedFile, offset: number) {
 
 export function writableTextPlace(place: TextPlace) {
   if (place.kind === "kswitcher") return Boolean(place.capabilities?.write);
-  return place.kind !== "server" && (place.kind !== "archive" || place.writable);
+  return place.kind === "server" ? isLanGroupPlace(place) : place.kind !== "archive" || place.writable;
 }
 
 let nextDirectoryWatch = 0;

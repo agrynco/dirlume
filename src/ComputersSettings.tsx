@@ -106,7 +106,7 @@ export function ComputersSettings() {
             const writable = event.target.checked;
             void runGroup(async () => { await api.setLanGroupWritable(writable); setGroupWritable(writable); });
           }} />
-          {t("Allow group members to create folders")}
+          {t("Allow group members to change files and folders")}
         </label>
         <div className="dialog-actions">
           <Button type="button" onClick={() => void runGroup(async () => {

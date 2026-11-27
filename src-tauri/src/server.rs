@@ -90,6 +90,8 @@ struct Share {
     authorization: String,
     #[cfg(feature = "desktop")]
     writable: Option<Arc<std::sync::atomic::AtomicBool>>,
+    #[cfg(feature = "desktop")]
+    lan_writes: std::sync::Mutex<()>,
 }
 
 enum ShareRoots {
@@ -384,6 +386,8 @@ fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
         authorization: format!("Bearer {token}"),
         #[cfg(feature = "desktop")]
         writable: None,
+        #[cfg(feature = "desktop")]
+        lan_writes: std::sync::Mutex::new(()),
     }))
 }
 
@@ -505,6 +509,7 @@ impl DesktopServer {
             roots,
             authorization: format!("Bearer {}", identity.invitation.token),
             writable: group.map(|(_, writable)| writable),
+            lan_writes: std::sync::Mutex::new(()),
         });
         let invitation = identity.invitation.encode()?;
         let shutdown = axum_server::Handle::new();
@@ -553,7 +558,8 @@ fn router(share: Arc<Share>) -> Router {
     #[cfg(feature = "desktop")]
     let router = router
         .route("/v1/drives", post(computer_drives))
-        .route("/v1/lan/change", post(change_computer));
+        .route("/v1/lan/change", post(change_computer))
+        .route("/v1/lan/save-text", post(save_computer_text));
     router
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(share)
@@ -579,6 +585,126 @@ fn apply_lan_change(
     operation: crate::protocol::LanChangeRequest,
 ) -> std::result::Result<(), String> {
     use crate::protocol::LanChange;
+    let _write = share.lan_writes.lock().map_err(crate::message)?;
+    let (directory, path) = writable_lan_item(share, operation.segments)?;
+    match operation.change {
+        LanChange::Folder => directory.create_dir(path),
+        LanChange::CreateText { encoding } => lan_create_text(&directory, &path, encoding),
+        LanChange::Rename { name } => {
+            let target = local::name_component(&name).map_err(crate::message)?;
+            rename_lan_exclusive(&directory, &path, target)
+        }
+        LanChange::Delete { recursive } => {
+            let metadata = directory.symlink_metadata(&path).map_err(crate::message)?;
+            if metadata.is_symlink() || !metadata.is_dir() {
+                directory.remove_file(path)
+            } else if recursive {
+                directory.remove_dir_all(path)
+            } else {
+                directory.remove_dir(path)
+            }
+        }
+    }
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(all(feature = "desktop", windows))]
+fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Result<()> {
+    use cap_std::fs::OpenOptionsExt;
+    use std::{
+        mem::{align_of, offset_of, size_of},
+        os::windows::{ffi::OsStrExt, io::AsRawHandle},
+    };
+    use windows_sys::{
+        Wdk::Storage::FileSystem::{
+            FileRenameInformation, NtSetInformationFile, FILE_RENAME_INFORMATION,
+        },
+        Win32::{
+            Foundation::RtlNtStatusToDosError,
+            Storage::FileSystem::{
+                DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, SYNCHRONIZE,
+            },
+            System::IO::IO_STATUS_BLOCK,
+        },
+    };
+    let mut options = cap_std::fs::OpenOptions::new();
+    let file = directory.open_with(
+        source,
+        options
+            .access_mode(DELETE | SYNCHRONIZE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT),
+    )?;
+    let name: Vec<u16> = target.as_os_str().encode_wide().collect();
+    let offset = offset_of!(FILE_RENAME_INFORMATION, FileName);
+    let name_bytes = name.len() * size_of::<u16>();
+    let length = (offset + name_bytes + size_of::<u16>()).max(size_of::<FILE_RENAME_INFORMATION>());
+    assert!(align_of::<usize>() >= align_of::<FILE_RENAME_INFORMATION>());
+    let mut buffer = vec![0usize; length.div_ceil(size_of::<usize>())];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+    let mut completion = IO_STATUS_BLOCK::default();
+    let result = unsafe {
+        (*info).RootDirectory = directory.as_raw_handle();
+        (*info).FileNameLength = name_bytes as u32;
+        let destination = buffer.as_mut_ptr().cast::<u8>().add(offset).cast::<u16>();
+        std::ptr::copy_nonoverlapping(name.as_ptr(), destination, name.len());
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut completion,
+            info.cast(),
+            length as u32,
+            FileRenameInformation,
+        )
+    };
+    if result < 0 {
+        Err(io::Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosError(result) } as i32,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "desktop", unix))]
+fn rename_lan_exclusive(directory: &Dir, source: &Path, target: &Path) -> io::Result<()> {
+    use std::{
+        ffi::CString,
+        os::{fd::AsRawFd, unix::ffi::OsStrExt},
+    };
+    let source = CString::new(source.as_os_str().as_bytes())?;
+    let target = CString::new(target.as_os_str().as_bytes())?;
+    let dir = directory.as_raw_fd();
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::renameat2(
+            dir,
+            source.as_ptr(),
+            dir,
+            target.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(target_os = "macos")]
+    let result = unsafe {
+        libc::renameatx_np(
+            dir,
+            source.as_ptr(),
+            dir,
+            target.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn writable_lan_item(
+    share: &Share,
+    segments: Vec<String>,
+) -> std::result::Result<(Dir, PathBuf), String> {
     use std::sync::atomic::Ordering;
     if !share
         .writable
@@ -587,18 +713,207 @@ fn apply_lan_change(
     {
         return Err("The remote computer allows read access only.".to_owned());
     }
-    if operation.segments.len() < 2 {
+    if segments.len() < 2 {
         return Err("Choose a location inside a remote drive.".to_owned());
     }
-    let (directory, path) = share
-        .resolve(RemotePath {
-            segments: operation.segments,
-        })
-        .map_err(|error| error.to_string())?;
-    match operation.change {
-        LanChange::Folder => directory.create_dir(path),
+    let (root, path) = share
+        .resolve(RemotePath { segments })
+        .map_err(crate::message)?;
+    let parent = root
+        .open_dir(path.parent().unwrap_or(Path::new(".")))
+        .map_err(crate::message)?;
+    let name = path
+        .file_name()
+        .ok_or("Choose an item inside a remote drive.")?;
+    Ok((parent, PathBuf::from(name)))
+}
+
+#[cfg(feature = "desktop")]
+fn lan_create_text(
+    directory: &Dir,
+    path: &Path,
+    encoding: crate::desktop::Encoding,
+) -> io::Result<()> {
+    let bytes = crate::desktop::encode_text(encoding, "");
+    if bytes.is_empty() {
+        let mut options = cap_std::fs::OpenOptions::new();
+        return directory
+            .open_with(path, options.write(true).create_new(true))
+            .map(drop);
     }
-    .map_err(|error| error.to_string())
+    stage_lan_text(directory, &bytes, None, |stage| {
+        directory.hard_link(stage, directory, path)
+    })
+}
+
+#[cfg(feature = "desktop")]
+fn stage_lan_text(
+    directory: &Dir,
+    bytes: &[u8],
+    original: Option<&cap_std::fs::File>,
+    publish: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let stage = PathBuf::from(format!(".dirlume-text-{}", uuid::Uuid::new_v4()));
+    let mut options = cap_std::fs::OpenOptions::new();
+    #[cfg(windows)]
+    if original.is_some() {
+        use cap_std::fs::OpenOptionsExt;
+        use windows_sys::Win32::{Foundation::GENERIC_WRITE, Storage::FileSystem::WRITE_DAC};
+        options.access_mode(GENERIC_WRITE | WRITE_DAC);
+    }
+    #[cfg(unix)]
+    if original.is_some() {
+        use cap_std::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = directory.open_with(&stage, options.write(true).create_new(true))?;
+    let written = original
+        .map_or(Ok(()), |original| preserve_lan_access(original, &file))
+        .and_then(|_| file.write_all(bytes))
+        .and_then(|_| file.sync_all());
+    drop(file);
+    let result = written.and_then(|_| publish(&stage));
+    let _ = directory.remove_file(&stage);
+    result
+}
+
+#[cfg(all(feature = "desktop", windows))]
+fn preserve_lan_access(original: &cap_std::fs::File, staged: &cap_std::fs::File) -> io::Result<()> {
+    use std::{
+        os::windows::io::AsRawHandle,
+        ptr::{null, null_mut},
+    };
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{GetSecurityInfo, SetSecurityInfo, SE_FILE_OBJECT},
+            DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        },
+    };
+    let mut access = null_mut();
+    let mut descriptor = null_mut();
+    let read = unsafe {
+        GetSecurityInfo(
+            original.as_raw_handle(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            &mut access,
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if read != 0 {
+        return Err(io::Error::from_raw_os_error(read as i32));
+    }
+    let result = unsafe {
+        let result = SetSecurityInfo(
+            staged.as_raw_handle(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            access,
+            null(),
+        );
+        LocalFree(descriptor);
+        result
+    };
+    if result != 0 {
+        return Err(io::Error::from_raw_os_error(result as i32));
+    }
+    staged.set_permissions(original.metadata()?.permissions())
+}
+
+#[cfg(all(feature = "desktop", unix))]
+fn preserve_lan_access(original: &cap_std::fs::File, staged: &cap_std::fs::File) -> io::Result<()> {
+    use cap_std::fs::{MetadataExt, PermissionsExt};
+    use std::os::fd::AsRawFd;
+    let source = original.metadata()?;
+    if source.permissions().mode() & 0o6000 != 0 {
+        return Err(io::Error::other(
+            "Edit this file with a tool that supports special permissions.",
+        ));
+    }
+    let target = staged.metadata()?;
+    if (source.uid(), source.gid()) != (target.uid(), target.gid())
+        && unsafe { libc::fchown(staged.as_raw_fd(), source.uid(), source.gid()) } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    staged.set_permissions(source.permissions())
+}
+
+#[cfg(feature = "desktop")]
+async fn save_computer_text(
+    State(share): State<Arc<Share>>,
+    request: axum::extract::Request,
+) -> std::result::Result<Json<std::result::Result<String, String>>, StatusCode> {
+    share.authorize(request.headers())?;
+    let bytes = axum::body::to_bytes(
+        request.into_body(),
+        6 * crate::desktop::TEXT_LIMIT as usize + 65_536,
+    )
+    .await
+    .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    let request = serde_json::from_slice(&bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok(Json(
+        spawn_blocking(move || save_lan_text(&share, request))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    ))
+}
+
+#[cfg(feature = "desktop")]
+fn save_lan_text(
+    share: &Share,
+    request: crate::protocol::LanTextSave,
+) -> std::result::Result<String, String> {
+    use crate::{
+        desktop::{decode_text, encode_text, TEXT_LIMIT},
+        protocol::lan_text_revision,
+    };
+    use std::io::Read as _;
+
+    let _write = share.lan_writes.lock().map_err(crate::message)?;
+    let (directory, path) = writable_lan_item(share, request.segments)?;
+    let read_original = || -> io::Result<(Vec<u8>, cap_std::fs::File)> {
+        if !directory.symlink_metadata(&path)?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Choose a regular file.",
+            ));
+        }
+        let mut options = cap_std::fs::OpenOptions::new();
+        // Check write access on the original before replacing its directory entry.
+        let mut file = directory.open_with(&path, options.read(true).write(true))?;
+        let mut bytes = Vec::new();
+        (&mut file).take(TEXT_LIMIT + 1).read_to_end(&mut bytes)?;
+        Ok((bytes, file))
+    };
+    let (source, original) = read_original().map_err(crate::message)?;
+    if lan_text_revision(&source) != request.revision {
+        return Err("The file changed outside Dirlume. Reopen it before saving.".to_owned());
+    }
+    let encoding = decode_text(source.as_slice())?.encoding;
+    let bytes = encode_text(encoding, &request.text);
+    if bytes.len() as u64 > TEXT_LIMIT {
+        return Err("The file is too large to edit in this remote editor.".to_owned());
+    }
+    stage_lan_text(&directory, &bytes, Some(&original), |stage| {
+        let (current, current_file) = read_original()?;
+        let first = same_file::Handle::from_file(original.try_clone()?.into_std())?;
+        let second = same_file::Handle::from_file(current_file.into_std())?;
+        if source != current || first != second {
+            return Err(io::Error::other(
+                "The file changed outside Dirlume. Reopen it before saving.",
+            ));
+        }
+        directory.rename(stage, &directory, &path)
+    })
+    .map_err(crate::message)?;
+    Ok(lan_text_revision(&bytes))
 }
 
 #[cfg(feature = "desktop")]

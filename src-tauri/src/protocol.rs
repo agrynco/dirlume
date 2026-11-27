@@ -12,6 +12,9 @@ pub(crate) const COMPUTER_NAME_HEADER: &str = "x-dirlume-computer-name";
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum LanChange {
     Folder,
+    CreateText { encoding: crate::desktop::Encoding },
+    Delete { recursive: bool },
+    Rename { name: String },
 }
 
 #[cfg(feature = "desktop")]
@@ -19,6 +22,19 @@ pub(crate) enum LanChange {
 pub(crate) struct LanChangeRequest {
     pub segments: Vec<String>,
     pub change: LanChange,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct LanTextSave {
+    pub segments: Vec<String>,
+    pub revision: String,
+    pub text: String,
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn lan_text_revision(bytes: &[u8]) -> String {
+    URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, bytes).as_ref())
 }
 
 #[cfg(feature = "desktop")]

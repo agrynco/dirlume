@@ -84,7 +84,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, remote, showHid
     setError("");
     setFailedName("");
     try {
-      if (remote?.kind === "server") await api.createLanFolder(remote, name);
+      if (remote?.kind === "server") await api.changeLanItem(remote, [name], { kind: "folder" });
       else if (remote) await api.createRemoteFolder(remote, name);
       if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
       if (kswitcher) {

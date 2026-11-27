@@ -423,28 +423,142 @@ mod tests {
                 assert_eq!(drives[0]["name"], drive);
 
                 if drive == "Drive B" && own_drive == "Drive A" {
-                    let request = crate::protocol::LanChangeRequest {
-                        segments: vec![drive.into(), "New folder".into()],
-                        change: crate::protocol::LanChange::Folder,
+                    use crate::{
+                        desktop::Encoding,
+                        protocol::{lan_text_revision, LanChange, LanChangeRequest, LanTextSave},
                     };
-                    let change = || {
+                    let post = |route| {
                         client
-                            .post(invitation.address.join("v1/lan/change").unwrap())
+                            .post(invitation.address.join(route).unwrap())
                             .bearer_auth(&invitation.token)
-                            .json(&request)
-                            .send()
                     };
-                    let result: Result<()> = change().await.unwrap().json().await.unwrap();
+                    let request = |parts: &[&str], change| LanChangeRequest {
+                        segments: std::iter::once(drive.to_owned())
+                            .chain(parts.iter().map(|part| (*part).to_owned()))
+                            .collect(),
+                        change,
+                    };
+                    let folder = request(&["New folder"], LanChange::Folder);
+                    let result: Result<()> = post("v1/lan/change")
+                        .json(&folder)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
                     assert_eq!(
                         result.unwrap_err(),
                         "The remote computer allows read access only."
                     );
                     assert!(!fixture.path().join("Drive B").join("New folder").exists());
                     b.set_writable(true);
-                    let result: Result<()> = change().await.unwrap().json().await.unwrap();
+                    let result: Result<()> = post("v1/lan/change")
+                        .json(&folder)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
                     result.unwrap();
                     assert!(fixture.path().join("Drive B").join("New folder").is_dir());
                     assert!(!fixture.path().join("Drive A").join("New folder").exists());
+                    let host = fixture.path().join(drive);
+                    let text_path = host.join("New folder").join("note.txt");
+                    let create = request(
+                        &["New folder", "note.txt"],
+                        LanChange::CreateText {
+                            encoding: Encoding::Utf8Bom,
+                        },
+                    );
+                    let result: Result<()> = post("v1/lan/change")
+                        .json(&create)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    result.unwrap();
+                    let original = std::fs::read(&text_path).unwrap();
+                    assert_eq!(original, [0xef, 0xbb, 0xbf]);
+
+                    let saved = "Saved text\n".repeat(9_000);
+                    let edit = LanTextSave {
+                        segments: create.segments,
+                        revision: lan_text_revision(&original),
+                        text: saved.clone(),
+                    };
+                    let result: Result<String> = post("v1/lan/save-text")
+                        .json(&edit)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    let new_contents = std::fs::read(&text_path).unwrap();
+                    assert_eq!(result.unwrap(), lan_text_revision(&new_contents));
+                    assert_eq!(&new_contents[..3], &[0xef, 0xbb, 0xbf]);
+                    assert_eq!(&new_contents[3..], saved.as_bytes());
+                    let result: Result<String> = post("v1/lan/save-text")
+                        .json(&edit)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    assert!(result.unwrap_err().contains("changed outside"));
+
+                    let occupied = host.join("Occupied");
+                    std::fs::create_dir(&occupied).unwrap();
+                    let conflict = request(
+                        &["New folder"],
+                        LanChange::Rename {
+                            name: "Occupied".into(),
+                        },
+                    );
+                    let result: Result<()> = post("v1/lan/change")
+                        .json(&conflict)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    assert!(result.is_err());
+                    assert!(occupied.is_dir() && text_path.is_file());
+                    let renamed = request(
+                        &["New folder"],
+                        LanChange::Rename {
+                            name: "Renamed".into(),
+                        },
+                    );
+                    let result: Result<()> = post("v1/lan/change")
+                        .json(&renamed)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    result.unwrap();
+                    assert!(host.join("Renamed").join("note.txt").is_file());
+                    for recursive in [false, true] {
+                        let deletion = request(&["Renamed"], LanChange::Delete { recursive });
+                        let result: Result<()> = post("v1/lan/change")
+                            .json(&deletion)
+                            .send()
+                            .await
+                            .unwrap()
+                            .json()
+                            .await
+                            .unwrap();
+                        assert_eq!(result.is_ok(), recursive);
+                    }
+                    assert!(!host.join("Renamed").exists());
                     b.set_writable(false);
                 }
             }
