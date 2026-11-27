@@ -556,7 +556,18 @@ impl Connection {
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
-        let response = request.send().await.map_err(message)?;
+        let response = request.send().await.map_err(|error| {
+            if error.is_connect() || error.is_timeout() {
+                "Could not reach the Dirlume server.".to_owned()
+            } else {
+                message(error)
+            }
+        })?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND
+            && matches!(action, "v1/list" | "v1/download" | "v1/bytes")
+        {
+            return Err("The requested remote drive, folder, or file is unavailable.".into());
+        }
         if !response.status().is_success() {
             return Err(format!(
                 "Dirlume server returned HTTP {}.",
@@ -2061,11 +2072,15 @@ mod server_download_tests {
         fs::create_dir(&second).unwrap();
         fs::write(first.join("first.txt"), "first drive").unwrap();
         fs::write(second.join("second.txt"), "second drive").unwrap();
-        let roots = vec![("C:".into(), first), ("D:".into(), second)];
+        let roots = Arc::new(Mutex::new(vec![("C:".into(), first)]));
+        let host_roots = Arc::clone(&roots);
         let ip = "127.0.0.1".parse().unwrap();
-        let mut host = crate::server::DesktopServer::start_computer(roots, ip)
-            .await
-            .unwrap();
+        let mut host = crate::server::DesktopServer::start_computer(
+            move || host_roots.lock().unwrap().clone(),
+            ip,
+        )
+        .await
+        .unwrap();
         let guest = Connection::connect(&host.invitation).unwrap();
         let response = guest
             .request("v1/drives", (), Duration::from_secs(5))
@@ -2074,7 +2089,9 @@ mod server_download_tests {
         let drives: serde_json::Value =
             serde_json::from_slice(&collect_response(response, 4096).await.unwrap()).unwrap();
         assert_eq!(drives[0]["name"], "C:");
+        assert_eq!(drives.as_array().unwrap().len(), 1);
         assert!(drives[0]["total"].as_u64().is_some_and(|total| total > 0));
+        roots.lock().unwrap().push(("D:".into(), second));
         let devices = guest.list(Vec::new()).await.unwrap().entries;
         assert_eq!(
             devices
@@ -2091,6 +2108,13 @@ mod server_download_tests {
         }
         assert!(guest.list(vec!["E:".into()]).await.is_err());
         assert!(guest.list(vec!["C:".into(), "..".into()]).await.is_err());
+        roots.lock().unwrap().retain(|(drive, _)| drive != "C:");
+        assert_eq!(guest.list(Vec::new()).await.unwrap().entries[0].name, "D:");
+        assert_eq!(
+            guest.list(vec!["C:".into()]).await.err().as_deref(),
+            Some("The requested remote drive, folder, or file is unavailable.")
+        );
+        assert!(guest.list(vec!["D:".into()]).await.is_ok());
         host.stop().await.unwrap();
     }
 

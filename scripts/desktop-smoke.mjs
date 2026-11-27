@@ -74,7 +74,6 @@ const src = join(temp, "from");
 const dst = join(temp, "to");
 const diagnostics = join(temp, "diagnostics");
 const diagnosticsFile = join(diagnostics, "diagnostics.jsonl");
-const highlightsDirectory = join(temp, "release-highlights");
 const attributes = join(temp, "attributes");
 await mkdir(src);
 await mkdir(dst);
@@ -116,9 +115,9 @@ let browser;
 let otherVolume;
 let lockedBy;
 
-async function startDesktop() {
+async function launchDesktop(program, storage) {
   const debuggingPort = await port();
-  child = spawn(executable, [], {
+  const childProcess = spawn(program, [], {
     windowsHide: true,
     env: {
       ...process.env,
@@ -130,40 +129,116 @@ async function startDesktop() {
       ...(process.env.DIRLUME_INTERNAL_CDP === "1"
         ? { DIRLUME_CDP_PORT: String(debuggingPort) }
         : { WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debuggingPort}` }),
-      WEBVIEW2_USER_DATA_FOLDER: join(temp, "webview"),
+      WEBVIEW2_USER_DATA_FOLDER: join(storage, "webview"),
       DIRLUME_FTP_TEST_CONFIG: join(temp, "ftp-config"),
       DIRLUME_SSH_TEST_CONFIG: join(temp, "ssh-config"),
-      DIRLUME_TEST_DIAGNOSTICS_DIR: diagnostics,
-      DIRLUME_TEST_HIGHLIGHTS_DIR: highlightsDirectory,
+      DIRLUME_TEST_DIAGNOSTICS_DIR: join(storage, "diagnostics"),
+      DIRLUME_TEST_HIGHLIGHTS_DIR: join(storage, "release-highlights"),
     },
   });
   let startupError = "";
   let startupOutput = "";
-  child.on("error", (error) => { startupError = error.message; });
-  child.stderr.on("data", (chunk) => { startupOutput = (startupOutput + chunk).slice(-2500); });
-  for (let attempt = 0; !browser; attempt++) {
-    if (attempt === 100 || startupError || child.exitCode !== null) {
-      throw new Error(`The Windows WebView did not start. PID ${child.pid}, exit code ${child.exitCode}. ${startupError} ${startupOutput}`);
+  childProcess.on("error", (error) => { startupError = error.message; });
+  childProcess.stderr.on("data", (chunk) => { startupOutput = (startupOutput + chunk).slice(-2500); });
+  let connection;
+  try {
+    for (let attempt = 0; !connection; attempt++) {
+      if (attempt === 100 || startupError || childProcess.exitCode !== null) {
+        throw new Error(`The Windows WebView did not start. PID ${childProcess.pid}, exit code ${childProcess.exitCode}. ${startupError} ${startupOutput}`);
+      }
+      try {
+        connection = await chromium.connectOverCDP(`http://127.0.0.1:${debuggingPort}`, { timeout: 1000 });
+      } catch {
+        await setTimeout(250);
+      }
     }
+    const context = connection.contexts()[0];
+    const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
+    page.setDefaultTimeout(8000);
+    await page.getByRole("heading", { name: "Dirlume" }).waitFor();
+    const release = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("installed_release"));
+    if (release.showOnStartup) {
+      const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
+      for (const highlight of release.highlights) await whatsNew.getByText(highlight, { exact: true }).waitFor();
+      await whatsNew.getByRole("button", { name: "Close", exact: true }).click();
+      await whatsNew.waitFor({ state: "hidden" });
+      assert.equal(await readFile(join(storage, "release-highlights", release.version), "utf8"), "");
+    }
+    return { process: childProcess, connection, page };
+  } catch (error) {
+    await connection?.close().catch(() => {});
+    await close(childProcess);
+    throw error;
+  }
+}
+
+async function startDesktop() {
+  const instance = await launchDesktop(executable, temp);
+  child = instance.process;
+  browser = instance.connection;
+  return instance.page;
+}
+
+async function testDirectComputerPairing(guest) {
+  const hostStorage = join(temp, "paired-desktop-host");
+  await mkdir(hostStorage);
+  const hostProgram = join(hostStorage, "Dirlume.exe");
+  await copyFile(executable, hostProgram);
+  const host = await launchDesktop(hostProgram, hostStorage);
+  const name = "Loopback desktop";
+  const systemDrive = process.env.SystemDrive ?? "C:";
+  try {
+    assert.notEqual(host.process.pid, child.pid);
+    const share = await host.page.evaluate(() =>
+      window.__TAURI_INTERNALS__.invoke("start_desktop_computer_share", { address: "127.0.0.1" }));
+    await guest.bringToFront();
+    const options = await openOptionsWindow(guest);
+    await options.getByRole("button", { name: "Computers", exact: true }).click();
+    await options.getByLabel("Computer name", { exact: true }).fill(name);
+    await options.getByLabel("Pairing code", { exact: true }).evaluate((input, invitation) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, invitation);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, share.invitation);
+    await options.getByRole("button", { name: "Pair computer", exact: true }).click();
+    await options.getByRole("button", { name: `Forget ${name}`, exact: true }).waitFor();
+    await closeToolWindow(options, () => options.getByRole("button", { name: "Done", exact: true }).click());
+
+    for (const side of ["left", "right"]) {
+      const pane = guest.getByRole("region", { name: `${side} pane`, exact: true });
+      await pane.getByRole("button", { name: `Locations for ${side} pane`, exact: true }).click();
+      const computer = pane.getByRole("group", { name, exact: true });
+      const drive = computer.getByRole("button", { name: new RegExp(`^${systemDrive}`) });
+      await drive.getByText("Fixed", { exact: true }).waitFor();
+      await drive.getByText(/free of/).waitFor();
+      await drive.click();
+      await guest.waitForFunction(({ side, drive }) =>
+        document.querySelector(`#${side}-path`)?.dataset.path === `/${drive}`, { side, drive: systemDrive });
+      await pane.getByRole("option", { name: /^Windows(?:\s|$)/i }).waitFor();
+    }
+    await host.page.evaluate(() => window.__TAURI_INTERNALS__.invoke("stop_desktop_share"));
+    const left = guest.getByRole("region", { name: "left pane", exact: true });
+    await left.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+    const offline = left.getByRole("group", { name, exact: true });
+    await offline.getByRole("status").filter({ hasText: /could not|offline/i }).waitFor();
+    assert.equal(await offline.getByRole("button").count(), 0);
+    await left.getByRole("button", { name: "Locations for left pane", exact: true }).click();
+    console.log("Verified native Dirlume-to-Dirlume pairing, drives in both panes, and revocation on a separate host process.");
+  } finally {
     try {
-      browser = await chromium.connectOverCDP(`http://127.0.0.1:${debuggingPort}`, { timeout: 1000 });
-    } catch {
-      await setTimeout(250);
+      if (!guest.isClosed()) await guest.evaluate(async (label) => {
+        const key = "dirlume.remote-connections";
+        const profiles = JSON.parse(localStorage.getItem(key) ?? "[]");
+        const paired = profiles.find((profile) => profile.label === label && profile.lan === true);
+        if (paired) {
+          await window.__TAURI_INTERNALS__.invoke("remove_server_invitation", { credential: paired.credential });
+          localStorage.setItem(key, JSON.stringify(profiles.filter((profile) => profile.id !== paired.id)));
+        }
+      }, name);
+    } finally {
+      await host.connection.close().catch(() => {});
+      await close(host.process);
     }
   }
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 8000 });
-  page.setDefaultTimeout(8000);
-  await page.getByRole("heading", { name: "Dirlume" }).waitFor();
-  const release = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke("installed_release"));
-  if (release.showOnStartup) {
-    const whatsNew = page.getByRole("dialog", { name: "What's new", exact: true });
-    for (const highlight of release.highlights) await whatsNew.getByText(highlight, { exact: true }).waitFor();
-    await whatsNew.getByRole("button", { name: "Close", exact: true }).click();
-    await whatsNew.waitFor({ state: "hidden" });
-    assert.equal(await readFile(join(highlightsDirectory, release.version), "utf8"), "");
-  }
-  return page;
 }
 
 async function exitDesktop(page) {
@@ -2418,6 +2493,7 @@ try {
       return page;
     });
   }
+  await testDirectComputerPairing(page);
   await exitDesktop(page);
   console.log("Verified the main menu, keyboard navigation, focus restoration, Help, About, and update action.");
   console.log("Verified copy progress, multiple selection, move, file creation, editing, deletion, appearance persistence, keyboard shortcuts, the command line, and remote transfers.");

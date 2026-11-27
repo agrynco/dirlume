@@ -91,15 +91,22 @@ struct Share {
 }
 
 enum ShareRoots {
-    Folder(Dir),
+    Folder(Arc<Dir>),
     #[cfg(feature = "desktop")]
-    Computer(std::collections::BTreeMap<String, ComputerRoot>),
+    Computer(ComputerLocations),
 }
 
 #[cfg(feature = "desktop")]
-struct ComputerRoot {
-    directory: Dir,
-    path: PathBuf,
+type ComputerLocations = Arc<dyn Fn() -> Vec<(String, PathBuf)> + Send + Sync>;
+
+#[cfg(feature = "desktop")]
+fn available_computer_locations(
+    locations: &ComputerLocations,
+) -> std::collections::BTreeMap<String, PathBuf> {
+    locations()
+        .into_iter()
+        .filter(|(_, path)| Dir::open_ambient_dir(path, ambient_authority()).is_ok())
+        .collect()
 }
 
 #[cfg(feature = "desktop")]
@@ -122,7 +129,7 @@ impl Share {
         }
     }
 
-    fn resolve(&self, path: RemotePath) -> io::Result<(&Dir, PathBuf)> {
+    fn resolve(&self, path: RemotePath) -> io::Result<(Arc<Dir>, PathBuf)> {
         let root = match &self.roots {
             ShareRoots::Folder(root) => root,
             #[cfg(feature = "desktop")]
@@ -135,13 +142,18 @@ impl Share {
                     ));
                 }
                 let name = path.segments.remove(0);
-                let root = roots.get(&name).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "The drive is unavailable")
-                })?;
-                return Ok((&root.directory, relative_path(path)?));
+                let root = roots()
+                    .into_iter()
+                    .rev()
+                    .filter(|(label, _)| label == &name)
+                    .find_map(|(_, path)| Dir::open_ambient_dir(path, ambient_authority()).ok())
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::NotFound, "The drive is unavailable")
+                    })?;
+                return Ok((Arc::new(root), relative_path(path)?));
             }
         };
-        Ok((root, relative_path(path)?))
+        Ok((Arc::clone(root), relative_path(path)?))
     }
 }
 
@@ -164,7 +176,7 @@ fn list(share: &Share, request: ListRequest) -> io::Result<ListPage> {
     #[cfg(feature = "desktop")]
     if let ShareRoots::Computer(roots) = &share.roots {
         if request.path.segments.is_empty() {
-            let entries = roots
+            let entries = available_computer_locations(roots)
                 .keys()
                 .filter(|name| request.after.as_ref().is_none_or(|after| *name > after))
                 .map(|name| {
@@ -366,7 +378,7 @@ async fn read_bytes(
 
 fn make_share(root: &Path, token: &str) -> io::Result<Arc<Share>> {
     Ok(Arc::new(Share {
-        roots: ShareRoots::Folder(Dir::open_ambient_dir(root, ambient_authority())?),
+        roots: ShareRoots::Folder(Arc::new(Dir::open_ambient_dir(root, ambient_authority())?)),
         authorization: format!("Bearer {token}"),
     }))
 }
@@ -443,22 +455,17 @@ pub(crate) struct DesktopServer {
 impl DesktopServer {
     #[cfg(test)]
     pub(crate) async fn start(root: &Path, ip: std::net::IpAddr) -> Result<Self> {
-        let roots = ShareRoots::Folder(Dir::open_ambient_dir(root, ambient_authority())?);
+        let roots = ShareRoots::Folder(Arc::new(Dir::open_ambient_dir(root, ambient_authority())?));
         Self::start_with_roots(roots, ip).await
     }
 
     pub(crate) async fn start_computer(
-        locations: Vec<(String, PathBuf)>,
+        locations: impl Fn() -> Vec<(String, PathBuf)> + Send + Sync + 'static,
         ip: std::net::IpAddr,
     ) -> Result<Self> {
-        let roots = locations
-            .into_iter()
-            .filter_map(|(label, path)| {
-                let directory = Dir::open_ambient_dir(&path, ambient_authority()).ok()?;
-                Some((label, ComputerRoot { directory, path }))
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if roots.is_empty() {
+        let roots: ComputerLocations = Arc::new(locations);
+        let initial = Arc::clone(&roots);
+        if spawn_blocking(move || available_computer_locations(&initial).is_empty()).await? {
             return Err("There are no accessible local drives.".into());
         }
         Self::start_with_roots(ShareRoots::Computer(roots), ip).await
@@ -535,14 +542,14 @@ async fn computer_drives(
             return Err(StatusCode::NOT_FOUND);
         };
         Ok(Json(
-            roots
+            available_computer_locations(roots)
                 .iter()
-                .map(|(name, root)| {
-                    let space = crate::disk_space::query(&root.path).ok();
+                .map(|(name, path)| {
+                    let space = crate::disk_space::query(path).ok();
                     ComputerDrive {
                         name: name.clone(),
                         #[cfg(windows)]
-                        kind: local::drive_type(&root.path),
+                        kind: local::drive_type(path),
                         #[cfg(not(windows))]
                         kind: None,
                         total: space.map(|space| space.total),

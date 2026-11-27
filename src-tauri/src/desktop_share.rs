@@ -69,10 +69,7 @@ pub(crate) async fn start_desktop_computer_share(
     if sharing.as_ref().is_some_and(DesktopServer::is_running) {
         return Err("Stop the current share before starting another.".to_owned());
     }
-    let locations = tokio::task::spawn_blocking(local::local_share_locations)
-        .await
-        .map_err(message)?;
-    let server = DesktopServer::start_computer(locations, ip)
+    let server = DesktopServer::start_computer(local::local_share_locations, ip)
         .await
         .map_err(message)?;
     let result = details(&server);
