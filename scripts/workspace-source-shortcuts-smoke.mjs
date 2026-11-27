@@ -74,10 +74,14 @@ try {
                 return new Promise((resolve) => { window.finishCapacity = () => resolve([drive("Files", 800, 700)]); });
               }
               return pairedDrives();
-            case "kswitcher_peers": return windows ? [
-              { id: "online", name: "KSwitcher PC", online: true },
-              { id: "offline", name: "Offline KSwitcher PC", online: false },
-            ] : [];
+            case "kswitcher_peers":
+              if (window.kswitcherAuthorizationDenied) {
+                throw "Authorize this executable in KSwitcher → Computers → Trusted clients.";
+              }
+              return windows ? [
+                { id: "online", name: "KSwitcher PC", online: true },
+                { id: "offline", name: "Offline KSwitcher PC", online: false },
+              ] : [];
             case "list_kswitcher":
               if (args.peer === "offline") throw new Error("An offline peer must not be queried.");
               if (args.path === "") return { ...listing, entries: [], parent: null,
@@ -161,8 +165,17 @@ try {
     await control.getByText("Analyze space", { exact: true }).waitFor();
     assert.equal(await control.isEnabled(), true);
     if (windows) {
+      await page.evaluate(() => { window.kswitcherAuthorizationDenied = true; });
       await files("right").press("Alt+F2");
-      const lan = sources("right").getByRole("group", { name: "Dirlume LAN", exact: true });
+      const kswitcher = sources("right").getByRole("group", { name: "KSwitcher LAN", exact: true });
+      await kswitcher.getByRole("status").filter({ hasText: "To browse KSwitcher computers" }).waitFor();
+      const direct = sources("right").getByRole("group", { name: "Dirlume LAN", exact: true });
+      await direct.getByRole("group", { name: "Dirlume test PC", exact: true }).getByRole("button", { name: /^Full disk/ }).waitFor();
+      assert.equal(await direct.getByText(/Trusted clients/).count(), 0);
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => { window.kswitcherAuthorizationDenied = false; });
+      await files("right").press("Alt+F2");
+      const lan = sources("right").getByRole("group", { name: "KSwitcher LAN", exact: true });
       await lan.getByRole("group", { name: "Offline KSwitcher PC", exact: true }).getByText("Offline", { exact: true }).waitFor();
       await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
       await page.waitForFunction(() => window.kswitcherDrive === "C:\\");

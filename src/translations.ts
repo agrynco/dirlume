@@ -871,6 +871,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "No saved computers.": ["Немає збережених комп’ютерів.", "Нет сохранённых компьютеров."],
   "Forget computer": ["Забути комп’ютер", "Забыть компьютер"],
   "Forget {0}": ["Забути {0}", "Забыть {0}"],
+  "KSwitcher LAN": ["KSwitcher LAN", "KSwitcher LAN"],
+  "To browse KSwitcher computers, add Dirlume.exe under KSwitcher → Computers → Trusted clients.": ["Для доступу до комп’ютерів KSwitcher додайте Dirlume.exe у KSwitcher → Computers → Trusted clients.", "Для доступа к компьютерам KSwitcher добавьте Dirlume.exe в KSwitcher → Computers → Trusted clients."],
   "Dirlume LAN": ["Dirlume LAN", "Dirlume LAN"],
   "Loading drives…": ["Завантаження дисків…", "Загрузка дисков…"],
   "No drives.": ["Немає дисків.", "Нет дисков."],
