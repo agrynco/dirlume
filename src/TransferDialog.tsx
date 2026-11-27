@@ -55,7 +55,7 @@ export function itemSource(place: FilePlace, item: Entry): TransferSource {
     return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
   }
   const target = childPlace(place, item.name) as typeof place;
-  return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name };
+  return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name, folder: item.directory };
 }
 
 export function TransferDialog({ transfer, side, showHidden, onClose, onFinished }: {
@@ -102,7 +102,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
     (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
   const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget;
-  const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" || transfer.kswitcherBroker;
+  const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
+    transfer.kswitcherBroker || transfer.items.every(({ place, entry }) =>
+      (place.kind === "server" || place.kind === "kswitcher") && entry.directory);
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
   const manyDestinations = multipleDestinations && !moving;
@@ -242,7 +244,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         attempted = item;
         const { place, entry } = item;
         setProgress({ file: entry.name, bytes: 0, total: null });
-        const remoteCopy = !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker;
+        const remoteCopy = !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
+          (place.kind === "server" || place.kind === "kswitcher") && entry.directory;
         const target = remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
           : destination;

@@ -124,6 +124,19 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Session {
+    pub(crate) fn create_folder(&mut self, segments: &[String]) -> SftpResult<()> {
+        self.wait(self.sftp.fs().create_dir(Self::absolute(segments)?))
+    }
+
+    pub(crate) fn create_file(&mut self, segments: &[String], mut bytes: &[u8]) -> SftpResult<()> {
+        let stage = self.stage_upload(segments, &mut bytes, |_| Ok(()))?;
+        let result = self.publish_stage(&stage, segments, false);
+        if result.is_err() {
+            self.remove_stage(&stage);
+        }
+        result
+    }
+
     fn wait<T, E: Into<SftpFailure>>(
         &self,
         operation: impl std::future::Future<Output = std::result::Result<T, E>>,
@@ -667,8 +680,7 @@ impl remote_transfer::UploadSession for Session {
         .map(|_| ())
     }
     fn mkdir(&mut self, segments: &[String]) -> Result<()> {
-        self.wait(self.sftp.fs().create_dir(Self::absolute(segments)?))
-            .map_err(Into::into)
+        self.create_folder(segments).map_err(Into::into)
     }
 
     fn upload_to_stage(

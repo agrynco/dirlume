@@ -1395,6 +1395,23 @@ impl Session {
             .map_err(message)
     }
 
+    pub(crate) fn create_file(&mut self, segments: &[String], mut bytes: &[u8]) -> Result<()> {
+        if self.stat(segments)?.is_some() {
+            return Err("An item with that name already exists.".to_owned());
+        }
+        let stage = self.upload_to_stage(segments, &mut bytes, |_| Ok(()))?;
+        let result = (|| {
+            if self.stat(segments)?.is_some() {
+                return Err("An item with that name already exists.".to_owned());
+            }
+            self.rename_stage(&stage, segments)
+        })();
+        if result.is_err() {
+            self.remove_stage(&stage);
+        }
+        result
+    }
+
     fn remove(&mut self, segments: &[String], recursive: bool) -> Result<()> {
         let file = self
             .stat(segments)?
@@ -1585,6 +1602,16 @@ pub(crate) fn matches_mask(pattern: &[char], name: &str) -> bool {
         }
     }
     pattern[next..].iter().all(|&letter| letter == '*')
+}
+
+#[tauri::command]
+pub async fn create_ftp_folder(
+    id: u32,
+    segments: Vec<String>,
+    state: State<'_, FtpState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    blocking(move || connection.open()?.mkdir(&segments)).await
 }
 
 #[tauri::command]

@@ -174,7 +174,7 @@ type Modal =
   | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
-  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" }> }
+  | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" | "kswitcher" | "ftp" | "ssh" }> }
   | { kind: "createArchive"; side: Side; directory: string; names: string[] }
   | { kind: "archivePassword"; side: Side; path: string }
   | { kind: "sudoBrowse"; side: Side; target: DeniedSshListing }
@@ -467,7 +467,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const remoteTrash = Boolean(fileServer?.environment?.recycleBin?.keepDeleted);
   const permanentDelete = Boolean(fileServer && !remoteTrash || smbHost(local));
   const canTransfer = Boolean(currentItem && (currentItem.place.kind !== "kswitcher" ||
-    currentItem.place.path && !currentItem.entry.link && (!currentItem.entry.directory || kswitcherWrite)));
+    currentItem.place.path && !currentItem.entry.link));
   const shortcuts = shortcutBindings(preferences);
   const editingDocument = documents.find(({ id }) => id === activeDocument)?.editing;
   const [helpRequest, setHelpTopic] = useHelpShortcut(shortcuts.help, contextHelpTopic(modal?.kind, editingDocument));
@@ -2123,9 +2123,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         "Choose a local source for the FTP upload.", error: true });
       return;
     }
-    if ((source.kind !== "local" || kswitcherBroker) && items.some(({ entry }) => entry.link ||
-      fromKSwitcher && !kswitcherBroker && entry.directory)) {
-      setStatus({ text: fromKSwitcher && !kswitcherBroker ? "Choose regular remote files to download." : "Choose remote files or folders without links.", error: true });
+    if ((source.kind !== "local" || kswitcherBroker) && items.some(({ entry }) => entry.link)) {
+      setStatus({ text: "Choose remote files or folders without links.", error: true });
       return;
     }
     setModal({ kind: "transfer", side, transfer: {
@@ -3090,7 +3089,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       case "mkdir":
         if (!pane.search && !busy && !pane.loading) {
-          const place = local ?? (archive?.canAdd ? archive : undefined) ?? (kswitcher?.capabilities?.write ? kswitcher : undefined);
+          const place = local ?? fileServer ?? (archive?.canAdd ? archive : undefined) ?? kswitcher;
           if (place) setModal({ kind: "mkdir", side: active, place });
         }
         break;
@@ -3113,10 +3112,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       }
       case "newFile": {
-        const place = local ?? (kswitcher?.capabilities?.write ? kswitcher : undefined);
+        const place = local ?? fileServer ?? kswitcher;
         if (place && !pane.search && !busy && !pane.loading) {
-          setModal(place.kind === "kswitcher" ? { kind: "newFile", side: active, path: place.path, name: "", kswitcher: place } :
-            { kind: "newFile", path: place.path, name: "" });
+          setModal({ kind: "newFile", side: active, path: placePath(place), name: "",
+            kswitcher: place.kind === "kswitcher" ? place : undefined,
+            remote: isFileServer(place) ? place : undefined });
         }
         break;
       }
@@ -3296,8 +3296,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       disabled: (!local && !ftp && !(kswitcherWrite && kswitcherDelete)) || !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher) && current.link) || busy },
-    { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !kswitcherWrite) || !!pane.search || busy },
-    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !archive?.canAdd && !kswitcherWrite) || !!pane.search || busy },
+    { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !fileServer && !kswitcher) || !!pane.search || busy },
+    { command: "mkdir", label: "New folder", Icon: FolderPlus, disabled: (!local && !fileServer && !archive?.canAdd && !kswitcher) || !!pane.search || busy },
     { command: "recycle", label: permanentDelete || archive ? "Delete" : "Trash", Icon: Trash2,
       disabled: (!local && !fileServer && !archive?.writable && !kswitcherDelete) || !!pane.search && !localSearchRoot(pane) || !current || busy },
     { command: "compare", label: "Compare", Icon: FileDiff, disabled: comparison === null },
@@ -4082,9 +4082,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         }} />}
       {modal?.kind === "compare" && <CompareDialog left={modal.left} right={modal.right}
         previousShortcut={shortcuts.previousChange} nextShortcut={shortcuts.nextChange} swapShortcut={shortcuts.swap} onClose={() => setModal(null)} />}
-      {modal?.kind === "mkdir" && <NewFolderDialog directory={modal.place.path} showHidden={preferences.hidden}
+      {modal?.kind === "mkdir" && <NewFolderDialog directory={placePath(modal.place)} showHidden={preferences.hidden}
         archive={modal.place.kind === "archive" ? modal.place : undefined}
         kswitcher={modal.place.kind === "kswitcher" ? modal.place : undefined}
+        remote={isFileServer(modal.place) ? modal.place : undefined}
         historyShortcut={shortcuts.folderNameHistory} onClose={() => setModal(null)}
         onCreated={async (name) => {
           await load(modal.side, modal.place, "refresh", name);
@@ -4116,7 +4117,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             }
             return false;
           } : undefined}
-          onSubmit={async (operation, recursive, progress) => {
+          onSubmit={async (operation, recursive, progress, sudoPassword) => {
           const remote = modal.remote;
           if (modal.kswitcher) {
             const { peer } = modal.kswitcher;
@@ -4202,11 +4203,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               setModal(null);
               return;
             }
-            if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
+            if (operation.kind === "create_file" && remote) {
+              await api.createRemoteTextFile(remote, operation.name, operation.encoding ?? "utf8", sudoPassword);
+              invalidateDirectories({ kind: remote.kind, id: remote.profileId });
+            } else if (operation.kind === "rename") await renameItem((remote?.kind === "ftp" ? remote : undefined) ?? localPath(modal.path), operation.name, operation.new_name);
             else await api.operate(modal.path, operation);
             fileLocationsChanged();
             if (modal.kind === "newFile") {
-              openDocument({ place: { kind: "local", path: modal.path, parent: null }, name: operation.name }, true, { fromPane: modal.side });
+              openDocument({ place: remote ?? { kind: "local", path: modal.path, parent: null }, name: operation.name }, true, { fromPane: modal.side });
             }
           }
           setModal(null);
@@ -4280,12 +4284,13 @@ function CommandHistory({ commands, onChoose, onClose }: {
 function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
   modal: ActionModal;
   onClose: () => void;
-  onSubmit: (operation: Operation | undefined, recursive: boolean, progress?: RemoteDeletionProgress) => Promise<void>;
+  onSubmit: (operation: Operation | undefined, recursive: boolean, progress?: RemoteDeletionProgress, sudoPassword?: string) => Promise<void>;
   hasNonemptyFolders?: () => Promise<boolean>;
 }) {
   const [name, setName] = useState(modal.kind === "rename" ? modal.name : "");
   const [encoding, setEncoding] = useState<TextEncoding>("utf8");
   const [error, setError] = useState("");
+  const [sudoCreation, setSudoCreation] = useState<{ name: string; encoding: TextEncoding }>();
   const [waiting, setWaiting] = useState(false);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [recursive, setRecursive] = useState(false);
@@ -4322,7 +4327,11 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         modal.kind === "rename" ? { kind: "rename", name: modal.name, new_name: name } : undefined, recursive,
         controller ? { signal: controller.signal, completed: setCompleted } : undefined);
     } catch (error) {
-      setError(describeError(error));
+      const reason = describeError(error);
+      setError(reason);
+      if (modal.kind === "newFile" && modal.remote?.kind === "ssh" && isPermissionError(reason)) {
+        setSudoCreation({ name, encoding });
+      }
     } finally {
       setWaiting(false);
       cancelRemote.current = null;
@@ -4370,6 +4379,7 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
               {Object.entries(textEncodingLabels).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </select>
           </label>}
+          {modal.kind === "newFile" && modal.remote && <p>{modal.remote.address} · {modal.path}</p>}
           {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
           {renameInArchive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
           {canCancelRemote && removing && waiting && <>
@@ -4394,6 +4404,10 @@ function FileDialog({ modal, onClose, onSubmit, hasNonemptyFolders }: {
         </footer>
       </form>
     </Dialog>
+    {sudoCreation && modal.remote?.kind === "ssh" && <SudoDialog address={modal.remote.address}
+      path={`/${[...modal.remote.segments, sudoCreation.name].join("/")}`} operation="createFile"
+      onClose={() => setSudoCreation(undefined)} onConfirm={(password) =>
+        onSubmit({ kind: "create_file", ...sudoCreation }, false, undefined, password)} />}
     {lockPaths && <LockDialog paths={lockPaths} onClose={() => setLockPaths(null)} />}
     </>
   );

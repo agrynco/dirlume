@@ -59,15 +59,31 @@ try {
             case "git_repository": return { root: home, name: "Fixture", headRef: null, head: null, branches: [] };
             case "git_history": return { commits: [], nextOffset: null };
             case "ftp_profiles": return [{ id: "ftp", label: "FTP fixture", host: "fixture", port: 21 }];
-            case "ssh_profiles": return [];
+            case "ssh_profiles": return [{ id: "ssh", label: "SSH creation fixture", host: "fixture", port: 22 }];
             case "connect_ftp": return { id: 1, address: "fixture", origin: "ftp://fixture", segments: ["nested"], listing };
             case "list_ftp": return listing;
+            case "connect_ssh": return { kind: "connected", id: 9, address: "fixture", origin: "sftp://fixture",
+              segments: ["nested"], listing };
+            case "list_ssh": return { ...listing, elevated: false };
+            case "read_ftp_text":
+            case "read_ssh_text": return { text: "", encoding: "utf8", revision: "fixture" };
+            case "create_ftp_folder":
+            case "create_ftp_text_file":
+            case "create_ssh_folder":
+            case "create_ssh_text_file":
+              (window.remoteCreates ??= []).push({ command, segments: args.segments, encoding: args.encoding,
+                elevated: args.sudoPassword !== undefined });
+              if (command.startsWith("create_ssh") && args.sudoPassword === undefined) throw "SSH permission denied.";
+              return null;
             case "computer_name": return "This test PC";
             case "list_saved_computer_drives": return pairedDrives();
             case "connect_saved_server":
               window.dirlumeDrive = args.segments;
               return { id: 8, address: "fixture", origin: "https://fixture", share: "fixture", listing: remoteListing(args.segments) };
             case "list_server": return remoteListing(args.segments);
+            case "transfer_item":
+              window.lastTransfer = args.request;
+              return { kind: "completed" };
             case "list_connected_computer_drives":
               if (window.deferCapacity) {
                 window.deferCapacity = false;
@@ -158,6 +174,16 @@ try {
     await refresh.click();
     await page.waitForFunction(() => typeof window.finishCapacity === "function");
     await openPairedDrive("Full disk");
+    await files("left").getByRole("option", { name: /^nested/ }).click();
+    await files("left").press("F5");
+    const copyFolder = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await copyFolder.getByRole("combobox", { name: "Destination", exact: true }).inputValue(), downloads);
+    await button(copyFolder, "Copy").click();
+    await page.waitForFunction(() => window.lastTransfer);
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "server", connection: 8, segments: ["Full disk", "nested"], folder: true,
+    });
+    await copyFolder.waitFor({ state: "hidden" });
     await control.getByText("0 B free of 100 GiB", { exact: true }).waitFor();
     await page.evaluate(() => window.finishCapacity());
     assert.equal(await control.getAttribute("aria-description"), "0 B free of 100 GiB, 100 GiB used");
@@ -371,6 +397,36 @@ try {
         assert.equal(await sources("left").isVisible(), true);
       }
     }
+    for (const [profile, provider] of [[/^FTP fixture/, "ftp"], [/^SSH creation fixture/, "ssh"]]) {
+      await page.setViewportSize({ width: 1400, height: 760 });
+      await files("left").press("Alt+F1");
+      await button(sources("left"), "NetBox").click();
+      await files("left").getByRole("option", { name: profile }).dblclick();
+      await waitForPath("left", "/nested");
+      for (const [key, title, name, suffix] of [
+        ["F7", "New folder", "Projects", "folder"],
+        ["Shift+F4", "New file", "draft.txt", "text_file"],
+      ]) {
+        await files("left").press(key);
+        const create = page.getByRole("dialog", { name: title, exact: true });
+        await create.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+        await button(create, "Create").click();
+        if (provider === "ssh") {
+          const sudo = page.getByRole("dialog", { name: "SSH permissions", exact: true });
+          await sudo.getByLabel("Sudo password", { exact: true }).waitFor();
+          await button(sudo, "Continue with sudo").click();
+        }
+        await create.waitFor({ state: "hidden" });
+        const attempts = await page.evaluate(({ provider, suffix }) => window.remoteCreates.filter(({ command }) =>
+          command === `create_${provider}_${suffix}`), { provider, suffix });
+        assert.deepEqual(attempts.map(({ elevated }) => elevated), provider === "ssh" ? [false, true] : [false]);
+        assert.deepEqual(attempts.at(-1).segments, ["nested", name]);
+        if (suffix === "text_file") {
+          await button(page.getByRole("region", { name, exact: true }), "Close document").click();
+        }
+      }
+    }
+
     const localized = {
       Windows: { language: "en", title: "Folder shortcuts", up: "Move up", down: "Move down" },
       Ubuntu: { language: "uk", title: "Закладки папок", up: "Перемістити вгору", down: "Перемістити вниз" },

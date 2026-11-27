@@ -1013,6 +1013,8 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Choose a folder as the link target.": ["Виберіть папку як ціль посилання.", "Выберите папку в качестве цели ссылки."],
   "Separate folder names with commas or semicolons and put names with separators in double quotes.": ["Розділяйте назви папок комами або крапками з комою. Назви з розділювачами беріть у подвійні лапки.", "Разделяйте имена папок запятыми или точками с запятой. Имена с разделителями заключайте в двойные кавычки."],
   "New folder": ["Нова папка", "Новая папка"],
+  "Use sudo on {0} to create this folder?": ["Створити цю папку на {0} з правами sudo?", "Создать эту папку на {0} с правами sudo?"],
+  "Use sudo on {0} to create this file?": ["Створити цей файл на {0} з правами sudo?", "Создать этот файл на {0} с правами sudo?"],
   "Delete": ["Видалити", "Удалить"],
   "Trash": ["До кошика", "В корзину"],
   "Compare": ["Порівняти", "Сравнить"],
