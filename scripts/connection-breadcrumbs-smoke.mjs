@@ -280,6 +280,25 @@ async function checkKSwitcherOperations(page) {
     peer: "fixture-peer", path: "D:\\notes.txt", text: "Remote notes\nUpdated remotely",
     encoding: "utf8", revision: "123",
   });
+  await button(editor, "Close document").click();
+  await page.evaluate(() => { window.connectionFixture.directorySettings = { startingFolder: "" }; });
+  await enterFromCatalog(page, "right", "NetBox", "Saved FTP");
+  await row(page, "right", folders[0]).click();
+  await list(page, "right").press("F5");
+  await button(copy, "Copy").click();
+  await copy.waitFor({ state: "hidden" });
+  await row(page, "left", "subfolder").click();
+  await list(page, "left").press("F6");
+  await button(move, "Move").click();
+  await move.waitFor({ state: "hidden" });
+  const [toPaired, toFtp] = await page.evaluate(() => window.connectionFixture.transfers.slice(2));
+  assert.equal(toPaired.source.kind, "ftp");
+  assert.equal(toPaired.kswitcherDestination, "fixture-peer");
+  assert.equal(toPaired.kswitcherBroker, false);
+  assert.equal(toFtp.source.kind, "kswitcher");
+  assert.equal(toFtp.source.path, "C:\\subfolder");
+  assert.equal(toFtp.ftpDestination, 4);
+  assert.equal(toFtp.moving, true);
 }
 
 async function checkDirectoryCache(page) {

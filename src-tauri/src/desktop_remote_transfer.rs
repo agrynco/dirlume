@@ -6,9 +6,10 @@ use std::{
 };
 
 use super::{
-    collect_local_move, finish_downloaded_file, ftp, lan_transfer, local, local_transfer, message,
-    remote_transfer, ssh, ssh_transfer, Channel, Connection, LocalOriginal, Result, TransferEvent,
-    TransferOutcome, TransferRequest, TransferSession, TransferSource, VerifiedUpload,
+    collect_local_move, download_kswitcher_tree, finish_downloaded_file, ftp, lan_transfer, local,
+    local_transfer, message, remote_transfer, ssh, ssh_transfer, transfer_kswitcher, Channel,
+    Connection, LocalOriginal, Result, TransferEvent, TransferOutcome, TransferRequest,
+    TransferSession, TransferSource, VerifiedUpload,
 };
 
 pub(super) enum Endpoint<'a> {
@@ -16,6 +17,7 @@ pub(super) enum Endpoint<'a> {
     Ssh(&'a Arc<ssh::Connection>),
     Server(&'a Connection),
     Archive(&'a Mutex<crate::archives::Archive>),
+    Kswitcher(&'a str),
 }
 
 impl Endpoint<'_> {
@@ -24,14 +26,14 @@ impl Endpoint<'_> {
             Self::Ftp(connection) => Some(connection.host()),
             Self::Ssh(connection) => Some(connection.host()),
             Self::Server(connection) => connection.invitation.address.host_str(),
-            Self::Archive(_) => None,
+            Self::Archive(_) | Self::Kswitcher(_) => None,
         }
     }
 }
 
 pub(super) struct Relay<'a> {
     pub request: &'a TransferRequest,
-    pub transfer: &'a TransferSession,
+    pub transfer: &'a Arc<TransferSession>,
     pub output: &'a Channel<TransferEvent>,
 }
 
@@ -99,6 +101,7 @@ impl Relay<'_> {
             Endpoint::Archive(archive) => {
                 self.publish_archive(archive, name, &staged, progress, ask)
             }
+            Endpoint::Kswitcher(peer) => self.publish_kswitcher(peer, name, &staged),
         };
         match source {
             Endpoint::Ftp(connection) => {
@@ -232,6 +235,83 @@ impl Relay<'_> {
                 }
                 Ok(TransferOutcome::Completed)
             }
+            Endpoint::Kswitcher(peer) => {
+                let TransferSource::Kswitcher {
+                    path,
+                    folder,
+                    modified,
+                    ..
+                } = &self.request.source
+                else {
+                    return Err("Choose a KSwitcher LAN source.".to_owned());
+                };
+                if self.request.moving {
+                    let capabilities = tauri::async_runtime::block_on(
+                        self.transfer
+                            .interrupt(crate::kswitcher_lan::capabilities(peer)),
+                    )?;
+                    if !capabilities.delete {
+                        return Err(
+                            "Grant the required file permission in Trusted clients.".to_owned()
+                        );
+                    }
+                }
+                if *folder {
+                    download_kswitcher_tree(peer, path, &staged, self.transfer, progress)?;
+                } else {
+                    let mut file = fs::File::create_new(&staged).map_err(message)?;
+                    tauri::async_runtime::block_on(self.transfer.interrupt(
+                        crate::kswitcher_lan::download(peer, path, &mut file, |bytes, total| {
+                            progress(Path::new(name), bytes, total)
+                        }),
+                    ))?;
+                    finish_downloaded_file(&file, *modified).map_err(message)?;
+                }
+                let mut originals = Vec::new();
+                if self.request.moving {
+                    let mut staged_items = Vec::new();
+                    collect_local_move(&staged, &[], self.transfer, &mut staged_items)?;
+                    for item in staged_items {
+                        let remote_path = join_kswitcher_path(path, &item.target);
+                        let stamp = kswitcher_entry(peer, &remote_path, self.transfer)?;
+                        if stamp.link
+                            || stamp.directory != matches!(item.original, LocalOriginal::Folder(_))
+                        {
+                            return Err(
+                                "The KSwitcher LAN item changed during the move.".to_owned()
+                            );
+                        }
+                        originals.push((item.path, remote_path, stamp));
+                    }
+                }
+                let Some(destination) = publish(progress, ask)? else {
+                    return Ok(TransferOutcome::Skipped);
+                };
+                for (local, remote, stamp) in originals {
+                    let cleanup = (|| {
+                        check_kswitcher_stamp(peer, &remote, &stamp, self.transfer)?;
+                        if !stamp.directory {
+                            verify_kswitcher_copy(peer, &remote, &local, self.transfer)?;
+                            check_kswitcher_stamp(peer, &remote, &stamp, self.transfer)?;
+                        }
+                        tauri::async_runtime::block_on(self.transfer.interrupt(
+                            crate::kswitcher_lan::change(
+                                peer,
+                                &remote,
+                                crate::kswitcher_lan::Change::Delete { recursive: false },
+                            ),
+                        ))
+                    })();
+                    if let Err(error) = cleanup {
+                        return Ok(TransferOutcome::SourceRetained {
+                            source: path.clone(),
+                            destination,
+                            error,
+                        });
+                    }
+                }
+                Ok(TransferOutcome::Completed)
+            }
         }
     }
 
@@ -324,6 +404,128 @@ impl Relay<'_> {
         Ok((copied.first() == Some(&true))
             .then(|| format!("{}/{name}", self.request.destination.trim_end_matches('/'))))
     }
+
+    fn publish_kswitcher(&self, peer: &str, name: &str, staged: &Path) -> Result<Option<String>> {
+        let directory = staged
+            .parent()
+            .and_then(|path| path.to_str())
+            .ok_or("Choose a local source folder.")?;
+        let request = TransferRequest {
+            source: TransferSource::Local {
+                directory: directory.to_owned(),
+                name: name.to_owned(),
+            },
+            destination: self.request.destination.clone(),
+            ftp_destination: None,
+            ssh_destination: None,
+            server_destination: None,
+            archive_destination: None,
+            kswitcher_destination: Some(peer.to_owned()),
+            kswitcher_broker: true,
+            multiple: self.request.multiple,
+            moving: false,
+            policy: self.request.policy,
+            ask_read_only: self.request.ask_read_only,
+            retry: false,
+            copy_options: Default::default(),
+        };
+        let (result, target) = tauri::async_runtime::block_on(
+            self.transfer
+                .interrupt(transfer_kswitcher(&request, self.transfer, self.output)),
+        )?;
+        match result {
+            TransferOutcome::Skipped => return Ok(None),
+            TransferOutcome::SourceRetained { error, .. } => return Err(error),
+            TransferOutcome::Completed => {}
+        }
+        let target = target.to_str().ok_or("Choose an absolute destination.")?;
+        if self.request.moving {
+            let mut staged_items = Vec::new();
+            collect_local_move(staged, &[], self.transfer, &mut staged_items)?;
+            for item in staged_items {
+                if matches!(item.original, LocalOriginal::File(_)) {
+                    verify_kswitcher_copy(
+                        peer,
+                        &join_kswitcher_path(target, &item.target),
+                        &item.path,
+                        self.transfer,
+                    )?;
+                }
+            }
+        }
+        Ok(Some(target.to_owned()))
+    }
+}
+
+fn join_kswitcher_path(root: &str, names: &[String]) -> String {
+    if names.is_empty() {
+        root.to_owned()
+    } else {
+        format!(
+            "{}\\{}",
+            root.trim_end_matches(['/', '\\']),
+            names.join("\\")
+        )
+    }
+}
+
+fn kswitcher_entry(peer: &str, path: &str, transfer: &TransferSession) -> Result<local::Entry> {
+    let name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("Choose a KSwitcher LAN item.")?;
+    let parent = Path::new(path)
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .ok_or("Choose a KSwitcher LAN folder.")?;
+    tauri::async_runtime::block_on(transfer.interrupt(crate::kswitcher_lan::list(peer, parent)))?
+        .entries
+        .into_iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| "The KSwitcher LAN item changed during the move.".to_owned())
+}
+
+fn check_kswitcher_stamp(
+    peer: &str,
+    path: &str,
+    stamp: &local::Entry,
+    transfer: &TransferSession,
+) -> Result<()> {
+    let current = kswitcher_entry(peer, path, transfer)?;
+    if current.link
+        || current.directory != stamp.directory
+        || !stamp.directory && (current.size != stamp.size || current.modified != stamp.modified)
+    {
+        return Err("The KSwitcher LAN item changed during the move.".to_owned());
+    }
+    Ok(())
+}
+
+fn verify_kswitcher_copy(
+    peer: &str,
+    path: &str,
+    local: &Path,
+    transfer: &TransferSession,
+) -> Result<()> {
+    use io::{Seek, SeekFrom};
+    let mut remote = tempfile::tempfile().map_err(message)?;
+    tauri::async_runtime::block_on(transfer.interrupt(crate::kswitcher_lan::download(
+        peer,
+        path,
+        &mut remote,
+        |_, _| transfer.ensure_running(),
+    )))?;
+    remote.seek(SeekFrom::Start(0)).map_err(message)?;
+    let sent = crate::protocol::lan_file_digest(fs::File::open(local).map_err(message)?, || {
+        transfer.ensure_running()
+    })
+    .map_err(message)?;
+    let received =
+        crate::protocol::lan_file_digest(remote, || transfer.ensure_running()).map_err(message)?;
+    if sent != received {
+        return Err("The KSwitcher LAN item differs from the verified copy.".to_owned());
+    }
+    Ok(())
 }
 
 fn stage<S: remote_transfer::DownloadSession>(
