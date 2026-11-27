@@ -1976,13 +1976,13 @@ try {
   for (const layout of ["twin", "classic"]) {
     await layoutSelect.selectOption(layout);
     await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
-    assert.equal(await page.locator(".app").getAttribute("data-layout"), layout);
+    await page.locator(`.app[data-layout="${layout}"]`).waitFor();
     assert.ok(await leftDrives.getByRole("button").count() > 0);
     assert.equal(await actionBarDisplay(), "grid");
   }
   await layoutSelect.selectOption("standard");
   await featureDialog.getByRole("button", { name: "Apply", exact: true }).click();
-  assert.equal(await page.locator(".app").getAttribute("data-layout"), "standard");
+  await page.locator('.app[data-layout="standard"]').waitFor();
   assert.equal(await leftDrives.count(), 0);
   assert.equal(await actionBarDisplay(), "grid");
   await featureDialog.getByLabel("Panel background hex", { exact: true }).waitFor();
