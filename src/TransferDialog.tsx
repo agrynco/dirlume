@@ -65,6 +65,7 @@ function estimateLabel(seconds: number | null) {
 }
 
 export function itemSource(place: FilePlace, item: Entry): TransferSource {
+  if (place.kind === "googleDrive") return { kind: "google_drive", profile: place.id, item: item.name, name: item.googleDrive?.name ?? item.name };
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (isFileServer(place)) return { kind: place.kind, connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
@@ -128,11 +129,12 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
     (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
   const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget && !serverTarget;
-  const replaceable = serverTarget || transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
+  const replaceable = serverTarget || transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" || transfer.source.kind === "googleDrive" ||
     transfer.kswitcherBroker || transfer.items.every(({ place }) => place.kind === "server" || place.kind === "kswitcher");
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
-  const manyDestinations = multipleDestinations && !moving && !serverTarget;
+  const driveSource = transfer.source.kind === "googleDrive";
+  const manyDestinations = multipleDestinations && !moving && !serverTarget && !driveSource;
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
@@ -140,7 +142,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
   const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
-    ? destination.replace(/[\\/]+$/, "") + separator + transfer.items[0].entry.name
+    ? destination.replace(/[\\/]+$/, "") + separator + (transfer.items[0].entry.googleDrive?.name ?? transfer.items[0].entry.name)
     : destination;
   const lockingMove = phase === "done" && windowsClient && blocked?.place.kind === "local" && moving && isLockError(error);
   const visibleEstimate = phase === "working" && !conflict ? estimatedTime : undefined;
@@ -280,8 +282,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         const { destination, item } = jobs[index];
         attempted = item;
         const { place, entry } = item;
-        setProgress({ file: entry.name, bytes: 0, total: null });
-        const remoteCopy = !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
+        setProgress({ file: entry.googleDrive?.name ?? entry.name, bytes: 0, total: null });
+        const remoteCopy = driveSource || !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
           (place.kind === "server" || place.kind === "kswitcher") && entry.directory;
         const target = item.collectionDestination?.length
           ? [destination.replace(/[\\/]+$/, ""), ...item.collectionDestination].join(separator)
@@ -358,7 +360,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
             <div className="field">
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
                 {transfer.collection ? t("Copy from collection") : <>
-                  {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+                  {promptStart}<strong>{itemCount === 1 ? (transfer.items[0].entry.googleDrive?.name ?? transfer.items[0].entry.name) : t("{0} selected items", itemCount)}</strong>{promptEnd}
                 </>}
               </label>
               {transfer.remoteDestination && <span className="muted" id="transfer-connection">
@@ -426,7 +428,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <span>{t("Copy contents of symbolic links")}</span>
               </label>
             </>}
-            {!moving && !archiveTarget && !serverTarget && <label className="field-checkbox">
+            {!moving && !archiveTarget && !serverTarget && !driveSource && <label className="field-checkbox">
               <input type="checkbox" checked={manyDestinations} onChange={(event) => setMultipleDestinations(event.target.checked)} />
               <span>{t("Process multiple destinations")}</span>
             </label>}

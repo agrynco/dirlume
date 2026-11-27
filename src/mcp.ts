@@ -36,12 +36,12 @@ function sameFile(a: NamedFile, b: NamedFile) {
 }
 
 function textFile(place: FileLocation, entry: Entry): NamedFile {
-  if (place.kind === "kswitcher" || place.kind === "smbRoot" || entry.directory || entry.link) throw new Error("Choose a regular text file.");
+  if (place.kind === "googleDrive" || place.kind === "kswitcher" || place.kind === "smbRoot" || entry.directory || entry.link) throw new Error("Choose a regular text file.");
   return { place, name: entry.name };
 }
 
 async function transfer(place: FileLocation, items: Entry[], destination: Place, moving: boolean) {
-  if (place.kind === "smbRoot" || !items.length || (moving && (place.kind !== "local" || destination.kind !== "local")) ||
+  if (place.kind === "googleDrive" || place.kind === "smbRoot" || !items.length || (moving && (place.kind !== "local" || destination.kind !== "local")) ||
       (destination.kind !== "local" && (destination.kind !== "ftp" || place.kind !== "local"))) {
     throw new Error("This transfer is unavailable for the selected sources.");
   }

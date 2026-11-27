@@ -15,7 +15,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use reqwest::{redirect::Policy, Certificate, Client, Response};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    ipc::Channel, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    ipc::Channel, AppHandle, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
@@ -1099,6 +1100,11 @@ async fn delete_ssh(
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum TransferSource {
+    GoogleDrive {
+        profile: uuid::Uuid,
+        item: String,
+        name: String,
+    },
     Local {
         directory: String,
         name: String,
@@ -2233,8 +2239,22 @@ async fn transfer_item(
     ftp_state: State<'_, ftp::FtpState>,
     archives: State<'_, crate::archives::Archives>,
     ssh_state: State<'_, ssh::SshState>,
+    app: AppHandle,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
+    let from_drive = matches!(request.source, TransferSource::GoogleDrive { .. });
+    if from_drive
+        && (request.moving
+            || request.multiple
+            || request.kswitcher_broker
+            || request.server_destination.is_some()
+            || request.ftp_destination.is_some()
+            || request.ssh_destination.is_some()
+            || request.archive_destination.is_some()
+            || request.kswitcher_destination.is_some())
+    {
+        return Err("Copy one Google Drive file to a local folder.".into());
+    }
     if request.server_destination.is_none()
         && request.ftp_destination.is_none()
         && request.ssh_destination.is_none()
@@ -2306,6 +2326,7 @@ async fn transfer_item(
             | TransferSource::Ssh { segments, .. }
             | TransferSource::Archive { segments, .. } => format!("/{}", segments.join("/")),
             TransferSource::Kswitcher { path, .. } => path.clone(),
+            TransferSource::GoogleDrive { name, .. } => format!("Google Drive/{name}"),
         };
         let mut actual_destination = request.destination.clone();
         let mut commits = Vec::new();
@@ -2328,7 +2349,8 @@ async fn transfer_item(
                     segments.last().ok_or("Choose a remote item.")?.as_str(),
                     None,
                 ),
-                TransferSource::Kswitcher { name, .. } => (name.as_str(), None),
+                TransferSource::Kswitcher { name, .. }
+                | TransferSource::GoogleDrive { name, .. } => (name.as_str(), None),
             };
             let mut progress = |path: &Path, bytes, total| {
                 session.ensure_running()?;
@@ -2764,7 +2786,8 @@ async fn transfer_item(
                         || ftp_source.is_some()
                         || ssh_source.is_some()
                         || archive.is_some()
-                        || remote_folder,
+                        || remote_folder
+                        || from_drive,
                 )
                 .map_err(message)?,
             };
@@ -2853,6 +2876,33 @@ async fn transfer_item(
             }
 
             match request.source {
+                TransferSource::GoogleDrive {
+                    profile,
+                    item,
+                    name,
+                } => copy_downloaded_item(
+                    &target,
+                    &session,
+                    &options,
+                    progress,
+                    ask,
+                    |staged, progress| {
+                        let modified = tauri::async_runtime::block_on(session.interrupt(
+                            crate::google_drive::download(
+                                &app,
+                                profile,
+                                &item,
+                                staged,
+                                |bytes, total| progress(Path::new(&name), bytes, total),
+                            ),
+                        ))?;
+                        let file = fs::File::options()
+                            .write(true)
+                            .open(staged)
+                            .map_err(message)?;
+                        finish_downloaded_file(&file, modified).map_err(message)
+                    },
+                ),
                 TransferSource::Server {
                     segments,
                     folder,
@@ -4712,6 +4762,7 @@ pub fn run() {
         .manage(crate::archive_create::ArchiveJobs::default())
         .manage(crate::deletion::DeleteJobs::default())
         .manage(ftp::FtpState::default())
+        .manage(crate::google_drive::DriveState::default())
         .manage(ssh::SshState::default())
         .manage(crate::netbox_connection::Requests::default())
         .manage(TransferSessions::default())
@@ -4856,6 +4907,12 @@ pub fn run() {
         remove_server_invitation,
         list_server,
         disconnect_server,
+        crate::google_drive::google_drive_profiles,
+        crate::google_drive::sign_in_google_drive,
+        crate::google_drive::cancel_google_drive_sign_in,
+        crate::google_drive::rename_google_drive,
+        crate::google_drive::remove_google_drive,
+        crate::google_drive::list_google_drive,
         ftp::ftp_profiles,
         ftp::ftp_windows_code_page,
         ftp::test_ftp_connection,

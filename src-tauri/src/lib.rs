@@ -33,6 +33,8 @@ mod ftp_transfer;
 #[cfg(feature = "desktop")]
 mod git_view;
 #[cfg(feature = "desktop")]
+mod google_drive;
+#[cfg(feature = "desktop")]
 mod image_edit;
 #[cfg(feature = "desktop")]
 mod kswitcher_lan;

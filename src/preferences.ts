@@ -176,6 +176,7 @@ export const commands = {
   processSources: { label: "Select Processes in the sources menu", key: "0" },
   netboxSources: { label: "Select NetBox in the sources menu", key: "2" },
   smbSources: { label: "Select SMB in the sources menu", key: "3" },
+  googleDriveSources: { label: "Select Google Drive in the sources menu", key: "5" },
   remoteSources: { label: "Select Remote machine in the sources menu", key: "4" },
   collectionsSources: { label: "Select Collections in the sources menu", key: "6" },
   ...driveSourceCommands,
@@ -183,6 +184,8 @@ export const commands = {
   editNetBoxProfile: { label: "Edit NetBox connection", key: "F4" },
   addSmbProfile: { label: "Add SMB connection", key: "Shift+F4" },
   editSmbProfile: { label: "Edit SMB connection", key: "F4" },
+  addGoogleDriveProfile: { label: "Add Google Drive connection", key: "Shift+F4" },
+  editGoogleDriveProfile: { label: "Edit Google Drive connection", key: "F4" },
   addRemoteProfile: { label: "Add remote machine", key: "Shift+F4" },
   editRemoteProfile: { label: "Edit remote machine", key: "F4" },
   folderShortcuts: { label: "Folder shortcuts", key: "" },
@@ -245,6 +248,7 @@ export function commandScope(command: Command) {
   if (command === "addNetBoxProfile" || command === "editNetBoxProfile") return "netbox";
   if (command === "netboxPreviousPage" || command === "netboxNextPage") return "netboxEditor";
   if (command === "addSmbProfile" || command === "editSmbProfile") return "smb";
+  if (command === "addGoogleDriveProfile" || command === "editGoogleDriveProfile") return "googleDrive";
   if (command === "addRemoteProfile" || command === "editRemoteProfile") return "remote";
   if (command === "viewAsHex") return "viewer";
   if (command.startsWith("image")) return "image";
@@ -266,7 +270,7 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if ([leftScope, rightScope].includes("processPane") && [leftScope, rightScope].includes("main")) return true;
   const commands = [left, right];
   if (commands.includes("fileBookmarks") && [leftScope, rightScope].some((scope) => scope === "text" || scope === "viewer")) return true;
-  if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["netbox", "smb", "remote"].includes(scope))) return true;
+  if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["netbox", "smb", "remote", "googleDrive"].includes(scope))) return true;
   if (commands.includes("viewAsHex") && (leftScope === "text" || rightScope === "text")) return true;
   if ((leftScope === "image" || rightScope === "image") &&
       commands.some((command) => ["viewAsHex", "closeText", "cancelText", "switchDocumentMode", "nextDocument", "previousDocument", "settings"].includes(command))) return true;

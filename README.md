@@ -242,6 +242,12 @@ On Windows, run `node scripts/desktop-smoke.mjs` after both builds. It opens Dir
 
 For Windows memory investigations, [measure WebView2 by PID and process role](docs/webview2-memory.md).
 
+### Test Google Drive sign-in
+
+Enable the Google Drive API in the Dirlume Google Cloud project, add the `https://www.googleapis.com/auth/drive.readonly` scope, and add the accounts you will use under **Google Auth Platform → Audience → Test users** when the app is in Testing. Create a **Desktop app** OAuth client in that project and download its JSON. Set `DIRLUME_GOOGLE_OAUTH_CLIENT` to the absolute path before starting Dirlume, or save the file as `google-drive-oauth.json` in Dirlume's app configuration directory. Keep the JSON out of the repository. The operating system credential store holds saved Google sign-ins. Testing-mode grants for this scope expire after seven days. Public distribution with full My Drive access requires [Google's restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
+Run `node scripts/google-drive-pane-smoke.mjs` after the frontend build to verify the pane workflows with a simulated Google Drive connection.
+
 ## Archives
 
 Packaged Dirlume includes the [7-Zip command-line tools](https://www.7-zip.org/download.html), including their license and source. Archive operations work offline. A development build can use a system copy of `7zz`, `7z`, or `7za`. Run `./scripts/prepare-7zip.ps1` before building a desktop package to prepare the pinned tools. Select local items and press **Shift+F1** to create a ZIP, 7z, TAR, or WIM archive when the tool supports the format. The dialog supports compression profiles, AES encryption, split volumes, and self-extracting archives on Windows. Profiles store compression options without passwords.
