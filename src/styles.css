@@ -1991,7 +1991,18 @@ button.color-swatch {
 .code-surface .cm-gutters { background: var(--document-gutter, var(--raised)); color: var(--muted); border-color: var(--line); }
 .code-surface .cm-lineNumbers .cm-gutterElement { padding-inline-end: .6em; }
 .code-surface .cm-activeLineGutter { background: var(--panel-selection); color: var(--panel-selected-ink); }
-.code-surface .cm-content { caret-color: var(--document-caret, var(--text-ink)); }
+.code-surface .cm-content {
+  caret-color: var(--document-caret, var(--text-ink));
+  --whitespace-mark: color-mix(in srgb, var(--document-ink, var(--text-ink)) 65%, transparent);
+}
+.code-surface .cm-content .cm-highlightSpace {
+  background: radial-gradient(circle closest-side, var(--whitespace-mark) 70%, transparent) center / 1ch .23em repeat-x;
+}
+.code-surface .cm-content .cm-highlightTab {
+  background: linear-gradient(var(--whitespace-mark), var(--whitespace-mark)) center / calc(100% - 2px) 1px no-repeat,
+    linear-gradient(45deg, transparent 32%, var(--whitespace-mark) 35% 63%, transparent 66%) right 1px top calc(50% - 2px) / 4px 4px no-repeat,
+    linear-gradient(135deg, transparent 32%, var(--whitespace-mark) 35% 63%, transparent 66%) right 1px top calc(50% + 2px) / 4px 4px no-repeat;
+}
 .code-surface .cm-editor .cm-activeLine { background: var(--document-active-line, transparent); }
 .code-surface .cm-content ::selection, .comparison ::selection {
   background: var(--document-selection, Highlight); color: var(--document-selection-ink, HighlightText);

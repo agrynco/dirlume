@@ -24,6 +24,7 @@ export interface MenuAction {
   separatorBefore?: boolean;
   id?: string;
   checked?: boolean;
+  checkbox?: boolean;
   translated?: boolean;
   Icon?: LucideIcon;
   run: () => void;
@@ -197,12 +198,12 @@ export function MainMenu({ groups, shortcut, ref, label = "Main menu", hiddenByD
           {shown && <div className="main-menu-dropdown" role="menu" aria-label={t(label)}
             data-action-icons={items.some(({ Icon }) => Icon) || undefined} data-tauri-drag-region="false">
             {items.map((action, item) => {
-              const { label, shortcut, disabled, separatorBefore, checked, id, translated, Icon } = action;
+              const { label, shortcut, disabled, separatorBefore, checked, checkbox, id, translated, Icon } = action;
               const legacyChoice = !Icon && checked !== undefined;
               const nested = "items" in action;
               return <Fragment key={id ?? label}>
                   {separatorBefore && <div className="main-menu-separator" role="separator" />}
-                  <Button type="button" role={checked === undefined ? "menuitem" : "menuitemradio"}
+                  <Button type="button" role={checked === undefined ? "menuitem" : checkbox ? "menuitemcheckbox" : "menuitemradio"}
                     aria-checked={checked} tabIndex={-1} data-menu-item={item}
                     aria-disabled={disabled || undefined} shortcut={shortcut} aria-haspopup={nested ? "menu" : undefined}
                     aria-expanded={nested ? submenu?.item === item : undefined}

@@ -3,11 +3,12 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } f
 import { cursorDocEnd, cursorDocStart, defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
-import { EditorView, gutter, GutterMarker, highlightActiveLine, keymap, lineNumbers, type Command } from "@codemirror/view";
+import { EditorView, gutter, GutterMarker, highlightActiveLine, highlightWhitespace, keymap, lineNumbers, type Command } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { NamedFile } from "./api";
 import { detectLanguage, languageChoices } from "./syntaxCatalog";
 import { lineFingerprint, type LineBookmarkJump, type BookmarkResult } from "./fileBookmarks";
+import { defaultTextTabWidth } from "./preferences";
 
 const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.comment, tags.docComment], class: "syntax-comment" },
@@ -51,6 +52,7 @@ function visibleBookmarkLine(view: EditorView) {
 }
 
 export default function CodeSurface({ file, editing, locked, active, fontSize, readingWidth, value, onChange,
+  textTabWidth = defaultTextTabWidth, showTextWhitespace = false,
   ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus, bookmarkLines, onBookmarkLine, bookmarkJump, onBookmarkResult }: {
   file: NamedFile;
   editing: boolean;
@@ -58,6 +60,8 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
   active: boolean;
   fontSize?: number;
   readingWidth?: number;
+  textTabWidth?: number;
+  showTextWhitespace?: boolean;
   value: string;
   onChange: (text: string) => void;
   ref?: Ref<SourceActions>;
@@ -77,6 +81,7 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
   const editSlot = useMemo(() => new Compartment(), []);
   const labelSlot = useMemo(() => new Compartment(), []);
   const bookmarkSlot = useMemo(() => new Compartment(), []);
+  const whitespaceSlot = useMemo(() => new Compartment(), []);
   const jumped = useRef<number | undefined>(undefined);
   const fileName = file.name;
   const label = t(editing ? "Edit {0}" : "View {0}", fileName);
@@ -109,7 +114,7 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
         doc: latest.current.value,
         extensions: [
           palette, languageSlot.of([]), editSlot.of([]), labelSlot.of([]), bookmarkSlot.of([]), lineNumbers(),
-          EditorView.lineWrapping,
+          whitespaceSlot.of([]), EditorView.lineWrapping,
           ...(editing ? [history(), highlightActiveLine(), keymap.of(managed ? defaultKeymap.filter(({ run }) => !run || !managedCommands.includes(run)) :
             [...defaultKeymap, ...historyKeymap])] : []),
           EditorView.updateListener.of((update) => {
@@ -133,7 +138,16 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
     jumped.current = undefined;
     editor.current = view;
     return () => { editor.current = null; view.destroy(); };
-  }, [editing, fileName, languageSlot, editSlot, labelSlot, bookmarkSlot, managed]);
+  }, [editing, fileName, languageSlot, editSlot, labelSlot, bookmarkSlot, whitespaceSlot, managed]);
+
+  useEffect(() => {
+    const view = editor.current;
+    if (!view) return;
+    view.dispatch({ effects: [
+      whitespaceSlot.reconfigure([EditorState.tabSize.of(textTabWidth), ...(showTextWhitespace ? [highlightWhitespace()] : [])]),
+      view.scrollSnapshot(),
+    ] });
+  }, [editing, fileName, managed, whitespaceSlot, textTabWidth, showTextWhitespace]);
 
   useEffect(() => {
     const view = editor.current;

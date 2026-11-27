@@ -3704,6 +3704,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             colors={scheme?.colors}
             shortcuts={shortcuts}
             fontSizes={preferences.viewFontSizes}
+            textTabWidth={preferences.textTabWidth} showTextWhitespace={preferences.showTextWhitespace}
+            onToggleTextWhitespace={() => setPreferences((previous) => ({ ...previous, showTextWhitespace: !previous.showTextWhitespace }))}
             onOptions={() => openSettings(editing ? "editor" : "viewer")}
             onCopyPath={copyPath}
             onSwitchMode={() => openDocument(file, !editing, { origin: returnTo })}
