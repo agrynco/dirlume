@@ -2034,7 +2034,7 @@ try {
       page = await startDesktop();
       return page;
     });
-    const sources = leftPane.locator(".location-menu");
+    const sources = page.locator("#left-pane .location-menu");
     await sources.getByRole("button", { name: "Locations for left pane", exact: true }).click();
     await sources.getByRole("button", { name: "Home", exact: true }).click();
     await navigate("left", src);
@@ -2112,7 +2112,7 @@ try {
   featureFonts.forEach(([, family], index) => assert.ok(featureValues[index][0].replaceAll("\\", "").startsWith(family)));
   const filesTab = page.getByRole("navigation", { name: "Open documents", exact: true }).getByRole("button", { name: "Files", exact: true });
   if (await filesTab.isVisible()) await filesTab.click();
-  const sampleForFonts = leftPane.getByRole("option", { name: /^sample\.rs/ });
+  const sampleForFonts = page.locator("#left-files").getByRole("option", { name: /^sample\.rs/ });
   const sampleSurface = page.getByRole("region", { name: "sample.rs", exact: true }).locator(".code-surface");
   for (const [shortcut, expected] of [["F3", "21px"], ["F4", "19px"]]) {
     await sampleForFonts.click();
