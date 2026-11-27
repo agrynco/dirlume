@@ -69,8 +69,8 @@ pub(crate) struct Revision {
 
 #[derive(Serialize)]
 pub(crate) struct Listing {
-    entries: Vec<local::Entry>,
-    omitted: usize,
+    pub(crate) entries: Vec<local::Entry>,
+    pub(crate) omitted: usize,
     parent: Option<String>,
     drives: Option<serde_json::Value>,
 }

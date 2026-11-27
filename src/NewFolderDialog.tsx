@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FolderLinkType, type KSwitcherPlace } from "./api";
+import { api, describeError, isPermissionError, kswitcherPath, placePath, windowsClient, type ArchivePlace, type FileServerPlace, type FolderLinkType, type KSwitcherPlace } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { EditableDropdown } from "./EditableDropdown";
@@ -9,6 +9,7 @@ import { bindingMatches, eventShortcut, showShortcut } from "./preferences";
 import { ElevationButton } from "./ProcessTools";
 import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { useArchiveChange } from "./useArchiveChange";
+import { SudoDialog } from "./SudoDialog";
 
 const historyKey = "dirlume.folder-name-history.v1";
 type HistoryEntry = { name: string; date: number };
@@ -24,10 +25,11 @@ function folderHistory(): HistoryEntry[] {
   }
 }
 
-export function NewFolderDialog({ directory, archive, kswitcher, showHidden, historyShortcut, onCreated, onClose }: {
+export function NewFolderDialog({ directory, archive, kswitcher, remote, showHidden, historyShortcut, onCreated, onClose }: {
   directory: string;
   archive?: ArchivePlace;
   kswitcher?: KSwitcherPlace;
+  remote?: FileServerPlace;
   showHidden: boolean;
   historyShortcut: readonly string[];
   onCreated: (name: string) => Promise<void>;
@@ -43,6 +45,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
   const [waiting, setWaiting] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState("");
+  const [sudoName, setSudoName] = useState<string>();
   const [failedName, setFailedName] = useState("");
   const [history] = useState(folderHistory);
   const archiveChange = useArchiveChange();
@@ -66,6 +69,14 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
     input.current?.focus();
   }
 
+  function complete(created: string) {
+    try {
+      const recent = [{ name: created, date: Date.now() }, ...history.filter(({ name }) => name !== created)].slice(0, 100);
+      localStorage.setItem(historyKey, JSON.stringify(recent));
+    } catch { /* The folder was created even if history storage is unavailable. */ }
+    onClose();
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (waiting) return;
@@ -73,25 +84,25 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
     setError("");
     setFailedName("");
     try {
+      if (remote) await api.createRemoteFolder(remote, name);
       if (archive) await archiveChange.run(archive.id, { kind: "folder", parent: archive.segments, name });
       if (kswitcher) {
         if (!name || /[\\/]/.test(name) || name === "." || name === "..") throw new Error(t("Enter a valid folder name."));
         await api.changeKSwitcher(kswitcher.peer, kswitcherPath(directory, name), { kind: "create_folder" });
       }
-      const result = archive || kswitcher ? { last: name, failure: null } : await api.createFolders(directory, { name, multiple, linkType, target });
+      const result = archive || kswitcher || remote ? { last: name, failure: null } :
+        await api.createFolders(directory, { name, multiple, linkType, target });
       if (result.last) await onCreated(result.last);
       if (result.failure) {
         setError(result.failure.error);
         setFailedName(result.failure.name);
         return;
       }
-      try {
-        const recent = [{ name, date: Date.now() }, ...history.filter((entry) => entry.name !== name)].slice(0, 100);
-        localStorage.setItem(historyKey, JSON.stringify(recent));
-      } catch { /* The folder was created even if history storage is unavailable. */ }
-      onClose();
+      complete(name);
     } catch (failure) {
-      setError(describeError(failure));
+      const reason = describeError(failure);
+      setError(reason);
+      if (remote?.kind === "ssh" && isPermissionError(reason)) setSudoName(name);
     } finally {
       setWaiting(false);
     }
@@ -102,7 +113,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
     else if (archive) archiveChange.cancel();
   }
 
-  return <Dialog title={t("New folder")} onClose={close} onKeyDown={(event) => {
+  return <><Dialog title={t("New folder")} onClose={close} onKeyDown={(event) => {
     if (historyOpen && event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -144,8 +155,8 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
           </div>}
         </div>
         {archive && <p>{placePath(archive)}</p>}
-        {kswitcher && <p>{kswitcher.address} · {directory}</p>}
-        {!archive && !kswitcher && <>
+        {(kswitcher || remote) && <p>{(kswitcher ?? remote)?.address} · {directory}</p>}
+        {!archive && !kswitcher && !remote && <>
         <label className="field">{t("Link type")}
           <select value={linkType} aria-label={t("Link type")} disabled={waiting} onChange={(event) => setLinkType(event.target.value as FolderLinkType)}>
             <option value="none">{t("None")}</option>
@@ -165,7 +176,7 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
         </>}
         {error && <p className="dialog-error" role="alert">{failedName ? t("Could not create {0}. {1}", failedName, errorText(error)) : errorText(error)}</p>}
         {archive && waiting && <progress aria-label={t("Archive update progress")} max={100} value={archiveChange.progress} />}
-        {!archive && !kswitcher && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
+        {!archive && !kswitcher && !remote && windowsClient && isPermissionError(error) && <ElevationButton directory={directory} />}
       </div>
       <div className="dialog-footer">
         <Button type="button" disabled={waiting && (!archive || archiveChange.canceling)} onClick={close}>
@@ -176,5 +187,13 @@ export function NewFolderDialog({ directory, archive, kswitcher, showHidden, his
         </Button>
       </div>
     </form>
-  </Dialog>;
+  </Dialog>
+  {remote?.kind === "ssh" && sudoName !== undefined && <SudoDialog address={remote.address}
+    path={`/${[...remote.segments, sudoName].join("/")}`} operation="createFolder" onClose={() => setSudoName(undefined)}
+    onConfirm={async (password) => {
+      await api.createRemoteFolder(remote, sudoName, password);
+      await onCreated(sudoName);
+      complete(sudoName);
+    }} />}
+  </>;
 }

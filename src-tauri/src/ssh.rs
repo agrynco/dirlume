@@ -929,6 +929,21 @@ pub struct SshListing {
 }
 
 #[tauri::command]
+pub async fn create_ssh_folder(
+    id: u32,
+    segments: Vec<String>,
+    sudo_password: Option<String>,
+    state: State<'_, SshState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    let password = sudo_password.map(Zeroizing::new);
+    blocking(move || {
+        connection.text_operation(password, false, |session| session.create_folder(&segments))
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn delete_ssh(
     id: u32,
     segments: Vec<String>,

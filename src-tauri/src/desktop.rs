@@ -694,11 +694,116 @@ impl Connection {
             } else {
                 let mut file = fs::File::create_new(destination).map_err(message)?;
                 self.download_file(path, &mut file, session, &mut *progress)?;
-                file.sync_all().map_err(message)?;
+                finish_downloaded_file(&file, item.modified).map_err(message)?;
             }
         }
         Ok(())
     }
+
+    fn copy_folder(
+        &self,
+        segments: Vec<String>,
+        target: &Path,
+        session: &TransferSession,
+        options: &local_transfer::Options,
+        progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+        ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+    ) -> Result<TransferOutcome> {
+        copy_downloaded_folder(
+            target,
+            session,
+            options,
+            progress,
+            ask,
+            |staged, progress| self.download_tree(segments, staged, session, progress),
+        )
+    }
+}
+
+fn copy_downloaded_folder<P>(
+    target: &Path,
+    session: &TransferSession,
+    options: &local_transfer::Options,
+    mut progress: P,
+    ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
+    download: impl FnOnce(&Path, &mut P) -> Result<()>,
+) -> Result<TransferOutcome>
+where
+    P: FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+{
+    let parent = target
+        .parent()
+        .ok_or("Choose a local destination folder.")?;
+    let workspace = tempfile::tempdir_in(parent).map_err(message)?;
+    let staged = workspace.path().join("download");
+    download(&staged, &mut progress)?;
+    session.ensure_running().map_err(message)?;
+
+    // Only the temporary local copy is moved. The remote folder is untouched.
+    let options = local_transfer::Options {
+        moving: true,
+        ..options.clone()
+    };
+    local_transfer::transfer(
+        &staged,
+        target,
+        &options,
+        &mut local_transfer::MoveResume::default(),
+        progress,
+        ask,
+    )
+    .map(transfer_outcome)
+    .map_err(message)
+}
+
+fn download_kswitcher_tree(
+    peer: &str,
+    path: &str,
+    target: &Path,
+    session: &TransferSession,
+    progress: &mut impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
+) -> Result<()> {
+    let listing =
+        tauri::async_runtime::block_on(session.interrupt(crate::kswitcher_lan::list(peer, path)))?;
+    if listing.omitted > 0 {
+        return Err("The server could not list every item in this folder.".to_owned());
+    }
+    fs::create_dir(target).map_err(message)?;
+    for item in listing.entries {
+        session.ensure_running().map_err(message)?;
+        if item.link {
+            return Err(format!("Cannot download a linked item ({}).", item.name));
+        }
+        let destination = target.join(local::name_component(&item.name).map_err(message)?);
+        let child = format!("{}\\{}", path.trim_end_matches(['/', '\\']), item.name);
+        if item.directory {
+            download_kswitcher_tree(peer, &child, &destination, session, progress)?;
+        } else {
+            let mut file = fs::File::create_new(destination).map_err(message)?;
+            tauri::async_runtime::block_on(session.interrupt(crate::kswitcher_lan::download(
+                peer,
+                &child,
+                &mut file,
+                |bytes, total| progress(Path::new(&item.name), bytes, total),
+            )))?;
+            finish_downloaded_file(&file, item.modified).map_err(message)?;
+        }
+    }
+    Ok(())
+}
+
+fn finish_downloaded_file(file: &fs::File, modified: Option<i64>) -> io::Result<()> {
+    if let Some(modified) = modified.and_then(|seconds| {
+        let duration = Duration::from_secs(seconds.unsigned_abs());
+        if seconds < 0 {
+            UNIX_EPOCH.checked_sub(duration)
+        } else {
+            UNIX_EPOCH.checked_add(duration)
+        }
+    }) {
+        file.set_times(fs::FileTimes::new().set_modified(modified))?;
+    }
+    file.sync_all()
 }
 
 async fn collect_response(mut response: Response, limit: usize) -> Result<Vec<u8>> {
@@ -951,6 +1056,8 @@ enum TransferSource {
         peer: String,
         path: String,
         name: String,
+        #[serde(default)]
+        folder: bool,
     },
     Ftp {
         connection: u32,
@@ -1580,6 +1687,11 @@ async fn transfer_item(
             if let Some(local) = local.as_mut().filter(|_| !request.retry) {
                 **local = LocalTransferAttempt::default();
             }
+            let remote_folder = matches!(
+                &request.source,
+                TransferSource::Server { folder: true, .. }
+                    | TransferSource::Kswitcher { folder: true, .. }
+            );
             let target = match local.as_ref().and_then(|local| local.destination.clone()) {
                 Some(path) => path,
                 None => transfer_target(
@@ -1590,7 +1702,8 @@ async fn transfer_item(
                     source.is_some()
                         || ftp_source.is_some()
                         || ssh_source.is_some()
-                        || archive.is_some(),
+                        || archive.is_some()
+                        || remote_folder,
                 )
                 .map_err(message)?,
             };
@@ -1664,6 +1777,47 @@ async fn transfer_item(
                 return result;
             }
 
+            if let TransferSource::Server {
+                segments,
+                folder: true,
+                ..
+            } = &request.source
+            {
+                if request.moving {
+                    return Err("This source is read-only.".to_owned());
+                }
+                let connection = connection.ok_or("Connect to the server first.")?;
+                return connection.copy_folder(
+                    segments.clone(),
+                    &target,
+                    &session,
+                    &options,
+                    progress,
+                    ask,
+                );
+            }
+            if let TransferSource::Kswitcher {
+                peer,
+                path,
+                folder: true,
+                ..
+            } = &request.source
+            {
+                if request.moving {
+                    return Err("This source is read-only.".to_owned());
+                }
+                return copy_downloaded_folder(
+                    &target,
+                    &session,
+                    &options,
+                    progress,
+                    ask,
+                    |staged, progress| {
+                        download_kswitcher_tree(peer, path, staged, &session, progress)
+                    },
+                );
+            }
+
             match fs::symlink_metadata(&target) {
                 Ok(metadata) => {
                     if request.policy != local_transfer::Policy::Skip {
@@ -1687,24 +1841,11 @@ async fn transfer_item(
                 | TransferSource::Archive { .. } => {
                     return Err("Choose a supported transfer source.".to_owned())
                 }
-                TransferSource::Server {
-                    segments, folder, ..
-                } => {
+                TransferSource::Server { segments, .. } => {
                     let connection = connection.ok_or("Connect to the server first.")?;
-                    if folder {
-                        let parent = target
-                            .parent()
-                            .ok_or("Choose a local destination folder.")?;
-                        let workspace = tempfile::tempdir_in(parent).map_err(message)?;
-                        let staged = workspace.path().join("download");
-                        connection.download_tree(segments, &staged, &session, &mut progress)?;
-                        progress(&target, 0, None).map_err(message)?;
-                        renamest::rename_exclusive(staged, target).map_err(message)?;
-                    } else {
-                        download_to(&target, &session, |file| {
-                            connection.download_file(segments, file, &session, &mut progress)
-                        })?;
-                    }
+                    download_to(&target, &session, |file| {
+                        connection.download_file(segments, file, &session, &mut progress)
+                    })?;
                 }
                 TransferSource::Kswitcher { peer, path, .. } => {
                     download_to(&target, &session, |file| {
@@ -1766,9 +1907,9 @@ async fn transfer_kswitcher(
             Path::new(directory).join(local::name_component(name).map_err(message)?),
             name.as_str(),
         ),
-        TransferSource::Kswitcher { peer, path, name } => {
-            (Some(peer.as_str()), PathBuf::from(path), name.as_str())
-        }
+        TransferSource::Kswitcher {
+            peer, path, name, ..
+        } => (Some(peer.as_str()), PathBuf::from(path), name.as_str()),
         _ => return Err("Choose a local or KSwitcher LAN source.".into()),
     };
     let target_peer = request.kswitcher_destination.as_deref();
@@ -2062,6 +2203,60 @@ fn download_to(
 mod server_download_tests {
     use super::*;
     use std::{net::TcpListener, thread};
+
+    #[tokio::test]
+    async fn copies_a_paired_computers_folder_into_an_existing_local_folder() {
+        let source = tempfile::tempdir().unwrap();
+        let published = source.path().join("project");
+        fs::create_dir_all(published.join("nested/empty")).unwrap();
+        fs::write(published.join("nested/report.txt"), "remote").unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let target = destination.path().join("project");
+        fs::create_dir_all(target.join("nested")).unwrap();
+        fs::write(target.join("nested/report.txt"), "local").unwrap();
+        fs::write(target.join("keep.txt"), "unchanged").unwrap();
+
+        let root = source.path().to_owned();
+        let mut host = crate::server::DesktopServer::start_computer(
+            move || vec![("Drive".into(), root.clone())],
+            "127.0.0.1".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let guest = Connection::connect(&host.invitation).unwrap();
+        let copied = tokio::task::spawn_blocking(move || {
+            let options = local_transfer::Options {
+                moving: false,
+                policy: local_transfer::Policy::Overwrite,
+                ask_read_only: false,
+                copy: local::CopyOptions::default(),
+            };
+            guest.copy_folder(
+                vec!["Drive".into(), "project".into()],
+                &target,
+                &TransferSession::default(),
+                &options,
+                |_, _, _| Ok(()),
+                |_| panic!("Overwrite should not prompt for a conflict"),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(copied, TransferOutcome::Completed));
+        let target = destination.path().join("project");
+        assert!(target.join("nested/empty").is_dir());
+        assert_eq!(
+            fs::read_to_string(target.join("nested/report.txt")).unwrap(),
+            "remote"
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("keep.txt")).unwrap(),
+            "unchanged"
+        );
+        assert!(published.join("nested/report.txt").is_file());
+        host.stop().await.unwrap();
+    }
 
     #[tokio::test]
     async fn desktop_computer_share_lists_and_opens_separate_drive_roots() {
@@ -2904,6 +3099,41 @@ fn create_encoded_file(path: &Path, encoding: Encoding) -> Result<()> {
         .map_err(|error| message(error.error))
 }
 
+#[tauri::command]
+async fn create_ftp_text_file(
+    id: u32,
+    segments: Vec<String>,
+    encoding: Encoding,
+    state: State<'_, ftp::FtpState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    blocking(move || {
+        connection
+            .open()?
+            .create_file(&segments, &encode_text(encoding, ""))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn create_ssh_text_file(
+    id: u32,
+    segments: Vec<String>,
+    encoding: Encoding,
+    sudo_password: Option<String>,
+    state: State<'_, ssh::SshState>,
+) -> Result<()> {
+    let connection = state.connection(id)?;
+    let password = sudo_password.map(zeroize::Zeroizing::new);
+    blocking(move || {
+        let bytes = encode_text(encoding, "");
+        connection.text_operation(password, false, |session| {
+            session.create_file(&segments, &bytes)
+        })
+    })
+    .await
+}
+
 fn ftp_text_revision(entry: &suppaftp::list::File, bytes: &[u8]) -> String {
     let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
     format!("{:?}:{}", entry.modified(), URL_SAFE_NO_PAD.encode(digest))
@@ -3503,6 +3733,8 @@ pub fn run() {
         ftp::search_ftp,
         ftp::cancel_ftp_search,
         ftp::rename_ftp,
+        ftp::create_ftp_folder,
+        create_ftp_text_file,
         ftp::delete_ftp,
         ssh::profiles::ssh_profiles,
         ssh::profiles::save_ssh_profile,
@@ -3512,6 +3744,8 @@ pub fn run() {
         ssh::disconnect_ssh,
         ssh::list_ssh,
         ssh::delete_ssh,
+        ssh::create_ssh_folder,
+        create_ssh_text_file,
         read_ftp_text,
         read_ftp_bytes,
         save_ftp_text,

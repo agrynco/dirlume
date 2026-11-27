@@ -475,7 +475,7 @@ export type TransferSource =
   | { kind: "ftp"; connection: number; segments: string[] }
   | { kind: "archive"; archive: number; segments: string[] }
   | { kind: "ssh"; connection: number; segments: string[] }
-  | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string };
+  | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string; folder: boolean };
 
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
 export type TransferEntryDetails = { size: number; modified: number | null; directory: boolean };
@@ -634,6 +634,12 @@ export const api = {
     invoke<(string | null)[]>("format_timestamps", { timestamps, style }),
   createFolders: (directory: string, request: { name: string; multiple: boolean; linkType: FolderLinkType; target: string }) =>
     invoke<FolderCreation>("create_folders", { directory, request }),
+  createRemoteFolder: (place: FileServerPlace, name: string, sudoPassword?: string) =>
+    invoke<void>(place.kind === "ftp" ? "create_ftp_folder" : "create_ssh_folder",
+      { id: place.id, segments: [...place.segments, name], sudoPassword }),
+  createRemoteTextFile: (place: FileServerPlace, name: string, encoding: TextEncoding, sudoPassword?: string) =>
+    invoke<void>(place.kind === "ftp" ? "create_ftp_text_file" : "create_ssh_text_file",
+      { id: place.id, segments: [...place.segments, name], encoding, sudoPassword }),
   archiveCapabilities: () => invoke<{ formats: string[]; sfx: boolean }>("archive_capabilities"),
   createArchive: (id: number, request: CreateArchive, output: Channel<number>) =>
     invoke<{ paths: string[]; warning: string }>("create_archive", { id, request, output }),
