@@ -13,8 +13,8 @@ import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHist
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
-  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, RefreshCw,
-  ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, type LucideIcon,
+  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, Redo2, RefreshCw,
+  ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -3360,10 +3360,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
       commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
       commandWithIcon(History, "commandHistory", activeDocument !== null),
-      menuCommand("userMenu", !filesAvailable || !local || !!smbHost(local) || !!pane.search || !!modal, "User Menu"),
+      commandWithIcon(TerminalIcon, "userMenu", !filesAvailable || !local || !!smbHost(local) || !!pane.search || !!modal, "User Menu"),
       commandWithIcon(History, "fileOperationHistory", !!modal || activeDocument !== null),
-      menuCommand("undoFileOperation", !!modal || activeDocument !== null),
-      menuCommand("redoFileOperation", !!modal || activeDocument !== null),
+      commandWithIcon(Undo2, "undoFileOperation", !!modal || activeDocument !== null),
+      commandWithIcon(Redo2, "redoFileOperation", !!modal || activeDocument !== null),
       commandWithIcon(Bookmark, "folderShortcuts", !panesAvailable),
       commandWithIcon(TerminalIcon, "toggleTerminal", activeDocument !== null),
       ...(isTauri() ? [

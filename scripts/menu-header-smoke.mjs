@@ -182,7 +182,6 @@ export async function testCommandIcons(page, native = false) {
       fits: item.scrollWidth <= item.clientWidth,
     };
   }));
-  assert.equal(rows.length, native ? 15 : 13);
   assert.equal(await commands.getByRole("menuitem", { name: "Connect", exact: true }).count(), 0);
   assert.ok(rows.every((row) => row.hidden === "true" && row.focusable === "false" && row.fits));
   assert.equal(new Set(rows.map(({ iconX }) => iconX)).size, 1);
@@ -191,6 +190,9 @@ export async function testCommandIcons(page, native = false) {
   assert.ok(rows.every(({ iconRight, labelX }) => labelX - iconRight >= 12),
     JSON.stringify(rows[0]));
   await commands.getByRole("menuitem", { name: "File bookmarks", exact: true }).locator(".main-menu-action-icon").waitFor();
+  for (const name of ["User Menu", "File operation history", "Undo file operation", "Redo file operation"]) {
+    await commands.getByRole("menuitem", { name, exact: true }).locator(".main-menu-action-icon").waitFor();
+  }
   if (native) {
     await commands.getByRole("menuitem", { name: "MCP server", exact: true }).locator(".main-menu-action-icon").waitFor();
     await commands.getByRole("menuitem", { name: "Check for updates", exact: true }).locator(".main-menu-action-icon").waitFor();

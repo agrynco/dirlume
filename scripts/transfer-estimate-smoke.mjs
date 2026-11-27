@@ -80,7 +80,8 @@ async function fixture(browser, remote = false, { platform = "Windows NT 10.0; W
 }
 
 async function start(page, names, move = false, policy = "ask") {
-  const source = page.locator("#left-files");
+  const source = page.locator('#left-files[aria-busy="false"]');
+  await page.locator("dialog[open]").waitFor({ state: "hidden" });
   const row = (name) => source.locator(`[role="option"][data-tooltip=${JSON.stringify(name)}]`);
   // Use selection events so the estimate test does not depend on how the
   // runner schedules animation frames after Playwright installs a clock.
