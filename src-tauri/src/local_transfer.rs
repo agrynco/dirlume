@@ -114,20 +114,6 @@ impl Conflict {
             existing,
         }
     }
-
-    pub fn remote(target: &Path, existing: &fs::Metadata) -> Self {
-        Self {
-            path: local::display_path(target)
-                .unwrap_or_else(|_| target.to_string_lossy().into_owned()),
-            directory: existing.is_dir(),
-            read_only: existing.permissions().readonly(),
-            confirm_read_only: false,
-            replaceable: false,
-            allow_remember: false,
-            incoming: None,
-            existing: EntryDetails::from(existing),
-        }
-    }
 }
 
 #[derive(Clone)]

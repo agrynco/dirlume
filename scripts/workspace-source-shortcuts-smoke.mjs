@@ -84,6 +84,9 @@ try {
             case "transfer_item":
               window.lastTransfer = args.request;
               return { kind: "completed" };
+            case "prepare_collection_folders":
+              window.collectionFolders = args;
+              return null;
             case "list_connected_computer_drives":
               if (window.deferCapacity) {
                 window.deferCapacity = false;
@@ -105,7 +108,7 @@ try {
               window.kswitcherDrive = args.path;
               window.kswitcherListings = (window.kswitcherListings ?? 0) + 1;
               if (window.kswitcherFailure) throw window.kswitcherFailure;
-              return { ...listing, parent: "" };
+              return { ...(window.collectionKSwitcher ? remoteListing(["drive"]) : listing), parent: "" };
             case "report_diagnostic":
               if (args.operation === "list_kswitcher") (window.kswitcherDiagnostics ??= []).push(args);
               return null;
@@ -427,6 +430,112 @@ try {
       }
     }
 
+    await page.goto("http://dirlume.test/");
+    await waitForPath("right", downloads);
+    await files("left").press("Alt+F1");
+    await sources("left").press("Digit6");
+    const collectionPane = page.locator('[data-pane-side="left"][aria-label="Collections"]');
+    const collectionList = page.locator("#left-collections");
+    async function nameCollectionItem(title, name) {
+      const dialog = page.getByRole("dialog", { name: title, exact: true });
+      await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+      await button(dialog, "Create").click();
+      await dialog.waitFor({ state: "hidden" });
+    }
+    await button(collectionPane, "New collection").click();
+    await nameCollectionItem("New collection", "Delivery");
+    await collectionList.press("F7");
+    await nameCollectionItem("New folder", "Notes");
+    for (const confirm of [false, true, true]) {
+      await files("right").getByRole("option", { name: /^note\.txt/ }).click();
+      await files("right").press("F5");
+      const dialog = page.getByRole("dialog", { name: "Add to collection", exact: true });
+      await dialog.getByText("Delivery / Notes", { exact: true }).waitFor();
+      await button(dialog, confirm ? "Add to collection" : "Cancel").click();
+      await dialog.waitFor({ state: "hidden" });
+      assert.equal(await collectionList.getByRole("option", { name: /^note\.txt/ }).count(), confirm ? 1 : 0);
+    }
+    await page.reload();
+    await waitForPath("right", downloads);
+    await files("right").press("Alt+F2");
+    await button(sources("right"), "Collections").click();
+    const reopened = page.locator("#right-collections");
+    await reopened.getByRole("option", { name: "Delivery", exact: true }).click();
+    await reopened.press("F5");
+    const exportDialog = page.getByRole("dialog", { name: "Copy", exact: true });
+    assert.equal(await exportDialog.getByRole("combobox", { name: "Destination", exact: true }).inputValue(), home);
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.collectionFolders), { directory: home, paths: [["Delivery"], ["Delivery", "Notes"]] });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), { kind: "local", directory: downloads, name: "note.txt" });
+    assert.equal(await page.evaluate(() => window.lastTransfer.destination), [home, "Delivery", "Notes"].join(windows ? "\\" : "/"));
+    await reopened.getByRole("option", { name: "Delivery", exact: true }).dblclick();
+    await reopened.getByRole("option", { name: "Notes", exact: true }).dblclick();
+    const reference = reopened.getByRole("option", { name: /^note\.txt/ });
+    await reference.waitFor();
+    await reopened.press("Delete");
+    const remove = page.getByRole("dialog", { name: "Remove from collection", exact: true });
+    await button(remove, "Remove").click();
+    await reference.waitFor({ state: "hidden" });
+    assert.equal(await files("left").getByRole("option", { name: /^note\.txt/ }).count(), 1);
+
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "NetBox").click();
+    await files("left").getByRole("option", { name: /^FTP fixture/ }).dblclick();
+    await waitForPath("left", "/nested");
+    await files("left").getByRole("option", { name: /^note\.txt/ }).click();
+    await files("left").press("F5");
+    await button(page.getByRole("dialog", { name: "Add to collection", exact: true }), "Add to collection").click();
+    await reference.waitFor();
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "Home").click();
+    await waitForPath("left", home);
+    await reference.click();
+    await reopened.press("F5");
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "ftp", connection: 1, segments: ["nested", "note.txt"],
+    });
+    await openPairedDrive("Files");
+    await files("left").getByRole("option", { name: /^nested/ }).click();
+    await files("left").press("F5");
+    const addCollection = page.getByRole("dialog", { name: "Add to collection", exact: true });
+    await button(addCollection, "Add to collection").click();
+    const directFolder = reopened.getByRole("option", { name: /^nested.*Dirlume test PC/ });
+    await directFolder.waitFor();
+    await files("left").press("Alt+F1");
+    await button(sources("left"), "Home").click();
+    await waitForPath("left", home);
+    await directFolder.click();
+    await reopened.press("F5");
+    await button(exportDialog, "Copy").click();
+    await exportDialog.waitFor({ state: "hidden" });
+    assert.deepEqual(await page.evaluate(() => window.lastTransfer.source), {
+      kind: "server", connection: 8, segments: ["Files", "nested"], folder: true,
+    });
+    if (windows) {
+      await page.evaluate(() => { window.collectionKSwitcher = true; });
+      await files("left").press("Alt+F1");
+      const lan = sources("left").getByRole("group", { name: "KSwitcher LAN", exact: true });
+      await lan.getByRole("group", { name: "KSwitcher PC", exact: true }).getByRole("button", { name: /^C:.*Fixed/ }).click();
+      await files("left").getByRole("option", { name: /^nested/ }).click();
+      await files("left").press("F5");
+      await button(addCollection, "Add to collection").click();
+      const kswitcherFolder = reopened.getByRole("option", { name: /^nested.*C:/ });
+      await kswitcherFolder.waitFor();
+      await files("left").press("Alt+F1");
+      await button(sources("left"), "Home").click();
+      await waitForPath("left", home);
+      await kswitcherFolder.click();
+      await reopened.press("F5");
+      await button(exportDialog, "Copy").click();
+      await exportDialog.waitFor({ state: "hidden" });
+      assert.deepEqual(await page.evaluate(() => {
+        const { kind, peer, path, folder } = window.lastTransfer.source;
+        return { kind, peer, path, folder };
+      }), { kind: "kswitcher", peer: "online", path: "C:\\nested", folder: true });
+    }
     const localized = {
       Windows: { language: "en", title: "Folder shortcuts", up: "Move up", down: "Move down" },
       Ubuntu: { language: "uk", title: "Закладки папок", up: "Перемістити вгору", down: "Перемістити вниз" },

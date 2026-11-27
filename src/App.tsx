@@ -12,7 +12,7 @@ import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  ArrowDownToLine, ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
+  ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
   FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, Redo2, RefreshCw,
   ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
@@ -54,6 +54,12 @@ import { McpDialog, McpRequests } from "./McpDialog";
 import { Pane } from "./Pane";
 import { PaneSources, type PaneSource } from "./PaneSources";
 import { RecentLocationsPane } from "./RecentLocationsPane";
+import { CollectionsPane } from "./CollectionsPane";
+import {
+  addCollectionReferences, collectionContents, collectionReference, collectionReferenceFromRecent, collectionReferencePath, collectionTrail,
+  editCollectionEntries, persistCollections, readCollections, resolveCollectionReference,
+  type CollectionEntry, type CollectionFolder, type CollectionReference,
+} from "./collections";
 import { persistRecentLocations, readRecentLocations, recentLocation, recentLocationKey, recentLocationLimit, type RecentLocation } from "./recentLocations";
 import { connectionEntries, readRemoteProfiles } from "./savedConnections";
 import { cacheDirectory, directoryCacheRevision, forgetDirectoryProfile, invalidateDirectories, readCachedDirectory, registerDirectorySession, rememberDirectory,
@@ -164,12 +170,15 @@ type RemoteDeletionProgress = {
 
 type Modal =
   | { kind: "settings"; page?: FeaturePage }
+  | { kind: "collect"; side: Side; path: string[]; references: CollectionReference[] }
+  | { kind: "collectionExport"; side: Side; stop: AbortController }
+  | { kind: "collectionArchivePassword"; submit: (password: string) => Promise<void>; cancel: () => void }
   | { kind: "smb"; side: Side; navigation: { path: string; complete: (place: Place, listing: Listing) => boolean } }
   | { kind: "connectionEditor"; side: Side; source: ConnectionSource; profile?: SavedConnection }
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
   | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
-  | { kind: "transfer"; side: Side; transfer: Transfer }
+  | { kind: "transfer"; side: Side; transfer: Transfer; temporary?: Resource[] }
   | { kind: "fileHistory"; direction?: "undo" | "redo" }
   | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
@@ -283,8 +292,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [environmentRevision, setEnvironmentRevision] = useState(0);
   const [recentPanes, setRecentPanes] = useState({ left: false, right: false });
   const [recentLocations, setRecentLocations] = useState(readRecentLocations);
+  const [collectionState, setCollectionState] = useState(() => {
+    try { return { items: readCollections(), error: "" }; }
+    catch (failure) { return { items: [] as CollectionFolder[], error: describeError(failure) }; }
+  });
+  const [collectionPanes, setCollectionPanes] = useState<Record<Side, string[] | null>>({ left: null, right: null });
   const active = quickViewSource ?? focusedSide;
   const recentActive = recentPanes[active];
+  const collectionActive = collectionPanes[active] !== null;
   const diskActive = diskPanes[active] !== null;
   const diskSide = diskPanes.left ? "left" : diskPanes.right ? "right" : null;
   const analysis = diskActive ? null : analysisPanes[active];
@@ -1093,11 +1108,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       analysisHandles.current[side]?.focus();
       return;
     }
-    document.getElementById(side + (environmentPanels[side] ? "-environment" : recentPanes[side] ? "-recent" : "-files"))?.focus({ preventScroll: true });
+    document.getElementById(side + (environmentPanels[side] ? "-environment" : recentPanes[side] ? "-recent" :
+      collectionPanes[side] ? "-collections" : "-files"))?.focus({ preventScroll: true });
   }
 
   function paneCovered(side: Side) {
-    return !!gitView || environmentPanels[side] !== null || recentPanes[side] || side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
+    return !!gitView || environmentPanels[side] !== null || recentPanes[side] || collectionPanes[side] !== null ||
+      side === previewSide || !!analysisPanes[side] || !!diskPanes[side];
   }
 
   function closeSourceMenu(restoreFocus: boolean) {
@@ -1123,6 +1140,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (analysisPanes[side]) setAnalysisPanes((current) => ({ ...current, [side]: null }));
     if (diskPanes[side]) setDiskPanes((current) => ({ ...current, [side]: null }));
     if (recentPanes[side]) setRecentPanes((current) => ({ ...current, [side]: false }));
+    if (collectionPanes[side]) setCollectionPanes((current) => ({ ...current, [side]: null }));
     if (side === previewSide) setQuickViewSource(null);
   }
 
@@ -1137,11 +1155,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function openPaneSource(side: Side, source: PaneSource) {
     closeSourceMenu(false);
     revealWorkspaceSide(side);
-    if (source === "recent") {
+    if (source === "recent" || source === "collections") {
       showProcesses(side, false);
       cancelFolderOperation(side);
       updatePane(side, (pane) => ({ ...pane, error: "" }));
-      setRecentPanes((current) => ({ ...current, [side]: true }));
+      if (source === "recent") setRecentPanes((current) => ({ ...current, [side]: true }));
+      else setCollectionPanes((current) => ({ ...current, [side]: [] }));
       setActive(side);
       return;
     }
@@ -1172,6 +1191,93 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       locations={locations} shortcuts={shortcuts}
       onToggle={() => toggleSourceMenu(side)} onClose={closeSourceMenu}
       onPick={(source) => openPaneSource(side, source)} />;
+  }
+
+  function saveCollections(items: CollectionFolder[]) {
+    if (collectionState.error) throw new Error(collectionState.error);
+    persistCollections(items);
+    setCollectionState({ items, error: "" });
+  }
+
+  function confirmCollectionAdd(path: string[], references: CollectionReference[]) {
+    const trail = collectionTrail(collectionState.items, path);
+    const folder = trail.at(-1);
+    if (!folder || path.length !== trail.length) throw new Error("Open a collection folder first.");
+    const merged = addCollectionReferences(folder, references);
+    const items = editCollectionEntries(collectionState.items, path.slice(0, -1), (entries) =>
+      entries.map((entry) => entry.id === folder.id ? merged : entry));
+    saveCollections(items);
+    setModal(null);
+  }
+
+  function collectReferences(side: Side, references: CollectionReference[]) {
+    const path = collectionPanes[opposite(side)];
+    if (!references.length || !path) return;
+    if (!path.length || collectionTrail(collectionState.items, path).length !== path.length) {
+      setStatus({ text: "Open a collection folder first.", error: true });
+      return;
+    }
+    setModal({ kind: "collect", side, path, references });
+  }
+
+  async function exportCollection(side: Side, entries: CollectionEntry[]) {
+    if (modal || !entries.length) return;
+    const other = opposite(side);
+    const target = !paneCovered(other) && !panes[other].search && !processPanels[other] ? panes[other].place : null;
+    const localTarget = target?.kind === "local" ? target : null;
+    const { folders, references } = collectionContents(entries);
+    const stop = new AbortController();
+    setModal({ kind: "collectionExport", side, stop });
+    const temporary: Resource[] = [];
+    const items: Transfer["items"] = [];
+    const unavailable: string[] = [];
+    for (const { reference, destination } of references) {
+      if (stop.signal.aborted) break;
+      try {
+        const resolve = (password?: string) => resolveCollectionReference(reference, preferences.kswitcher, (place) => {
+          if ("id" in place) temporary.push(place);
+        }, password, [
+          connected.current.left, connected.current.right,
+          ...[panes.left.place, panes.right.place].map((place) => place?.kind === "archive" ? place : null),
+        ]);
+        const resolved = await resolve().catch(async (failure: unknown) => {
+          if (reference.origin.kind !== "archive" || stop.signal.aborted || describeError(failure) !== passwordError) throw failure;
+          return new Promise<Awaited<ReturnType<typeof resolve>>>((accept, reject) => {
+            const finish = () => setModal({ kind: "collectionExport", side, stop });
+            setModal({ kind: "collectionArchivePassword",
+              submit: async (password) => { const result = await resolve(password); finish(); accept(result); },
+              cancel: () => { finish(); reject(failure); },
+            });
+          });
+        });
+        if (resolved.entry.link && resolved.place.kind !== "local") throw new Error("Choose an original item without a remote link.");
+        items.push({ ...resolved, collectionDestination: destination });
+      } catch (failure) {
+        unavailable.push(collectionReferencePath(reference) + " · " + errorText(describeError(failure)));
+      }
+    }
+    if (stop.signal.aborted || !items.length && !folders.length) {
+      temporary.forEach(disconnect);
+      if (!stop.signal.aborted) {
+        setStatus({ text: unavailable.join("\n"), error: true });
+        setModal(null);
+        requestAnimationFrame(() => focus(side));
+      }
+      return;
+    }
+    const allLocal = items.every(({ place }) => place.kind === "local");
+    const remoteDestination = !folders.length && allLocal && isFileServer(target) ? target : undefined;
+    const archiveDestination = !folders.length && allLocal && target?.kind === "archive" && target.canAdd &&
+      items.every(({ entry }) => !entry.link) ? target : undefined;
+    const kswitcherDestination = !folders.length && allLocal && target?.kind === "kswitcher" && target.path && target.capabilities?.write &&
+      items.every(({ entry }) => !entry.link) ? target : undefined;
+    const destination = localTarget ?? remoteDestination ?? archiveDestination ?? kswitcherDestination;
+    const source = items[0]?.place ?? localTarget ?? localPath("");
+    setModal({ kind: "transfer", side, temporary, transfer: {
+      kind: "copy", source, items, target: destination ? placePath(destination) : "",
+      archiveDestination, remoteDestination, kswitcherDestination, kswitcherBroker: !!kswitcherDestination,
+      collection: { folders, unavailable, needsLocalDestination: !!target && !destination },
+    } });
   }
 
   function selectDocument(id: number | null, paneOrigin?: PaneDocumentOrigin) {
@@ -1519,7 +1625,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       invalidateListing(side);
     }
     setQuickViewSource(null);
-    if (mode) setRecentPanes((current) => ({ ...current, [side]: false }));
+    if (mode) {
+      setRecentPanes((current) => ({ ...current, [side]: false }));
+      setCollectionPanes((current) => ({ ...current, [side]: null }));
+    }
     setEnvironmentPanels((panels) => ({ ...panels, [side]: mode }));
     setActive(side);
     if (!mode) focusRevealedSide(side);
@@ -2232,13 +2341,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       setStatus({ text: "Select a file or folder in the active pane." });
       return;
     }
+    const targetSide = opposite(side);
+    if (collectionPanes[targetSide]) {
+      if (kind === "copy") collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
+      return;
+    }
     if (kind === "move" && (state.search && !localSearchRoot(state) || source.kind !== "local" && source.kind !== "ftp" &&
       (source.kind !== "kswitcher" || !source.capabilities?.write || !source.capabilities?.delete))) return;
     if (kind === "move" && source.kind === "ftp") {
       setModal({ kind: "rename", path: placePath(source), name: selected.name, remote: source });
       return;
     }
-    const targetSide = opposite(side);
     const otherPane = panes[targetSide];
     const target = otherPane.search || kind === "move" && state.search &&
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
@@ -2815,6 +2928,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     setProcessPanels(swapSides);
     setEnvironmentPanels(swapSides);
     setRecentPanes(swapSides);
+    setCollectionPanes(swapSides);
     setQuickViewSource((side) => side === null ? null : opposite(side));
     setAnalysisPanes(swapSides);
     setDiskPanes(swapSides);
@@ -2824,7 +2938,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     selectionAnchor.current = swapSides(selectionAnchor.current);
     scans.current = swapSides(scans.current);
     setActive(opposite(focusedSide));
-    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : recentActive ? "-recent" : "-files");
+    const id = next + (diskActive ? "-disk-information" : environmentActive ? "-environment" : recentActive ? "-recent" :
+      collectionActive ? "-collections" : "-files");
     requestAnimationFrame(() => {
       if (movedFocus?.isConnected) movedFocus.focus({ preventScroll: true });
       else if (!diskActive && analysisHandles.current[next]) analysisHandles.current[next]?.focus();
@@ -2860,7 +2975,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       if (panesAvailable && !gitView && !showingAnalysis) showEnvironment(active, environmentPanels[active] ? null : "root");
       return;
     }
-    if ((environmentActive || recentActive) && !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
+    if ((environmentActive || recentActive || collectionActive) &&
+        !["switchPane", "menu", "help", "settings", "close", "shrinkLeft", "growLeft"].includes(command)) return;
     if (command === "gitView") {
       if (!canToggleGitView) return;
       if (gitView) closeGitView();
@@ -3197,10 +3313,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       }
       return;
     }
-    if (environmentActive || recentActive) {
-      const fromList = target.id === active + (recentActive ? "-recent" : "-environment");
-      const tabThroughRecent = recentActive && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
-      if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft"].includes(command) ||
+    if (environmentActive || recentActive || collectionActive) {
+      const fromList = target.id === active + (collectionActive ? "-collections" : recentActive ? "-recent" : "-environment");
+      const tabThroughRecent = (recentActive || collectionActive) && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey;
+      if (command && (["environmentVariables", "menu", "help", "close", "shrinkLeft", "growLeft", "leftLocations", "rightLocations"].includes(command) ||
           command === "switchPane" && fromList && !tabThroughRecent)) {
         event.preventDefault();
         if (!event.repeat) perform(command);
@@ -3290,10 +3406,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       disabled: !fileFor(active) && !measureEntries.length },
     { command: "edit", label: "Edit", Icon: Pencil, disabled: !currentFile || !(imageType(currentFile.name)
       ? currentFile.place.kind !== "kswitcher" : writableTextPlace(currentFile.place)) },
-    { command: "copy", label: local || fileServer || archive || kswitcherWrite ? "Copy" : "Download",
-      Icon: local || fileServer || archive || kswitcherWrite ? Copy : ArrowDownToLine, disabled: !canTransfer || busy },
+    { command: "copy", label: collectionPanes[opposite(active)] ? "Add to collection" : "Copy",
+      Icon: Copy, disabled: !canTransfer || busy },
     { command: "move", label: ftp ? "Rename" : "Move", Icon: ArrowLeftRight,
-      disabled: (!local && !ftp && !(kswitcherWrite && kswitcherDelete)) || !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
+      disabled: Boolean(collectionPanes[opposite(active)]) || (!local && !ftp && !(kswitcherWrite && kswitcherDelete)) ||
+        !!pane.search && !localSearchRoot(pane) || !canTransfer || busy },
     { command: "rename", label: "Rename", Icon: TextCursorInput, disabled: (!local && !ftp && !archive?.canAdd && !kswitcherWrite) ||
       !!pane.search || !current || ((archive || kswitcher) && current.link) || busy },
     { command: "newFile", label: "New file", Icon: FilePlus, disabled: (!local && !fileServer && !kswitcher) || !!pane.search || busy },
@@ -3308,9 +3425,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
   const systemFolderPath = systemFolder?.kind === "local" && !smbHost(systemFolder) ? systemFolder.path : null;
   const canOpenInSystem = filesAvailable && (systemFolderPath !== null || !!currentItem && !currentItem.entry.directory);
-  const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right && !gitView && !showingAnalysis &&
+  const canToggleQuickView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
+    !collectionPanes.left && !collectionPanes.right && !gitView && !showingAnalysis &&
     (quickViewSource !== null || filesAvailable && !!pane.place && !catalog && pane.place.kind !== "smbRoot");
   const canToggleGitView = panesAvailable && !showingEnvironment && !recentPanes.left && !recentPanes.right &&
+    !collectionPanes.left && !collectionPanes.right &&
     (!!gitView || filesAvailable && !!local && !showingAnalysis && !busy && !panes[opposite(active)].loading);
   const previewFile = previewSide && filesAvailable ? currentFile : null;
   const previousPreview = adjacentQuickViewFile(-1);
@@ -3422,7 +3541,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       { label: "Open error log", separatorBefore: true, run: () => void openErrorLog() }] },
   ];
 
-  const showFileActions = !showingGit && !environmentActive && !recentActive && activeDocument === null;
+  const showFileActions = !showingGit && !environmentActive && !recentActive && !collectionActive && activeDocument === null;
   const commandLineVisible = showFileActions && !panelsHidden;
   const resizeInDocuments = !preferences.showStatusBar && documents.length > 0;
   const resizeInFileActions = !preferences.showStatusBar && !resizeInDocuments && showFileActions;
@@ -3571,7 +3690,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             locations={recentLocations} sourceMenu={paneSources(side)} error={panes[side].error} loading={panes[side].loading}
             onFocus={() => setActive(side)} onClose={() => closeRecent(side)} onOpen={(location) => void openRecent(side, location)}
             onRemove={(location) => setRecentLocations((items) => items.filter((item) => recentLocationKey(item) !== recentLocationKey(location)))}
-            onClear={() => setRecentLocations([])} onEdit={(location) => void editRecentConnection(side, location)} />)}
+            onClear={() => setRecentLocations([])} onEdit={(location) => void editRecentConnection(side, location)}
+            copyBindings={shortcuts.copy} onCollect={collectionPanes[opposite(side)] ? (location) => {
+              const reference = collectionReferenceFromRecent(location);
+              if (reference) collectReferences(side, [reference]);
+              else setStatus({ text: "This location cannot be added as a folder reference.", error: true });
+            } : undefined} />)}
+        {(["left", "right"] as const).map((side) => {
+          const path = collectionPanes[side];
+          return path && <CollectionsPane key={swappedPanes ? opposite(side) : side} side={side} active={active === side}
+            collections={collectionState.items} path={path} sourceMenu={paneSources(side)} shortcuts={shortcuts}
+            loadError={collectionState.error} onFocus={() => setActive(side)}
+            onPath={(path) => setCollectionPanes((current) => ({ ...current, [side]: path }))}
+            onClose={() => { setCollectionPanes((current) => ({ ...current, [side]: null })); focusRevealedSide(side); }}
+            onChange={saveCollections} onCopy={(entries) => void exportCollection(side, entries)} />;
+        })}
         {(["left", "right"] as const).map((side) => {
           const mode = environmentPanels[side];
           return mode && <Suspense key={swappedPanes ? opposite(side) : side} fallback={<section className={"pane environment-pane environment-" + side}>
@@ -3894,8 +4027,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           </div>
         </Dialog>
       )}
+      {modal?.kind === "collectionExport" && <Dialog title={t("Copy from collection")}
+        onClose={() => { modal.stop.abort(); setModal(null); requestAnimationFrame(() => focus(modal.side)); }}>
+        <div className="dialog-body"><p role="status">{t("Checking original files and folders…")}</p></div>
+      </Dialog>}
+      {modal?.kind === "collectionArchivePassword" && <ArchivePasswordDialog onOpen={modal.submit} onClose={modal.cancel} />}
       {modal?.kind === "transfer" && (
-        <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden} onClose={() => setModal(null)}
+        <TransferDialog transfer={modal.transfer} side={modal.side} showHidden={preferences.hidden} onClose={() => {
+          modal.temporary?.forEach(disconnect);
+          setModal(null);
+          if (modal.transfer.collection) requestAnimationFrame(() => focus(modal.side));
+        }}
           onFinished={(success, movedPaths) => {
             if (movedPaths.length) {
               const removed = new Set(movedPaths);
@@ -3949,6 +4091,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         const item = entry ? paneItem(state, entry) : null;
         const kswitcherItem = item?.place.kind === "kswitcher" ? item.place : undefined;
         const target = panes[opposite(side)];
+        const toCollection = collectionPanes[opposite(side)] !== null;
         return <FileContextMenu x={x} y={y} onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
           {state.place?.kind === "connections" && (() => {
             const { source } = state.place;
@@ -3970,15 +4113,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             open(side, entry);
           }}>{t("Open")}</Button>}
           {item && <>
-            <Button role="menuitem" disabled={item.place.kind === "kswitcher" && (!item.place.path || item.entry.link ||
-              item.entry.directory && !item.place.capabilities?.write)} onClick={() => {
+            <Button role="menuitem" disabled={!toCollection && item.place.kind === "kswitcher" && (!item.place.path || item.entry.link)}
+              onClick={() => {
               setFileMenu(null);
-              openTransfer("copy", item.place, transferItems(side, entry!, state.marked.includes(entry!.name)),
+              const items = transferItems(side, entry!, state.marked.includes(entry!.name));
+              if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
+              else openTransfer("copy", item.place, items,
                 target.search || (item.place.kind !== "local" && isFileServer(target.place)) ? null : target.place, false, side);
-            }}>{t(item.place.kind === "kswitcher" && !item.place.capabilities?.write ? "Download" : "Copy")}</Button>
+            }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
             {kswitcherItem?.path && !state.search && !state.loading && !busy && <>
               {!item.entry.link && kswitcherItem.capabilities?.write && <>
-                {kswitcherItem.capabilities.delete && <Button role="menuitem" onClick={() => {
+                {kswitcherItem.capabilities.delete && !toCollection && <Button role="menuitem" onClick={() => {
                   setFileMenu(null);
                   transfer("move", side, entry);
                 }}>{t("Move")}</Button>}
@@ -3993,7 +4138,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               </>}
             </>}
             {localSearchRoot(state) && entry && !state.loading && !busy && <>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>
+              {!toCollection && <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
               <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
             </>}
@@ -4068,6 +4213,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           reloadConnectionLists(modal.side, { kind, id });
         }}
         onClose={() => connectionDialogsClosed(modal.side)} />}
+      {modal?.kind === "collect" && <AddToCollectionDialog
+        destination={collectionTrail(collectionState.items, modal.path).map(({ name }) => name).join(" / ")}
+        count={modal.references.length}
+        onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }}
+        onConfirm={() => { confirmCollectionAdd(modal.path, modal.references); requestAnimationFrame(() => focus(modal.side)); }} />}
       {modal?.kind === "removeConnection" && <RemoveConnectionDialog profile={modal.profile}
         onRemoved={() => {
           const { kind, id } = modal.profile;
@@ -4235,6 +4385,32 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     </div>
     </ElevationContext>
   );
+}
+
+function AddToCollectionDialog({ destination, count, onClose, onConfirm }: {
+  destination: string;
+  count: number;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const [error, setError] = useState("");
+  return <Dialog title={t("Add to collection")} onClose={onClose}>
+    <form className="dialog-form" onSubmit={(event) => {
+      event.preventDefault();
+      try { onConfirm(); }
+      catch (failure) { setError(describeError(failure)); }
+    }}>
+      <div className="dialog-body">
+        <p>{t("Add {0} to this collection folder?", countText(count, "item"))}</p>
+        <p dir="auto"><strong>{destination}</strong></p>
+        {error && <p className="dialog-error" role="alert">{errorText(error)}</p>}
+      </div>
+      <footer className="dialog-footer">
+        <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
+        <Button type="submit" data-initial-focus>{t("Add to collection")}</Button>
+      </footer>
+    </form>
+  </Dialog>;
 }
 
 function UpToDateDialog({ onClose }: { onClose: () => void }) {

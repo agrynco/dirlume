@@ -5,6 +5,7 @@ import { Dialog } from "./Dialog";
 import { errorText, t } from "./i18n";
 import type { Side } from "./panes";
 import { recentLocationKey, recentPath, type RecentLocation } from "./recentLocations";
+import { bindingMatches, eventShortcut } from "./preferences";
 
 function recentSource(location: RecentLocation) {
   if (location.kind === "local") return t("Local file system");
@@ -14,7 +15,7 @@ function recentSource(location: RecentLocation) {
 }
 
 export function RecentLocationsPane({ side, active, locations, sourceMenu, error, loading, onFocus,
-  onClose, onOpen, onRemove, onClear, onEdit }: {
+  onClose, onOpen, onRemove, onClear, onEdit, copyBindings, onCollect }: {
   side: Side;
   active: boolean;
   locations: readonly RecentLocation[];
@@ -27,6 +28,8 @@ export function RecentLocationsPane({ side, active, locations, sourceMenu, error
   onRemove: (location: RecentLocation) => void;
   onClear: () => void;
   onEdit: (location: RecentLocation) => void;
+  copyBindings: readonly string[];
+  onCollect?: (location: RecentLocation) => void;
 }) {
   const [filter, setFilter] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
@@ -46,6 +49,12 @@ export function RecentLocationsPane({ side, active, locations, sourceMenu, error
     if (current && !loading) onOpen(current);
   }
   function navigate(event: KeyboardEvent, inFilter = false) {
+    if (!inFilter && current && !loading && onCollect && !event.nativeEvent.isComposing &&
+        bindingMatches(copyBindings, eventShortcut(event))) {
+      event.preventDefault();
+      if (!event.repeat) onCollect(current);
+      return;
+    }
     if (event.nativeEvent.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
     if (event.key === "Enter") {
       event.preventDefault();
@@ -99,6 +108,7 @@ export function RecentLocationsPane({ side, active, locations, sourceMenu, error
     {error && <div className="pane-error"><span role="alert">{errorText(error)}</span></div>}
     <footer className="recent-actions">
       <Button disabled={!current || loading} onClick={openCurrent}>{t("Open folder")}</Button>
+      {onCollect && <Button disabled={!current || loading} onClick={() => { if (current) onCollect(current); }}>{t("Add to collection")}</Button>}
       <Button disabled={!current || loading} onClick={() => {
         if (current) onRemove(current);
         list.current?.focus({ preventScroll: true });

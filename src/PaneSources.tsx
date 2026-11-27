@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { Activity, ChevronDown, Clock3, Folder, HardDrive, Server } from "lucide-react";
+import { Activity, ChevronDown, Clock3, Folder, HardDrive, LibraryBig, Server } from "lucide-react";
 import { api, describeError, windowsClient, type ComputerDrive, type ConnectionSource, type QuickLocation } from "./api";
 import { Button } from "./Button";
 import { helpIsOpen } from "./contextHelp";
@@ -12,7 +12,7 @@ type LanHost = { kind: "dirlume"; id: string; name: string; credential: string }
   { kind: "kswitcher"; id: string; name: string; online?: boolean };
 type RemoteDrive = { host: LanHost; drive: string };
 type LanComputer = { host: LanHost; drives?: ComputerDrive[]; error?: string };
-export type PaneSource = QuickLocation | RemoteDrive | ConnectionSource | "processes" | "recent";
+export type PaneSource = QuickLocation | RemoteDrive | ConnectionSource | "processes" | "recent" | "collections";
 const driveTypes = ["", "", "Removable", "Fixed", "Network", "Optical", "RAM disk"];
 
 export function PaneSources({ side, overlay, open, locations, shortcuts, onToggle, onClose, onPick }: {
@@ -88,7 +88,8 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
   const downloads = locations.findIndex(({ label }) => label === "Downloads");
   const firstDrive = folders.findIndex(({ value }) => driveSourceCommand(value));
   const recentIndex = downloads >= 0 ? downloads + 1 : firstDrive >= 0 ? firstDrive : folders.length;
-  const folderSources = [...folders.slice(0, recentIndex), recent, ...folders.slice(recentIndex)];
+  const collections = { label: t("Collections"), bindings: shortcuts.collectionsSources, Icon: LibraryBig, value: "collections" } as const;
+  const folderSources = [...folders.slice(0, recentIndex), recent, collections, ...folders.slice(recentIndex)];
   const kswitcherStatus = kswitcherError === "Authorize this executable in KSwitcher → Computers → Trusted clients."
     ? t("To browse KSwitcher computers, add Dirlume.exe under KSwitcher → Computers → Trusted clients.")
     : errorText(kswitcherError);
@@ -107,7 +108,7 @@ export function PaneSources({ side, overlay, open, locations, shortcuts, onToggl
       aria-label={t(side === "left" ? "Left pane sources" : "Right pane sources")} onKeyDown={(event) => {
       if (event.defaultPrevented || event.nativeEvent.isComposing) return;
       const shortcut = eventShortcut(event);
-      const item = shortcut && [...folders, ...sources].find(({ bindings }) => bindingMatches(bindings, shortcut));
+      const item = shortcut && [...folderSources, ...sources].find(({ bindings }) => bindingMatches(bindings, shortcut));
       if (item) {
         event.preventDefault();
         event.stopPropagation();

@@ -471,11 +471,11 @@ export type DeletionDecision = "retry" | "skip" | "skipRemaining";
 
 export type TransferSource =
   | { kind: "local"; directory: string; name: string }
-  | { kind: "server"; connection: number; segments: string[]; folder: boolean }
+  | { kind: "server"; connection: number; segments: string[]; folder: boolean; modified?: number }
   | { kind: "ftp"; connection: number; segments: string[] }
   | { kind: "archive"; archive: number; segments: string[] }
   | { kind: "ssh"; connection: number; segments: string[] }
-  | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string; folder: boolean };
+  | { kind: "kswitcher"; directory: string; peer: string; path: string; name: string; folder: boolean; modified?: number };
 
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "rename" | "newer";
 export type TransferEntryDetails = { size: number; modified: number | null; directory: boolean };
@@ -667,6 +667,8 @@ export const api = {
     invoke<FileAttributes>("update_file_attributes", { directory, name, changes }),
   operate: (directory: string, operation: Operation | { kind: "open_directory" }) =>
     invoke<void>("operate", { directory, operation }, operation.kind),
+  prepareCollectionFolders: (directory: string, paths: string[][]) =>
+    invoke<void>("prepare_collection_folders", { directory, paths }),
   connectSavedServer: (credential: string, segments?: string[]) =>
     invoke<Connection & { share: string }>("connect_saved_server", { credential, segments }),
   connect: (invitation: string) => invoke<Connection & { share: string }>("connect_server", { invitation }),

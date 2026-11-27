@@ -709,7 +709,7 @@ impl Connection {
         progress: impl FnMut(&Path, u64, Option<u64>) -> io::Result<()>,
         ask: impl FnMut(local_transfer::Conflict) -> io::Result<local_transfer::Decision>,
     ) -> Result<TransferOutcome> {
-        copy_downloaded_folder(
+        copy_downloaded_item(
             target,
             session,
             options,
@@ -720,7 +720,7 @@ impl Connection {
     }
 }
 
-fn copy_downloaded_folder<P>(
+fn copy_downloaded_item<P>(
     target: &Path,
     session: &TransferSession,
     options: &local_transfer::Options,
@@ -1051,6 +1051,7 @@ enum TransferSource {
         connection: u32,
         segments: Vec<String>,
         folder: bool,
+        modified: Option<i64>,
     },
     Kswitcher {
         peer: String,
@@ -1058,6 +1059,7 @@ enum TransferSource {
         name: String,
         #[serde(default)]
         folder: bool,
+        modified: Option<i64>,
     },
     Ftp {
         connection: u32,
@@ -1777,88 +1779,71 @@ async fn transfer_item(
                 return result;
             }
 
-            if let TransferSource::Server {
-                segments,
-                folder: true,
-                ..
-            } = &request.source
-            {
-                if request.moving {
-                    return Err("This source is read-only.".to_owned());
-                }
-                let connection = connection.ok_or("Connect to the server first.")?;
-                return connection.copy_folder(
-                    segments.clone(),
-                    &target,
-                    &session,
-                    &options,
-                    progress,
-                    ask,
-                );
-            }
-            if let TransferSource::Kswitcher {
-                peer,
-                path,
-                folder: true,
-                ..
-            } = &request.source
-            {
-                if request.moving {
-                    return Err("This source is read-only.".to_owned());
-                }
-                return copy_downloaded_folder(
-                    &target,
-                    &session,
-                    &options,
-                    progress,
-                    ask,
-                    |staged, progress| {
-                        download_kswitcher_tree(peer, path, staged, &session, progress)
-                    },
-                );
-            }
-
-            match fs::symlink_metadata(&target) {
-                Ok(metadata) => {
-                    if request.policy != local_transfer::Policy::Skip {
-                        session
-                            .ask(
-                                local_transfer::Conflict::remote(&target, &metadata),
-                                &output,
-                            )
-                            .map_err(message)?;
-                    }
-                    return Ok(TransferOutcome::Skipped);
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(message(error)),
-            }
-
             match request.source {
-                TransferSource::Local { .. }
-                | TransferSource::Ftp { .. }
-                | TransferSource::Ssh { .. }
-                | TransferSource::Archive { .. } => {
-                    return Err("Choose a supported transfer source.".to_owned())
-                }
-                TransferSource::Server { segments, .. } => {
+                TransferSource::Server {
+                    segments,
+                    folder,
+                    modified,
+                    ..
+                } => {
+                    if request.moving {
+                        return Err("This source is read-only.".to_owned());
+                    }
                     let connection = connection.ok_or("Connect to the server first.")?;
-                    download_to(&target, &session, |file| {
-                        connection.download_file(segments, file, &session, &mut progress)
-                    })?;
+                    if folder {
+                        return connection
+                            .copy_folder(segments, &target, &session, &options, progress, ask);
+                    }
+                    copy_downloaded_item(
+                        &target,
+                        &session,
+                        &options,
+                        progress,
+                        ask,
+                        |staged, progress| {
+                            let mut file = fs::File::create_new(staged).map_err(message)?;
+                            connection.download_file(segments, &mut file, &session, progress)?;
+                            finish_downloaded_file(&file, modified).map_err(message)
+                        },
+                    )
                 }
-                TransferSource::Kswitcher { peer, path, .. } => {
-                    download_to(&target, &session, |file| {
-                        tokio::runtime::Handle::current().block_on(crate::kswitcher_lan::download(
-                            &peer,
-                            &path,
-                            file,
-                            |bytes, total| progress(&target, bytes, total),
-                        ))
-                    })?;
+                TransferSource::Kswitcher {
+                    peer,
+                    path,
+                    folder,
+                    name,
+                    modified,
+                } => {
+                    if request.moving {
+                        return Err("This source is read-only.".to_owned());
+                    }
+                    copy_downloaded_item(
+                        &target,
+                        &session,
+                        &options,
+                        progress,
+                        ask,
+                        |staged, progress| {
+                            if folder {
+                                return download_kswitcher_tree(
+                                    &peer, &path, staged, &session, progress,
+                                );
+                            }
+                            let mut file = fs::File::create_new(staged).map_err(message)?;
+                            tauri::async_runtime::block_on(session.interrupt(
+                                crate::kswitcher_lan::download(
+                                    &peer,
+                                    &path,
+                                    &mut file,
+                                    |bytes, total| progress(Path::new(&name), bytes, total),
+                                ),
+                            ))?;
+                            finish_downloaded_file(&file, modified).map_err(message)
+                        },
+                    )
                 }
+                _ => Err("Choose a supported transfer source.".to_owned()),
             }
-            Ok(TransferOutcome::Completed)
         })();
         if let Some(tracker) = &session.history {
             let (outcome, error, known_change) = match &result {
@@ -2182,23 +2167,6 @@ async fn disconnect_server(id: u32, state: State<'_, Connections>) -> Result<()>
     Ok(())
 }
 
-fn download_to(
-    path: &Path,
-    session: &TransferSession,
-    write: impl FnOnce(&mut fs::File) -> Result<()>,
-) -> Result<()> {
-    local::ensure_absent(path).map_err(message)?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| "Choose a local destination folder.".to_owned())?;
-    let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(message)?;
-    write(staged.as_file_mut())?;
-    staged.as_file().sync_all().map_err(message)?;
-    session.ensure_running().map_err(message)?;
-    staged.persist_noclobber(path).map_err(message)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod server_download_tests {
     use super::*;
@@ -2408,21 +2376,35 @@ mod server_download_tests {
                             token: String::new(),
                         },
                     };
-                    let downloaded = download_to(&destination, &session, |file| {
-                        connection.download_file(
-                            vec!["download.bin".to_owned()],
-                            file,
-                            &session,
-                            |_, bytes, _| {
-                                if bytes == 0 {
-                                    let _ = received_headers.try_send(());
-                                } else {
-                                    let _ = received_chunk.try_send(bytes);
-                                }
-                                Ok(())
-                            },
-                        )
-                    });
+                    let options = local_transfer::Options {
+                        moving: false,
+                        policy: local_transfer::Policy::Ask,
+                        ask_read_only: true,
+                        copy: local::CopyOptions::default(),
+                    };
+                    let downloaded = copy_downloaded_item(
+                        &destination,
+                        &session,
+                        &options,
+                        |_, bytes, _| {
+                            if bytes == 0 {
+                                let _ = received_headers.try_send(());
+                            } else {
+                                let _ = received_chunk.try_send(bytes);
+                            }
+                            Ok(())
+                        },
+                        |_| panic!("No destination was published"),
+                        |staged, progress| {
+                            let mut file = fs::File::create_new(staged).map_err(message)?;
+                            connection.download_file(
+                                vec!["download.bin".into()],
+                                &mut file,
+                                &session,
+                                progress,
+                            )
+                        },
+                    );
                     result.send(downloaded).unwrap();
                 }
             });
@@ -2434,7 +2416,7 @@ mod server_download_tests {
             let cancelled = done.recv_timeout(Duration::from_secs(2));
             drop(release);
             peer.join().unwrap();
-            assert_eq!(cancelled.unwrap().unwrap_err(), "Transfer canceled.");
+            assert!(matches!(cancelled.unwrap(), Err(error) if error == "Transfer canceled."));
             transfer.join().unwrap();
             assert!(!destination.exists());
             assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
@@ -3710,6 +3692,7 @@ pub fn run() {
         change_archive,
         copy_into_archive,
         crate::folders::create_folders,
+        crate::folders::prepare_collection_folders,
         crate::desktop_share::active_desktop_share,
         connect_server,
         crate::desktop_share::start_desktop_computer_share,

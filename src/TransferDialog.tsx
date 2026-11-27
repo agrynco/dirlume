@@ -16,13 +16,14 @@ import { estimateDelay, estimateInterval, TransferEstimate } from "./transferEst
 export interface Transfer {
   kind: "copy" | "move";
   source: FilePlace;
-  items: { place: FilePlace; entry: Entry; searchPath?: string }[];
+  items: { place: FilePlace; entry: Entry; searchPath?: string; collectionDestination?: string[] }[];
   target: string;
   remoteDestination?: FtpPlace | SshPlace;
   kswitcherDestination?: KSwitcherPlace;
   kswitcherBroker?: boolean;
   archiveDestination?: ArchivePlace;
   chooseOperation?: boolean;
+  collection?: { folders: string[][]; unavailable: string[]; needsLocalDestination: boolean };
 }
 
 type Decision = "overwrite" | "overwrite_all" | "skip";
@@ -51,11 +52,13 @@ export function itemSource(place: FilePlace, item: Entry): TransferSource {
   if (place.kind === "local") return { kind: "local", directory: place.path, name: item.name };
   if (isFileServer(place)) return { kind: place.kind, connection: place.id, segments: [...place.segments, item.name] };
   if (place.kind === "archive") return { kind: "archive", archive: place.id, segments: [...place.segments, item.name] };
+  const metadata = item.modified === null ? {} : { modified: item.modified };
   if (place.kind === "server") {
-    return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory };
+    return { kind: "server", connection: place.id, segments: [...place.segments, item.name], folder: item.directory, ...metadata };
   }
   const target = childPlace(place, item.name) as typeof place;
-  return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name, folder: item.directory };
+  return { kind: "kswitcher", directory: place.directory, peer: place.peer, path: target.path, name: item.name,
+    folder: item.directory, ...metadata };
 }
 
 export function TransferDialog({ transfer, side, showHidden, onClose, onFinished }: {
@@ -102,16 +105,15 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const prompt = kswitcherTarget?.capabilities?.conflictPrompt ??
     (transfer.source.kind === "kswitcher" ? transfer.source.capabilities?.conflictPrompt : undefined);
   const localTarget = !transfer.remoteDestination && !archiveTarget && !kswitcherTarget;
-  const replaceable = transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
-    transfer.kswitcherBroker || transfer.items.every(({ place, entry }) =>
-      (place.kind === "server" || place.kind === "kswitcher") && entry.directory);
+  const replaceable = transfer.collection || transfer.source.kind === "local" || isFileServer(transfer.source) || transfer.source.kind === "archive" ||
+    transfer.kswitcherBroker || transfer.items.every(({ place }) => place.kind === "server" || place.kind === "kswitcher");
   const verb = moving ? "Move" : replaceable ? "Copy" : "Download";
   const itemCount = transfer.items.length;
   const manyDestinations = multipleDestinations && !moving;
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
-  const singleFile = !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
+  const singleFile = !transfer.collection && !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
   const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
   const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";
   const browsePath = singleFile && (destination === transfer.target || /[\\/]$/.test(destination)) && destination
@@ -223,6 +225,12 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         });
         initialized = true;
       }
+      if (transfer.collection?.folders.length && !cancelled.current) {
+        for (const target of targets) {
+          if (cancelled.current) break;
+          await api.prepareCollectionFolders(target, transfer.collection.folders);
+        }
+      }
       if (archiveTarget && !cancelled.current) {
         const sources = transfer.items.map(({ place, entry }) => {
           if (place.kind !== "local") throw new Error(t("Choose local files or folders to copy into the archive."));
@@ -246,7 +254,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
         setProgress({ file: entry.name, bytes: 0, total: null });
         const remoteCopy = !localTarget || isFileServer(transfer.source) || transfer.kswitcherBroker ||
           (place.kind === "server" || place.kind === "kswitcher") && entry.directory;
-        const target = remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
+        const target = item.collectionDestination?.length
+          ? [destination.replace(/[\\/]+$/, ""), ...item.collectionDestination].join(separator)
+          : remoteCopy && !manyDestinations && itemCount === 1 && transfer.target && !/[\\/:]/.test(destination)
           ? transfer.target.replace(/[\\/]+$/, "") + separator + destination
           : destination;
         const request = {
@@ -254,7 +264,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           ftpDestination: transfer.remoteDestination?.kind === "ftp" ? transfer.remoteDestination.id : undefined,
           sshDestination: transfer.remoteDestination?.kind === "ssh" ? transfer.remoteDestination.id : undefined,
           kswitcherDestination: kswitcherTarget?.peer, kswitcherBroker: transfer.kswitcherBroker,
-          multiple: itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
+          multiple: !!transfer.collection || itemCount > 1 || manyDestinations, policy, askReadOnly, retry: retry && index === processed,
           copyOptions: localCopy ? { access, preserveTimestamps, followLinks, mask: useFilter ? mask.trim() : undefined } : undefined,
         };
         const output = transferEvents(id);
@@ -315,7 +325,9 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           <div className="dialog-body transfer-body transfer-options">
             <div className="field">
               <label htmlFor="transfer-destination" data-tooltip={placePath(itemCount === 1 ? transfer.items[0].place : transfer.source)}>
-                {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+                {transfer.collection ? t("Copy from collection") : <>
+                  {promptStart}<strong>{itemCount === 1 ? transfer.items[0].entry.name : t("{0} selected items", itemCount)}</strong>{promptEnd}
+                </>}
               </label>
               {transfer.remoteDestination && <span className="muted" id="transfer-connection">
                 {remoteDestinationLabel(transfer.remoteDestination)}
@@ -328,6 +340,12 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 kswitcher={kswitcherTarget} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
             </div>
+            {!!transfer.collection?.unavailable.length && <div role="status">
+              <p>{t("These originals are unavailable. Available items can still be copied.")}</p>
+              <ul>{transfer.collection.unavailable.map((message, index) => <li key={index}>{message}</li>)}</ul>
+            </div>}
+            {transfer.collection?.needsLocalDestination &&
+              <p role="status">{t("Choose a local destination for this collection selection.")}</p>}
             {manyDestinations && <>
               {additional.map((path, index) => <PathField key={index} id={`transfer-destination-${index + 2}`}
                 label={t("Destination {0}", index + 2)} historyKey="transfer-destination" value={path} required
