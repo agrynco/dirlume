@@ -65,7 +65,7 @@ function terminalAppearance(): ITerminalOptions {
 
 export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
   history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onDisconnected,
-  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onFileOpens, onRestart, onClose }: {
+  onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onFileOpens, onRestart, onRunFinished, onClose }: {
   session: TerminalSession;
   directory: string | null;
   visible: boolean;
@@ -90,15 +90,21 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   focusRequested: { current: number | null };
   onFileOpens: () => void;
   onRestart?: () => void;
+  onRunFinished?: () => void;
   onClose: () => void;
 }) {
   const remoteTerminal = session.kind === "ssh";
+  const menuRun = session.kind === "local" && !!session.userMenu;
   const container = useRef<HTMLDivElement>(null);
   const instance = useRef<{ term: Terminal; fit: () => void; paste: () => void; copy: (text: string) => void; openLink: (href: string) => void } | null>(null);
   const [shellDirectory, setShellDirectory] = useState(session.path);
   const [environmentChanged, setEnvironmentChanged] = useState(false);
   const [commandsWaiting, setCommandsWaiting] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const stopRun = useRef<(() => void) | null>(null);
+  const runFinished = useRef(onRunFinished);
+  runFinished.current = onRunFinished;
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string; href: string | null } | null>(null);
   const suggestionId = useId();
   const [popup, setPopup] = useState<{ options: CommandSuggestion[]; selected: number; style: CSSProperties } | null>(null);
@@ -488,16 +494,33 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     moveTo.current = (path) => { nextDirectory = path; synchronize(); };
     output.onmessage = (message) => {
       if (stopped || closed) return;
-      if (message.event !== "data") {
+      if (message.event === "finished") {
+        const result = message.code === 0 ? t("Completed") : t("Command exited with code {0}.", message.code);
+        endSession(result, new Error(result));
+        setSessionError(null);
+        setRunStatus(result);
+        term.writeln("\r\n" + result);
+        runFinished.current?.();
+      } else if (message.event !== "data") {
         const reason = t("This terminal session has closed.");
         endSession(reason, new Error(reason), false, message.event === "disconnected");
         if (!windows) term.writeln("\r\n" + reason);
+        if (menuRun) { setRunStatus(reason); runFinished.current?.(); }
       } else {
         term.write(Uint8Array.from(atob(message.data), (byte) => byte.charCodeAt(0)));
       }
     };
     const opening = api.openTerminal(session, promptToken, term.rows, term.cols, output);
-    if (windows) {
+    if (menuRun) stopRun.current = () => {
+      if (closed || stopped) return;
+      const result = t("Canceled");
+      endSession(result, new Error(result));
+      setSessionError(null);
+      setRunStatus(result);
+      term.writeln("\r\n" + result);
+      void closing?.then(() => runFinished.current?.());
+    };
+    if (windows && !menuRun) {
       startupTimer = window.setTimeout(() => {
         const reason = t("PowerShell did not reach its prompt in time.");
         endSession(reason, new Error(reason));
@@ -513,7 +536,9 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
       } else if (!runQueuedCommand()) synchronize();
     }, (error: unknown) => {
       if (!stopped && !closed) {
-        endSession(t("PowerShell could not start."), error);
+        const reason = menuRun ? describeError(error) : t("PowerShell could not start.");
+        endSession(reason, error);
+        if (menuRun) { setRunStatus(errorText(reason)); runFinished.current?.(); }
         term.writeln(describeError(error));
       }
     });
@@ -735,11 +760,13 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
   return (
     <section className="terminal-card" data-font-zoom="terminal" data-help-topic="terminal" aria-label={t("Terminal")} hidden={!visible}>
       <header onClick={(event) => { if (!(event.target as Element).closest("button")) instance.current?.term.focus(); }}>
-        <h2>{t(remoteTerminal ? "SSH terminal" : "Terminal")}</h2>
+        <h2>{t(remoteTerminal ? "SSH terminal" : menuRun ? "User Menu command" : "Terminal")}</h2>
         <span className="terminal-location" data-tooltip={shellDirectory}>{remoteTerminal ? session.address + " · " : ""}{shellDirectory}</span>
         {focusHint}
+        {menuRun && (runStatus ? <span role="status" className="terminal-location">{runStatus}</span> :
+          <Button type="button" onClick={() => stopRun.current?.()}>{t("Stop")}</Button>)}
         <Button type="button" data-file-opens onClick={onFileOpens}>{t("File opens")}</Button>
-        <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={onClose}><X /></Button>
+        <Button type="button" className="icon-button" aria-label={t("Close terminal")} onClick={() => { if (menuRun) stopRun.current?.(); onClose(); }}><X /></Button>
       </header>
       {watchEnvironment && environmentChanged && !sessionError && <p className="terminal-environment-notice" role="status">
         {t("Windows environment changed. Reopen the terminal to apply the updated variables.")}

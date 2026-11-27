@@ -1282,6 +1282,24 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .file-operation-history-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; padding-block: 8px; }
 .file-operation-history-details ul { max-height: 42vh; overflow: auto; margin: 8px 0 0; padding: 0; list-style: none; }
 .file-operation-history-details li { padding-block: 7px; border-top: 1px solid var(--line); }
+.user-menu-body { display: grid; gap: 10px; min-width: 0; }
+.user-menu-body label { display: grid; gap: 4px; min-width: 0; }
+.user-menu-body label.user-menu-check { display: flex; align-items: center; gap: 8px; }
+.user-menu-body :is(input:not([type="checkbox"]), select, textarea) { min-width: 0; width: 100%; }
+.user-menu-body textarea { resize: vertical; }
+.user-menu-body pre { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 38vh; overflow: auto; }
+.user-menu-path { color: var(--muted); }
+.user-menu-list { border: 1px solid var(--line); border-radius: var(--radius); max-height: 34vh; min-height: 42px; overflow: auto; }
+.user-menu-list:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.user-menu-list [role="option"] { display: flex; justify-content: space-between; gap: 8px; padding: 7px 10px; cursor: pointer; overflow-wrap: anywhere; }
+.user-menu-list [role="option"][aria-selected="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.user-menu-list [role="option"][aria-disabled="true"] { color: var(--muted); cursor: default; }
+.user-menu-list [role="option"] span + span { flex: none; }
+.user-menu-list hr { margin: 4px 10px; border: 0; border-top: 1px solid var(--line); }
+.user-menu-list p { padding: 10px; color: var(--muted); }
+.user-menu-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.user-menu-prompt { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 6px; align-items: end; }
 @media (max-width: 560px) {
   .file-operation-history-grid { grid-template-columns: minmax(0, 1fr); }
 }

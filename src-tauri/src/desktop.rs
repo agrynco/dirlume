@@ -3162,6 +3162,7 @@ pub fn run() {
         .manage(TransferSessions::default())
         .manage(crate::file_history::History::default())
         .manage(terminal::Terminals::default())
+        .manage(crate::user_menu::UserMenus::default())
         .manage(watch::Watches::default())
         .manage(watch::Measurements::default())
         .manage(crate::space_analyzer::Scans::default())
@@ -3349,6 +3350,9 @@ pub fn run() {
         resolve_transfer,
         transfer_item,
         terminal::open_terminal,
+        crate::user_menu::user_menu_sources,
+        crate::user_menu::approve_user_menu,
+        crate::user_menu::save_user_menu,
         crate::completion::complete_command,
         crate::completion::complete_ssh_terminal,
         crate::completion::complete_ssh_command,

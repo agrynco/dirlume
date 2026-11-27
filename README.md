@@ -116,6 +116,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
 | F2 | Rename the selected file or folder in its row. |
+| Configurable | Open **User Menu** from a local file pane. Set **Open User Menu** in **Options → Keyboard shortcuts**. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
 | Ctrl+C / Ctrl+V in a file list | Copy local files to the system clipboard or paste files into the active local folder. |
@@ -131,6 +132,10 @@ Drag the Options title bar to position it independently of the main window. Drag
 In **New folder**, enable **Process multiple names** to separate names with commas or semicolons. Put names containing a separator in double quotes. For a link, choose **Symbolic link** or **Directory junction** on Windows, then select an existing target folder. Press **Alt+Down** in the dialog to recall successful names from history.
 
 Click **Terminal** or press **F12** to show or hide the interactive shell. Dirlume keeps a local shell and a separate shell for each SSH connection. The active local or SSH pane and its terminal synchronize their working directories when a supported shell returns to its prompt. Hiding the terminal preserves the session and its split height. Use **Ctrl+↑/↓** to resize it in steps or **Ctrl+O** to hide or restore the file panes. Click **Close terminal** to end the active session.
+
+Open **Commands → User Menu** to run saved commands from the captured local pane. The current folder's `.dirlume-menu.json` takes precedence over the personal menu. Use **Menu source** to switch to a parent or personal menu, and **Manage menus** to edit commands, submenus, and separators. Assign a letter, digit, or function key within each menu level. Choose a visibility rule and use **Show hidden entries** to find filtered commands.
+
+Use **Insert token** to add the active folder, opposite folder, focused name, path, stem or extension, marked paths, or a named prompt. Enter shell steps one per line. Put tokens where arguments go, without adding extra quotes. Folder definitions require a review and approval of their current contents for the session. The preview shows substituted values before prompted commands run. Commands run in order in their own PowerShell, sh, dash, Bash, or Zsh session. The Terminal reports failures and exit status. **Stop** cancels remaining steps. Completed steps can leave changes.
 
 The shell receives keystrokes while its input has focus. A hint in the status bar, or beside the close button in the terminal header when the status bar is hidden, reminds you to click a file pane to use its shortcuts. Use the question-mark button to open offline Help and return to your command when you close it. Click **Terminal** to restore the panes when they are hidden. The terminal layout shortcuts remain available while editing a shell command. From the command line, **Alt+F8** opens dated history to search, edit, or rerun earlier commands. Dirlume keeps the last 1,000 submissions from the command line and from supported embedded shells.
 

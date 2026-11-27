@@ -420,10 +420,12 @@ export interface EnvironmentSave {
   integration: EnvironmentOutcome | null;
 }
 
-export type TerminalOutput = { event: "data"; data: string } | { event: "closed" | "disconnected" };
+import type { MenuRun, MenuEntry, MenuSource, MenuSourceVersion } from "./userMenu";
+
+export type TerminalOutput = { event: "data"; data: string } | { event: "finished"; code: number } | { event: "closed" | "disconnected" };
 export type TerminalCommand = { command: string; directory: string } | null;
 export type TerminalSession = { id: number; path: string; refreshEnvironment: boolean } &
-  ({ kind: "local" } | { kind: "ssh"; connection: number; address: string; segments: string[] });
+  ({ kind: "local"; userMenu?: MenuRun } | { kind: "ssh"; connection: number; address: string; segments: string[] });
 export type CommandCompletion = { index: number; length: number; exclusive?: boolean; matches: { label: string; text: string; directory: boolean }[] };
 export type ShellCompletionEnvironment = Record<string, string | null>;
 export type TerminalCompletionContext = { searchPath?: string; environment?: ShellCompletionEnvironment };
@@ -741,9 +743,13 @@ export const api = {
     invoke<Listing & { parent: string | null; drives?: ComputerDrive[] | null }>("list_kswitcher", { directory, peer, path }),
   installedFonts: () => invoke<string[]>("installed_fonts"),
   computerName: () => invoke<string | null>("computer_name"),
+  userMenuSources: (folder: string) => invoke<MenuSource[]>("user_menu_sources", { folder }),
+  approveUserMenu: (source: MenuSourceVersion) => invoke<void>("approve_user_menu", { source }),
+  saveUserMenu: (source: MenuSourceVersion, entries: MenuEntry[]) => invoke<MenuSource>("save_user_menu", { source, entries }),
   openTerminal: (session: TerminalSession, promptToken: string, rows: number, cols: number, output: Channel<TerminalOutput>) =>
     invoke<boolean>("open_terminal", { request: { id: session.id, directory: session.path, promptToken, rows, cols,
       refreshEnvironment: session.refreshEnvironment,
+      userMenu: session.kind === "local" ? session.userMenu : undefined,
       ssh: session.kind === "ssh" ? { connection: session.connection, segments: session.segments } : undefined,
     }, output }),
   completeCommand: (line: string, caret: number, directory: string, refreshEnvironment: boolean, shellEnvironment?: ShellCompletionEnvironment) =>

@@ -35,6 +35,8 @@ import { KSwitcherUnavailableError, reportFrontendError, SshConnectionLostError 
 import { AttributesDialog } from "./AttributesDialog";
 import { connectionCommands, RemoveConnectionDialog, SavedConnectionDialog } from "./SavedConnectionDialog";
 import { FileHistoryDialog } from "./FileHistoryDialog";
+import { UserMenuDialog } from "./UserMenuDialog";
+import type { MenuContext, MenuRun } from "./userMenu";
 import { VerifyHostDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
@@ -169,6 +171,7 @@ type Modal =
   | { kind: "compare"; left: NamedFile; right: NamedFile }
   | { kind: "transfer"; side: Side; transfer: Transfer }
   | { kind: "fileHistory"; direction?: "undo" | "redo" }
+  | { kind: "userMenu"; side: Side; context: MenuContext }
   | { kind: "deletion"; deletion: Deletion; searchSide?: Side }
   | { kind: "search"; side: Side; place: FileLocation }
   | { kind: "mkdir"; side: Side; place: Extract<Place, { kind: "local" | "archive" }> }
@@ -317,6 +320,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const exitConfirmed = useRef(false);
   const busy = modal?.kind === "transfer";
   const [terminals, setTerminals] = useState<Record<string, TerminalSession>>({});
+  const [userMenuOutput, setUserMenuOutput] = useState(false);
+  const userMenuInProgress = useRef<number | null>(null);
   const [fileOpensVisible, setFileOpensVisible] = useState(false);
   const fileOpens = useFileOpens();
   const [terminalCompletion, setTerminalCompletion] = useState<Record<number, TerminalCompletionContext & { id: number }>>({});
@@ -452,6 +457,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const terminalPlace = terminalLocation?.kind === "local" || terminalLocation?.kind === "ssh" ? terminalLocation : null;
   const terminalKey = terminalPlace ? terminalPlace.kind === "ssh" ? "ssh:" + terminalPlace.id : "local" : null;
   const terminal = terminalKey ? terminals[terminalKey] : undefined;
+  const terminalViewKey = userMenuOutput && terminals.userMenu ? "userMenu" : terminalKey;
   const ftp = pane.place?.kind === "ftp" ? pane.place : undefined;
   const archive = pane.place?.kind === "archive" ? pane.place : undefined;
   const fileServer = isFileServer(pane.place) ? pane.place : undefined;
@@ -2123,6 +2129,38 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     setFileRevision((revision) => revision + 1);
   }
 
+  function openUserMenu() {
+    if (modal || !local || smbHost(local) || !filesAvailable || pane.search || panelsHidden) return;
+    const otherSide = opposite(active);
+    const other = panes[otherSide];
+    const itemDetails = (item: typeof currentItem) => item?.place.kind === "local" && !smbHost(item.place)
+      ? { path: placePath(childPlace(item.place, item.entry.name)), name: item.entry.name, directory: item.entry.directory } : null;
+    const marked = pane.marked.flatMap((name) => {
+      const row = trees[active].enabled ? trees[active].lookup(pane, name) : pane.entries.find((entry) => entry.name === name);
+      const item = itemDetails(paneItem(pane, row ?? undefined));
+      return item ? [item.path] : [];
+    });
+    setModal({ kind: "userMenu", side: active, context: { folder: local.path,
+      opposite: !other.search && !processPanels[otherSide] && other.place?.kind === "local" && !smbHost(other.place) ? other.place.path : null,
+      focused: itemDetails(currentItem), marked } });
+  }
+
+  function runUserMenu(userMenu: MenuRun) {
+    if (userMenuInProgress.current !== null) return false;
+    const session: TerminalSession = { id: ++nextSession.current, kind: "local", path: userMenu.source.folder,
+      refreshEnvironment: preferences.refreshEnvironment, userMenu };
+    userMenuInProgress.current = session.id;
+    const previous = terminals.userMenu;
+    if (previous) clearTerminalState(previous.id);
+    terminalFocus.current = session.id;
+    setTerminals((current) => ({ ...current, userMenu: session }));
+    setUserMenuOutput(true);
+    setFileOpensVisible(false);
+    setTerminalShare(terminalHeight);
+    setModal(null);
+    return true;
+  }
+
   function confirmDeletion(command: "recycle" | "delete", place: RenameLocation | SshPlace | ArchivePlace,
     entries: readonly Entry[], tree = false, searchSide?: Side) {
     if (!entries.length) return;
@@ -2508,6 +2546,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
 
   function toggleTerminal() {
     if (terminalVisible) showCommandLine();
+    else if (userMenuOutput && terminals.userMenu) setTerminalShare(terminalHeight);
     else if (!terminalPlace && fileOpens.history.length) {
       setTerminalShare(terminalHeight);
       setFileOpensVisible(true);
@@ -2583,8 +2622,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       else if (!analysis && currentRow) open(active, currentRow);
       return;
     }
-    const session = openTerminal(!terminalVisible);
+    const session = openTerminal(!terminalVisible || userMenuOutput);
     if (!session || !terminalPlace) return;
+    setUserMenuOutput(false);
     if (!terminalVisible) setTerminalShare(terminalHeight);
     setPendingCommands((commands) => ({
       ...commands, [session.id]: [...(commands[session.id] ?? []), { command: commandLine, directory: placePath(terminalPlace) }],
@@ -2984,6 +3024,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         break;
       }
       case "commandHistory": setModal({ kind: "commandHistory" }); break;
+      case "userMenu": openUserMenu(); break;
       case "mark": {
         if (current) {
           selectRow(active, current, false, true);
@@ -3147,6 +3188,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
+    if (command === "userMenu" && (!onFiles || inField || event.repeat)) return;
     if (command === "quickViewPrevious" || command === "quickViewNext") {
       if (quickViewSource !== null && !inField && !target.closest("[role=menu]") &&
           (onFiles?.id === quickViewSource + "-files" || target.closest(".quick-view"))) {
@@ -3318,6 +3360,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
       commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
       commandWithIcon(History, "commandHistory", activeDocument !== null),
+      menuCommand("userMenu", !filesAvailable || !local || !!smbHost(local) || !!pane.search || !!modal, "User Menu"),
       commandWithIcon(History, "fileOperationHistory", !!modal || activeDocument !== null),
       menuCommand("undoFileOperation", !!modal || activeDocument !== null),
       menuCommand("redoFileOperation", !!modal || activeDocument !== null),
@@ -3650,12 +3693,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         {Object.entries(terminals).map(([key, session]) => (
           <TerminalPanel key={session.id} session={session}
             directory={key === terminalKey && terminalPlace && !processPanels[active] ? placePath(terminalPlace) : null}
-            visible={key === terminalKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
+            visible={key === terminalViewKey && terminalVisible && !fileOpensVisible && activeDocument === null} theme={theme} scheme={scheme}
             fontSize={preferences.viewFontSizes.terminal}
             history={localTerminalHistory}
             rowHeight={terminalRowHeight} focusRequested={terminalFocus}
             focusHint={!preferences.showStatusBar && key === terminalKey ? terminalFocusHint : undefined}
-            watchEnvironment={session.kind === "local" && preferences.refreshEnvironment}
+            watchEnvironment={session.kind === "local" && !session.userMenu && preferences.refreshEnvironment}
             copyShortcut={shortcuts.copyTerminalText} pasteShortcut={shortcuts.pasteTerminalText} pasteOnRightClick={preferences.terminalPasteOnRightClick}
             onClipboardError={(error) => setStatus({ text: describeError(error), error: true })}
             onTerminalError={(message) => setStatus({ text: message, error: true })}
@@ -3670,12 +3713,16 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
               const { [session.id]: _closed, ...remaining } = current;
               return remaining;
             })}
-            onRestart={session.kind === "local" && terminalPlace?.kind === "local"
+            onRestart={session.kind === "local" && !session.userMenu && terminalPlace?.kind === "local"
               ? () => openTerminal(true, terminalPlace, session.id) : undefined}
             onFileOpens={showFileOpens}
-            onClose={() => { dropTerminal(key); showCommandLine(); }} />
+            onRunFinished={key === "userMenu" ? () => {
+              if (userMenuInProgress.current === session.id) userMenuInProgress.current = null;
+              fileLocationsChanged();
+            } : undefined}
+            onClose={() => { dropTerminal(key); if (key === "userMenu") setUserMenuOutput(false); showCommandLine(); }} />
         ))}
-        {!terminal && terminalPlaceholder}
+        {!(terminalViewKey && terminals[terminalViewKey]) && terminalPlaceholder}
       </Suspense>
       {terminalVisible && fileOpensVisible && activeDocument === null &&
         <FileOpensTerminal history={fileOpens.history} onBack={backFromFileOpens} onClose={() => showCommandLine()} />}
@@ -3683,6 +3730,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         <Button type="button" className="toolbar-button" aria-pressed={terminalVisible} onClick={toggleTerminal} shortcut={keyLabel("toggleTerminal")}>
           <TerminalIcon /> {t("Terminal")}
         </Button>
+        {terminalVisible && terminals.userMenu && <Button type="button" onClick={() => {
+          if (userMenuOutput && !openTerminal()) return;
+          setUserMenuOutput(!userMenuOutput);
+          setFileOpensVisible(false);
+        }}>{t(userMenuOutput ? "Interactive terminal" : "User Menu output")}</Button>}
         <span data-tooltip={terminalLocation ? placePath(terminalLocation) : undefined}>{terminalLocation ? placePath(terminalLocation) : ""}</span>
         <CommandField input={commandInput} draft={commandLine} directory={processPanels[active] || terminalPlace?.kind !== "local" ? null : terminalPlace.path}
           remote={!processPanels[active] && terminalPlace?.kind === "ssh" ? terminalPlace : null}
@@ -3831,6 +3883,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         <FileHistoryDialog initial={modal.direction} onClose={() => { setModal(null); requestAnimationFrame(() => focus(active)); }}
           onChanged={fileLocationsChanged} />
       )}
+      {modal?.kind === "userMenu" && <UserMenuDialog context={modal.context} onRun={runUserMenu}
+        onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }} />}
       {modal?.kind === "search" && (
         <SearchDialog root={modal.place} showHidden={preferences.hidden} onClose={() => setModal(null)}
           onReveal={(directory, name) => revealResult(modal.side, directory, name)}

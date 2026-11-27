@@ -5,9 +5,9 @@
     "Open SMB shares on Windows, macOS, and Ubuntu, and configure proxy routing, SFTP server commands, legacy timestamps, and SSH shells in NetBox.",
     "Use the color scheme’s selection text color for current and marked file names, including hidden and system entries.",
     "Use the refreshed main menu, two-pane app icon, high-contrast Windows Administrator badge, and consistent checkbox placement in dialogs.",
-    "Review Copy and Move history and undo or redo verified local file transfers. Scan local folders faster on APFS and ext4. Tree falls back to List when a folder lookup fails, and Copy and Move can merge folders with per-file overwrite choices.",
+    "Undo and redo verified local transfers from Copy and Move history. Measure local folders faster on APFS and ext4. Tree falls back to List after a failed folder lookup. Merge folders with per-file overwrite choices.",
     "Share the settings file beside Dirlume.exe between ordinary and administrator launches of the same Windows copy.",
-    "Start local zsh in the active pane’s folder without showing its setup command.",
+    "Run saved commands from User Menu with the active pane’s paths and prompted arguments. Local zsh starts in the active pane’s folder without showing its setup command.",
     "Browse and edit large text files in pages, with streaming saves that preserve the untouched contents."
   ]
 }
