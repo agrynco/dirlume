@@ -625,6 +625,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Filename code page": ["Кодова сторінка назв файлів", "Кодовая страница имён файлов"],
   "Use Windows code page": ["Використовувати кодову сторінку Windows", "Использовать кодовую страницу Windows"],
   "Plain FTP sends credentials and files without encryption.": ["Звичайний FTP передає облікові дані та файли без шифрування.", "Обычный FTP передаёт учётные данные и файлы без шифрования."],
+  "Page": ["Сторінка", "Страница"],
   "Previous page": ["Попередня сторінка", "Предыдущая страница"],
   "Next page": ["Наступна сторінка", "Следующая страница"],
   "Byte offset": ["Зміщення в байтах", "Смещение в байтах"],

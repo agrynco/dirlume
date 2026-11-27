@@ -499,7 +499,7 @@ impl Session {
         &mut self,
         segments: &[String],
         original: &Entry,
-        bytes: &[u8],
+        mut content: impl Read,
         revalidate: impl FnOnce(&mut Self) -> SftpResult<()>,
     ) -> SftpResult<()> {
         let target = Self::absolute(segments)?;
@@ -527,7 +527,6 @@ impl Session {
                 .create(&directory_path),
         )?;
         let result = (|| {
-            let mut content = bytes;
             let staged = self.stage_upload(
                 &remote_transfer::child(&directory, "text"),
                 &mut content,
@@ -600,15 +599,27 @@ impl remote_transfer::DownloadSession for Session {
         &mut self,
         segments: &[String],
         output: &mut std::fs::File,
-        mut progress: impl FnMut(u64) -> Result<()>,
+        progress: impl FnMut(u64) -> Result<()>,
     ) -> Result<()> {
+        self.download_file(segments, output, progress)
+            .map_err(Into::into)
+    }
+}
+
+impl Session {
+    pub(crate) fn download_file(
+        &mut self,
+        segments: &[String],
+        output: &mut (impl Write + ?Sized),
+        mut progress: impl FnMut(u64) -> Result<()>,
+    ) -> SftpResult<()> {
         let mut file = self.wait(self.sftp.open(Self::absolute(segments)?))?;
-        let result = (|| {
+        let result = (|| -> SftpResult<()> {
             let mut buffer = Default::default();
             let mut total = 0;
             while let Some(mut data) = self.wait(file.read(CHUNK, buffer))? {
                 if data.is_empty() {
-                    return Err("The SSH server returned an empty data packet.".to_owned());
+                    return Err("The SSH server returned an empty data packet.".into());
                 }
                 output.write_all(&data).map_err(message)?;
                 total += data.len() as u64;
@@ -619,7 +630,7 @@ impl remote_transfer::DownloadSession for Session {
             Ok(())
         })();
         let closed = self.wait(file.close());
-        result.and(closed.map_err(Into::into))
+        result.and(closed)
     }
 }
 

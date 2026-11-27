@@ -28,8 +28,12 @@ try {
       "sample.rs": "fn main() { let value = 42; }",
       "other.rs": "fn main() { let value = 117; }",
       "guide.md": "# View settings\n\n[Home](https://example.com)",
+      "large.txt": "Expected the paged reader to open this file.",
     };
     const entries = Object.keys(files).map((name) => ({ name, directory: false, link: false, hidden: false, size: files[name].length, modified: null }));
+    const pages = ["Beginning\r\n", "Middle\r\n", "End\r\n"];
+    const info = { id: 71, encoding: "utf8", length: 9 * 1024 * 1024, pageCount: pages.length };
+    const edits = new Map();
     window.openedTerminals = [];
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1,
@@ -37,6 +41,19 @@ try {
         if (command === "locations") return [{ label: "Home", path }];
         if (command === "list_directory") return { path, parent: null, entries, omitted: 0 };
         if (command === "file_icons") return args.items.map(() => null);
+        if (command === "open_local_text_pages") return args.name === "large.txt" ? info : null;
+        if (command === "read_text_page") return { text: edits.get(args.index) ?? pages[args.index],
+          original: { start: args.index * 131072, end: (args.index + 1) * 131072 } };
+        if (command === "edit_text_page") {
+          edits.set(args.index, args.text);
+          return true;
+        }
+        if (command === "save_text_pages") {
+          for (const [index, text] of edits) pages[index] = text;
+          edits.clear();
+          return info;
+        }
+        if (command === "close_text_pages") { edits.clear(); return null; }
         if (command === "read_text") return { text: files[args.name], encoding: "utf8" };
         if (command === "read_bytes") return { length: files[args.name].length, data: [...new TextEncoder().encode(files[args.name])] };
         if (command === "installed_fonts") return ["Fixture Sans"];
@@ -82,6 +99,36 @@ try {
       node.getBoundingClientRect().bottom - parseFloat(getComputedStyle(node).marginBottom));
     assert.ok(bottom <= 2, "The Viewer reading area should fill the space below the toolbar");
   };
+
+  await showDocument("large.txt", "F3");
+  const largeSurface = documentWindow.locator(".cm-content");
+  const pageNumber = documentWindow.getByRole("spinbutton", { name: "Page" });
+  await largeSurface.getByText("Beginning", { exact: true }).waitFor();
+  await pageNumber.fill("2");
+  await pageNumber.press("Enter");
+  await largeSurface.getByText("Middle", { exact: true }).waitFor();
+  await exactButton(documentWindow, "Go to end").click();
+  await largeSurface.getByText("End", { exact: true }).waitFor();
+  await closeDocument();
+  await showDocument("large.txt", "F4");
+  await largeSurface.getByText("Beginning", { exact: true }).waitFor();
+  await largeSurface.press("Home");
+  await page.keyboard.insertText("Edited ");
+  await exactButton(documentWindow, "Go to end").click();
+  await largeSurface.getByText("End", { exact: true }).waitFor();
+  await largeSurface.press("Home");
+  await page.keyboard.insertText("Edited ");
+  await exactButton(documentWindow, "Save").click();
+  await largeSurface.getByText("Edited End", { exact: true }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll(".text-window button")].some((button) =>
+    button.textContent === "Save" && button.disabled));
+  await closeDocument();
+  await showDocument("large.txt", "F3");
+  await largeSurface.getByText("Edited Beginning", { exact: true }).waitFor();
+  await exactButton(documentWindow, "Go to end").click();
+  await largeSurface.getByText("Edited End", { exact: true }).waitFor();
+  await closeDocument();
+  console.log("Verified Viewer and Editor paging, cross-page edits, and reopening a large document.");
 
   await showDocument("guide.md", "F3");
   const markdown = documentWindow.locator(".markdown");

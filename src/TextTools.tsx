@@ -5,7 +5,7 @@ import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Copy, Search, Settings2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
-import { api, describeError, documentPath, isPermissionError, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument } from "./api";
+import { api, describeError, documentPath, isPermissionError, openPlaceTextPages, readPlaceText, savePlaceText, textEncodingLabels, watchDirectory, writableTextPlace, type NamedFile, type TextDocument, type TextPages } from "./api";
 import { Dialog } from "./Dialog";
 import { DialogDisclosure, DialogIconButton } from "./DialogActions";
 import { DiagnosticLog } from "./DiagnosticLog";
@@ -29,14 +29,62 @@ import { PathField } from "./PathField";
 const CodeSurface = lazy(() => import("./CodeSurface"));
 const SyntaxPicker = lazy(() => import("./SyntaxPicker"));
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then(({ MarkdownPreview }) => ({ default: MarkdownPreview })));
+const PagedTextWindow = lazy(() => import("./PagedTextWindow").then(({ PagedTextWindow }) => ({ default: PagedTextWindow })));
 
 function sameDiskContents(previous: TextDocument | null, next: TextDocument) {
   return previous?.text === next.text && previous.encoding === next.encoding && previous.revision === next.revision;
 }
 
-export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
+export function TextWindow(props: Omit<Parameters<typeof WholeTextWindow>[0], "openPaged">) {
+  const { file, editing, active, fontSizes, diagnosticLog, onClose } = props;
+  const key = diagnosticLog ? null : JSON.stringify([documentPath(file), editing]);
+  const [opened, setOpened] = useState<{ key: string; pages: TextPages | null }>();
+  const request = useRef<AbortController | null>(null);
+
+  function releasePages(id: number) {
+    void api.closeTextPages(id).catch(() => undefined);
+  }
+
+  useEffect(() => {
+    if (key === null) return;
+    const current = new AbortController();
+    request.current = current;
+    void openPlaceTextPages(file, editing).then((pages) => {
+      if (current.signal.aborted) { if (pages) releasePages(pages.id); }
+      else setOpened({ key, pages });
+    }).catch(() => { if (!current.signal.aborted) setOpened({ key, pages: null }); });
+    return () => current.abort();
+  }, [key, file, editing]);
+  const openedId = opened?.pages?.id;
+  useEffect(() => () => { if (openedId !== undefined) releasePages(openedId); }, [openedId]);
+
+  async function openPaged(password?: string) {
+    const current = request.current;
+    if (!key || !current || current.signal.aborted) return false;
+    const pages = await openPlaceTextPages(file, editing, password);
+    if (!pages) return false;
+    if (current.signal.aborted) releasePages(pages.id);
+    else setOpened({ key, pages });
+    return true;
+  }
+
+  if (key !== null && opened?.key !== key) {
+    return <section hidden={!active} className="text-window" aria-label={file.name}>
+      <div className="dialog-body">
+        <span role="status">{t("Loading…")}</span>
+        <Button type="button" onClick={onClose}>{t("Close document")}</Button>
+      </div>
+    </section>;
+  }
+  if (key !== null && opened?.pages) return <Suspense>
+    <PagedTextWindow key={opened.pages.id} initial={opened.pages} {...props} fontSize={fontSizes[editing ? "editor" : "viewer"]} />
+  </Suspense>;
+  return <WholeTextWindow {...props} openPaged={openPaged} />;
+}
+
+function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, viewerContentWidth, viewerMarkdownContentWidth, mermaidScale, colors, diagnosticLog,
   onOptions, onCopyPath, onSwitchMode, position, canGoBack, canGoForward, onNavigate, onOpenDocument, onDirtyChange, onSaved, onClose,
-  fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks }: {
+  fileBookmarks, bookmarkJump, onBookmark, onFileBookmarks, openPaged }: {
   file: NamedFile;
   editing: boolean;
   active: boolean;
@@ -63,6 +111,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
   bookmarkJump?: BookmarkJump;
   onBookmark: (bookmark: FileBookmark) => void;
   onFileBookmarks: () => void;
+  openPaged: (password?: string) => Promise<boolean>;
 }) {
   const [document, setDocument] = useState<TextDocument | null>(null);
   const [text, setText] = useState("");
@@ -287,6 +336,8 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
       replaceDocument(saved);
       setDeniedWrite(null);
       onSaved();
+      // A small document can cross the paging threshold after an edit.
+      if (updated.length >= 2 * 1024 * 1024) await openPaged(sudoPassword).catch(() => false);
     } catch (error) {
       const message = describeError(error);
       setError(message);
@@ -562,7 +613,7 @@ export function TextWindow({ file, editing, active, theme, shortcuts, fontSizes,
         path={path} onClose={() => setSudoAction(null)}
         onConfirm={async (password) => {
           if (sudoAction === "read") {
-            replaceDocument(await readPlaceText(file, password, editing ? "editor" : "viewer"));
+            if (!await openPaged(password)) replaceDocument(await readPlaceText(file, password, editing ? "editor" : "viewer"));
           } else if (editing) await save(password);
           else if (deniedWrite !== null) await write(deniedWrite, password);
         }} />}

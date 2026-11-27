@@ -72,6 +72,8 @@ mod ssh;
 #[cfg(feature = "desktop")]
 mod terminal;
 #[cfg(feature = "desktop")]
+mod text_pages;
+#[cfg(feature = "desktop")]
 mod timestamps;
 #[cfg(feature = "desktop")]
 mod updates;
