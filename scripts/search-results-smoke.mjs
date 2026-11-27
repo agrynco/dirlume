@@ -149,7 +149,20 @@ try {
   await list().press("F6");
   const move = dialog("Rename or move");
   assert.equal(await destination(move).inputValue(), "/destination");
-  await button(move, "Move").click();
+  const focused = page.locator(":focus");
+  await button(move, "Move").and(focused).waitFor();
+  const policy = move.getByRole("combobox", { name: "Existing files" });
+  const spacing = await policy.evaluate((select) => select.getBoundingClientRect().left -
+    select.closest("label").querySelector("span").getBoundingClientRect().right);
+  assert.ok(spacing >= 0 && spacing <= 12, `Expected the label beside the control, got ${spacing}px`);
+  for (const key of ["e", "c", "m"]) await move.locator(`.dialog-access-keys [data-access-key="${key}"]`).waitFor();
+  await page.keyboard.press("Alt+e");
+  await policy.and(focused).waitFor();
+  await page.keyboard.press("Alt+c");
+  await button(move, "Cancel").and(focused).waitFor();
+  await page.keyboard.press("Alt+m");
+  await button(move, "Move").and(focused).waitFor();
+  await page.keyboard.press("Enter");
   const stopped = dialog("Transfer stopped");
   await stopped.getByRole("alert").getByText("Fixture move denied").waitFor();
   await removeRow(one);

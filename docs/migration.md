@@ -30,6 +30,8 @@ Direct Dirlume pairing uses a host-approved read-only session. Opening the pane 
 
 The session file operation history records Copy and Move results. Undo and Redo cover verified regular local files transferred to one destination without overwrites. Move reversal stays on the same volume.
 
+F6 focuses Move when a default destination is available. Enter starts the move. Dialog labels and text buttons have underlined access keys. Alt and the underlined letter focus the corresponding control.
+
 Space Analyzer, Scan volume, and folder sizing in List and Tree share a scanner. Local APFS uses batched metadata reads, and ext4 uses one metadata lookup per entry when mount IDs are available. The scanner uses ordinary directory reads and metadata when these optimizations are unavailable.
 
 Local Space Analyzer tree rows support the Windows Shell menu and Dirlume's Copy, Rename or move, Trash, and permanent deletion dialogs. They share the file pane's shortcuts and resolve actions from the selected row's parent path. Expanded branches survive a refresh after a file operation.

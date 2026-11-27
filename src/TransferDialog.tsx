@@ -136,6 +136,8 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
   const targets = manyDestinations ? [...new Set([destination, ...additional])] : [destination];
   const copies = targets.length * itemCount;
   const localCopy = !moving && localTarget && transfer.items.every(({ place }) => place.kind === "local");
+  const submitDisabled = targets.some((path) => !path.trim()) || (localCopy && useFilter && !mask.trim());
+  const focusMove = transfer.kind === "move" && !submitDisabled;
   const singleFile = !transfer.collection && !manyDestinations && itemCount === 1 && !transfer.items[0].entry.directory;
   const [promptStart, promptEnd] = t(moving ? "Move {0} to:" : verb === "Download" ? "Download {0} to:" : "Copy {0} to:").split("{0}");
   const separator = kswitcherTarget || localTarget && windowsClient ? "\\" : "/";
@@ -366,12 +368,12 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
               </span>}
               {kswitcherTarget && <span className="muted" id="transfer-connection">{kswitcherTarget.address}</span>}
               {serverTarget && <span className="muted" id="transfer-connection">{serverTarget.address}</span>}
-              {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus value={destination} /> :
+              {archiveTarget ? <input id="transfer-destination" type="text" readOnly data-initial-focus={!focusMove || undefined} value={destination} /> :
               serverTarget ? <input id="transfer-destination" type="text" aria-label={t("Destination")} aria-describedby="transfer-connection"
-                required data-initial-focus value={destination} onChange={(event) => setDestination(event.target.value)} /> :
+                required data-initial-focus={!focusMove || undefined} value={destination} onChange={(event) => setDestination(event.target.value)} /> :
               <PathField id="transfer-destination" label={t("Destination")} value={destination} onChange={setDestination}
                 describedBy={transfer.remoteDestination || kswitcherTarget ? "transfer-connection" : undefined}
-                required initialFocus selectOnFocus showHidden={showHidden} server={transfer.remoteDestination}
+                required initialFocus={!focusMove} selectOnFocus showHidden={showHidden} server={transfer.remoteDestination}
                 kswitcher={kswitcherTarget} includeFiles={singleFile}
                 browse={singleFile ? "save" : "folder"} browsePath={browsePath} />}
             </div>
@@ -401,7 +403,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
                 <option value="inherit">{t("Inherit from destination")}</option>
               </select>
             </label>}
-            <label className="setting"><span>{t("Existing files")}</span>
+            <label className={moving ? "setting transfer-conflict-policy" : "setting"}><span>{t("Existing files")}</span>
               <select value={policy} onChange={(event) => setPolicy(event.target.value as ConflictPolicy)}>
                 <option value="ask">{t(sameServerMove || sameArchiveMove || transfer.kswitcherBroker && !prompt ? "Stop on conflict" : "Ask")}</option>
                 <option value="skip">{t("Skip")}</option>
@@ -446,7 +448,7 @@ export function TransferDialog({ transfer, side, showHidden, onClose, onFinished
           </div>
           <footer className="dialog-footer">
             <Button type="button" onClick={onClose}>{t("Cancel")}</Button>
-            <Button type="submit" className="primary" disabled={targets.some((path) => !path.trim()) || (localCopy && useFilter && !mask.trim())}>{t(verb)}</Button>
+            <Button type="submit" className="primary" data-initial-focus={focusMove || undefined} disabled={submitDisabled}>{t(verb)}</Button>
           </footer>
         </form>
       ) : (
