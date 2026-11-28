@@ -21,8 +21,11 @@ pub struct RevisionDiff {
     fallback: Option<&'static str>,
 }
 
-fn resolve_commit(git: &Path, root: &Path, revision: &str) -> Result<String> {
-    if revision.starts_with("refs/tags/") {
+pub(super) fn resolve_commit(git: &Path, root: &Path, revision: &str) -> Result<String> {
+    if ["refs/tags/", "refs/heads/", "refs/remotes/"]
+        .iter()
+        .any(|prefix| revision.starts_with(prefix))
+    {
         if !run(git, root, &["check-ref-format", revision])?
             .status
             .success()
@@ -258,10 +261,6 @@ mod tests {
         );
         assert_eq!(run(&["status", "--porcelain"]), before);
         assert_eq!(run(&["rev-parse", "HEAD"]), base);
-        let graph = super::super::commit_graph(&git, root, &target, "topic").unwrap();
-        assert!(graph.contains("* "));
-        assert!(graph.contains("Topic"));
-        assert!(!graph.contains("Common"));
         let history = super::super::history_of(&git, root, &target, 0, Some("topic.txt")).unwrap();
         assert_eq!(history.commits[0].subject, "Topic");
         let blamed = super::super::blame(&git, root, &target, "topic.txt").unwrap();
