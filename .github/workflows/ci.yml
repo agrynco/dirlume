@@ -204,6 +204,9 @@ jobs:
       - name: Verify command line paths from parent and file rows
         if: github.event.action != 'closed'
         run: node scripts/command-parent-path-smoke.mjs
+      - name: Verify opening executable Linux scripts in the embedded terminal
+        if: github.event.action != 'closed' && runner.os == 'Linux'
+        run: node scripts/local-shell-script-smoke.mjs
       - name: Verify SSH pane refresh after uploads and with shortcuts
         if: github.event.action != 'closed'
         shell: bash

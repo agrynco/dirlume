@@ -421,6 +421,16 @@ async fn update_file_attributes(
     .await
 }
 
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn executable_shell_script(directory: String, name: String) -> Result<bool> {
+    blocking(move || {
+        let path = selected(&directory, &name).map_err(message)?;
+        Ok(local::executable_shell_script(&path))
+    })
+    .await
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Operation {
@@ -5268,6 +5278,8 @@ pub fn run() {
         stream_sort_supported,
         file_attributes,
         update_file_attributes,
+        #[cfg(target_os = "linux")]
+        executable_shell_script,
         operate,
         crate::archive_create::archive_capabilities,
         crate::archive_create::create_archive,

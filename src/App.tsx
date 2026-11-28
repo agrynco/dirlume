@@ -110,7 +110,7 @@ import { Message } from "./Message";
 import { readWorkspace, restorePane, saveWorkspace, type DocumentWindow, type SavedFtpLocation } from "./workspace";
 import { resizeViewFont } from "./viewFonts";
 import { useFontZoom } from "./useFontZoom";
-import { shellArgument } from "./shell";
+import { shellArgument, shellScriptCommand } from "./shell";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel"));
 const HelpDialog = lazy(() => import("./HelpDialog"));
@@ -373,8 +373,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry; git?: GitFileContext;
     paneGit?: Omit<GitPaneTarget, "action"> } | null>(null);
   const fileMenuRequest = useRef(0);
-  const fileMenuWorkspace = useRef({ active, panes, modal, gitView });
-  fileMenuWorkspace.current = { active, panes, modal, gitView };
+  const workspaceState = useRef({ active, panes, modal, gitView });
+  workspaceState.current = { active, panes, modal, gitView };
   useEffect(() => {
     const invalidate = () => { fileMenuRequest.current++; };
     window.addEventListener("pointerdown", invalidate, true);
@@ -416,6 +416,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   });
   const terminalRowHeight = useRef(0);
   const terminalFocus = useRef<number | null>(null);
+  const scriptOpenRequest = useRef(0);
   const terminalDrag = useRef<{ y: number; height: number; available: number; minimum: number; maximum: number } | null>(null);
   const [panelsHidden, setPanelsHidden] = useState(false);
   const terminalVisible = panelsHidden || terminalShare > 0;
@@ -1882,6 +1883,26 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
   }
 
+  async function openScript(side: Side, row: Entry, directory: Extract<Place, { kind: "local" }>, name: string) {
+    const ticket = ++scriptOpenRequest.current;
+    const { place, selected } = panes[side];
+    const executable = await api.executableShellScript(directory.path, name).catch(() => false);
+    const current = workspaceState.current;
+    if (scriptOpenRequest.current !== ticket || current.active !== side || current.modal || current.gitView ||
+        current.panes[side].place !== place || current.panes[side].selected !== selected || current.panes[side].loading) return;
+    if (!executable) {
+      open(side, row, true);
+      return;
+    }
+    const session = openTerminal(true, directory);
+    if (!session) return;
+    setFileOpensVisible(false);
+    setUserMenuOutput(false);
+    if (!terminalVisible) setTerminalShare(terminalHeight);
+    queueTerminalCommand(session, shellScriptCommand(name), directory.path);
+    focusTerminalInput();
+  }
+
   function openGoogleDriveLink(link: string) {
     void api.openWebLink(link).catch((failure: unknown) => setStatus({ text: describeError(failure), error: true }));
   }
@@ -2734,7 +2755,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       head: gitListing.status.head, previousPath: gitListing.files.get(path)?.find(({ status }) => status === "R")?.previousPath ?? undefined } : undefined;
     const menu = { side, x, y, entry, paneGit };
     function stillCurrent() {
-      const current = fileMenuWorkspace.current;
+      const current = workspaceState.current;
       return fileMenuRequest.current === request && current.active === side && !current.modal && !current.gitView &&
         current.panes[side].place === state.place && current.panes[side].search === state.search;
     }
@@ -3064,6 +3085,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     historyIndex.current = -1;
   }
 
+  function queueTerminalCommand(session: TerminalSession, command: string, directory: string) {
+    setPendingCommands((commands) => ({
+      ...commands, [session.id]: [...(commands[session.id] ?? []), { command, directory }],
+    }));
+    recordCommand(command, session.kind);
+  }
+
   function submitCommand(event: FormEvent) {
     event.preventDefault();
     if (!commandLine.trim()) {
@@ -3075,10 +3103,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (!session || !terminalPlace) return;
     setUserMenuOutput(false);
     if (!terminalVisible) setTerminalShare(terminalHeight);
-    setPendingCommands((commands) => ({
-      ...commands, [session.id]: [...(commands[session.id] ?? []), { command: commandLine, directory: placePath(terminalPlace) }],
-    }));
-    recordCommand(commandLine, session.kind);
+    queueTerminalCommand(session, commandLine, placePath(terminalPlace));
     setCommandLine("");
   }
 
@@ -3729,6 +3754,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
     if (panelsHidden && (fileNavigation || (["mark", "copy", "move", "recycle", "recycleAlternate", "delete"].includes(command)))) return;
     event.preventDefault();
+    if (command === "open" && onFiles?.id === active + "-files" && !inField && /Linux/i.test(navigator.userAgent) && currentRow &&
+        currentItem?.place.kind === "local" && !currentItem.entry.directory && /\.sh$/i.test(currentItem.entry.name)) {
+      if (!event.repeat) void openScript(active, currentRow, currentItem.place, currentItem.entry.name);
+      return;
+    }
     if (command === "refresh" && (onFiles?.id === "left-files" || onFiles?.id === "right-files")) {
       refresh(onFiles.id === "left-files" ? "left" : "right", true);
       return;

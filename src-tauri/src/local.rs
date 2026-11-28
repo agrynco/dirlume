@@ -7,6 +7,22 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(all(target_os = "linux", feature = "desktop"))]
+pub(crate) fn executable_shell_script(path: &Path) -> bool {
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("sh"))
+        || !fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+    {
+        return false;
+    }
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) else {
+        return false;
+    };
+    // The NUL-terminated path lives through the access check.
+    unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) == 0 }
+}
+
 #[cfg(any(feature = "desktop", feature = "server"))]
 pub fn read_byte_page(mut file: fs::File, offset: u64) -> io::Result<crate::protocol::BytePage> {
     let length = file.metadata()?.len();
@@ -879,6 +895,26 @@ pub fn move_item(source: &Path, target: PathBuf) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(target_os = "linux", feature = "desktop"))]
+    #[test]
+    fn accepts_only_executable_shell_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("launch 'with spaces';$.sh");
+        fs::write(&script, b"#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!executable_shell_script(&script));
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(executable_shell_script(&script));
+        let other = script.with_extension("txt");
+        fs::rename(script, &other).unwrap();
+        assert!(!executable_shell_script(&other));
+        let directory = temp.path().join("folder.sh");
+        fs::create_dir(&directory).unwrap();
+        assert!(!executable_shell_script(&directory));
+    }
 
     #[test]
     fn copies_a_tree_and_preserves_both_items_on_conflict() {
