@@ -149,10 +149,18 @@ try {
             return { revision, path: args.path, content: available ? { state: "available", text: revision === hash("c") ? "Edited line" :
               revision === hash("a") ? "Alternate line" : "Original line" } : { state: "missing" } };
           }
-          case "git_file_blame":
+          case "git_file_blame": {
             assertRoot(args.root);
+            if (args.path === "empty.txt" && args.tip === hash("c")) return { revision: args.tip, path: args.path, content: { state: "empty" } };
+            if (args.path === "binary.txt" && args.tip === hash("c")) return { revision: args.tip, path: args.path, content: { state: "binary" } };
             if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file revision";
-            return "cccccccccccc (Fixture Author 2026-11-21 1) note\n";
+            const lines = Array.from({ length: 32 }, (_, index) => ({ number: index + 1, original: index + 2,
+              hash: hash(index === 16 ? "d" : "c"), author: index === 16 ? "Prior author" : "Fixture Author",
+              path: index === 16 ? "old-note.txt" : "note.txt", time: 1795222800,
+              text: index === 15 ? "Long line " + "wrapped content here ".repeat(15) : "Text at line " + (index + 1),
+            }));
+            return { revision: args.tip, path: args.path, content: { state: "available", lines } };
+          }
           case "git_merge_plan":
             assertRoot(args.root);
             return { review: { headRef: "refs/heads/main", head: hash("a"), sourceRef: args.source, sourceTip: hash("c") },
@@ -308,7 +316,9 @@ try {
             if (args.tip === hash("c")) return { commits: [commit("c", "Remote-tracking topic")], nextOffset: null };
             return { commits: args.offset ? [commit("d", "Old commit")] : [commit("a", "Merge feature")],
               nextOffset: args.offset ? null : 1 };
-          case "git_details": return { message: "Merge feature\n\nFull commit body", merge: true, firstParent: hash("b"), changes: [
+          case "git_details": return args.hash === hash("d") ? { message: "Why the original note changed", merge: false,
+            firstParent: null, changes: [{ status: "A", path: "old-note.txt", previousPath: null }] } :
+            { message: "Merge feature\n\nFull commit body", merge: true, firstParent: hash("b"), changes: [
             { status: "A", path: "new ł.txt", previousPath: null }, { status: "D", path: "removed.txt", previousPath: null },
           ] };
           case "git_index_state":
@@ -626,7 +636,38 @@ try {
   await revisionPreview.getByText("Empty tree", { exact: true }).waitFor();
   await revisionPreview.getByText("File absent at this revision.", { exact: true }).waitFor();
   await button(history, "Show blame").click();
-  await revisionPreview.getByLabel("Blame", { exact: true }).filter({ hasText: "Fixture Author" }).waitFor();
+  const blame = page.getByRole("dialog", { name: "Git blame · Text Viewer", exact: true });
+  const blameList = blame.getByLabel("Line attribution", { exact: true });
+  const originLine = blame.getByRole("button", { name: /Show commit details for line 17: Prior author/ });
+  await originLine.waitFor();
+  await blame.getByText("Committed revision", { exact: false }).waitFor();
+  const fifth = blame.locator('[data-blame-line="16"]');
+  const wrappedLine = await fifth.boundingBox();
+  const attribution = await fifth.getByRole("button").boundingBox();
+  assert.ok(Math.abs(wrappedLine.height - attribution.height) <= 1);
+  await button(blame, "Wrap lines").click();
+  assert.ok((await fifth.boundingBox()).height < wrappedLine.height);
+  await button(blame, "Wrap lines").click();
+  await blame.getByRole("button", { name: /Show commit details for line 16: Fixture Author/ }).focus();
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await originLine.evaluate((row) => document.activeElement === row), true);
+  const blameScrollPosition = await blameList.evaluate((element) => element.scrollTop);
+  await page.keyboard.press("Enter");
+  await blame.getByText("Why the original note changed", { exact: true }).waitFor();
+  await blame.locator("li[data-highlight]").getByText("old-note.txt", { exact: true }).waitFor();
+  await button(blame, "Back to line 17").click();
+  assert.equal(await originLine.evaluate((row) => document.activeElement === row), true);
+  assert.equal(await blameList.evaluate((element) => element.scrollTop), blameScrollPosition);
+  await button(blame, "Close").click();
+  const pathToBlame = history.getByRole("textbox", { name: "Path relative to the repository", exact: true });
+  await pathToBlame.fill("empty.txt");
+  await button(history, "Show blame").click();
+  await blame.getByText("This file has no lines.", { exact: true }).waitFor();
+  await button(blame, "Close").click();
+  await pathToBlame.fill("binary.txt");
+  await button(history, "Show blame").click();
+  await blame.getByText("This revision contains binary data.", { exact: true }).waitFor();
+  await button(blame, "Close").click();
   await button(history, "File history").click();
   await button(branches, "Create tracking branch and switch").click();
   const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });

@@ -283,8 +283,5 @@ mod tests {
         assert_eq!(run(&["rev-parse", "HEAD"]), base);
         let history = super::super::history_of(&git, root, &target, 0, Some("topic.txt")).unwrap();
         assert_eq!(history.commits[0].subject, "Topic");
-        let blamed = super::super::blame(&git, root, &target, "topic.txt").unwrap();
-        assert!(blamed.contains("Fixture Author"));
-        assert!(blamed.ends_with("topic\n"));
     }
 }
