@@ -10,7 +10,7 @@ const sorts: Partial<Record<PanelField, SortColumn>> = {
   name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified", time: "time", owner: "owner", links: "hardLinks",
 };
 export const fieldClass: Record<PanelField, string> = {
-  name: "name", rightName: "name", markedName: "name", size: "size", bytes: "size", date: "modified",
+  name: "name", rightName: "name", markedName: "name", git: "git", size: "size", bytes: "size", date: "modified",
   time: "time", owner: "owner", links: "links",
 };
 const storageKey = (side: Side, mode: PanelModeId) =>
@@ -43,7 +43,7 @@ export function columnGroupTrack(groups: PanelColumn[][], index: number): CSSPro
 }
 
 const autoWidths: Record<PanelField, number> = {
-  name: 5, markedName: 5, rightName: 5, size: 9, bytes: 12, date: 13, time: 9, owner: 15, links: 5,
+  name: 5, markedName: 5, rightName: 5, git: 7, size: 9, bytes: 12, date: 13, time: 9, owner: 15, links: 5,
 };
 export type ColumnSamples = Partial<Record<PanelField, readonly string[]>>;
 const panelColumnFields = Object.keys(panelFields) as PanelField[];

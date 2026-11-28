@@ -14,7 +14,7 @@ export const panelModeDigits = {
 
 export const panelFields = {
   name: "Name", markedName: "Name with mark", rightName: "Name (keep end visible)",
-  size: "Size", bytes: "Size in bytes", date: "Date", time: "Time", owner: "Owner", links: "Links",
+  git: "Git", size: "Size", bytes: "Size in bytes", date: "Date", time: "Time", owner: "Owner", links: "Links",
 } as const;
 export type PanelField = keyof typeof panelFields;
 export type PanelColumn = { field: PanelField; width: string };

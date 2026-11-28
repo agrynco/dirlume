@@ -25,6 +25,8 @@ import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLo
 import { googleDriveSignInRequired, smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type GoogleDrivePlace, type SavedConnection, type SshHostVerification } from "./api";
 import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
 import type { GitFileContext, GitFileLaunch } from "./api";
+import { GitPaneInspection, type GitPaneTarget } from "./GitPaneInspection";
+import { gitPanePath, useGitPane, type GitPaneAction } from "./gitPane";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -186,6 +188,7 @@ type Modal =
   | { kind: "removeConnection"; side: Side; profile: SavedConnection }
   | { kind: "verifyConnection"; side: Side; profile: SavedConnectionTarget; verification: SshHostVerification; options: ConnectionOpenOptions }
   | { kind: "compare"; left: NamedFile; right: NamedFile }
+  | { kind: "gitPane"; side: Side; target: GitPaneTarget }
   | { kind: "transfer"; side: Side; transfer: Transfer; temporary?: Resource[] }
   | { kind: "fileHistory"; direction?: "undo" | "redo" }
   | { kind: "userMenu"; side: Side; context: MenuContext }
@@ -355,6 +358,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const showingEnvironment = environmentPanels.left !== null || environmentPanels.right !== null;
   const previewSide = quickViewSource === null ? null : opposite(quickViewSource);
   const [processPanels, setProcessPanels] = useState<Record<Side, { path?: string } | null>>({ left: null, right: null });
+  const gitPanes = {
+    left: useGitPane(panes.left.search || processPanels.left ? null : panes.left.place, panes.left.loading, panes.left.entries, fileRevision),
+    right: useGitPane(panes.right.search || processPanels.right ? null : panes.right.place, panes.right.loading, panes.right.entries, fileRevision),
+  };
   const [preferences, setPreferences] = useState(initialPreferences);
   const rowsPerGroup = useRef<Record<Side, number>>({ left: 0, right: 0 });
   const groupPageSize = useRef<Record<Side, number>>({ left: 0, right: 0 });
@@ -363,7 +370,8 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
-  const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry; git?: GitFileContext } | null>(null);
+  const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry; git?: GitFileContext;
+    paneGit?: Omit<GitPaneTarget, "action"> } | null>(null);
   const fileMenuRequest = useRef(0);
   const fileMenuWorkspace = useRef({ active, panes, modal, gitView });
   fileMenuWorkspace.current = { active, panes, modal, gitView };
@@ -2720,14 +2728,18 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const state = panes[side];
     const item = entry ? paneItem(state, entry) : null;
     const place = entry ? item?.place : state.search ? null : state.place;
-    const menu = { side, x, y, entry };
+    const gitListing = gitPanes[side]?.listing;
+    const path = entry && item && !item.entry.directory && gitListing ? gitPanePath(gitListing, entry) : undefined;
+    const paneGit = path !== undefined && gitListing ? { source: gitListing.source, root: gitListing.status.root, path,
+      head: gitListing.status.head, previousPath: gitListing.files.get(path)?.find(({ status }) => status === "R")?.previousPath ?? undefined } : undefined;
+    const menu = { side, x, y, entry, paneGit };
     function stillCurrent() {
       const current = fileMenuWorkspace.current;
       return fileMenuRequest.current === request && current.active === side && !current.modal && !current.gitView &&
         current.panes[side].place === state.place && current.panes[side].search === state.search;
     }
     function show(git?: GitFileContext) {
-      if (git && (git.head || git.hasDiff)) setFileMenu({ ...menu, git });
+      if (paneGit || git && (git.head || git.hasDiff)) setFileMenu({ ...menu, git });
       else if (isTauri() && windowsClient && place?.kind === "local") {
         void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
           if (!stillCurrent()) return;
@@ -3960,6 +3972,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             layout={preferences.layout} showHidden={preferences.hidden} rightClickSelection={preferences.rightClickSelection}
             pane={paneSizes[side] ? { ...panes[side], backgroundSizes: paneSizes[side] } : panes[side]}
             entries={entries[side]} fileTypes={fileTypes} locations={locations} addressPlace={treeFolder(side)}
+            gitListing={gitPanes[side]?.listing} gitUnavailable={!!gitPanes[side]?.unavailable}
             fileView={trees[side].enabled ? "tree" : "list"} onFileView={(view) => void setFilePaneView(side, view)}
             onTreeBranch={(entry) => toggleTreeBranch(side, entry)} folderSizes={folderSizes[side]}
             onFolderSizes={() => {
@@ -4459,10 +4472,13 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           await load(modal.side, place, action, reveal, password);
         }} />}
       {modal?.kind === "mcp" && <McpDialog onClose={() => setModal(null)} />}
+      {modal?.kind === "gitPane" && <GitPaneInspection target={modal.target}
+        shortcuts={{ previousShortcut: shortcuts.previousChange, nextShortcut: shortcuts.nextChange, swapShortcut: shortcuts.swap }}
+        onClose={() => { setModal(null); requestAnimationFrame(() => focus(modal.side)); }} />}
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); showCommandLine(); }} />}
       {fileMenu && !modal && (() => {
-        const { side, x, y, entry, git } = fileMenu;
+        const { side, x, y, entry, git, paneGit } = fileMenu;
         const state = panes[side];
         const item = entry ? paneItem(state, entry) : null;
         const document = fileFor(side, entry);
@@ -4480,15 +4496,21 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             openGitView(side, git.root, file);
           }
         }
-        return <FileContextMenu x={x} y={y} className={git ? "file-menu-with-git" : undefined}
+        function inspectGitPane(action: GitPaneAction) {
+          if (!paneGit) return;
+          setFileMenu(null);
+          setModal({ kind: "gitPane", side, target: { ...paneGit, action } });
+        }
+        return <FileContextMenu x={x} y={y} className={git || paneGit ? "file-menu-with-git" : undefined}
           onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
-          {git && <>
+          {(git || paneGit) && <>
             <div role="group" aria-label="Git" className="file-git-actions">
               <div className="file-git-heading" aria-hidden="true">Git</div>
-              {git.hasHistory && <Button role="menuitem" onClick={() => openGitFile("history")}><FileClock aria-hidden="true" />{t("Show history")}</Button>}
-              {git.hasBlame && <Button role="menuitem" onClick={() => openGitFile("blame")}><Search aria-hidden="true" />{t("Show blame")}</Button>}
-              {git.head && <Button role="menuitem" onClick={() => openGitFile("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with revision…")}</Button>}
-              {git.hasDiff && <Button role="menuitem" onClick={() => openGitFile("diff")}><FileDiff aria-hidden="true" />{t("Show diff")}</Button>}
+              {(paneGit || git?.hasHistory) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("history") : openGitFile("history")}><FileClock aria-hidden="true" />{t("Show history")}</Button>}
+              {git?.hasBlame && <Button role="menuitem" onClick={() => openGitFile("blame")}><Search aria-hidden="true" />{t("Show blame")}</Button>}
+              {paneGit && <Button role="menuitem" onClick={() => inspectGitPane("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with HEAD")}</Button>}
+              {git?.head && <Button role="menuitem" onClick={() => openGitFile("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with revision…")}</Button>}
+              {(paneGit || git?.hasDiff) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("diff") : openGitFile("diff")}><FileDiff aria-hidden="true" />{t("Show diff")}</Button>}
             </div>
             <div role="separator" className="main-menu-separator" />
             {windowsClient && item?.place.kind === "local" && <Button role="menuitem" onClick={() => {

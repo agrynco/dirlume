@@ -5203,6 +5203,8 @@ pub fn run() {
         crate::git_view::file::git_file_revision,
         crate::git_view::file::git_file_blame,
         crate::git_view::file::git_file_context,
+        crate::git_view::pane::git_pane_status,
+        crate::git_view::pane::git_pane_read,
         crate::git_view::file::git_working_file_content,
         crate::git_view::branches::git_update_branch,
         crate::git_view::comparison::git_compare_revisions,

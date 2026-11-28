@@ -1,11 +1,14 @@
 FROM ubuntu:22.04
 RUN apt-get update -qq \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -qy --no-install-recommends openssh-server sudo \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -qy --no-install-recommends git openssh-server sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # This account and password are for the disposable loopback test server.
 RUN useradd -m -s /bin/bash dirlume-fixture \
     && printf 'dirlume-fixture:fixture-login\n' | chpasswd \
+    && useradd -m -s /bin/bash dirlume-sftp-only \
+    && printf 'dirlume-sftp-only:fixture-login\n' | chpasswd \
+    && printf '\nMatch User dirlume-sftp-only\n    ForceCommand internal-sftp\n' >>/etc/ssh/sshd_config \
     && printf 'dirlume-fixture ALL=(root) /usr/lib/openssh/sftp-server *\n' >/etc/sudoers.d/dirlume-fixture \
     && chmod 440 /etc/sudoers.d/dirlume-fixture
 RUN mkdir -p /run/sshd /srv/dirlume-target/batch/protected /srv/dirlume-delete/nested /srv/dirlume-move/nested \

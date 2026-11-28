@@ -290,6 +290,41 @@ fn resumes_transfers_and_deletion_with_an_openssh_sudo_session() {
 }
 
 #[test]
+fn reads_git_in_a_linux_ssh_pane_and_keeps_sftp_only_browsing_usable() {
+    let Ok(port) = std::env::var("DIRLUME_SSH_GIT_TEST_PORT") else {
+        return;
+    };
+    let connect = |username: &str| {
+        let input = json!({
+            "label": "Disposable Linux Git fixture",
+            "host": "127.0.0.1",
+            "port": port.parse::<u16>().unwrap(),
+            "username": username,
+            "auth": {"kind": "password"},
+            "secret": "fixture-login",
+        });
+        let approval = route(input.clone(), &[], &[]).unwrap().err().unwrap();
+        let (client, keys) = route(input.clone(), &[approval], &[])
+            .unwrap()
+            .ok()
+            .unwrap();
+        let mut saved = input.clone();
+        saved["id"] = json!(Uuid::new_v4());
+        Arc::new(Connection {
+            profile: serde_json::from_value(saved).unwrap(),
+            host_keys: keys,
+            listing: Mutex::new(open_sftp(client).unwrap()),
+            sudo: sudo::Access::default(),
+            fixture_login: Some(input),
+        })
+    };
+    let sftp_only = connect("dirlume-sftp-only");
+    assert!(sftp_only.list(&[], None).is_ok());
+    crate::git_view::pane::verify_ssh_git_pane(connect("dirlume-fixture"), sftp_only.clone());
+    assert!(sftp_only.list(&[], None).is_ok());
+}
+
+#[test]
 fn opens_a_two_hop_sftp_route() {
     let Some(python) = std::env::var_os("DIRLUME_SSH_FIXTURE_PYTHON") else {
         return;
