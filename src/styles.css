@@ -1003,6 +1003,17 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-write-feedback { margin: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .git-filter { min-width: 0; margin: 6px 7px; }
 .git-scroll { flex: 1; min-height: 0; overflow: auto; padding-block: 2px; }
+.git-branch-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 8px; }
+.git-history-heading { flex-wrap: wrap; }
+.git-history-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.git-revision-comparison { display: grid; align-content: start; gap: 10px; padding: 8px; }
+.git-revision-comparison form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.git-revision-comparison form > div { flex: 1 1 10rem; min-width: 0; }
+.git-revision-comparison ul { margin: 4px 0; padding-inline-start: 1.2em; }
+.git-revision-comparison li { overflow-wrap: anywhere; }
+.git-revision-comparison h3 { margin: 0; font-size: 1em; }
+.git-revision-commits { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 8px; }
+.git-revision-comparison .git-patch { margin-block-start: 8px; max-block-size: 24rem; }
 .git-branch-group { margin-block-end: 5px; }
 .git-branch-group h3, .git-details h3 { margin: 0; padding: 4px 8px; color: var(--panel-muted); font: 600 .88em/1.4 var(--ui-font); }
 .git-branch-group button, .git-commit > button {
