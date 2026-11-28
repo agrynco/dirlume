@@ -27,6 +27,9 @@ try {
       const content = (text) => ({ state: "available", text });
       const entries = [entry(note), entry("folder", true), ...["ignored.txt", "fresh.txt", "added.txt", "renamed.txt", "conflict.txt"].map((name) => entry(name))];
       window.fixture = { root, other, lastRead: null, fail: false, delay: false };
+      const initialStatus = new Promise((resolve) => { window.fixture.releaseInitial = resolve; });
+      if (sessionStorage.getItem("git-pane-status-loaded")) window.fixture.releaseInitial();
+      sessionStorage.setItem("git-pane-status-loaded", "yes");
       window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (command, args) => {
         switch (command) {
           case "locations": return [{ label: "Home", path: root }, { label: "Downloads", path: other }];
@@ -38,6 +41,7 @@ try {
             segments: ["remote"], listing: { entries: [entry(note)], omitted: 0, elevated: false } };
           case "list_ssh": return { entries: [entry(note)], omitted: 0, elevated: false };
           case "git_pane_status": {
+            await initialStatus;
             const ssh = args.source.kind === "ssh";
             if (ssh && window.fixture.fail) throw "unreadable";
             if (!ssh && args.source.directory !== root) throw "notRepository";
@@ -68,7 +72,12 @@ try {
     const right = page.locator("#right-pane");
     const leftFiles = page.locator("#left-files");
     const rightFiles = page.locator("#right-files");
+    await leftFiles.getByRole("option", { name: /^note ł\.txt/ }).waitFor();
+    const before = await leftFiles.boundingBox();
+    await page.evaluate(() => window.fixture.releaseInitial());
     await left.getByText("local-main", { exact: true }).waitFor();
+    const after = await leftFiles.boundingBox();
+    assert.deepEqual([after.y, after.height], [before.y, before.height]);
     const note = leftFiles.getByRole("option", { name: /note ł\.txt.*Staged: Modified.*Unstaged: Modified/ });
     const marker = note.getByRole("button", { name: /Staged: Modified/ });
     assert.deepEqual(await marker.locator("span").allTextContents(), ["SM", "WM"]);

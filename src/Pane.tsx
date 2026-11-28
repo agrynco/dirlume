@@ -539,14 +539,14 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
         <AddressField key={pane.addressRevision} side={side} place={addressPlace ?? pane.place} trail={pane.addressTrail} showHidden={showHidden}
           onNavigate={onPath} onNavigateAncestor={onPathAncestor} onOpenConnections={onOpenConnections}
           onCopy={onCopyPath} focusFiles={() => list.current?.focus()} />
+        {!processView && (gitListing || gitUnavailable) && <div className="pane-git-branch" data-help-topic="gitView">
+          <GitBranch aria-hidden="true" />{gitListing ? <span dir="auto" data-tooltip={gitListing.status.root}>
+            {gitListing.status.headRef?.replace(/^refs\/heads\//, "") ??
+              t("Detached HEAD {0}", gitListing.status.head?.slice(0, 7) ?? "")}
+            {!gitListing.status.head && <> · {t("No commits yet")}</>}</span> : <span>{t("Git status unavailable")}</span>}
+        </div>}
         {sourceMenu}
       </div>
-      {!processView && (gitListing || gitUnavailable) && <div className="pane-git-branch" data-help-topic="gitView">
-        <GitBranch aria-hidden="true" />{gitListing ? <span dir="auto" data-tooltip={gitListing.status.root}>
-          {gitListing.status.headRef?.replace(/^refs\/heads\//, "") ??
-            t("Detached HEAD {0}", gitListing.status.head?.slice(0, 7) ?? "")}
-          {!gitListing.status.head && <> · {t("No commits yet")}</>}</span> : <span>{t("Git status unavailable")}</span>}
-      </div>}
       {processView ? <ProcessBrowser side={side} lockingPath={processView.path} onClose={() => onProcesses(false)}
         menuShortcut={processContextMenuShortcut} onShowExecutable={onShowExecutable} onFeedback={onProcessFeedback} /> : <>
       {(filterOpen || pane.filter) && (

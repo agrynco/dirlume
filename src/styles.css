@@ -812,7 +812,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-name .link-icon { width: 12px; margin-left: -3px; }
 .file-size, .file-date, .file-time { font-variant-numeric: tabular-nums; font-size: .88em; text-align: right; padding-inline: 5px; }
 .file-size svg { width: 13px; height: 13px; vertical-align: text-bottom; }
-.pane-git-branch { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 9px 4px; font: .85em var(--ui-font); color: var(--panel-muted); }
+.pane-git-branch { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 30%; padding-inline: 3px; font: .85em/1.25 var(--ui-font); color: var(--panel-muted); }
 .pane-git-branch svg { width: 13px; height: 13px; flex: none; }
 .pane-git-branch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-git-status { min-width: 0; display: flex; align-items: center; justify-content: center; font: .85em var(--panel-font); }
