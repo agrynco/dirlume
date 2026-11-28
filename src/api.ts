@@ -382,6 +382,19 @@ export interface DiskSpace {
   total: number;
 }
 
+export interface GoogleDriveQuota {
+  limit: number | null;
+  usage: number | null;
+  usageInDrive: number | null;
+  usageInDriveTrash: number | null;
+}
+
+export interface GoogleDriveSpacePage {
+  items: { id: string; name: string; directory: boolean; quotaBytes: number | null }[];
+  nextPageToken: string | null;
+  partial: boolean;
+}
+
 export interface VolumeInformation {
   path: string;
   share: boolean;
@@ -816,6 +829,9 @@ export const api = {
   renameGoogleDrive: (id: string, label: string) => invoke<void>("rename_google_drive", { id, label }),
   removeGoogleDrive: (id: string) => invoke<void>("remove_google_drive", { id }),
   listGoogleDrive: (id: string, folder: string) => invoke<GoogleDriveItem[]>("list_google_drive", { id, folder }),
+  googleDriveQuota: (id: string) => invoke<GoogleDriveQuota>("google_drive_quota", { id }),
+  googleDriveSpacePage: (id: string, folder: string, pageToken: string | null, validateFolder: boolean) =>
+    invoke<GoogleDriveSpacePage>("google_drive_space_page", { id, folder, pageToken, validateFolder }),
   changeGoogleDrive: (id: string, change: GoogleDriveChange) => invoke<string | null>("change_google_drive", { id, change }),
   startMcp: () => invoke<McpConnection>("start_mcp"),
   stopMcp: () => invoke<void>("stop_mcp"),

@@ -5309,6 +5309,8 @@ pub fn run() {
         crate::google_drive::rename_google_drive,
         crate::google_drive::remove_google_drive,
         crate::google_drive::list_google_drive,
+        crate::google_drive::google_drive_quota,
+        crate::google_drive::google_drive_space_page,
         crate::google_drive::change_google_drive,
         crate::google_drive::read_google_drive_text,
         crate::google_drive::read_google_drive_image,

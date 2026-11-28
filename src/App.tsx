@@ -74,7 +74,7 @@ import { ArchiveDialog, ArchivePasswordDialog, isArchiveName, passwordError } fr
 import { findFiles, SearchDialog } from "./SearchDialog";
 import { ElevationButton, ElevationContext, LockDialog } from "./ProcessTools";
 import { DeletionDialog } from "./DeletionDialog";
-import { DiskInformation } from "./DiskInformation";
+import { DiskInformation, type DiskInformationTarget } from "./DiskInformation";
 import type { Deletion } from "./api";
 import { Settings } from "./Settings";
 import { SortCriteriaDialog, SortMenu } from "./FileSortMenu";
@@ -322,7 +322,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     return panes;
   });
-  const [diskPanes, setDiskPanes] = useState<Record<Side, string | null>>({ left: null, right: null });
+  const [diskPanes, setDiskPanes] = useState<Record<Side, DiskInformationTarget | null>>({ left: null, right: null });
   const analysisHandles = useRef<Record<Side, SpaceAnalyzerHandle | null>>({ left: null, right: null });
   const nextAnalysis = useRef(administratorWorkspace?.otherAnalyzer ? 1 : 0);
   const treeNavigation = useRef<Record<Side, number>>({ left: 0, right: 0 });
@@ -1702,9 +1702,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     return shared ? { ...place, id: shared.id } : place;
   }, []);
 
-  function diskPath(side: Side) {
+  function diskTarget(side: Side) {
     const place = analysisPanes[side]?.location.place ?? treeFolder(side) ?? panes[side].place;
-    return place?.kind === "local" ? place.path : null;
+    return place?.kind === "local" || place?.kind === "googleDrive" ? place : null;
   }
 
   function toggleDiskInformation(side: Side) {
@@ -1712,9 +1712,9 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       closeDiskInformation(diskSide);
       return;
     }
-    const path = diskPath(side);
-    if (!path || !canSelectPanelMode(side)) return;
-    setDiskPanes((current) => ({ ...current, [opposite(side)]: path }));
+    const target = diskTarget(side);
+    if (!target || !canSelectPanelMode(side)) return;
+    setDiskPanes((current) => ({ ...current, [opposite(side)]: target }));
   }
 
   function closeDiskInformation(side: Side) {
@@ -1753,8 +1753,11 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   function selectAnalysisLocation(side: Side, id: number, location: AnalysisPane["location"]) {
     setAnalysisPanes((panes) => {
       const current = panes[side];
-      if (!current || current.id !== id || current.location.reveal === location.reveal &&
-          placePath(current.location.place) === placePath(location.place)) return panes;
+      if (!current || current.id !== id) return panes;
+      const sameFolder = location.place.kind === "googleDrive"
+        ? spaceRelativePath(current.location.place, location.place)?.length === 0
+        : placePath(current.location.place) === placePath(location.place);
+      if (current.location.reveal === location.reveal && sameFolder) return panes;
       return { ...panes, [side]: { ...current, location } };
     });
   }
@@ -3821,7 +3824,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             if (analysisPanes[side]) focus(side);
             else if (canAnalyze(target.place)) openSpaceAnalyzer(side, target.place);
           } },
-        { ...menuCommand("diskInformation", !diskSide && (!canSelectPanelMode(side) || !diskPath(side))),
+        { ...menuCommand("diskInformation", !diskSide && (!canSelectPanelMode(side) || !diskTarget(side))),
           checked: diskSide === opposite(side), run: () => toggleDiskInformation(side) },
         { ...menuCommand("sortMenu", !canSelectPanelMode(side)), separatorBefore: true, run: () => showSortMenu(side) },
         menuCommand(side === "left" ? "leftLocations" : "rightLocations", activeDocument !== null, "Sources"),
@@ -4082,9 +4085,12 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             onTerminal={openGitTerminal}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
-        {(["left", "right"] as const).map((side) => diskPanes[side] && <DiskInformation key={side + diskPanes[side]}
-          side={side} path={diskPanes[side]} active={active === side} onFocus={() => setActive(side)}
-          onClose={() => closeDiskInformation(side)} onScan={(root) => openSpaceAnalyzer(side, localPath(root), true, "sunburst")} />)}
+        {(["left", "right"] as const).map((side) => {
+          const target = diskPanes[side];
+          return target && <DiskInformation key={side + (target.kind === "local" ? target.path : target.id)}
+            side={side} target={target} active={active === side} onFocus={() => setActive(side)}
+            onClose={() => closeDiskInformation(side)} onScan={(root) => openSpaceAnalyzer(side, root, true, root.kind === "googleDrive" ? "treemap" : "sunburst")} />;
+        })}
         {(["left", "right"] as const).map((side) => {
           const analyzer = analysisPanes[side];
           return analyzer && <Suspense key={analyzer.id} fallback={<section className={"pane space-analyzer space-analyzer-" + side}>
