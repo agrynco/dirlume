@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, ptr, time::Duration};
+use std::{ffi::CStr, io, path::PathBuf, ptr, slice, time::Duration};
 
 use core_foundation::{
     array::{CFArray, CFArrayRef},
@@ -7,6 +7,7 @@ use core_foundation::{
     string::{CFString, CFStringRef},
     url::{CFURLCreateWithString, CFURLRef, CFURL},
 };
+use percent_encoding::percent_decode_str;
 use url::Url;
 
 use super::Credentials;
@@ -67,6 +68,7 @@ pub(super) fn list_shares(url: &Url, credentials: Option<&Credentials>) -> io::R
 }
 
 pub(super) fn mount_share(url: &Url, credentials: Option<&Credentials>) -> io::Result<PathBuf> {
+    let url_address = url.clone();
     let address = CFString::new(url.as_str());
     // Core Foundation returns an owned URL on success and null for an invalid address.
     let url =
@@ -117,6 +119,13 @@ pub(super) fn mount_share(url: &Url, credentials: Option<&Credentials>) -> io::R
                 "macOS SMB mount failed ({status})."
             )));
         }
+        if status == libc::EEXIST {
+            // NetFS reports EEXIST without mount points when the share is already
+            // mounted, for example by Finder, so reuse that mount.
+            if let Some(path) = existing_mount(&url_address) {
+                return Ok(path);
+            }
+        }
         return Err(io::Error::from_raw_os_error(status));
     }
     mount_points
@@ -128,4 +137,71 @@ pub(super) fn mount_share(url: &Url, credentials: Option<&Credentials>) -> io::R
                 .find(|path| path.is_dir())
         })
         .ok_or_else(|| io::Error::other("The SMB share did not provide a mounted folder."))
+}
+
+/// Finds the folder where macOS already mounted the share at `url`.
+fn existing_mount(url: &Url) -> Option<PathBuf> {
+    let host = url.host_str()?;
+    let share = url.path_segments()?.find(|segment| !segment.is_empty())?;
+    let share = percent_decode_str(share).decode_utf8().ok()?;
+    let mut mounts: *mut libc::statfs = ptr::null_mut();
+    // getmntinfo returns a buffer owned by libc that stays valid until the next call.
+    let count = unsafe { libc::getmntinfo(&mut mounts, libc::MNT_NOWAIT) };
+    if count <= 0 || mounts.is_null() {
+        return None;
+    }
+    let mounts = unsafe { slice::from_raw_parts(mounts, count as usize) };
+    mounts.iter().find_map(|mount| {
+        let kind = unsafe { CStr::from_ptr(mount.f_fstypename.as_ptr()) };
+        if kind.to_bytes() != b"smbfs" {
+            return None;
+        }
+        let source = unsafe { CStr::from_ptr(mount.f_mntfromname.as_ptr()) };
+        if !mounted_share_matches(&source.to_string_lossy(), host, &share) {
+            return None;
+        }
+        let path = unsafe { CStr::from_ptr(mount.f_mntonname.as_ptr()) };
+        Some(PathBuf::from(path.to_string_lossy().into_owned())).filter(|path| path.is_dir())
+    })
+}
+
+/// Compares an smbfs mount source such as `//user@server/share` with a host and share name.
+fn mounted_share_matches(source: &str, host: &str, share: &str) -> bool {
+    let Some((authority, path)) = source
+        .strip_prefix("//")
+        .and_then(|source| source.split_once('/'))
+    else {
+        return false;
+    };
+    let mounted_host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let Ok(mounted_share) = percent_decode_str(path.trim_end_matches('/')).decode_utf8() else {
+        return false;
+    };
+    mounted_host
+        .trim_end_matches('.')
+        .eq_ignore_ascii_case(host.trim_end_matches('.'))
+        && mounted_share.eq_ignore_ascii_case(share)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mounted_share_matches;
+
+    #[test]
+    fn matches_mount_sources_for_the_requested_share() {
+        assert!(mounted_share_matches(
+            "//slava@raspi-server.local/shared",
+            "raspi-server.local",
+            "shared"
+        ));
+        assert!(mounted_share_matches(
+            "//;WORK;anna@NAS.local./Team%20Files",
+            "nas.local",
+            "team files"
+        ));
+        assert!(mounted_share_matches("//GUEST:@nas/media", "nas", "media"));
+        assert!(!mounted_share_matches("//nas/media", "nas", "music"));
+        assert!(!mounted_share_matches("//other/media", "nas", "media"));
+        assert!(!mounted_share_matches("/dev/disk3s1", "nas", "media"));
+    }
 }
