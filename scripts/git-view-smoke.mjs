@@ -18,6 +18,7 @@ try {
     const linked = windows ? "C:\\linked repo ł" : "/linked repo ł";
     const cloned = windows ? "C:\\cloned repo ł" : "/cloned repo ł";
     const file = { name: "note.txt", directory: false, link: false, hidden: false, size: 1, modified: null };
+    const fileContextFixture = sessionStorage.getItem("git-file-context-fixture") === "yes";
     const hash = (value) => value.repeat(40);
     const commit = (value, subject) => ({
       subject, hash: hash(value), shortHash: value.repeat(7), author: "Fixture Author", date: "2026-11-21T01:00:00Z",
@@ -44,18 +45,37 @@ try {
       { group: "unstaged", status: "D", path: "removed.txt", previousPath: null },
       { group: "untracked", status: "?", path: "new ł.txt", previousPath: null },
     ];
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
       transformCallback: () => 1,
       invoke: async (command, args = {}) => {
         switch (command) {
           case "locations": return [{ label: "Home", path: root }, { label: "Downloads", path: sub }];
-          case "list_directory": return { path: args.path, parent: null, entries: [file], omitted: 0 };
+          case "list_directory": return { path: args.path, parent: null, entries: fileContextFixture ?
+            [file, { ...file, name: "another.txt" }, { ...file, name: "outside.txt" }] : [file], omitted: 0 };
           case "file_icons": return [null];
+          case "windows_item_menu": window.nativeFileMenu = args; return false;
+          case "git_file_context": {
+            window.fileContextRequest = { directory: args.directory, name: args.name };
+            if (window.gitError || args.name === "outside.txt") throw "notRepository";
+            const actualRoot = args.directory === sub ? sub : root;
+            const value = { root: actualRoot, path: args.name, head: hash("c"), hasHistory: true,
+              hasBlame: true, hasDiff: args.name === "note.txt" };
+            if (window.holdGitFileContext && args.name === "note.txt") return new Promise((resolve) => {
+              window.finishGitFileContext = () => resolve(value);
+            });
+            return value;
+          }
+          case "git_working_file_content":
+            assertRoot(args.root);
+            if (args.path !== "note.txt") throw "unexpected working comparison path";
+            return { state: "available", text: "Working line" };
           case "git_repository":
             window.gitEvents.push(args.path);
             if (window.gitError) throw window.gitError;
-            return { root: args.path === linked ? linked : args.path === cloned ? cloned : root,
-              name: args.path === linked ? "linked repo ł" : args.path === cloned ? "cloned repo ł" : "repo ł",
+            return { root: args.path === linked ? linked : args.path === cloned ? cloned : fileContextFixture && args.path === sub ? sub : root,
+              name: args.path === linked ? "linked repo ł" : args.path === cloned ? "cloned repo ł" : fileContextFixture && args.path === sub ? "nested" : "repo ł",
               headRef: window.gitDetached ? null : args.path === linked ? "refs/heads/topic" : "refs/heads/main",
               head: window.gitEmpty ? null : hash("a"),
               branches: window.gitEmpty || window.gitDetached ? [] : [
@@ -128,6 +148,10 @@ try {
           }
           case "git_file_history":
             assertRoot(args.root);
+            if (fileContextFixture && args.path === "another.txt" && args.tip === hash("c")) return { commits: [
+              { ...commit("c", "Created a different file"), parent: hash("b"), merge: false,
+                change: { status: "A", path: "another.txt", previousPath: null } },
+            ], nextOffset: null };
             if (args.path !== "note.txt" || args.tip !== hash("c")) throw "invalid file history";
             if (args.offset) return { commits: [{ ...commit("d", "Added original note"), parent: null, merge: false,
               change: { status: "A", path: "old-note.txt", previousPath: null } }], nextOffset: null };
@@ -139,13 +163,13 @@ try {
             ], nextOffset: 2 };
           case "git_file_revision": {
             assertRoot(args.root);
-            const revision = args.revision === "refs/heads/main" ? hash("a") : args.revision;
+            const revision = args.revision === "refs/heads/main" ? hash("a") : args.revision === "refs/tags/v1" ? hash("f") : args.revision;
             if (window.holdFileRevision && revision === hash("c")) return new Promise((resolve) => {
               window.finishFileRevision = () => resolve({ revision, path: args.path, content: {
                 state: "available", text: "Late response for another row",
               } });
             });
-            const available = revision === hash("d") ? args.path === "old-note.txt" : args.path === "note.txt";
+            const available = revision === hash("d") ? args.path === "old-note.txt" : revision !== hash("f") && args.path === "note.txt";
             return { revision, path: args.path, content: available ? { state: "available", text: revision === hash("c") ? "Edited line" :
               revision === hash("a") ? "Alternate line" : "Original line" } : { state: "missing" } };
           }
@@ -425,7 +449,7 @@ try {
       },
     };
     function assertRoot(path) {
-      if (path !== root && path !== linked && path !== cloned) throw "notRepository";
+      if (path !== root && path !== linked && path !== cloned && !(fileContextFixture && path === sub)) throw "notRepository";
     }
   });
   await page.goto("http://dirlume.test/");
@@ -1131,7 +1155,75 @@ try {
     await filter.press("Control+Alt+j");
     assert.equal(await branches.and(page.locator(binding.length ? ".git-pane-left" : ".git-pane-right")).count(), 1);
   }
-  console.log("Verified Git View, paged history, commit details, state-preserving swaps, shortcut customization, and pane restoration.");
+  await page.evaluate(() => sessionStorage.setItem("git-file-context-fixture", "yes"));
+  await page.reload();
+  const noteRow = right.getByRole("option", { name: /^note\.txt/ });
+  const anotherRow = right.getByRole("option", { name: /^another\.txt/ });
+  const fileActions = page.getByRole("menu", { name: "File actions", exact: true });
+  const gitActions = fileActions.getByRole("group", { name: "Git", exact: true });
+  await noteRow.click();
+  await page.evaluate(() => { window.isTauri = true; });
+  await anotherRow.click({ button: "right" });
+  await gitActions.waitFor();
+  assert.equal(await menuItem(gitActions, "Show diff").count(), 0);
+  assert.equal(await page.evaluate(() => window.fileContextRequest.name), "another.txt");
+  await menuItem(gitActions, "Show history").click();
+  await history.getByRole("option", { name: /Created a different file/ }).waitFor();
+  assert.equal(await history.getByRole("textbox", { name: "Path relative to the repository" }).inputValue(), "another.txt");
+  assert.equal(await page.evaluate(() => window.gitEvents.at(-1)), await page.evaluate(() => window.fileContextRequest.directory));
+  assert.match(await page.evaluate(() => window.gitEvents.at(-1)), /nested$/);
+  await button(revisionPreview, "Close Git View").click();
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+  assert.equal(await anotherRow.getAttribute("data-current"), "true");
+  await noteRow.click();
+  await right.press("Shift+F10");
+  await menuItem(gitActions, "Show blame").click();
+  await blame.getByText("note.txt", { exact: true }).waitFor();
+  await button(blame, "Close").click();
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+  assert.equal(await noteRow.getAttribute("data-current"), "true");
+  await right.press("Shift+F10");
+  await menuItem(gitActions, "Compare with revision…").click();
+  await fileComparison.getByRole("combobox", { name: "Comparison revision", exact: true }).selectOption("refs/heads/main");
+  await button(fileComparison, "Compare").click();
+  await fileComparison.getByText("Stored revision", { exact: true }).waitFor();
+  await fileComparison.getByText("Working file", { exact: true }).waitFor();
+  await fileComparison.getByLabel("Side-by-side revision diff").waitFor();
+  await fileComparison.getByRole("combobox", { name: "Comparison revision", exact: true }).selectOption("refs/tags/v1");
+  await button(fileComparison, "Compare").click();
+  await fileComparison.getByText("File absent at this revision.", { exact: true }).waitFor();
+  await button(fileComparison, "Close").click();
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+  await noteRow.click({ button: "right" });
+  await menuItem(gitActions, "Show diff").click();
+  const scopedChanges = page.getByRole("region", { name: "Changes", exact: true });
+  await scopedChanges.getByRole("group", { name: "Staged", exact: true }).getByRole("option", { name: /note\.txt/ }).waitFor();
+  await preview.getByText("HEAD → Index", { exact: true }).waitFor();
+  await scopedChanges.getByRole("group", { name: "Unstaged", exact: true }).getByRole("option", { name: /note\.txt/ }).click();
+  await preview.getByText("Index → Working file", { exact: true }).waitFor();
+  assert.equal(await button(preview, "Stage").count(), 0);
+  assert.equal(await scopedChanges.getByRole("option").count(), 2);
+  await button(scopedChanges, "Close Git View").click();
+  await page.waitForFunction(() => document.activeElement?.id === "right-files");
+  await page.evaluate(() => { window.holdGitFileContext = true; });
+  await noteRow.click({ button: "right" });
+  await page.waitForFunction(() => typeof window.finishGitFileContext === "function");
+  await anotherRow.click({ button: "right" });
+  await gitActions.waitFor();
+  await page.evaluate(() => window.finishGitFileContext());
+  assert.equal(await menuItem(gitActions, "Show diff").count(), 0);
+  await menuItem(gitActions, "Show history").click();
+  await history.getByRole("option", { name: /Created a different file/ }).waitFor();
+  await button(revisionPreview, "Close Git View").click();
+  await right.getByRole("option", { name: /^outside\.txt/ }).click({ button: "right" });
+  await page.waitForFunction(() => window.fileContextRequest?.name === "outside.txt");
+  if (await page.evaluate(() => /Windows/i.test(navigator.userAgent))) {
+    await page.waitForFunction(() => window.nativeFileMenu?.name === "outside.txt");
+  } else {
+    await fileActions.waitFor();
+  }
+  assert.equal(await gitActions.count(), 0);
+  console.log("Verified Git View, file context actions, paged history, commit details, shortcut customization, and pane restoration.");
 } finally {
   await browser.close();
 }

@@ -1,10 +1,10 @@
 use super::{
-    bounded, comparison::resolve_commit, directory, executable, oid, parse_changes, query,
-    relative_file, text_patch, Change, Commit, GitError, Result, PAGE_SIZE, PATCH_LIMIT,
-    STATUS_LIMIT,
+    bounded, comparison::resolve_commit, directory, executable, oid, optional_line, parse_changes,
+    query, relative_file, run, text_patch, working_changes, working_file, worktree_root, Change,
+    Commit, GitError, Result, PAGE_SIZE, PATCH_LIMIT, STATUS_LIMIT,
 };
 use serde::Serialize;
-use std::path::Path;
+use std::{fs::File, io::Read, path::Path};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,7 @@ fn file_history(
 
 #[derive(Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
-enum FileContent {
+pub enum FileContent {
     Available { text: String },
     Missing,
     Binary,
@@ -286,20 +286,11 @@ fn file_blame(git: &Path, root: &Path, tip: &str, path: &str) -> Result<FileBlam
     })
 }
 
-fn file_revision(git: &Path, root: &Path, revision: &str, path: &str) -> Result<FileRevision> {
-    relative_file(path)?;
-    let revision = resolve_commit(git, root, revision)?;
+fn stored_blob(git: &Path, root: &Path, revision: &str, path: &str) -> Result<Option<String>> {
     let entry = bounded(
         git,
         root,
-        &[
-            "--literal-pathspecs",
-            "ls-tree",
-            "-z",
-            &revision,
-            "--",
-            path,
-        ],
+        &["--literal-pathspecs", "ls-tree", "-z", revision, "--", path],
         STATUS_LIMIT,
     )?
     .ok_or(GitError::Unreadable)?;
@@ -309,23 +300,120 @@ fn file_revision(git: &Path, root: &Path, revision: &str, path: &str) -> Result<
         .unwrap_or_default();
     let metadata = std::str::from_utf8(metadata).map_err(|_| GitError::Unreadable)?;
     let mut fields = metadata.split_whitespace();
-    let content = match (fields.next(), fields.next(), fields.next()) {
+    match (fields.next(), fields.next(), fields.next()) {
         (Some("100644" | "100755"), Some("blob"), Some(hash)) => {
-            match bounded(git, root, &["cat-file", "blob", oid(hash)?], PATCH_LIMIT)? {
-                Some(bytes) => match text_patch(bytes) {
-                    Ok(text) => FileContent::Available { text },
-                    Err("oversized") => FileContent::Oversized,
-                    Err(_) => FileContent::Binary,
-                },
-                None => FileContent::Oversized,
-            }
+            oid(hash).map(|hash| Some(hash.to_owned()))
         }
-        _ => FileContent::Missing,
+        _ => Ok(None),
+    }
+}
+
+fn file_content(bytes: Vec<u8>) -> FileContent {
+    match text_patch(bytes) {
+        Ok(text) => FileContent::Available { text },
+        Err("oversized") => FileContent::Oversized,
+        Err(_) => FileContent::Binary,
+    }
+}
+
+fn file_revision(git: &Path, root: &Path, revision: &str, path: &str) -> Result<FileRevision> {
+    relative_file(path)?;
+    let revision = resolve_commit(git, root, revision)?;
+    let content = match stored_blob(git, root, &revision, path)? {
+        Some(hash) => bounded(git, root, &["cat-file", "blob", &hash], PATCH_LIMIT)?
+            .map_or(FileContent::Oversized, file_content),
+        None => FileContent::Missing,
     };
     Ok(FileRevision {
         revision,
         path: path.into(),
         content,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContext {
+    root: String,
+    path: String,
+    head: Option<String>,
+    has_history: bool,
+    has_blame: bool,
+    has_diff: bool,
+}
+
+fn file_context(git: &Path, directory: &Path, name: &str) -> Result<FileContext> {
+    let name = crate::local::name_component(name).map_err(|_| GitError::Unreadable)?;
+    let file = directory.join(name);
+    if !file
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_file())
+    {
+        return Err(GitError::Unreadable);
+    }
+    let root = worktree_root(git, directory)?;
+    let resolved_root = Path::new(&root)
+        .canonicalize()
+        .map_err(|_| GitError::Unreadable)?;
+    let resolved_file = file.canonicalize().map_err(|_| GitError::Unreadable)?;
+    let path = resolved_file
+        .strip_prefix(resolved_root)
+        .map_err(|_| GitError::Unreadable)?
+        .components()
+        .map(|part| part.as_os_str().to_str().ok_or(GitError::Unreadable))
+        .collect::<Result<Vec<_>>>()?
+        .join("/");
+    if path
+        .split('/')
+        .next()
+        .is_some_and(|part| part.eq_ignore_ascii_case(".git"))
+    {
+        return Err(GitError::NotRepository);
+    }
+    relative_file(&path)?;
+    let working_root = Path::new(&root);
+    let head = optional_line(run(
+        git,
+        working_root,
+        &["rev-parse", "--verify", "--quiet", "HEAD"],
+    )?)?;
+    let mut has_blame = false;
+    let mut has_history = false;
+    if let Some(tip) = head.as_deref() {
+        let tip = oid(tip)?;
+        has_blame = stored_blob(git, working_root, tip, &path)?.is_some();
+        has_history = has_blame
+            || !file_history(git, working_root, tip, &path, 0)?
+                .commits
+                .is_empty();
+    }
+    let has_diff = working_changes(git, working_root)?
+        .iter()
+        .any(|change| change.path == path || change.previous_path.as_deref() == Some(&path));
+    Ok(FileContext {
+        root,
+        path,
+        head,
+        has_history,
+        has_blame,
+        has_diff,
+    })
+}
+
+fn working_content(root: &Path, path: &str) -> Result<FileContent> {
+    let Some(path) = working_file(root, relative_file(path)?) else {
+        return Ok(FileContent::Missing);
+    };
+    let mut bytes = Vec::new();
+    File::open(path)
+        .map_err(|_| GitError::Unreadable)?
+        .take(PATCH_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| GitError::Unreadable)?;
+    Ok(if bytes.len() as u64 > PATCH_LIMIT {
+        FileContent::Oversized
+    } else {
+        file_content(bytes)
     })
 }
 
@@ -353,6 +441,16 @@ pub async fn git_file_blame(root: String, tip: String, path: String) -> Result<F
     query(move || file_blame(&executable()?, directory(&root)?, &tip, &path)).await
 }
 
+#[tauri::command]
+pub async fn git_file_context(directory: String, name: String) -> Result<FileContext> {
+    query(move || file_context(&executable()?, super::directory(&directory)?, &name)).await
+}
+
+#[tauri::command]
+pub async fn git_working_file_content(root: String, path: String) -> Result<FileContent> {
+    query(move || working_content(directory(&root)?, &path)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,6 +473,66 @@ mod tests {
             &["config", "user.email", "fixture@example.invalid"],
         );
         git(exe, root, &["config", "commit.gpgsign", "false"]);
+    }
+
+    #[test]
+    fn resolves_file_context_in_a_linked_worktree_and_a_nested_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("outer");
+        let linked = tmp.path().join("linked");
+        let nested = root.join("independent");
+        let subfolder = nested.join("folder");
+        let exe = executable().unwrap();
+        std::fs::create_dir_all(&subfolder).unwrap();
+        fixture(&exe, &root);
+        std::fs::write(root.join("note.txt"), "outer content\n").unwrap();
+        git(&exe, &root, &["add", "note.txt"]);
+        git(&exe, &root, &["commit", "-m", "Outer file"]);
+        git(
+            &exe,
+            &root,
+            &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+        );
+        let in_linked = file_context(&exe, &linked, "note.txt").unwrap();
+        assert_eq!(
+            Path::new(&in_linked.root).canonicalize().unwrap(),
+            linked.canonicalize().unwrap()
+        );
+        assert!(in_linked.has_history && in_linked.has_blame && !in_linked.has_diff);
+
+        fixture(&exe, &nested);
+        std::fs::write(subfolder.join("note.txt"), "nested content\n").unwrap();
+        let unborn = file_context(&exe, &subfolder, "note.txt").unwrap();
+        assert!(
+            unborn.head.is_none() && !unborn.has_history && !unborn.has_blame && unborn.has_diff
+        );
+        git(&exe, &nested, &["add", "folder/note.txt"]);
+        git(&exe, &nested, &["commit", "-m", "Nested file"]);
+        std::fs::write(subfolder.join("note.txt"), "staged content\n").unwrap();
+        git(&exe, &nested, &["add", "folder/note.txt"]);
+        std::fs::write(subfolder.join("note.txt"), "working content\n").unwrap();
+        let in_nested = file_context(&exe, &subfolder, "note.txt").unwrap();
+        assert_eq!(
+            Path::new(&in_nested.root).canonicalize().unwrap(),
+            nested.canonicalize().unwrap()
+        );
+        assert_eq!(in_nested.path, "folder/note.txt");
+        assert_ne!(in_nested.head, in_linked.head);
+        assert!(in_nested.has_history && in_nested.has_blame && in_nested.has_diff);
+        assert!(
+            matches!(working_content(&nested, &in_nested.path).unwrap(), FileContent::Available { text }
+            if text == "working content\n")
+        );
+        assert!(
+            matches!(file_revision(&exe, &nested, in_nested.head.as_ref().unwrap(), &in_nested.path).unwrap().content,
+            FileContent::Available { text } if text == "nested content\n")
+        );
+        assert!(working_content(&nested, "../note.txt").is_err());
+        std::fs::write(tmp.path().join("outside.txt"), "outside\n").unwrap();
+        assert!(matches!(
+            file_context(&exe, tmp.path(), "outside.txt"),
+            Err(GitError::NotRepository)
+        ));
     }
 
     #[test]

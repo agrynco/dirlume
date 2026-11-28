@@ -455,6 +455,15 @@ export interface GitFileCommit extends GitCommit {
 }
 
 export type GitFileContent = { state: "available"; text: string } | { state: "missing" | "binary" | "oversized" };
+export interface GitFileContext {
+  root: string;
+  path: string;
+  head: string | null;
+  hasHistory: boolean;
+  hasBlame: boolean;
+  hasDiff: boolean;
+}
+export type GitFileLaunch = { path: string; action: "history" | "blame" | "compare"; head: string } | { path: string; action: "diff" };
 export interface GitBlameLine {
   number: number;
   original: number;
@@ -848,6 +857,8 @@ export const api = {
     invoke<GitFileRevision>("git_file_revision", { root, revision, path }),
   gitFileBlame: (root: string, tip: string, path: string) =>
     invoke<GitFileBlame>("git_file_blame", { root, tip, path }),
+  gitFileContext: (directory: string, name: string) => invoke<GitFileContext>("git_file_context", { directory, name }),
+  gitWorkingFileContent: (root: string, path: string) => invoke<GitFileContent>("git_working_file_content", { root, path }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
   gitUpdateBranch: (root: string, request: GitBranchRequest) =>
     invoke<GitRepository>("git_update_branch", { root, request }),

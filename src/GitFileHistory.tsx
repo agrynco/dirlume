@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowLeft, FileClock, FileDiff, GitCompareArrows, Search } from "lucide-react";
 import { api, type GitCommit, type GitFileCommit, type GitRepository } from "./api";
 import { Button } from "./Button";
@@ -32,6 +32,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
   const [comparison, setComparison] = useState<{ hash: string; revision: string }>();
   const [failedOffset, setFailedOffset] = useState<number>();
   const list = useRef<HTMLDivElement>(null);
+  const focusInitialSelection = useRef(!!initial);
   const { root } = repository;
   const previousSource = useRef({ refresh, tip });
   useEffect(() => {
@@ -55,6 +56,11 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
     }, () => { if (active) setFailedOffset(request.offset); }).finally(() => { if (active) setRequest(undefined); });
     return () => { active = false; };
   }, [root, tip, opened, request]);
+  useLayoutEffect(() => {
+    if (!selected || !focusInitialSelection.current) return;
+    focusInitialSelection.current = false;
+    list.current?.querySelector<HTMLElement>("[role=option][aria-selected=true]")?.focus({ preventScroll: true });
+  }, [selected]);
   function open() {
     if (!path.trim()) return;
     setOpened({ path });

@@ -268,8 +268,12 @@ fn optional_line(output: Output) -> Result<Option<String>> {
     }
 }
 
+fn worktree_root(git: &Path, path: &Path) -> Result<String> {
+    line(success(run(git, path, &["rev-parse", "--show-toplevel"])?)?)
+}
+
 fn repository(git: &Path, path: &Path) -> Result<Repository> {
-    let root = line(success(run(git, path, &["rev-parse", "--show-toplevel"])?)?)?;
+    let root = worktree_root(git, path)?;
     let path = directory(&root)?;
     let head_ref = optional_line(run(git, path, &["symbolic-ref", "--quiet", "HEAD"])?)?;
     let head = optional_line(run(

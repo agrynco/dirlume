@@ -8,7 +8,7 @@ import { DiffRows } from "./DiffRows";
 import { GitActionButtons, type GitAction } from "./GitActions";
 import { t } from "./i18n";
 
-export type GitFileSide = { revision: string | null; path: string; label: string; absent?: boolean };
+export type GitFileSide = { revision: string | null; path: string; label: string; absent?: boolean; working?: boolean };
 type FileVersion = GitFileSide & { content: GitFileContent };
 
 const fallback = {
@@ -16,8 +16,18 @@ const fallback = {
   binary: "This revision contains binary data.",
   oversized: "This file revision exceeds the preview limit.",
 };
+const workingFallback = {
+  missing: "The working file is unavailable.",
+  binary: "The working file contains binary data.",
+  oversized: "The working file exceeds the preview limit.",
+};
+
+function comparable({ content, working }: FileVersion) {
+  return content.state === "available" || !working && content.state === "missing";
+}
 
 async function readVersion(root: string, side: GitFileSide): Promise<FileVersion> {
+  if (side.working) return { ...side, content: await api.gitWorkingFileContent(root, side.path) };
   if (!side.revision || side.absent) return { ...side, content: { state: "missing" } };
   const value = await api.gitFileRevision(root, side.revision, side.path);
   return { ...side, ...value };
@@ -26,9 +36,9 @@ async function readVersion(root: string, side: GitFileSide): Promise<FileVersion
 function VersionHeading({ side }: { side: FileVersion }) {
   return <div className="git-file-version-heading">
     <strong>{side.label}</strong>
-    <code title={side.revision ?? undefined}>{side.revision?.slice(0, 12) ?? t("Empty tree")}</code>
+    {!side.working && <code title={side.revision ?? undefined}>{side.revision?.slice(0, 12) ?? t("Empty tree")}</code>}
     <span>{side.path}</span>
-    {side.content.state !== "available" && <small>{t(fallback[side.content.state])}</small>}
+    {side.content.state !== "available" && <small>{t((side.working ? workingFallback : fallback)[side.content.state])}</small>}
   </div>;
 }
 
@@ -45,7 +55,7 @@ export function GitFileVersions({ root, left, right, showRevision = false }: {
   const [document, setDocument] = useState(false);
   const output = useRef<HTMLDivElement>(null);
   const { revision: leftRevision, path: leftPath, label: leftLabel, absent: leftAbsent } = left;
-  const { revision: rightRevision, path: rightPath, label: rightLabel, absent: rightAbsent } = right;
+  const { revision: rightRevision, path: rightPath, label: rightLabel, absent: rightAbsent, working: rightWorking } = right;
   useEffect(() => {
     let active = true;
     setVersions(undefined);
@@ -54,14 +64,14 @@ export function GitFileVersions({ root, left, right, showRevision = false }: {
     setGroup(0);
     void Promise.all([
       readVersion(root, { revision: leftRevision, path: leftPath, label: leftLabel, absent: leftAbsent }),
-      readVersion(root, { revision: rightRevision, path: rightPath, label: rightLabel, absent: rightAbsent }),
+      readVersion(root, { revision: rightRevision, path: rightPath, label: rightLabel, absent: rightAbsent, working: rightWorking }),
     ]).then(([left, right]) => { if (active) setVersions({ left, right }); }, () => { if (active) setError(true); });
     return () => { active = false; };
-  }, [root, leftRevision, leftPath, leftLabel, leftAbsent, rightRevision, rightPath, rightLabel, rightAbsent]);
+  }, [root, leftRevision, leftPath, leftLabel, leftAbsent, rightRevision, rightPath, rightLabel, rightAbsent, rightWorking]);
   useEffect(() => {
     if (!versions) return;
     const { left, right } = versions;
-    if ([left.content, right.content].some(({ state }) => state !== "available" && state !== "missing")) return;
+    if (![left, right].every(comparable)) return;
     const before = left.content.state === "available" ? left.content.text : "";
     const after = right.content.state === "available" ? right.content.text : "";
     if (before === after) {
@@ -93,7 +103,7 @@ export function GitFileVersions({ root, left, right, showRevision = false }: {
   }
   if (error) return <p role="alert" className="git-file-feedback">{t("Could not read the file revision. Check that the revision is available locally.")}</p>;
   if (!versions) return <p role="status" className="git-file-feedback">{t("Reading change…")}</p>;
-  const canCompare = [versions.left.content, versions.right.content].every(({ state }) => state === "available" || state === "missing");
+  const canCompare = [versions.left, versions.right].every(comparable);
   const canShow = versions.right.content.state === "available";
   const bothPresent = versions.left.content.state === "available" && canShow;
   const actions: GitAction[] = [

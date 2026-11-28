@@ -86,6 +86,7 @@ export const commands = {
   rename: { label: "Rename", key: "F2" },
   lockingProcesses: { label: "Find locking processes", key: "" },
   processContextMenu: { label: "Open process context menu", key: "Shift+F10" },
+  fileContextMenu: { label: "Open file context menu", key: "Shift+F10" },
   view: { label: "View text or measure folder", key: "F3" },
   quickView: { label: "Quick View", key: "Ctrl+Q" },
   quickViewPrevious: { label: "Quick View: Previous File", key: "Alt+PageUp" },
@@ -245,6 +246,7 @@ export function commandScope(command: Command) {
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText" || command === "copyTerminalText") return "terminal";
   if (command === "processContextMenu") return "processPane";
+  if (command === "fileContextMenu") return "filePane";
   if (command === "gitContextMenu") return "gitPane";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addNetBoxProfile" || command === "editNetBoxProfile") return "netbox";
@@ -269,7 +271,8 @@ export function shortcutScopesOverlap(left: Command, right: Command) {
   if (leftScope === rightScope) return true;
   if (leftScope === "wheel" || rightScope === "wheel") return false;
   if (leftScope === "global" || rightScope === "global") return true;
-  if ([leftScope, rightScope].includes("processPane") && [leftScope, rightScope].includes("main")) return true;
+  if ([leftScope, rightScope].includes("main") &&
+      [leftScope, rightScope].some((scope) => scope === "processPane" || scope === "filePane")) return true;
   const commands = [left, right];
   if (commands.includes("fileBookmarks") && [leftScope, rightScope].some((scope) => scope === "text" || scope === "viewer")) return true;
   if (commands.includes("open") && [leftScope, rightScope].some((scope) => ["netbox", "smb", "remote", "googleDrive"].includes(scope))) return true;

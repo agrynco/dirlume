@@ -4,10 +4,11 @@ import { helpIsOpen } from "./contextHelp";
 import type { HelpTopic } from "./helpTopics";
 import { t } from "./i18n";
 
-export function FileContextMenu({ x, y, label = "File actions", helpTopic = "operations", container = document.body, onClose, onReturn, children }: {
+export function FileContextMenu({ x, y, label = "File actions", helpTopic = "operations", container = document.body, className, onClose, onReturn, children }: {
   label?: string;
   helpTopic?: HelpTopic;
   container?: HTMLElement;
+  className?: string;
   x: number; y: number; onClose: () => void; onReturn: () => void; children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -37,7 +38,7 @@ export function FileContextMenu({ x, y, label = "File actions", helpTopic = "ope
     };
   }, []);
 
-  return createPortal(<div ref={ref} className="file-column-menu" role="menu" tabIndex={-1} data-help-topic={helpTopic} aria-label={t(label)}
+  return createPortal(<div ref={ref} className={"file-column-menu" + (className ? " " + className : "")} role="menu" tabIndex={-1} data-help-topic={helpTopic} aria-label={t(label)}
     onContextMenu={(event) => event.preventDefault()}
     onBlur={(event) => { if (!helpIsOpen() && !event.currentTarget.contains(event.relatedTarget)) onClose(); }}
     onKeyDown={(event) => {
