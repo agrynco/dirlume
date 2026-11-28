@@ -1,3 +1,4 @@
+import { openMainMenu } from "./menu-header-smoke.mjs";
 import { closeToolWindow, openToolWindow } from "./tool-window-smoke.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -337,7 +338,7 @@ export async function testFtp(page, temp, source, destination, config, restartDe
     await stopped.waitFor({ state: "hidden" });
 
     await remoteRow("guide.md").click();
-    await page.keyboard.press("F2");
+    await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
     const rename = right.getByRole("textbox", { name: "New name for guide.md", exact: true });
     await rename.fill("renamed.md");
     await rename.press("Enter");

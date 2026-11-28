@@ -1,3 +1,4 @@
+import { openMainMenu } from "./menu-header-smoke.mjs";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -22,7 +23,7 @@ export async function testInlineRename(page, root) {
   async function edit(side, name) {
     const item = row(side, name);
     await item.click();
-    await page.keyboard.press("F2");
+    await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
     const field = item.getByRole("textbox", { name: "New name for " + name, exact: true });
     await field.waitFor();
     assert.equal(await field.inputValue(), name);

@@ -2514,7 +2514,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   function openUserMenu() {
-    if (modal || !local || smbHost(local) || !filesAvailable || pane.search || panelsHidden) return;
+    if (!canOpenUserMenu || !local) return;
     const otherSide = opposite(active);
     const other = panes[otherSide];
     const itemDetails = (item: typeof currentItem) => item?.place.kind === "local" && !smbHost(item.place)
@@ -3696,7 +3696,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     const inCommandLine = target === commandInput.current;
     const inField = target.closest("input, select, textarea, [contenteditable]");
-    if (command === "userMenu" && (!onFiles || inField || event.repeat)) return;
+    if (command === "userMenu" && (!canOpenUserMenu || !onFiles || inField || event.repeat)) return;
     if (command === "quickViewPrevious" || command === "quickViewNext") {
       if (quickViewSource !== null && !inField && !target.closest("[role=menu]") &&
           (onFiles?.id === quickViewSource + "-files" || target.closest(".quick-view"))) {
@@ -3775,6 +3775,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     { command: "mark", label: "Mark", Icon: CheckSquare, disabled: !current },
   ] as const);
   const filesAvailable = panesAvailable && !analysis && !diskActive && !gitView && !environmentActive && !recentActive && !processPanels[active] && !pane.loading;
+  const canOpenUserMenu = filesAvailable && !modal && !panelsHidden && !!local && !smbHost(local) && !pane.search;
   const systemFolder = currentRow?.name === ".." ? pane.place :
     currentItem?.entry.directory && currentItem.place.kind === "local" ? childPlace(currentItem.place, currentItem.entry.name) : null;
   const systemFolderPath = systemFolder?.kind === "local" && !smbHost(systemFolder) ? systemFolder.path : null;
@@ -3876,7 +3877,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       commandWithIcon(Copy, "copyItemNames", !canCopyItemNames),
       commandWithIcon(ArrowLeftRight, "swap", !panesAvailable || !canSwapPanes),
       commandWithIcon(History, "commandHistory", activeDocument !== null),
-      commandWithIcon(TerminalIcon, "userMenu", !filesAvailable || !local || !!smbHost(local) || !!pane.search || !!modal, "User Menu"),
+      commandWithIcon(TerminalIcon, "userMenu", !canOpenUserMenu, "User Menu"),
       commandWithIcon(History, "fileOperationHistory", !!modal || activeDocument !== null),
       commandWithIcon(Undo2, "undoFileOperation", !!modal || activeDocument !== null),
       commandWithIcon(Redo2, "redoFileOperation", !!modal || activeDocument !== null),

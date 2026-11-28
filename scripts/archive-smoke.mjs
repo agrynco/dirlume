@@ -1,3 +1,4 @@
+import { openMainMenu } from "./menu-header-smoke.mjs";
 import { editPaneAddress } from "./pane-address-smoke.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -73,7 +74,7 @@ export async function testArchives(page, root) {
   await row("incoming").waitFor();
   assert.equal(await readFile(join(destination, "incoming", "copied.txt"), "utf8"), "copy into archive");
   await row("incoming").click();
-  await page.keyboard.press("F2");
+  await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
   const rename = dialog("Rename");
   await rename.getByLabel("Name", { exact: true }).fill("note.txt");
   await button(rename, "Rename").click();
