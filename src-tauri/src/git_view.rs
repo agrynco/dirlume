@@ -80,6 +80,7 @@ struct Commit {
 pub struct Details {
     message: String,
     merge: bool,
+    first_parent: Option<String>,
     changes: Vec<Change>,
 }
 
@@ -496,6 +497,7 @@ fn details(git: &Path, path: &Path, hash: &str) -> Result<Details> {
     Ok(Details {
         message: message.trim_end_matches('\n').into(),
         merge,
+        first_parent: parent.map(str::to_owned),
         changes,
     })
 }

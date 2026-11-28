@@ -73,6 +73,9 @@ try {
             };
           case "git_revision_diff":
             assertRoot(args.root);
+            if (args.path === "new ł.txt" && args.base === hash("b") && args.target === hash("a") && args.previousPath === null) {
+              return { patch: "+new in this commit\n", fallback: null };
+            }
             if (args.base !== hash("a") || args.target !== hash("c") || args.path !== "compare.txt") throw "invalid comparison";
             return { patch: "-old\n+new\n", fallback: null };
           case "git_commit_graph":
@@ -233,8 +236,8 @@ try {
             if (args.tip === hash("c")) return { commits: [commit("c", "Remote-tracking topic")], nextOffset: null };
             return { commits: args.offset ? [commit("d", "Old commit")] : [commit("a", "Merge feature")],
               nextOffset: args.offset ? null : 1 };
-          case "git_details": return { message: "Merge feature\n\nFull commit body", merge: true, changes: [
-            { status: "A", path: "new ł.txt" }, { status: "D", path: "removed.txt" },
+          case "git_details": return { message: "Merge feature\n\nFull commit body", merge: true, firstParent: hash("b"), changes: [
+            { status: "A", path: "new ł.txt", previousPath: null }, { status: "D", path: "removed.txt", previousPath: null },
           ] };
           case "git_index_state":
             assertRoot(args.root);
@@ -346,6 +349,8 @@ try {
   await page.goto("http://dirlume.test/");
   const swapKey = await page.evaluate(() => /Mac/i.test(navigator.userAgent) ? "Meta+u" : "Control+u");
   const button = (scope, name) => scope.getByRole("button", { name, exact: true });
+  const gitMenu = (target) => page.getByRole("menu", { name: "Git actions for " + target, exact: true });
+  const menuItem = (scope, name) => scope.getByRole("menuitem", { name, exact: true });
   const right = page.locator("#right-files");
   const git = button(page, "Git View");
   const branches = page.getByRole("region", { name: "Branches", exact: true });
@@ -357,9 +362,31 @@ try {
   assert.equal(await branches.evaluate((node) => node.classList.contains("git-pane-right")), true);
   await branches.getByRole("option", { name: /main/, selected: true }).waitFor();
   assert.equal(await button(page, "Quick View").isDisabled(), true);
+  assert.equal(await button(branches, "Create branch").getAttribute("data-tooltip"), "Create a branch from the selected revision.");
+  assert.equal(await button(branches, "Create branch").locator("svg").count(), 1);
+  await button(branches, "Create branch").focus();
+  await page.getByRole("tooltip").filter({ hasText: "Create a branch from the selected revision." }).waitFor();
+  await merge.focus();
+  await page.keyboard.press("Shift+F10");
+  const commitMenu = gitMenu("aaaaaaa");
+  await commitMenu.waitFor();
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await menuItem(commitMenu, "Copy commit hash").evaluate((item) => document.activeElement === item), true);
+  await page.keyboard.press("Escape");
+  assert.equal(await merge.evaluate((row) => document.activeElement === row), true);
+  await merge.click({ button: "right" });
+  await menuItem(commitMenu, "Revert commit").click();
+  assert.equal(await history.getByRole("combobox", { name: "History action", exact: true }).inputValue(), "revert");
+  assert.equal(await history.getByRole("textbox", { name: "Target commit", exact: true }).inputValue(), "a".repeat(40));
+  await button(history, "History actions").click();
   await merge.click();
   await history.getByText("Changed paths relative to the first parent").waitFor();
   await history.getByText("new ł.txt").waitFor();
+  await history.getByText("new ł.txt", { exact: true }).click({ button: "right" });
+  await menuItem(gitMenu("new ł.txt"), "Show change").click();
+  const historicalChange = page.getByRole("dialog", { name: "Change preview", exact: true });
+  await historicalChange.getByText("+new in this commit", { exact: true }).waitFor();
+  await button(historicalChange, "Close dialog").click();
   await button(history, "Copy commit hash").click();
   assert.equal(await page.evaluate(() => window.gitCopied), "a".repeat(40));
   await button(history, "Load more").click();
@@ -416,7 +443,15 @@ try {
   const tracking = page.getByRole("dialog", { name: "Create tracking branch and switch", exact: true });
   assert.equal(await tracking.getByRole("textbox", { name: "Branch name", exact: true }).inputValue(), "topic");
   await button(tracking, "Cancel").click();
-  await button(history, "Merge branch").click();
+  await filter.fill("");
+  await branches.getByRole("option", { name: /main/ }).click();
+  await branches.getByRole("option", { name: "origin/topic", exact: true }).click({ button: "right" });
+  const remoteMenu = gitMenu("origin/topic");
+  await remoteMenu.waitFor();
+  const bounds = await remoteMenu.boundingBox();
+  const viewport = page.viewportSize();
+  assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width && bounds.y + bounds.height <= viewport.height);
+  await menuItem(remoteMenu, "Merge into current branch…").click();
   await history.getByText("refs/remotes/origin/topic", { exact: false }).waitFor();
   assert.equal(await button(history, "Fast-forward only").isDisabled(), true);
   await button(history, "Create merge commit").click();
@@ -508,9 +543,12 @@ try {
   const createdTree = history.locator("li").filter({ hasText: worktreePath });
   await button(createdTree, "Remove worktree").waitFor();
   assert.equal(await page.evaluate(() => window.gitCreatedWorktree.branch), "created");
+  assert.equal(await button(history, "Worktrees").getAttribute("data-tooltip"), "Show linked worktrees.");
+  assert.equal(await button(history, "Worktrees").locator("svg").count(), 1);
   const removeTree = page.getByRole("dialog", { name: "Remove worktree", exact: true });
   await page.setViewportSize({ width: 580, height: 460 });
-  await button(createdTree, "Remove worktree").click();
+  await createdTree.getByText(worktreePath, { exact: true }).click({ button: "right" });
+  await menuItem(gitMenu(worktreePath), "Remove worktree").click();
   await removeTree.waitFor();
   const reviewFields = removeTree.locator("dl > div");
   assert.deepEqual(await reviewFields.locator("dt").allTextContents(),
@@ -648,6 +686,17 @@ try {
   await changes.and(page.locator(".git-pane-left")).waitFor();
   await preview.and(page.locator(".git-pane-right")).waitFor();
   assert.equal(await edited.getAttribute("aria-selected"), "true");
+  const stagedNote = changes.getByRole("group", { name: "Staged", exact: true }).getByRole("option", { name: /note\.txt/ });
+  await stagedNote.click({ button: "right" });
+  const stagedMenu = gitMenu("Staged · note.txt");
+  assert.equal(await menuItem(stagedMenu, "Unstage").isEnabled(), true);
+  assert.equal(await menuItem(stagedMenu, "Stage").count(), 0);
+  await page.keyboard.press("Escape");
+  await edited.click({ button: "right" });
+  const unstagedMenu = gitMenu("Unstaged · note.txt");
+  assert.equal(await menuItem(unstagedMenu, "Stage").isEnabled(), true);
+  assert.equal(await menuItem(unstagedMenu, "Unstage").count(), 0);
+  await page.keyboard.press("Escape");
   await button(preview, "Open in Viewer").click();
   await page.getByText("saved working text", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
@@ -754,7 +803,8 @@ try {
   await button(stashes, "Staged").click();
   await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved staged version" }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.gitStashCreated), { message: "Fixture stash", untracked: true });
-  await button(stashes, "Apply stash").click();
+  await stashes.getByRole("button", { name: /stash@\{0\} · Fixture stash/ }).click({ button: "right" });
+  await menuItem(gitMenu("Fixture stash"), "Apply stash").click();
   const apply = page.getByRole("dialog", { name: "Apply stash", exact: true });
   await button(apply, "Apply stash").click();
   await stashes.getByText("stash-conflict.txt", { exact: true }).waitFor();
@@ -808,12 +858,30 @@ try {
       const key = "dirlume.preferences.v1";
       const current = JSON.parse(localStorage.getItem(key));
       localStorage.setItem(key, JSON.stringify({ ...current, activeShortcutScheme: "fixture-swap",
-        shortcutSchemes: [{ id: "fixture-swap", name: "Fixture swap", bindings: { swap } }] }));
+        shortcutSchemes: [{ id: "fixture-swap", name: "Fixture swap", bindings: {
+          swap, gitContextMenu: swap.length ? ["Ctrl+Alt+K"] : [],
+        } }] }));
     }, binding);
     await page.reload();
     await right.getByRole("option", { name: /^note\.txt/ }).click();
     await git.click();
     await branches.and(page.locator(".git-pane-right")).waitFor();
+    const main = branches.getByRole("option", { name: /main/, selected: true });
+    await main.focus();
+    await page.keyboard.press("Control+Alt+k");
+    const mainMenu = gitMenu("main");
+    if (binding.length) {
+      await mainMenu.waitFor();
+      await page.keyboard.press("Escape");
+      assert.ok(await main.evaluate((row) => document.activeElement === row));
+    } else {
+      assert.equal(await mainMenu.count(), 0);
+      await page.keyboard.press("Shift+F10");
+      assert.equal(await mainMenu.count(), 0);
+      await main.click({ button: "right" });
+      await mainMenu.waitFor();
+      await page.keyboard.press("Escape");
+    }
     await filter.press(swapKey);
     assert.equal(await branches.and(page.locator(".git-pane-right")).count(), 1);
     await filter.press("Control+Alt+j");

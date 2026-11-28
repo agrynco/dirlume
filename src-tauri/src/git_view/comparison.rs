@@ -97,15 +97,19 @@ fn unique_history(
 fn revision_diff(
     git: &Path,
     root: &Path,
-    base: &str,
+    base: Option<&str>,
     target: &str,
     path: &str,
     previous_path: Option<&str>,
 ) -> Result<RevisionDiff> {
     relative_file(path)?;
-    let mut args = vec![
-        "--literal-pathspecs",
-        "diff",
+    let mut args = vec!["--literal-pathspecs"];
+    if base.is_some() {
+        args.push("diff");
+    } else {
+        args.extend(["diff-tree", "--root", "-r", "--patch", "--no-commit-id"]);
+    }
+    args.extend([
         "--no-color",
         "--no-ext-diff",
         "--no-textconv",
@@ -113,11 +117,11 @@ fn revision_diff(
         "--find-renames",
         "--ignore-submodules=none",
         "--submodule=short",
-        oid(base)?,
-        oid(target)?,
-        "--",
-        path,
-    ];
+    ]);
+    if let Some(base) = base {
+        args.push(oid(base)?);
+    }
+    args.extend([oid(target)?, "--", path]);
     if let Some(previous) = previous_path {
         relative_file(previous)?;
         args.push(previous);
@@ -180,7 +184,7 @@ pub async fn git_revision_history(
 #[tauri::command]
 pub async fn git_revision_diff(
     root: String,
-    base: String,
+    base: Option<String>,
     target: String,
     path: String,
     previous_path: Option<String>,
@@ -189,7 +193,7 @@ pub async fn git_revision_diff(
         revision_diff(
             &executable()?,
             directory(&root)?,
-            &base,
+            base.as_deref(),
             &target,
             &path,
             previous_path.as_deref(),
@@ -215,6 +219,7 @@ mod tests {
         std::fs::write(root.join("shared.txt"), "shared\n").unwrap();
         run(&["add", "--", "shared.txt"]);
         run(&["commit", "-m", "Common"]);
+        let initial = run(&["rev-parse", "HEAD"]);
         run(&["switch", "-c", "topic"]);
         std::fs::write(root.join("topic.txt"), "topic\n").unwrap();
         run(&["add", "--", "topic.txt"]);
@@ -237,11 +242,20 @@ mod tests {
         assert_eq!(result.changes[0].status, 'D');
         assert_eq!(result.changes[1].path, "topic.txt");
         assert_eq!(result.changes[1].status, 'A');
-        assert!(revision_diff(&git, root, &base, &target, "topic.txt", None)
-            .unwrap()
-            .patch
-            .unwrap()
-            .contains("+topic"));
+        assert!(
+            revision_diff(&git, root, Some(&base), &target, "topic.txt", None)
+                .unwrap()
+                .patch
+                .unwrap()
+                .contains("+topic")
+        );
+        assert!(
+            revision_diff(&git, root, None, &initial, "shared.txt", None)
+                .unwrap()
+                .patch
+                .unwrap()
+                .contains("+shared")
+        );
         assert_eq!(run(&["status", "--porcelain"]), before);
         assert_eq!(run(&["rev-parse", "HEAD"]), base);
         let graph = super::super::commit_graph(&git, root, &target, "topic").unwrap();

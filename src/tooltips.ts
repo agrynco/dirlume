@@ -36,6 +36,7 @@ function fits(element: HTMLElement, anchor: HTMLElement) {
 function tooltipText(anchor: HTMLElement) {
   const { tooltip, tooltipAction, tooltipShortcut } = anchor.dataset;
   if (!tooltip) return;
+  if (anchor.dataset.tooltipAlways) return tooltip;
   const action = normalize(tooltipAction ?? tooltip);
   const hasVisibleLabel = [anchor, ...anchor.querySelectorAll("*")].some((element) => {
     if (!(element instanceof HTMLElement) || element.closest("kbd")) return false;

@@ -432,6 +432,7 @@ export interface GitHistory {
 export interface GitDetails {
   message: string;
   merge: boolean;
+  firstParent: string | null;
   changes: { status: string; path: string; previousPath: string | null }[];
 }
 
@@ -809,7 +810,7 @@ export const api = {
     invoke<GitComparison>("git_compare_revisions", { root, base, target }),
   gitRevisionHistory: (root: string, included: string, excluded: string, offset: number) =>
     invoke<GitHistory>("git_revision_history", { root, included, excluded, offset }),
-  gitRevisionDiff: (root: string, base: string, target: string, path: string, previousPath: string | null) =>
+  gitRevisionDiff: (root: string, base: string | null, target: string, path: string, previousPath: string | null) =>
     invoke<GitRevisionDiff>("git_revision_diff", { root, base, target, path, previousPath }),
   gitMergeState: (root: string) => invoke<GitMergeState | null>("git_merge_state", { root }),
   gitMergePlan: (root: string, source: string) => invoke<GitMergePlan>("git_merge_plan", { root, source }),

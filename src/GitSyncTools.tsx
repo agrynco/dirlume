@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
+import { CloudDownload, Copy, GitCompareArrows, GitMerge, GitPullRequest, Network, Pencil, Tag, Trash2, Upload } from "lucide-react";
 import { api, type GitRemote, type GitRemoteAction, type GitRepository, type GitUpstream } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { displayGitUrl } from "./GitRepositorySetup";
 import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
 const tabs = { remotes: "Remotes", upstream: "Upstream", refs: "Remote references" } as const;
+const tabIcons = { remotes: Network, upstream: GitPullRequest, refs: Tag };
 type Tab = keyof typeof tabs;
+type SyncTarget = { reference?: string; action: "push" | "upstream" | "delete" };
 const remoteLabels: Record<GitRemoteAction, string> = {
   add: "Add remote", rename: "Rename remote", setFetchUrl: "Change fetch URL", setPushUrl: "Change push URL",
   clearPushUrl: "Use fetch URL for pushes", remove: "Remove remote",
@@ -20,14 +24,14 @@ type Review = { title: string; context: string[]; apply: () => Promise<string | 
 function EditRemote({ root, remote, onReview, pending }: {
   root: string; remote?: GitRemote; onReview: (review: Review) => void; pending: boolean;
 }) {
+  const menu = useGitMenu();
   const [action, setAction] = useState<GitRemoteAction>("add");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const names = action === "add" || action === "rename";
   const urls = action === "add" || action === "setFetchUrl" || action === "setPushUrl";
   const blocked = action !== "add" && !remote || names && !name.trim() || urls && !url.trim();
-  return <form onSubmit={(event) => {
-    event.preventDefault();
+  function prepare() {
     if (blocked) return;
     const newName = name.trim();
     const newUrl = urls ? url.trim() : null;
@@ -38,7 +42,11 @@ function EditRemote({ root, remote, onReview, pending }: {
         action === "clearPushUrl" ? remote?.fetchUrls[0] : undefined].filter((value): value is string => !!value),
       apply: () => api.gitConfigureRemote(root, action, action === "add" ? null : remote ?? null, newName, newUrl),
     });
-  }}>
+  }
+  const review: GitAction = { label: "Review changes", icon: Pencil, disabled: pending || blocked,
+    run: prepare, submit: true, destructive: action === "remove" };
+  return <form {...menu([{ ...review, label: remoteLabels[action] }])}
+    onSubmit={(event) => { event.preventDefault(); prepare(); }}>
     <label className="field">{t("Remote action")}
       <select value={action} disabled={pending} onChange={(event) => setAction(event.target.value as GitRemoteAction)}>
         {Object.entries(remoteLabels).map(([value, label]) => <option key={value} value={value} disabled={value !== "add" && !remote}>{t(label)}</option>)}
@@ -50,29 +58,34 @@ function EditRemote({ root, remote, onReview, pending }: {
     {urls && <label className="field">{t(action === "setPushUrl" ? "Push URL" : "Fetch URL")}
       <input value={url} disabled={pending} autoComplete="off" spellCheck={false} onChange={(event) => setUrl(event.target.value)} />
     </label>}
-    <Button type="submit" disabled={pending || blocked}>{t("Review changes")}</Button>
+    <GitActionButtons actions={[review]} />
   </form>;
 }
 
-export function GitSyncTools({ repository, refresh, onRefresh, onCompare, onPull }: {
+export function GitSyncTools({ repository, refresh, initial, onRefresh, onCompare, onCopyRef, onPull }: {
   repository: GitRepository; refresh: number; onRefresh: () => void;
+  initial?: SyncTarget;
   onCompare: (target: string) => void;
+  onCopyRef: (reference: string) => void;
   onPull: (method: PullMethod, upstream: string) => void;
 }) {
+  const menu = useGitMenu();
   const root = repository.root;
-  const [tab, setTab] = useState<Tab>("remotes");
+  const [tab, setTab] = useState<Tab>(initial?.action === "upstream" ? "upstream" : initial ? "refs" : "remotes");
   const [remotes, setRemotes] = useState<GitRemote[]>();
   const [selected, setSelected] = useState("");
   const [upstream, setUpstream] = useState<GitUpstream>();
   const [desired, setDesired] = useState("");
-  const [refAction, setRefAction] = useState<RefAction>("branch");
-  const [source, setSource] = useState(repository.headRef ?? "");
-  const [destination, setDestination] = useState(repository.headRef?.replace(/^refs\/heads\//, "") ?? "");
+  const [refAction, setRefAction] = useState<RefAction>(initial?.action === "delete" ?
+    "deleteBranch" : initial?.reference?.startsWith("refs/tags/") ? "tag" : "branch");
+  const [source, setSource] = useState(initial?.action === "push" ? initial.reference ?? "" : repository.headRef ?? "");
+  const [destination, setDestination] = useState(initial?.action === "delete" ? "" :
+    (initial?.reference ?? repository.headRef)?.replace(/^refs\/(heads|tags)\//, "") ?? "");
   const [review, setReview] = useState<Review>();
   const [pending, setPending] = useState(false);
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
-  const remote = remotes?.find((item) => item.name === selected) ?? remotes?.[0];
+  const remote = selected ? remotes?.find((item) => item.name === selected) : remotes?.[0];
   const upstreamRemote = remotes?.find((item) => item.name === upstream?.remote);
   const isTag = refAction === "tag" || refAction === "deleteTag";
   const deleting = refAction === "deleteBranch" || refAction === "deleteTag";
@@ -82,15 +95,26 @@ export function GitSyncTools({ repository, refresh, onRefresh, onCompare, onPull
   useEffect(() => {
     let canceled = false;
     const fail = (error: unknown) => { if (!canceled) setError(writeError(error)); };
-    void api.gitRemotes(root).then((values) => { if (!canceled) setRemotes(values); }, fail);
+    void api.gitRemotes(root).then((values) => {
+      if (canceled) return;
+      setRemotes(values);
+      if (initial?.action !== "delete" || !initial.reference) return;
+      const reference = initial.reference;
+      const matching = values.filter(({ name }) => reference.startsWith("refs/remotes/" + name + "/"))
+        .sort((left, right) => right.name.length - left.name.length)[0];
+      if (matching) {
+        setSelected((current) => current || matching.name);
+        setDestination((current) => current || reference.slice(("refs/remotes/" + matching.name + "/").length));
+      } else setError(t("The remote reference no longer exists."));
+    }, fail);
     void api.gitUpstream(root).then((value) => {
       if (!canceled) {
         setUpstream(value);
-        setDesired(value.reference ?? "");
+        setDesired(initial?.action === "upstream" ? initial.reference ?? "" : value.reference ?? "");
       }
     }, fail);
     return () => { canceled = true; };
-  }, [root, refresh]);
+  }, [root, refresh, initial]);
 
   async function execute() {
     if (!review || pending) return;
@@ -156,16 +180,49 @@ export function GitSyncTools({ repository, refresh, onRefresh, onCompare, onPull
     }
   }
 
+  const tabActions: GitAction[] = (Object.keys(tabs) as Tab[]).map((name) => ({
+    label: tabs[name], icon: tabIcons[name], pressed: tab === name, disabled: pending,
+    run: () => { setTab(name); setError(""); setOutput(""); },
+  }));
+  const fetchActions: GitAction[] = remote ? [false, true].map((prune) => {
+    const label = prune ? "Fetch and prune" : "Fetch remote";
+    return { label, icon: CloudDownload, disabled: pending,
+      run: () => setReview({ title: label, context: [remote.name, ...remote.fetchUrls],
+        apply: () => api.gitFetchRemote(root, remote, prune) }) };
+  }) : [];
+  const upstreamActions: GitAction[] = upstream ? [
+    { label: desired ? "Set upstream" : "Remove upstream", icon: Network, destructive: !desired,
+      disabled: pending || !upstream.headRef || !upstream.head || (upstream.reference ?? "") === desired,
+      run: () => setReview({ title: desired ? "Set upstream" : "Remove upstream", context: [upstream.headRef ?? "", desired || upstream.reference || ""],
+        apply: () => api.gitSetUpstream(root, upstream, desired || null) }) },
+    { label: "Compare upstream", icon: GitCompareArrows, disabled: pending || !upstream.tip,
+      run: () => { if (upstream.tip) onCompare(upstream.reference ?? upstream.tip); } },
+    ...(["merge", "rebase"] as const).map((method) => ({
+      label: method === "merge" ? "Pull by merge" : "Pull by rebase", icon: method === "merge" ? GitMerge : GitPullRequest,
+      disabled: pending || !upstreamRemote || !upstream.head, run: () => preparePull(method),
+    })),
+  ] : [];
+  const refReview: GitAction = { label: refLabels[refAction], icon: deleting ? Trash2 : Upload,
+    disabled: pending || !remote || !destination.trim() || !deleting && !source,
+    destructive: deleting, run: () => void inspectTransfer(), submit: true };
+  const refActions: GitAction[] = [
+    ...(!deleting && source ? [
+      { label: "Compare revisions", icon: GitCompareArrows, run: () => onCompare(source) },
+      { label: "Copy reference", icon: Copy, run: () => onCopyRef(source) },
+    ] : []),
+    refReview,
+  ];
+  const destructiveReview = !!review && ["Remove upstream", "Remove remote", "Delete remote branch", "Delete remote tag"].includes(review.title);
   const remotePicker = <label className="field">{t("Remote")}
     <select value={remote?.name ?? ""} disabled={pending || !remotes?.length} onChange={(event) => setSelected(event.target.value)}>
       {remotes?.map(({ name }) => <option key={name}>{name}</option>)}
     </select>
   </label>;
-  return <div className="git-scroll git-revision-comparison" aria-label={t("Synchronize repository")}>
+  return <div className="git-scroll git-revision-comparison" aria-label={t("Synchronize repository")} tabIndex={-1}
+    {...menu([...tabActions, ...(tab === "remotes" ? fetchActions : tab === "upstream" ? upstreamActions : refActions)])}>
     <p><code>{root}</code></p>
     <div className="git-branch-actions">
-      {(Object.keys(tabs) as Tab[]).map((name) => <Button key={name} aria-pressed={tab === name} disabled={pending}
-        onClick={() => { setTab(name); setError(""); setOutput(""); }}>{t(tabs[name])}</Button>)}
+      <GitActionButtons actions={tabActions} />
     </div>
     {error && <p role="alert" className="git-write-feedback">{error}</p>}
     {pending && <p role="status">{t("Working with Git…")}</p>}
@@ -177,10 +234,7 @@ export function GitSyncTools({ repository, refresh, onRefresh, onCompare, onPull
         <dl><dt>{t("Fetch URL")}</dt><dd>{remote.fetchUrls.join("\n")}</dd>
           <dt>{t("Push URL")}</dt><dd>{remote.pushUrls.join("\n")}</dd></dl>
         <div className="git-branch-actions">
-          {[false, true].map((prune) => <Button key={Number(prune)} disabled={pending}
-            onClick={() => setReview({ title: prune ? "Fetch and prune" : "Fetch remote",
-              context: [remote.name, ...remote.fetchUrls],
-              apply: () => api.gitFetchRemote(root, remote, prune) })}>{t(prune ? "Fetch and prune" : "Fetch remote")}</Button>)}
+          <GitActionButtons actions={fetchActions} />
         </div>
       </>}
       {remotes && <EditRemote root={root} remote={remote} onReview={setReview} pending={pending} />}
@@ -199,18 +253,10 @@ export function GitSyncTools({ repository, refresh, onRefresh, onCompare, onPull
         </select>
       </label>
       <div className="git-branch-actions">
-        <Button disabled={pending || !upstream.headRef || !upstream.head || (upstream.reference ?? "") === desired} onClick={() =>
-          setReview({ title: desired ? "Set upstream" : "Remove upstream", context: [upstream.headRef ?? "", desired || upstream.reference || ""],
-            apply: () => api.gitSetUpstream(root, upstream, desired || null) })}>{t(desired ? "Set upstream" : "Remove upstream")}</Button>
-        <Button disabled={pending || !upstream.tip}
-          onClick={() => { if (upstream.tip) onCompare(upstream.reference ?? upstream.tip); }}>{t("Compare upstream")}</Button>
-        <Button disabled={pending || !upstreamRemote || !upstream.head}
-          onClick={() => preparePull("merge")}>{t("Pull by merge")}</Button>
-        <Button disabled={pending || !upstreamRemote || !upstream.head}
-          onClick={() => preparePull("rebase")}>{t("Pull by rebase")}</Button>
+        <GitActionButtons actions={upstreamActions} />
       </div>
     </> : <p role="status">{t("Reading upstream…")}</p>)}
-    {tab === "refs" && (remote ? <form onSubmit={(event) => { event.preventDefault(); void inspectTransfer(); }}>
+    {tab === "refs" && (remote ? <form {...menu(refActions)} onSubmit={(event) => { event.preventDefault(); void inspectTransfer(); }}>
       {remotePicker}
       <label className="field">{t("Reference action")}
         <select value={refAction} disabled={pending} onChange={(event) => changeRefAction(event.target.value as RefAction)}>
@@ -229,15 +275,19 @@ export function GitSyncTools({ repository, refresh, onRefresh, onCompare, onPull
       <label className="field">{t(isTag ? "Remote tag name" : "Destination branch")}
         <input autoComplete="off" spellCheck={false} value={destination} disabled={pending} onChange={(event) => setDestination(event.target.value)} />
       </label>
-      <Button type="submit" disabled={pending || !destination.trim() || !deleting && !source}>{t("Review changes")}</Button>
+      <GitActionButtons actions={[{ ...refReview, label: "Review changes" }]} />
     </form> : <p>{t("No Git remotes are configured.")}</p>)}
     {review && <Dialog title={t(review.title)} helpTopic="gitView" onClose={pending ? undefined : () => setReview(undefined)}
-      footer={<><Button disabled={pending} onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
-        <Button disabled={pending} onClick={() => void execute()}>{t(review.title)}</Button></>}>
+      footer={<><Button disabled={pending} data-initial-focus={destructiveReview || undefined}
+        onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
+        <Button disabled={pending} className={destructiveReview ? "negative" : undefined}
+          onClick={() => void execute()}>{t(review.title)}</Button></>}>
+      <div className="dialog-body git-tools-review">
       <p><code>{root}</code></p>
       {review.context.map((value, index) => <p key={index}><code>{value}</code></p>)}
       {review.title === "Pull by merge" || review.title === "Pull by rebase"
         ? <p>{t("Fetch the upstream and review the integration before changing the current branch.")}</p> : null}
+      </div>
     </Dialog>}
   </div>;
 }
