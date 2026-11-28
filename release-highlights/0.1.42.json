@@ -1,0 +1,8 @@
+{
+  "version": "0.1.42",
+  "highlights": [
+    "Create, switch, rename, and safely delete local branches in Git View. Start a local branch that tracks a remote branch.",
+    "Compare branches, tags, and commits to see unique commits, changed files, and their diffs.",
+    "Search the commit graph and inspect a file’s history and blame from the selected revision."
+  ]
+}
