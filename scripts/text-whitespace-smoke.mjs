@@ -13,7 +13,7 @@ try {
   });
   await page.addInitScript((original) => {
     const path = /Windows/.test(navigator.userAgent) ? "C:\\fixture" : "/fixture";
-    const files = { "sample.rs": original, "guide.md": "# Guide\n\na\tline  \n", "large.txt": "" };
+    const files = { "sample.rs": original, "guide.md": "# Guide\n\na\tline  \n", "large.txt": "", "indent.txt": "one\n\t\ttwo\n     three\nfour" };
     const pages = ["a\tpage one  \n", "a\tpage two  \n"];
     const entries = Object.entries(files).map(([name, text]) => ({
       name, directory: false, link: false, hidden: false, size: text.length, modified: null,
@@ -180,7 +180,72 @@ try {
   await openFile("sample.rs");
   await checkTabStop(8);
   await waitMarkers();
-  console.log("Verified shared tab stops, whitespace markers, unchanged text and edits, and persistence in source and paged documents.");
+  const mac = await page.evaluate(() => navigator.userAgent.includes("Macintosh"));
+  const modifier = mac ? "Meta" : "Control";
+  const textLines = () => content.locator(".cm-line").allTextContents();
+  const editorFocused = () => content.evaluate((element) => window.document.activeElement === element);
+  await closeFile();
+  await openFile("indent.txt", "F4");
+  await content.press("Home");
+  await content.press("Shift+Tab");
+  assert.equal(await editorFocused(), true);
+  assert.equal((await textLines())[0], "one");
+  if (!mac) {
+    await content.press("Control+m");
+    await content.press("Tab");
+    assert.equal(await editorFocused(), false);
+    assert.equal((await textLines())[0], "one");
+    await content.press("Control+m");
+  }
+  await content.press("Tab");
+  assert.equal((await textLines())[0], "\tone");
+  await content.press(`${modifier}+a`);
+  await content.press("Shift+Tab");
+  assert.deepEqual(await textLines(), ["one", "\ttwo", "three", "four"]);
+  assert.equal(await editorFocused(), true);
+  await content.press("ArrowLeft");
+  await content.press("Home");
+  await content.press("Tab");
+  await (await action("File", "Save")).press("Enter");
+  assert.equal(await page.evaluate(() => window.savedText), "\tone\n\ttwo\nthree\nfour");
+  await closeFile();
+  await openFile("indent.txt");
+  assert.deepEqual(await textLines(), ["\tone", "\ttwo", "three", "four"]);
+  await scroller.press("Tab");
+  assert.equal(await editorFocused(), false);
+  await closeFile();
+
+  for (const name of ["guide.md", "large.txt"]) {
+    await openFile(name, "F4");
+    await content.locator("xpath=self::*[@contenteditable='true']").waitFor();
+    const before = (await textLines())[0];
+    await content.press("Home");
+    await content.press("Tab");
+    assert.equal((await textLines())[0], "\t" + before);
+    await content.press("Shift+Tab");
+    assert.equal((await textLines())[0], before);
+    assert.equal(await editorFocused(), true);
+    await closeFile();
+  }
+
+  await page.evaluate(() => {
+    const key = "dirlume.preferences.v1";
+    const preferences = JSON.parse(localStorage.getItem(key));
+    localStorage.setItem(key, JSON.stringify({ ...preferences, activeShortcutScheme: "fixture-indent",
+      shortcutSchemes: [{ id: "fixture-indent", name: "Indentation keys",
+        bindings: { documentInsertTab: ["Shift+F8"], documentOutdent: [] } }] }));
+  });
+  await page.reload();
+  await openFile("indent.txt", "F4");
+  await content.press("Home");
+  await content.press("Shift+F8");
+  assert.equal((await textLines())[0], "\tone");
+  await content.press("Shift+Tab");
+  assert.equal(await editorFocused(), false);
+  await content.press("Tab");
+  assert.equal(await editorFocused(), false);
+  assert.equal((await textLines())[0], "\tone");
+  console.log("Verified tab stops, literal tabs, outdenting, keyboard focus, custom bindings, and saved text in regular, Markdown, and paged documents.");
 } finally {
   await browser.close();
 }

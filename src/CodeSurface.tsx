@@ -2,13 +2,15 @@ import { t } from "./i18n";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { cursorDocEnd, cursorDocStart, defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state";
 import { EditorView, gutter, GutterMarker, highlightActiveLine, highlightWhitespace, keymap, lineNumbers, type Command } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { NamedFile } from "./api";
 import { detectLanguage, languageChoices } from "./syntaxCatalog";
 import { lineFingerprint, type LineBookmarkJump, type BookmarkResult } from "./fileBookmarks";
-import { defaultTextTabWidth } from "./preferences";
+import { bindingMatches, defaultTextTabWidth, eventShortcut, type Bindings } from "./preferences";
+
+type IndentationShortcuts = Pick<Bindings, "documentInsertTab" | "documentOutdent">;
 
 const palette = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.comment, tags.docComment], class: "syntax-comment" },
@@ -32,6 +34,27 @@ export type SourceActions = {
 };
 const managedCommands: Command[] = [selectAll, cursorDocStart, cursorDocEnd];
 
+function outdentLines(view: EditorView) {
+  const { state } = view;
+  const { doc, selection, tabSize } = state;
+  const removals: { from: number; to: number }[] = [];
+  let previousLine = 0;
+  for (const range of selection.ranges) {
+    const first = doc.lineAt(range.from).number;
+    const last = doc.lineAt(range.empty ? range.to : range.to - 1).number;
+    for (let number = Math.max(first, previousLine + 1); number <= last; number++) {
+      const line = doc.line(number);
+      const leading = /^ *\t?/.exec(line.text)?.[0] ?? "";
+      const count = Math.min(leading.length, tabSize);
+      if (count) removals.push({ from: line.from, to: line.from + count });
+    }
+    previousLine = Math.max(previousLine, last);
+  }
+  if (!removals.length) return;
+  const changes = state.changes(removals);
+  view.dispatch({ changes, selection: selection.map(changes), scrollIntoView: true, userEvent: "delete.dedent" });
+}
+
 const lineBookmarkMarker = new class extends GutterMarker {
   elementClass = "cm-line-bookmarked";
 }();
@@ -51,7 +74,7 @@ function visibleBookmarkLine(view: EditorView) {
   return first;
 }
 
-export default function CodeSurface({ file, editing, locked, active, fontSize, readingWidth, value, onChange,
+export default function CodeSurface({ file, editing, locked, active, fontSize, readingWidth, value, onChange, indentationShortcuts,
   textTabWidth = defaultTextTabWidth, showTextWhitespace = false,
   ref, syntaxOverride = "auto", onSyntaxInfo, onSourceStatus, bookmarkLines, onBookmarkLine, bookmarkJump, onBookmarkResult }: {
   file: NamedFile;
@@ -64,6 +87,7 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
   showTextWhitespace?: boolean;
   value: string;
   onChange: (text: string) => void;
+  indentationShortcuts?: IndentationShortcuts;
   ref?: Ref<SourceActions>;
   syntaxOverride?: string;
   onSyntaxInfo?: (info: { detected: string | undefined; unavailable: boolean }) => void;
@@ -75,8 +99,8 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
 }) {
   const container = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
-  const latest = useRef({ value, onChange, onSourceStatus, onBookmarkLine, onBookmarkResult });
-  latest.current = { value, onChange, onSourceStatus, onBookmarkLine, onBookmarkResult };
+  const latest = useRef({ value, onChange, onSourceStatus, onBookmarkLine, onBookmarkResult, indentationShortcuts });
+  latest.current = { value, onChange, onSourceStatus, onBookmarkLine, onBookmarkResult, indentationShortcuts };
   const languageSlot = useMemo(() => new Compartment(), []);
   const editSlot = useMemo(() => new Compartment(), []);
   const labelSlot = useMemo(() => new Compartment(), []);
@@ -116,7 +140,17 @@ export default function CodeSurface({ file, editing, locked, active, fontSize, r
           palette, languageSlot.of([]), editSlot.of([]), labelSlot.of([]), bookmarkSlot.of([]), lineNumbers(),
           whitespaceSlot.of([]), EditorView.lineWrapping,
           ...(editing ? [history(), highlightActiveLine(), keymap.of(managed ? defaultKeymap.filter(({ run }) => !run || !managedCommands.includes(run)) :
-            [...defaultKeymap, ...historyKeymap])] : []),
+            [...defaultKeymap, ...historyKeymap]), Prec.highest(EditorView.domEventHandlers({ keydown(event, view) {
+              const bindings = latest.current.indentationShortcuts;
+              if (!bindings || view.state.readOnly || event.isComposing) return false;
+              const shortcut = eventShortcut(event);
+              if (bindingMatches(bindings.documentInsertTab, shortcut)) {
+                view.dispatch(view.state.update(view.state.replaceSelection("\t"), { scrollIntoView: true, userEvent: "input.type" }));
+              } else if (bindingMatches(bindings.documentOutdent, shortcut)) outdentLines(view);
+              else return false;
+              event.stopPropagation();
+              return true;
+            } }))] : []),
           EditorView.updateListener.of((update) => {
             if (editing && update.docChanged && update.transactions.some((transaction) =>
               transaction.docChanged && !transaction.annotation(externalEdit))) {
