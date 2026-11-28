@@ -15,6 +15,7 @@ try {
     const windows = /Windows/i.test(navigator.userAgent);
     const root = windows ? "C:\\repo ł" : "/repo ł";
     const sub = root + (windows ? "\\nested" : "/nested");
+    const linked = windows ? "C:\\linked repo ł" : "/linked repo ł";
     const file = { name: "note.txt", directory: false, link: false, hidden: false, size: 1, modified: null };
     const hash = (value) => value.repeat(40);
     const commit = (value, subject) => ({
@@ -23,6 +24,10 @@ try {
     window.gitEvents = [];
     let indexVersion = 0;
     let stashes = [];
+    let worktrees = [
+      { path: root, branch: "refs/heads/main", head: hash("a"), primary: true, locked: false, bare: false, prunable: false },
+      { path: linked, branch: "refs/heads/topic", head: hash("b"), primary: false, locked: false, bare: false, prunable: false },
+    ];
     const conflictState = (operation) => ({ session: { operation, head: hash("a"), sources: [hash("c")] }, conflicts: [
       { path: "conflict.txt", base: { mode: "100644", oid: hash("a") },
         ours: { mode: "100644", oid: hash("b") }, theirs: { mode: "100644", oid: hash("c") } },
@@ -43,7 +48,8 @@ try {
           case "git_repository":
             window.gitEvents.push(args.path);
             if (window.gitError) throw window.gitError;
-            return { root, name: "repo ł", headRef: window.gitDetached ? null : "refs/heads/main",
+            return { root: args.path === linked ? linked : root, name: args.path === linked ? "linked repo ł" : "repo ł",
+              headRef: window.gitDetached ? null : args.path === linked ? "refs/heads/topic" : "refs/heads/main",
               head: window.gitEmpty ? null : hash("a"),
               branches: window.gitEmpty || window.gitDetached ? [] : [
                 { reference: "refs/heads/main", name: "main", tip: hash("a"), remote: false },
@@ -138,6 +144,52 @@ try {
             assertRoot(args.root);
             window.gitLease = args.review;
             return null;
+          case "git_worktrees":
+            assertRoot(args.root);
+            return worktrees;
+          case "git_create_worktree":
+            assertRoot(args.root);
+            window.gitCreatedWorktree = args.review;
+            worktrees.push({ path: args.review.destination, branch: "refs/heads/" + args.review.branch,
+              head: args.review.expectedCommit, primary: false, locked: false, bare: false, prunable: false });
+            return null;
+          case "git_remove_worktree":
+            assertRoot(args.root);
+            if (window.gitWorktreeDirty) throw { kind: "failed", detail: "The worktree contains local changes." };
+            worktrees = worktrees.filter((tree) => tree.path !== args.review.path);
+            window.gitRemovedWorktree = args.review.path;
+            return null;
+          case "git_submodules":
+            assertRoot(args.root);
+            return [{ path: "modules/local fixture", status: window.gitModuleUpdated ? " " : "-", head: hash("b") }];
+          case "git_update_submodule":
+            assertRoot(args.root);
+            window.gitModuleUpdated = args.review.path;
+            return null;
+          case "git_lfs_state":
+            assertRoot(args.root);
+            return window.gitLfsInstalled ? { installed: true, version: "git-lfs/3.7.1", status: "LFS objects ready",
+              remotes: ["origin"] } : { installed: false, version: null, status: null, remotes: [] };
+          case "git_lfs_transfer":
+            assertRoot(args.root);
+            window.gitLfsTransfer = { action: args.action, remote: args.remote };
+            return null;
+          case "git_bisect_state":
+            assertRoot(args.root);
+            return window.gitBisect ?? null;
+          case "git_start_bisect":
+            assertRoot(args.root);
+            window.gitBisect = { start: "main", head: hash("c"), log: "git bisect start", concluded: false };
+            return null;
+          case "git_update_bisect":
+            assertRoot(args.root);
+            window.gitBisectAction = args.action;
+            window.gitBisect = args.action === "reset" ? null :
+              { ...window.gitBisect, concluded: true, log: "# first bad commit: " + hash("c") };
+            return null;
+          case "open_terminal":
+            window.gitTerminalDirectory = args.request.directory;
+            return false;
           case "git_history":
             if (args.tip === hash("b")) return new Promise((resolve) => {
               window.finishOldHistory = () => resolve({ commits: [commit("b", "Stale local topic")], nextOffset: null });
@@ -252,7 +304,7 @@ try {
       },
     };
     function assertRoot(path) {
-      if (path !== root) throw "notRepository";
+      if (path !== root && path !== linked) throw "notRepository";
     }
   });
   await page.goto("http://dirlume.test/");
@@ -406,6 +458,67 @@ try {
   await button(page.getByRole("dialog", { name: "Abort cherry-pick", exact: true }), "Abort cherry-pick").click();
   await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.gitFinishedOperation), { operation: "cherryPick", abort: true });
+  await button(history, "Repository tools").click();
+  const worktreePath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\created repo" : "/created repo");
+  const linkedPath = await page.evaluate(() => /Windows/i.test(navigator.userAgent) ? "C:\\linked repo ł" : "/linked repo ł");
+  await history.getByRole("textbox", { name: "Worktree path", exact: true }).fill(worktreePath);
+  await history.getByRole("textbox", { name: "Branch name", exact: true }).fill("created");
+  await button(history, "Create linked worktree").click();
+  const createTree = page.getByRole("dialog", { name: "Create linked worktree", exact: true });
+  await createTree.getByText(worktreePath, { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitCreatedWorktree), undefined);
+  await button(createTree, "Create linked worktree").click();
+  const createdTree = history.locator("li").filter({ hasText: worktreePath });
+  await button(createdTree, "Remove worktree").waitFor();
+  assert.equal(await page.evaluate(() => window.gitCreatedWorktree.branch), "created");
+  const removeTree = page.getByRole("dialog", { name: "Remove worktree", exact: true });
+  await page.evaluate(() => { window.gitWorktreeDirty = true; });
+  await button(createdTree, "Remove worktree").click();
+  await button(removeTree, "Remove worktree").click();
+  await history.getByRole("alert").getByText("The worktree contains local changes.").waitFor();
+  assert.equal(await page.evaluate(() => window.gitRemovedWorktree), undefined);
+  await page.evaluate(() => { window.gitWorktreeDirty = false; });
+  await button(createdTree, "Remove worktree").click();
+  await button(removeTree, "Remove worktree").click();
+  await createdTree.waitFor({ state: "hidden" });
+  await button(history.locator("li").filter({ hasText: linkedPath }), "Open worktree").click();
+  await branches.getByText("linked repo ł", { exact: true }).waitFor();
+  await button(history, "Repository tools").click();
+  await button(history, "Open terminal at worktree").click();
+  await page.waitForFunction((path) => window.gitTerminalDirectory === path, linkedPath);
+  await button(page.getByRole("region", { name: "Terminal", exact: true }), "Close terminal").click();
+  await button(history.locator("li").filter({ hasText: "Primary worktree" }), "Open worktree").click();
+  await branches.getByText("repo ł", { exact: true }).waitFor();
+  await button(history, "Repository tools").click();
+  await button(history, "Submodules").click();
+  await history.getByText("modules/local fixture", { exact: true }).waitFor();
+  await button(history, "Initialize submodule").click();
+  await button(page.getByRole("dialog", { name: "Initialize submodule", exact: true }), "Initialize submodule").click();
+  await button(history, "Update submodule").waitFor();
+  assert.equal(await page.evaluate(() => window.gitModuleUpdated), "modules/local fixture");
+  await button(history, "Git LFS").click();
+  await history.getByText("Git LFS is not installed.", { exact: true }).waitFor();
+  await page.evaluate(() => { window.gitLfsInstalled = true; });
+  await button(branches, "Refresh").click();
+  await history.getByLabel("Git LFS status", { exact: true }).filter({ hasText: "LFS objects ready" }).waitFor();
+  await button(history, "Fetch LFS objects").click();
+  await button(page.getByRole("dialog", { name: "Fetch LFS objects", exact: true }), "Fetch LFS objects").click();
+  await page.waitForFunction(() => window.gitLfsTransfer?.action === "fetch");
+  assert.equal(await page.evaluate(() => window.gitLfsTransfer.remote), "origin");
+  await button(history, "Bisect").click();
+  await history.getByRole("combobox", { name: "Known good commit", exact: true }).fill("d".repeat(40));
+  await button(history, "Start bisect").click();
+  await button(page.getByRole("dialog", { name: "Start bisect", exact: true }), "Start bisect").click();
+  await history.getByText("Bisect in progress", { exact: true }).waitFor();
+  await button(branches, "Close Git View").click();
+  await git.click();
+  await button(history, "Repository tools").click();
+  await button(history, "Mark bad").click();
+  await button(page.getByRole("dialog", { name: "Mark bad", exact: true }), "Mark bad").click();
+  await history.getByLabel("Bisect log", { exact: true }).filter({ hasText: "# first bad commit:" }).waitFor();
+  await button(history, "Finish bisect").click();
+  await button(page.getByRole("dialog", { name: "Finish bisect", exact: true }), "Finish bisect").click();
+  await page.waitForFunction(() => window.gitBisectAction === "reset");
   await button(branches, "Changes").click();
   const changes = page.getByRole("region", { name: "Changes", exact: true });
   const preview = page.getByRole("region", { name: "Change preview", exact: true });

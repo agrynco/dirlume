@@ -63,11 +63,12 @@ function terminalAppearance(): ITerminalOptions {
   };
 }
 
-export default function TerminalPanel({ session, directory, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
+export default function TerminalPanel({ session, directory, directoryRequest, visible, theme, scheme, fontSize, pendingCommands, watchEnvironment,
   history, copyShortcut, pasteShortcut, pasteOnRightClick, onClipboardError, onTerminalError, onDisconnected,
   onCommandsQueued, rowHeight, onCommandSubmitted, onDirectoryChange, onCompletionContext, focusRequested, focusHint, onFileOpens, onRestart, onRunFinished, onClose }: {
   session: TerminalSession;
   directory: string | null;
+  directoryRequest?: number;
   visible: boolean;
   focusHint?: React.ReactNode;
   theme: Theme;
@@ -792,7 +793,7 @@ export default function TerminalPanel({ session, directory, visible, theme, sche
     }
   }, [visible, session.id, focusRequested]);
 
-  useEffect(() => { moveTo.current?.(directory); }, [directory]);
+  useEffect(() => { moveTo.current?.(directory); }, [directory, directoryRequest]);
 
   useEffect(() => {
     if (!enqueue.current || !pendingCommands.length) return;

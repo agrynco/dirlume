@@ -514,6 +514,27 @@ export interface GitPushReview {
   url: string;
   urlDigest: number[];
 }
+export interface GitWorktree {
+  path: string;
+  head: string | null;
+  branch: string | null;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  primary: boolean;
+}
+export interface GitWorktreeCreate {
+  destination: string;
+  revision: string;
+  expectedCommit: string;
+  branch: string | null;
+  detach: boolean;
+}
+export interface GitSubmodule { path: string; status: string; head: string }
+export interface GitLfsState { installed: boolean; version: string | null; status: string | null; remotes: string[] }
+export type GitLfsAction = "fetch" | "pull" | "push";
+export interface GitBisectState { start: string; head: string; log: string; concluded: boolean }
+export type GitBisectAction = "good" | "bad" | "skip" | "reset";
 
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
@@ -821,6 +842,19 @@ export const api = {
     invoke<void>("git_create_stash", { root, expected, message, untracked }),
   gitUpdateStash: (root: string, expected: GitIndexSnapshot, entry: GitStashEntry, action: GitStashAction, restoreIndex: boolean) =>
     invoke<GitStashResult>("git_update_stash", { root, expected, entry, action, restoreIndex }),
+  gitWorktrees: (root: string) => invoke<GitWorktree[]>("git_worktrees", { root }),
+  gitCreateWorktree: (root: string, review: GitWorktreeCreate) => invoke<void>("git_create_worktree", { root, review }),
+  gitRemoveWorktree: (root: string, review: GitWorktree) => invoke<void>("git_remove_worktree", { root, review }),
+  gitSubmodules: (root: string) => invoke<GitSubmodule[]>("git_submodules", { root }),
+  gitUpdateSubmodule: (root: string, review: GitSubmodule) => invoke<void>("git_update_submodule", { root, review }),
+  gitLfsState: (root: string) => invoke<GitLfsState>("git_lfs_state", { root }),
+  gitLfsTransfer: (root: string, remote: string, action: GitLfsAction) =>
+    invoke<void>("git_lfs_transfer", { root, remote, action }),
+  gitBisectState: (root: string) => invoke<GitBisectState | null>("git_bisect_state", { root }),
+  gitStartBisect: (root: string, expectedRef: string | null, expectedHead: string, good: string, bad: string) =>
+    invoke<void>("git_start_bisect", { root, expectedRef, expectedHead, good, bad }),
+  gitUpdateBisect: (root: string, review: GitBisectState, action: GitBisectAction) =>
+    invoke<void>("git_update_bisect", { root, review, action }),
   gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),

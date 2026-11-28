@@ -14,6 +14,7 @@ pub(crate) mod merge;
 pub(crate) mod rebase;
 pub(crate) mod remote_push;
 pub(crate) mod stash;
+pub(crate) mod workspace;
 pub(crate) mod writes;
 
 #[derive(Debug, Serialize)]
