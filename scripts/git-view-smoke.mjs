@@ -22,6 +22,10 @@ try {
     });
     window.gitEvents = [];
     let indexVersion = 0;
+    const conflictState = (operation) => ({ session: { operation, head: hash("a"), sources: [hash("c")] }, conflicts: [
+      { path: "conflict.txt", base: { mode: "100644", oid: hash("a") },
+        ours: { mode: "100644", oid: hash("b") }, theirs: { mode: "100644", oid: hash("c") } },
+    ] });
     let rows = [
       { group: "staged", status: "M", path: "note.txt", previousPath: null },
       { group: "unstaged", status: "M", path: "note.txt", previousPath: null },
@@ -79,10 +83,7 @@ try {
           case "git_start_merge":
             assertRoot(args.root);
             if (args.review.sourceRef !== "refs/remotes/origin/topic" || args.mode !== "mergeCommit") throw "wrong reviewed branch";
-            window.gitMerge = { session: { head: hash("a"), sources: [hash("c")] }, conflicts: [
-              { path: "conflict.txt", base: { mode: "100644", oid: hash("a") },
-                ours: { mode: "100644", oid: hash("b") }, theirs: { mode: "100644", oid: hash("c") } },
-            ] };
+            window.gitMerge = conflictState("merge");
             return null;
           case "git_inspect_merge":
             assertRoot(args.root);
@@ -95,7 +96,46 @@ try {
             return null;
           case "git_finish_merge":
             assertRoot(args.root);
+            window.gitFinishedOperation = { operation: args.session.operation, abort: args.abort };
             window.gitMerge = null;
+            return null;
+          case "git_history_plan":
+            assertRoot(args.root);
+            return { review: { action: args.action, head: hash("a"), headRef: "refs/heads/main",
+              target: args.target, parent: args.parent, index: {}, trackedChanges: null },
+              parents: [], paths: [{ status: "M", path: "fixture-reset.txt", previousPath: null }], localChanges: rows };
+          case "git_edit_history":
+            assertRoot(args.root);
+            window.gitEdited = args.review;
+            if (args.review.action === "cherryPick") window.gitMerge = conflictState("cherryPick");
+            return null;
+          case "git_rebase_plan":
+            assertRoot(args.root);
+            return { review: { head: hash("a"), headRef: "refs/heads/main", base: hash("b"),
+              baseRef: args.target, index: {} }, merges: [],
+              commits: [commit("c", "First commit to replay"), commit("d", "Second commit to replay")] };
+          case "git_start_rebase":
+            assertRoot(args.root);
+            window.gitRebaseRequest = args;
+            return null;
+          case "git_reflog":
+            assertRoot(args.root);
+            return { entries: [{ hash: hash("d"), selector: "HEAD@{2026-11-21T01:00:00Z}",
+              action: "reset: moving to main", subject: "Recovered commit" }], nextOffset: null };
+          case "git_recover_commit":
+            assertRoot(args.root);
+            window.gitRecovered = args;
+            return null;
+          case "git_push_remotes":
+            assertRoot(args.root);
+            return ["origin", "review"];
+          case "git_push_lease_plan":
+            assertRoot(args.root);
+            return { head: hash("a"), headRef: "refs/heads/main", remote: args.remote, destination: "refs/heads/" + args.branch,
+              expected: hash("b"), url: "https://example.invalid/review/dirlume", urlDigest: [] };
+          case "git_push_with_lease":
+            assertRoot(args.root);
+            window.gitLease = args.review;
             return null;
           case "git_history":
             if (args.tip === hash("b")) return new Promise((resolve) => {
@@ -249,6 +289,66 @@ try {
   await button(history, "Continue merge").click();
   await button(page.getByRole("dialog", { name: "Continue merge", exact: true }), "Continue merge").click();
   await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
+  await button(history, "History actions").click();
+  const actionType = history.getByRole("combobox", { name: "History action", exact: true });
+  await actionType.selectOption("hardReset");
+  await history.getByRole("textbox", { name: "Target commit", exact: true }).fill("d".repeat(40));
+  await button(history, "Review changes").click();
+  await history.getByText("fixture-reset.txt", { exact: true }).waitFor();
+  await button(history, "Hard reset").click();
+  const reset = page.getByRole("dialog", { name: "Hard reset", exact: true });
+  await reset.getByText("Move HEAD, replace the index, and discard changes to tracked working files.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitEdited), undefined);
+  await button(reset, "Hard reset").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitEdited.action), "hardReset");
+  await actionType.selectOption("rebase");
+  await history.getByRole("combobox", { name: "Rebase base", exact: true }).fill("refs/heads/topic");
+  await button(history, "Review changes").click();
+  await history.getByText("First commit to replay").waitFor();
+  await button(history, "Move earlier").last().click();
+  await history.getByRole("combobox", { name: "Rebase action", exact: true }).first().selectOption("reword");
+  await history.getByRole("textbox", { name: "Replacement commit message", exact: true }).fill("Reworded second");
+  await history.getByRole("combobox", { name: "Rebase action", exact: true }).last().selectOption("squash");
+  await button(history, "Rebase branch").click();
+  const rebase = page.getByRole("dialog", { name: "Rebase branch", exact: true });
+  assert.match(await rebase.locator("ol li").first().innerText(), /Reword.*Reworded second/);
+  await button(rebase, "Rebase branch").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.deepEqual((await page.evaluate(() => window.gitRebaseRequest.steps)).map((step) => [step.hash[0], step.action]),
+    [["d", "reword"], ["c", "squash"]]);
+  await actionType.selectOption("reflog");
+  await button(history, "Read reflog").click();
+  await history.getByText("Recovered commit", { exact: false }).waitFor();
+  await button(history, "Recover into new branch").click();
+  const recover = page.getByRole("dialog", { name: "Recover into new branch", exact: true });
+  await recover.getByRole("textbox", { name: "Branch name", exact: true }).fill("rescued");
+  await button(recover, "Recover into new branch").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitRecovered.name), "rescued");
+  await actionType.selectOption("push");
+  await history.getByRole("combobox", { name: "Remote", exact: true }).selectOption("review");
+  await history.getByRole("textbox", { name: "Destination branch", exact: true }).fill("topic");
+  await button(history, "Review changes").click();
+  await button(history, "Force-push with lease").click();
+  const lease = page.getByRole("dialog", { name: "Force-push with lease", exact: true });
+  await lease.getByText("refs/heads/topic", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitLease), undefined);
+  await button(lease, "Force-push with lease").click();
+  await history.getByText("Git operation completed.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitLease.expected), "b".repeat(40));
+  await actionType.selectOption("cherryPick");
+  await button(history, "Review changes").click();
+  await button(history, "Cherry-pick commit").click();
+  await button(page.getByRole("dialog", { name: "Cherry-pick commit", exact: true }), "Cherry-pick commit").click();
+  await button(history, "Cherry-pick in progress").waitFor();
+  await button(branches, "Close Git View").click();
+  await git.click();
+  await history.getByText("ours fixture", { exact: true }).waitFor();
+  await button(history, "Abort cherry-pick").click();
+  await button(page.getByRole("dialog", { name: "Abort cherry-pick", exact: true }), "Abort cherry-pick").click();
+  await history.getByText("Select a source branch to merge.", { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitFinishedOperation), { operation: "cherryPick", abort: true });
   await button(branches, "Changes").click();
   const changes = page.getByRole("region", { name: "Changes", exact: true });
   const preview = page.getByRole("region", { name: "Change preview", exact: true });
