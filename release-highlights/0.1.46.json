@@ -1,7 +1,8 @@
 {
   "version": "0.1.46",
   "highlights": [
-    "An empty User Menu puts keyboard focus on New command. The launcher uses standard dialog spacing and shows the menu file path during management and review.",
+    "Press F2 in a local pane to open User Menu. Create or edit a command in a compact dialog, then save it directly to the selected menu. Rename remains under Files and has its own configurable shortcut.",
+    "Command history is wider and uses shell syntax colors. Multiline commands retain their line breaks and indentation when you select them to edit.",
     "Press Tab to insert a tab character or Shift+Tab to outdent the current or selected lines in Text Editor. Both shortcuts are configurable."
   ]
 }
