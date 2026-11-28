@@ -387,11 +387,13 @@ The installer and server filenames include both numbers, for example `Dirlume-0.
 
 Start work branches from `prerelease`. For implementation tasks, Codex runs the relevant local checks, opens a pull request into `prerelease`, and squash-merges it when ready. Pull requests and pushes to that branch do not start CI.
 
-When the batch is ready, open one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open.
+When the batch is ready, open one pull request from `prerelease` to `main`. Both CI workflows run on pull requests targeting `main` and recheck the batch if `prerelease` receives new commits while the pull request is open. Pull request checks build, package, and test all four targets without uploading the installable packages as Actions artifacts.
 
 Invoke [$dirlume-backlog-runner](.agents/skills/dirlume-backlog-runner/SKILL.md) in Codex to process the GitHub issue backlog in the current checkout. It works through the issues in order, merges each completed task into `prerelease`, then opens and merges the promotion pull request after its required checks pass.
 
 After the required checks pass, merge the release pull request with **Create a merge commit** to preserve the shared history for the next batch. GitHub Actions automatically builds the signed update bundles and server packages for Windows, Linux, and macOS from the merged commit, verifies the packages, and publishes the matching `vX.Y.Z` tag and [GitHub Release](https://github.com/agrynco/dirlume/releases). The full test suite runs during pull request CI on all four targets. The release build picks the next patch version, promotes a newer published prerelease to stable, or uses a higher source version.
+
+The intermediate package artifacts used by the release job expire after one day. Published downloads are available from the GitHub Release. If those artifacts have expired when you retry a failed publication, rerun the full workflow to rebuild the packages.
 
 Prepare one to eight short English highlights in `release-highlights/X.Y.Z.json` for the next stable version before opening its promotion pull request. Set `version` to that product version and list the sentences in `highlights`. The same summary goes into the desktop packages, the updater manifest, and the GitHub Release.
 

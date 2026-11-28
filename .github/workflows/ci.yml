@@ -326,11 +326,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'Windows' && needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ runner.os == 'Windows' && needs.version.outputs.publish == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         run: node scripts/package.mjs collect "${{ matrix.platform }}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload packages for publication
+        if: needs.version.outputs.publish == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dirlume-${{ needs.version.outputs.product-version }}-build.${{ needs.version.outputs.build-number }}-${{ matrix.platform }}
           path: release/*
           if-no-files-found: error
+          retention-days: 1
           overwrite: true
 
   release:
