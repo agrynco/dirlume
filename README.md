@@ -363,6 +363,10 @@ Local text reads that encounter a problem include `fileRead` with the caller sur
 
 A failed update check includes `updateCheck` with the initiating trigger, build, platform, architecture, package target, stage, and reason. `httpStatus` is the code of the response available at the failure. A rate limit can be identified from HTTP 429 or a 403 with rate-limit headers. The update check records none of the response headers or body. Download and installation errors still use `install_update`.
 
+## Contributor workflow
+
+The [Dirlume contributor skill](.agents/skills/dirlume-contributor/SKILL.md) covers issue readiness, project board automation, task pull requests, and release handoff. Open the checkout in Codex and invoke `$dirlume-contributor`. In Claude Code, copy the `.agents/skills/dirlume-contributor` folder into `.claude/skills/` in your checkout or `~/.claude/skills/` for personal use, then invoke `/dirlume-contributor` from the checkout.
+
 ## CI and releases
 
 The [DirLume project board](https://github.com/users/agrynco/projects/12/views/1) uses issue labels, issue branches, and task pull requests to keep its columns current. The `ready for dev` label moves a queued issue to **Ready**. A published `codex/issue-N` branch or draft task pull request marks it **In progress**. A task pull request ready for review marks it **In review**. Merging that pull request into `prerelease` moves the issue to **prerelease**, and closing it moves it to **Done**. Link task pull requests with `Refs #N`.
