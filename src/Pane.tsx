@@ -13,7 +13,7 @@ import { entryLabel, folderMeasurement, formatDate, formatSize, paneCursorIndex,
 import { ElevationButton, ProcessBrowser } from "./ProcessTools";
 import { fileAppearance, type FileTypeIndex } from "./appearance";
 import { fileIconKey, useWindowsIcons } from "./useWindowsIcons";
-import { showShortcut, type PanelLayout } from "./preferences";
+import { bindingMatches, eventShortcut, showShortcut, type PanelLayout } from "./preferences";
 import { useTimestamps } from "./useTimestamps";
 import { viewFontStyle } from "./viewFonts";
 import { columnGroupTrack, fieldClass, FileColumns, panelColumnTracks, readColumnLayout, saveColumnLayout, type ColumnSamples } from "./FileColumns";
@@ -106,6 +106,7 @@ interface PaneProps {
   processView: { path?: string } | null;
   onProcesses: (visible: boolean) => void;
   processContextMenuShortcut: readonly string[];
+  fileContextMenuShortcut: readonly string[];
   onShowExecutable: (path: string) => Promise<void>;
   onProcessFeedback: (text: string, error?: boolean) => void;
   onContext: (x: number, y: number, entry?: Entry, preserveMarks?: boolean) => void;
@@ -155,7 +156,7 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
   rightClickSelection, pane, entries: availableEntries, fileTypes, fileView, onFileView, onTreeBranch, folderSizes, onFolderSizes, locations, rename, activate, onRow,
   onRightClickMark, onQuickMatch, onOpen, fileOpenFeedback, onPath, onLocalLocation,
   onHistory, onParent, onRefresh, onFilter, onSort, sourceMenu, fontSize, onCloseResults, onRevealResult,
-  onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, onShowExecutable, onProcessFeedback,
+  onStartDrag, dropTarget, processView, onProcesses, processContextMenuShortcut, fileContextMenuShortcut, onShowExecutable, onProcessFeedback,
   onContext, onCancelFolderOperation, cancelFolderShortcut,
   onPathAncestor, onOpenConnections, onAddConnection, onReconnectGoogleDrive, onCopyPath, onDismissError, onRetryWithSudo, onAnalyze, spaceDisabled }: PaneProps) {
   const section = useRef<HTMLElement>(null);
@@ -601,9 +602,20 @@ export function Pane({ side, active, covered, preserveScroll, layout, modeId, mo
       <div id={`${side}-files`} ref={list} className={virtual ? "file-list virtual-file-list" : "file-list"} data-paged={paged || undefined}
         role={tree ? "tree" : "listbox"} data-help-return data-file-view={fileView} aria-label={t(side === "left" ? "left files" : "right files")}
         {...rightClick.events}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || event.key !== "ContextMenu" &&
+              !bindingMatches(fileContextMenuShortcut, eventShortcut(event))) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.repeat) return;
+          const entry = entries[selected];
+          const target = event.currentTarget.querySelector<HTMLElement>(".file-row[data-current=true]") ?? event.currentTarget;
+          const bounds = target.getBoundingClientRect();
+          onContext(bounds.left + 8, bounds.bottom, entry?.name === ".." ? undefined : entry);
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY);
+          if (event.button >= 0 && !rightClick.suppressContextMenu(event)) onContext(event.clientX, event.clientY);
         }}
         onWheel={(event) => {
           if (!paged || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||

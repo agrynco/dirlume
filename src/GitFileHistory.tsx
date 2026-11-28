@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowLeft, FileClock, FileDiff, GitCompareArrows, Search } from "lucide-react";
 import { api, type GitCommit, type GitFileCommit, type GitRepository } from "./api";
 import { Button } from "./Button";
@@ -6,12 +6,13 @@ import { Dialog } from "./Dialog";
 import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { GitFileVersions, type GitFileSide } from "./GitFileVersions";
 import { RevisionInput } from "./GitRevisionComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { t } from "./i18n";
 import { opposite, type Side } from "./panes";
 
 type HistoryPage = { commits: GitFileCommit[]; nextOffset: number | null };
 
-export function GitFileHistory({ repository, tip, side, initial, refresh, historyHeader, previewControls, commitActions, onBlame }: {
+export function GitFileHistory({ repository, tip, side, initial, refresh, historyHeader, previewControls, commitActions, onBlame, compareShortcuts }: {
   repository: GitRepository;
   tip: string;
   side: Side;
@@ -21,6 +22,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
   previewControls: ReactNode;
   commitActions: (commit: GitCommit) => GitAction[];
   onBlame: (path: string, revision: string) => void;
+  compareShortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const [path, setPath] = useState(initial?.path ?? "");
@@ -32,6 +34,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
   const [comparison, setComparison] = useState<{ hash: string; revision: string }>();
   const [failedOffset, setFailedOffset] = useState<number>();
   const list = useRef<HTMLDivElement>(null);
+  const focusInitialSelection = useRef(!!initial);
   const { root } = repository;
   const previousSource = useRef({ refresh, tip });
   useEffect(() => {
@@ -55,6 +58,11 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
     }, () => { if (active) setFailedOffset(request.offset); }).finally(() => { if (active) setRequest(undefined); });
     return () => { active = false; };
   }, [root, tip, opened, request]);
+  useLayoutEffect(() => {
+    if (!selected || !focusInitialSelection.current) return;
+    focusInitialSelection.current = false;
+    list.current?.querySelector<HTMLElement>("[role=option][aria-selected=true]")?.focus({ preventScroll: true });
+  }, [selected]);
   function open() {
     if (!path.trim()) return;
     setOpened({ path });
@@ -101,7 +109,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
       </header>
       {!!revisionActions.length && <div className="git-branch-actions"><GitActionButtons actions={revisionActions} /></div>}
       {row && before && after ? <GitFileVersions key={JSON.stringify([row.hash, before.revision, refresh])} root={root}
-        left={before} right={after} showRevision /> : <p className="pane-empty">{t("Select a file revision to preview its changes.")}</p>}
+        left={before} right={after} shortcuts={compareShortcuts} showRevision /> : <p className="pane-empty">{t("Select a file revision to preview its changes.")}</p>}
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")}
       tabIndex={-1} data-help-topic="gitView" data-pane-side={opposite(side)} {...menu(pathActions)}>

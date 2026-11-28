@@ -13,7 +13,7 @@ import { commandHistoryGroups, historyLimit, readCommandHistory, saveCommandHist
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
-  FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, History, Moon, Pencil, Plug, Redo2, RefreshCw,
+  FileClock, FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, GitCompareArrows, History, Moon, Pencil, Plug, Redo2, RefreshCw,
   ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
 import { Channel, isTauri } from "@tauri-apps/api/core";
@@ -24,6 +24,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, connectFtpLocation, describeError, folderLabel, isFileServer, isLockError, isPermissionError, kswitcherPath, placePath, smbHost, watchDirectory, writableTextPlace, windowsClient, type ArchivePlace, type Entry, type FtpPlace, type KSwitcherPlace, type Listing, type NamedFile, type Operation, type Place, type QuickLocation, type RemotePlace, type SizeResult, type SshPlace } from "./api";
 import { googleDriveSignInRequired, smbLocation, uncParts, type AdministratorWorkspace, type ConnectionSource, type FileLocation, type GoogleDrivePlace, type SavedConnection, type SshHostVerification } from "./api";
 import { isLanGroupPlace, isWritableServerPlace, supportsFileTree, type TreePlace, type WritableServerPlace } from "./api";
+import type { GitFileContext, GitFileLaunch } from "./api";
 import { canAnalyze, scanSpace, spaceRelativePath, type SpaceItemCommand, type SpaceLocalItem, type SpacePlace } from "./spaceScan";
 import { useSudoFolderScan } from "./useSudoFolderScan";
 import type { SpaceAnalyzerHandle, SpaceNavigation } from "./SpaceAnalyzer";
@@ -329,7 +330,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const [folderSizesEnabled, setFolderSizesEnabled] = useState({ left: false, right: false });
   const folderScanSudo = useSudoFolderScan();
   const treeBrowseSudo = useSudoFolderScan("browse");
-  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string; terminal?: { path: string; request: number } } | null>(null);
+  const [gitView, setGitView] = useState<{ side: Side; source: Side; path: string; file?: GitFileLaunch; terminal?: { path: string; request: number } } | null>(null);
   const [gitRefresh, setGitRefresh] = useState(0);
   const [swappedPanes, setSwappedPanes] = useState(false);
   const [environmentPanels, setEnvironmentPanels] = useState<Record<Side, EnvironmentMode | null>>({ left: null, right: null });
@@ -360,7 +361,19 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   const followSystem = preferences.theme === "system" && preferences.activeScheme === null;
   const [modal, setModal] = useState<Modal | null>(null);
   const [localAppearancePick, setLocalAppearancePick] = useState<((pick: AppearancePick | null) => void) | null>(null);
-  const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry } | null>(null);
+  const [fileMenu, setFileMenu] = useState<{ side: Side; x: number; y: number; entry?: Entry; git?: GitFileContext } | null>(null);
+  const fileMenuRequest = useRef(0);
+  const fileMenuWorkspace = useRef({ active, panes, modal, gitView });
+  fileMenuWorkspace.current = { active, panes, modal, gitView };
+  useEffect(() => {
+    const invalidate = () => { fileMenuRequest.current++; };
+    window.addEventListener("pointerdown", invalidate, true);
+    window.addEventListener("blur", invalidate);
+    return () => {
+      window.removeEventListener("pointerdown", invalidate, true);
+      window.removeEventListener("blur", invalidate);
+    };
+  }, []);
   const [updateNotice, setUpdateNotice] = useState<Extract<Modal, { kind: "update" | "upToDate" }> | null>(null);
   const [installedRelease, setInstalledRelease] = useState<InstalledRelease | null | undefined>(undefined);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
@@ -1723,6 +1736,15 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     requestAnimationFrame(() => focus(source));
   }
 
+  function openGitView(side: Side, path: string, file?: GitFileLaunch) {
+    for (const side of ["left", "right"] as const) {
+      if (pendingListings.current[side] && !panes[side].loading) invalidateListing(side);
+    }
+    setQuickViewSource(null);
+    setActive(side);
+    setGitView({ side, source: side, path, file });
+  }
+
   function showEnvironment(side: Side, mode: EnvironmentMode | null) {
     if (mode && !environmentPanels[side] && pendingListings.current[side] && !cancelLoading(side)) {
       invalidateListing(side);
@@ -2609,6 +2631,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
   }
 
   function contextActions(side: Side, x: number, y: number, entry?: Entry, preserveMarks = false) {
+    const request = ++fileMenuRequest.current;
     setActive(side);
     setFileMenu(null);
     if (entry && !panes[side].marked.includes(entry.name)) {
@@ -2620,12 +2643,27 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     const state = panes[side];
     const item = entry ? paneItem(state, entry) : null;
     const place = entry ? item?.place : state.search ? null : state.place;
-    if (isTauri() && windowsClient && place?.kind === "local") {
-      void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
-        setStatus({ text: describeError(failure), error: true });
-        setFileMenu({ side, x, y, entry });
-      });
-    } else setFileMenu({ side, x, y, entry });
+    const menu = { side, x, y, entry };
+    function stillCurrent() {
+      const current = fileMenuWorkspace.current;
+      return fileMenuRequest.current === request && current.active === side && !current.modal && !current.gitView &&
+        current.panes[side].place === state.place && current.panes[side].search === state.search;
+    }
+    function show(git?: GitFileContext) {
+      if (git && (git.head || git.hasDiff)) setFileMenu({ ...menu, git });
+      else if (isTauri() && windowsClient && place?.kind === "local") {
+        void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
+          if (!stillCurrent()) return;
+          setStatus({ text: describeError(failure), error: true });
+          setFileMenu(menu);
+        });
+      } else setFileMenu(menu);
+    }
+    const multiFile = !!entry && state.marked.length > 1 && (preserveMarks || state.marked.includes(entry.name));
+    if (isTauri() && !multiFile && item && !item.entry.directory && !item.entry.link && item.place.kind === "local" && !smbHost(item.place)) {
+      void api.gitFileContext(item.place.path, item.entry.name).then(
+        (git) => { if (stillCurrent()) show(git); }, () => { if (stillCurrent()) show(); });
+    } else show();
   }
 
   function finishDrag(event: PointerEvent<HTMLDivElement>) {
@@ -3186,13 +3224,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (command === "gitView") {
       if (!canToggleGitView) return;
       if (gitView) closeGitView();
-      else if (local) {
-        for (const side of ["left", "right"] as const) {
-          if (pendingListings.current[side] && !panes[side].loading) invalidateListing(side);
-        }
-        setQuickViewSource(null);
-        setGitView({ side: active, source: active, path: local.path });
-      }
+      else if (local) openGitView(active, local.path);
       return;
     }
     if (gitView) {
@@ -3914,6 +3946,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             onStartDrag={(entry, event) => startDrag(side, entry, event)} dropTarget={dropTarget === side}
             processView={processPanels[side]} onProcesses={(visible) => showProcesses(side, visible)}
             processContextMenuShortcut={shortcuts.processContextMenu}
+            fileContextMenuShortcut={shortcuts.fileContextMenu}
             onShowExecutable={(path) => revealProcessExecutable(side, path)}
             onProcessFeedback={(text, error) => setStatus({ text, error })}
             onContext={(x, y, entry, preserveMarks) => contextActions(side, x, y, entry, preserveMarks)}
@@ -3958,9 +3991,10 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         {gitView && <Suspense fallback={<section className={"pane git-pane git-pane-" + gitView.side}>
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
-          <GitView key={gitView.path} side={gitView.side} path={gitView.path} refresh={gitRefresh} menuShortcut={shortcuts.gitContextMenu}
+          <GitView key={gitView.path} side={gitView.side} path={gitView.path} file={gitView.file} refresh={gitRefresh} menuShortcut={shortcuts.gitContextMenu}
+            compareShortcuts={{ previousShortcut: shortcuts.previousChange, nextShortcut: shortcuts.nextChange, swapShortcut: shortcuts.swap }}
             onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
-            onOpenWorktree={(path) => setGitView((current) => current && { ...current, path })}
+            onOpenWorktree={(path) => setGitView((current) => current && { ...current, path, file: undefined })}
             onTerminal={openGitTerminal}
             onRefresh={() => setGitRefresh((revision) => revision + 1)} onClose={closeGitView} />
         </Suspense>}
@@ -4338,7 +4372,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       {modal?.kind === "commandHistory" && <CommandHistory commands={historyItems} onClose={() => setModal(null)}
         onChoose={(line) => { historyIndex.current = -1; setCommandLine(line); setModal(null); showCommandLine(); }} />}
       {fileMenu && !modal && (() => {
-        const { side, x, y, entry } = fileMenu;
+        const { side, x, y, entry, git } = fileMenu;
         const state = panes[side];
         const item = entry ? paneItem(state, entry) : null;
         const driveEditor = driveEditorLink(item?.entry);
@@ -4346,7 +4380,32 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         const kswitcherItem = item?.place.kind === "kswitcher" ? item.place : undefined;
         const target = panes[opposite(side)];
         const toCollection = collectionPanes[opposite(side)] !== null;
-        return <FileContextMenu x={x} y={y} onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
+        function openGitFile(action: GitFileLaunch["action"]) {
+          if (!git) return;
+          const file: GitFileLaunch | undefined = action === "diff" ? { action, path: git.path } :
+            git.head ? { action, path: git.path, head: git.head } : undefined;
+          if (file) {
+            setFileMenu(null);
+            openGitView(side, git.root, file);
+          }
+        }
+        return <FileContextMenu x={x} y={y} className={git ? "file-menu-with-git" : undefined}
+          onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
+          {git && <>
+            <div role="group" aria-label="Git" className="file-git-actions">
+              <div className="file-git-heading" aria-hidden="true">Git</div>
+              {git.hasHistory && <Button role="menuitem" onClick={() => openGitFile("history")}><FileClock aria-hidden="true" />{t("Show history")}</Button>}
+              {git.hasBlame && <Button role="menuitem" onClick={() => openGitFile("blame")}><Search aria-hidden="true" />{t("Show blame")}</Button>}
+              {git.head && <Button role="menuitem" onClick={() => openGitFile("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with revision…")}</Button>}
+              {git.hasDiff && <Button role="menuitem" onClick={() => openGitFile("diff")}><FileDiff aria-hidden="true" />{t("Show diff")}</Button>}
+            </div>
+            <div role="separator" className="main-menu-separator" />
+            {windowsClient && item?.place.kind === "local" && <Button role="menuitem" onClick={() => {
+              if (item.place.kind !== "local") return;
+              setFileMenu(null);
+              void api.windowsItemMenu(item.place.path, item.entry.name).catch((error) => setStatus({ text: describeError(error), error: true }));
+            }}>{t("Windows context menu…")}</Button>}
+          </>}
           {state.place?.kind === "connections" && (() => {
             const { source } = state.place;
             return <>
