@@ -32,7 +32,9 @@ The session file operation history records Copy and Move results. Undo and Redo 
 
 F6 starts with the other pane's location and focuses Move when a default destination is available. Enter starts the move. Editing the field can switch the destination between a local path and a supported connected source. A single new name renames the selected item in its current folder. Dialog labels and text buttons have underlined access keys. Alt and the underlined letter focus the corresponding control.
 
-Google Drive My Drive supports List and Tree navigation, creation of folders and text files, text editing, rename, Trash, and permanent deletion. File and folder transfers use the same Copy and Move dialogs between Drive and the local filesystem. Drive grants and item permissions determine which operations can write.
+Google Drive My Drive supports List and Tree navigation, creation of folders and text files, text editing, rename, Trash, and permanent deletion. The same Copy and Move dialogs transfer files and folders between Drive and local storage, SMB, FTP/FTPS, SFTP, Dirlume Server, both LAN sources, and writable archives. Each connection and item supplies the permissions for the operation.
+
+Folder shortcuts use one numbered picker for local folders, SMB, FTP/FTPS, SFTP, Dirlume Server, KSwitcher LAN, Dirlume LAN, archives, My Drive, and Collections. List and Tree use the same source capabilities for the key bar and file commands. Collections can open an original in its source or copy a virtual folder hierarchy to a writable pane destination. Moving collection entries within Collections changes their organization in Dirlume.
 
 Google Drive transfers to local disks export supported Workspace documents and save reference-only items as `.url` links. Moving a reference or a folder containing references keeps its Drive source. Bulk transfers report individual failures and continue through the selection.
 

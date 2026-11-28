@@ -6,11 +6,13 @@ use std::{
 };
 
 use super::{
-    collect_local_move, download_kswitcher_tree, finish_downloaded_file, ftp, lan_transfer, local,
-    local_transfer, message, remote_transfer, ssh, ssh_transfer, transfer_kswitcher, Channel,
-    Connection, LocalOriginal, Result, TransferEvent, TransferOutcome, TransferRequest,
-    TransferSession, TransferSource, VerifiedUpload,
+    collect_local_move, download_drive_tree, download_kswitcher_tree, drive_transfer_plan,
+    finish_downloaded_file, ftp, lan_transfer, local, local_transfer, message, remote_transfer,
+    ssh, ssh_transfer, transfer_drive_folder, transfer_kswitcher, Channel, Connection,
+    LocalOriginal, Result, TransferEvent, TransferOutcome, TransferRequest, TransferSession,
+    TransferSource, VerifiedUpload,
 };
+use crate::google_drive::TransferDrive;
 
 pub(super) enum Endpoint<'a> {
     Ftp(&'a ftp::Connection),
@@ -18,6 +20,7 @@ pub(super) enum Endpoint<'a> {
     Server(&'a Connection),
     Archive(&'a Mutex<crate::archives::Archive>),
     Kswitcher(&'a str),
+    Drive(&'a TransferDrive),
 }
 
 impl Endpoint<'_> {
@@ -26,7 +29,7 @@ impl Endpoint<'_> {
             Self::Ftp(connection) => Some(connection.host()),
             Self::Ssh(connection) => Some(connection.host()),
             Self::Server(connection) => connection.invitation.address.host_str(),
-            Self::Archive(_) | Self::Kswitcher(_) => None,
+            Self::Archive(_) | Self::Kswitcher(_) | Self::Drive(_) => None,
         }
     }
 }
@@ -61,14 +64,44 @@ impl Relay<'_> {
         let different_protocol =
             std::mem::discriminant(&source) != std::mem::discriminant(&destination);
         let name = segments.last().ok_or("Choose a remote file or folder.")?;
+        let (drive_revisions, prepared) = match (&source, &self.request.source) {
+            (Endpoint::Drive(drive), TransferSource::GoogleDrive { item, folder, .. }) => {
+                let revisions = self
+                    .request
+                    .moving
+                    .then(|| {
+                        tauri::async_runtime::block_on(
+                            self.transfer.interrupt(drive.snapshot(item, *folder)),
+                        )
+                    })
+                    .transpose()?;
+                let prepared = (!folder)
+                    .then(|| {
+                        tauri::async_runtime::block_on(
+                            self.transfer.interrupt(drive.prepare_local_file(item)),
+                        )
+                    })
+                    .transpose()?;
+                (revisions, prepared)
+            }
+            _ => (None, None),
+        };
+        let stage_name = prepared
+            .as_ref()
+            .map_or_else(|| name.clone(), |file| file.local_name(name));
+        let target_segments = if stage_name == *name {
+            segments
+        } else {
+            std::slice::from_ref(&stage_name)
+        };
         let workspace = tempfile::tempdir().map_err(message)?;
         let staged = workspace
             .path()
-            .join(local::name_component(name).map_err(message)?);
+            .join(local::name_component(&stage_name).map_err(message)?);
         let publish = |progress: &mut _, ask: &mut _| match destination {
             Endpoint::Ftp(connection) => self.publish(
                 &mut connection.open_with_cancel(Some(self.transfer.cancelled.clone()))?,
-                segments,
+                target_segments,
                 &staged,
                 (same_host, different_protocol),
                 progress,
@@ -81,7 +114,7 @@ impl Relay<'_> {
                     self.transfer,
                     self.output,
                 )?,
-                segments,
+                target_segments,
                 &staged,
                 (same_host, different_protocol),
                 progress,
@@ -92,16 +125,17 @@ impl Relay<'_> {
                     connection,
                     transfer: self.transfer,
                 },
-                segments,
+                target_segments,
                 &staged,
                 (same_host, different_protocol),
                 progress,
                 ask,
             ),
             Endpoint::Archive(archive) => {
-                self.publish_archive(archive, name, &staged, progress, ask)
+                self.publish_archive(archive, &stage_name, &staged, progress, ask)
             }
-            Endpoint::Kswitcher(peer) => self.publish_kswitcher(peer, name, &staged),
+            Endpoint::Kswitcher(peer) => self.publish_kswitcher(peer, &stage_name, &staged),
+            Endpoint::Drive(drive) => self.publish_drive(drive, &stage_name, &staged),
         };
         match source {
             Endpoint::Ftp(connection) => {
@@ -312,7 +346,129 @@ impl Relay<'_> {
                 }
                 Ok(TransferOutcome::Completed)
             }
+            Endpoint::Drive(drive) => {
+                let TransferSource::GoogleDrive { item, folder, .. } = &self.request.source else {
+                    return Err("Choose a Google Drive item.".into());
+                };
+                let references = if let Some(file) = prepared {
+                    let references = file.is_reference();
+                    let modified = tauri::async_runtime::block_on(self.transfer.interrupt(
+                        file.write(&staged, |bytes, total| {
+                            progress(Path::new(name), bytes, total)
+                        }),
+                    ))?;
+                    finish_downloaded_file(
+                        &fs::File::options()
+                            .write(true)
+                            .open(&staged)
+                            .map_err(message)?,
+                        modified,
+                    )
+                    .map_err(message)?;
+                    references
+                } else {
+                    tauri::async_runtime::block_on(download_drive_tree(
+                        drive,
+                        item,
+                        &staged,
+                        self.transfer,
+                        true,
+                        &mut *progress,
+                    ))?
+                };
+                let Some(destination) = publish(progress, ask)? else {
+                    return Ok(TransferOutcome::Skipped);
+                };
+                if let Some(revisions) = drive_revisions {
+                    let cleanup = if references {
+                        Err("Saved file links. The source was kept in Google Drive.".into())
+                    } else {
+                        tauri::async_runtime::block_on(
+                            self.transfer
+                                .interrupt(drive.trash_unchanged(item, *folder, &revisions)),
+                        )
+                    };
+                    if let Err(error) = cleanup {
+                        return Ok(TransferOutcome::SourceRetained {
+                            source: name.clone(),
+                            destination,
+                            error,
+                        });
+                    }
+                }
+                Ok(TransferOutcome::Completed)
+            }
         }
+    }
+
+    fn publish_drive(
+        &self,
+        drive: &TransferDrive,
+        name: &str,
+        staged: &Path,
+    ) -> Result<Option<String>> {
+        let target = self
+            .request
+            .google_drive_destination
+            .as_ref()
+            .ok_or("Choose a Google Drive destination.")?;
+        tauri::async_runtime::block_on(async {
+            let metadata = fs::symlink_metadata(staged).map_err(message)?;
+            let incoming = local_transfer::EntryDetails::network(
+                Some(metadata.len()),
+                metadata.modified().ok(),
+                metadata.is_dir(),
+            );
+            let Some(plan) = drive_transfer_plan(
+                drive,
+                target,
+                name,
+                incoming,
+                None,
+                self.request,
+                self.transfer,
+                self.output,
+            )
+            .await?
+            else {
+                return Ok(None);
+            };
+            if metadata.is_dir() {
+                transfer_drive_folder(
+                    drive,
+                    staged,
+                    &target.parent,
+                    &plan,
+                    self.transfer,
+                    self.output,
+                    false,
+                    &self.request.destination,
+                )
+                .await?;
+            } else {
+                self.transfer
+                    .interrupt(
+                        drive.upload(staged, &target.parent, &plan.name, |bytes, total| {
+                            super::report_transfer_progress(
+                                self.output,
+                                Path::new(name),
+                                bytes,
+                                Some(total),
+                            );
+                            self.transfer.ensure_running()
+                        }),
+                    )
+                    .await?;
+                if let Some(existing) = plan.replace {
+                    drive.trash(&existing).await?;
+                }
+            }
+            Ok(Some(format!(
+                "{}/{}",
+                self.request.destination.trim_end_matches('/'),
+                plan.name
+            )))
+        })
     }
 
     fn publish<S: VerifiedUpload>(

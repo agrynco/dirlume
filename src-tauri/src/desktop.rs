@@ -2265,16 +2265,23 @@ async fn transfer_item(
     app: AppHandle,
 ) -> Result<TransferOutcome> {
     let session = sessions.get(id)?;
-    if let Some(destination) = &request.google_drive_destination {
-        if request.ftp_destination.is_some()
+    let drive_endpoint = request.google_drive_destination.as_ref();
+    if drive_endpoint.is_some()
+        && (request.ftp_destination.is_some()
             || request.ssh_destination.is_some()
             || request.server_destination.is_some()
             || request.archive_destination.is_some()
             || request.kswitcher_destination.is_some()
-            || request.kswitcher_broker
-        {
-            return Err("Choose a single remote connection for the copy.".into());
-        }
+            || request.kswitcher_broker)
+    {
+        return Err("Choose a single remote connection for the copy.".into());
+    }
+    if let Some(destination) = drive_endpoint.filter(|_| {
+        matches!(
+            &request.source,
+            TransferSource::Local { .. } | TransferSource::GoogleDrive { .. }
+        )
+    }) {
         let drive = crate::google_drive::TransferDrive::writable(&app, destination.profile).await?;
         return match &request.source {
             TransferSource::Local { directory, name } => {
@@ -2497,17 +2504,6 @@ async fn transfer_item(
             ),
         };
     }
-    let from_drive = matches!(request.source, TransferSource::GoogleDrive { .. });
-    if from_drive
-        && (request.kswitcher_broker
-            || request.server_destination.is_some()
-            || request.ftp_destination.is_some()
-            || request.ssh_destination.is_some()
-            || request.archive_destination.is_some()
-            || request.kswitcher_destination.is_some())
-    {
-        return Err("Copy one Google Drive file to a local folder.".into());
-    }
     if request.server_destination.is_none()
         && request.ftp_destination.is_none()
         && request.ssh_destination.is_none()
@@ -2523,6 +2519,7 @@ async fn transfer_item(
             .await
             .map(|(outcome, _)| outcome);
     }
+    let from_drive = matches!(&request.source, TransferSource::GoogleDrive { .. });
     let connection = match &request.source {
         TransferSource::Server { connection, .. } => Some(connections.get(*connection)?),
         _ => None,
@@ -2556,6 +2553,29 @@ async fn transfer_item(
         .as_ref()
         .map(|destination| archives.get(destination.id))
         .transpose()?;
+    let drive_destination = if let Some(destination) = drive_endpoint {
+        Some(crate::google_drive::TransferDrive::writable(&app, destination.profile).await?)
+    } else {
+        None
+    };
+    let drive_source = if let TransferSource::GoogleDrive { profile, .. } = &request.source {
+        if ftp_destination.is_some()
+            || ssh_destination.is_some()
+            || server_destination.is_some()
+            || archive_destination.is_some()
+            || request.kswitcher_destination.is_some()
+        {
+            Some(if request.moving {
+                crate::google_drive::TransferDrive::writable(&app, *profile).await?
+            } else {
+                crate::google_drive::TransferDrive::readable(&app, *profile).await?
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     if [
         ftp_destination.is_some(),
         ssh_destination.is_some(),
@@ -2630,6 +2650,9 @@ async fn transfer_item(
                 TransferSource::Kswitcher { peer, name, .. } => {
                     Some((Endpoint::Kswitcher(peer), std::slice::from_ref(name)))
                 }
+                TransferSource::GoogleDrive { name, .. } => drive_source
+                    .as_ref()
+                    .map(|drive| (Endpoint::Drive(drive), std::slice::from_ref(name))),
                 _ => None,
             };
             let relay_destination = ftp_destination
@@ -2638,6 +2661,7 @@ async fn transfer_item(
                 .or_else(|| ssh_destination.as_ref().map(Endpoint::Ssh))
                 .or_else(|| server_destination.as_deref().map(Endpoint::Server))
                 .or_else(|| archive_destination.as_deref().map(Endpoint::Archive))
+                .or_else(|| drive_destination.as_ref().map(Endpoint::Drive))
                 .or_else(|| {
                     request
                         .kswitcher_destination
