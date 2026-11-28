@@ -1,6 +1,11 @@
 {
   "version": "0.1.45",
   "highlights": [
+    "Open Git history, blame, and revision comparisons from a file’s context menu. Git uses the same Compare files interface for unified and side-by-side views.",
+    "Inspect per-file patches before cherry-picking or reverting a commit, and browse line attribution directly in the text Viewer.",
+    "Save folder shortcuts across local, network, archive, Google Drive, and Collections sources. Copy between Google Drive and other supported providers using the usual transfer dialogs.",
+    "Size and Size in bytes automatically fit complete values and their headings in both panes.",
+    "View Google storage quota in Disk information and use Space Analyzer to inspect owned file usage in My Drive.",
     "The contributor guide explains how to select issues, follow project board statuses, submit pull requests, and prepare a release using the Dirlume contributor skill."
   ]
 }
