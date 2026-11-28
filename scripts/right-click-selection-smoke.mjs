@@ -41,12 +41,54 @@ try {
   const press = () => page.mouse.down({ button: "right" });
   const release = () => page.mouse.up({ button: "right" });
   const dismiss = async () => { await page.keyboard.press("Escape"); await menu.waitFor({ state: "hidden" }); };
+  const action = (name) => menu.getByRole("menuitem", { name, exact: true });
   const [first, second, third, folder, last] = names;
 
   await click(first);
   await menu.waitFor();
   await dismiss();
   assert.deepEqual(await marked(), []);
+  await row(first).click();
+  await files().press("Insert");
+  await files().press("Insert");
+  assert.deepEqual(await marked(), [first, second]);
+  await click(second);
+  await action("Move (2)").waitFor();
+  await action("Copy (2)").click();
+  const copy = page.getByRole("dialog", { name: "Copy", exact: true });
+  await copy.getByText("2 selected items", { exact: true }).waitFor();
+  await copy.getByRole("button", { name: "Cancel", exact: true }).click();
+  await click(first);
+  await action("Move (2)").click();
+  const move = page.getByRole("dialog", { name: "Rename or move", exact: true });
+  await move.getByText("2 selected items", { exact: true }).waitFor();
+  await move.getByRole("button", { name: "Cancel", exact: true }).click();
+  await click(first);
+  await action("Move to Trash (2)").click();
+  const trash = page.getByRole("dialog", { name: "Move to Trash", exact: true });
+  await trash.getByText("2 items", { exact: true }).waitFor();
+  await trash.getByRole("button", { name: "Cancel", exact: true }).click();
+  await click(third);
+  assert.deepEqual(await marked(), [first, second]);
+  assert.equal(await action("Move (2)").count(), 0);
+  await action("Copy").click();
+  await copy.getByText(third, { exact: true }).waitFor();
+  await copy.getByRole("button", { name: "Cancel", exact: true }).click();
+  await files().press("Shift+F10");
+  await action("Move to Trash").click();
+  await trash.getByText(third, { exact: true }).waitFor();
+  assert.equal(await trash.getByText(first, { exact: true }).count(), 0);
+  await trash.getByRole("button", { name: "Cancel", exact: true }).click();
+  await moveTo(row(third));
+  await press();
+  await spinner.waitFor();
+  assert.equal(await menu.count(), 0);
+  await release();
+  await action("Copy").waitFor();
+  if (process.env.DIRLUME_FILE_MENU_PREVIEW) await menu.screenshot({ path: ".smoke/file-menu-772.png" });
+  await dismiss();
+  assert.deepEqual(await marked(), [first, second]);
+  await files().press("Space");
   await page.getByRole("button", { name: "Options", exact: true }).click();
   const options = page.getByRole("dialog", { name: "Options", exact: true });
   const sections = options.getByRole("navigation", { name: "Options sections" });
@@ -135,7 +177,7 @@ try {
       }
     }
   }
-  console.log("Verified opt-in right-click selection, skipped rows, drag direction, hold feedback, and menus.");
+  console.log("Verified short and held file menus, batch and single targets, keyboard opening, and opt-in right-click selection and drag.");
 } finally {
   await browser.close();
 }

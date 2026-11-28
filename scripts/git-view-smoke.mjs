@@ -55,7 +55,10 @@ try {
           case "list_directory": return { path: args.path, parent: null, entries: fileContextFixture ?
             [file, { ...file, name: "another.txt" }, { ...file, name: "outside.txt" }] : [file], omitted: 0 };
           case "file_icons": return [null];
-          case "windows_item_menu": window.nativeFileMenu = args; return false;
+          case "windows_item_menu":
+            window.nativeFileMenus ??= [];
+            window.nativeFileMenus.push(args);
+            return false;
           case "git_file_context": {
             window.fileContextRequest = { directory: args.directory, name: args.name };
             if (window.gitError || args.name === "outside.txt") throw "notRepository";
@@ -1177,11 +1180,16 @@ try {
   const noteRow = right.getByRole("option", { name: /^note\.txt/ });
   const anotherRow = right.getByRole("option", { name: /^another\.txt/ });
   const fileActions = page.getByRole("menu", { name: "File actions", exact: true });
-  const gitActions = fileActions.getByRole("group", { name: "Git", exact: true });
+  const gitTrigger = fileActions.getByRole("menuitem", { name: "Git", exact: true });
+  const gitActions = fileActions.getByRole("menu", { name: "Git", exact: true });
   await noteRow.click();
   await page.evaluate(() => { window.isTauri = true; });
   await anotherRow.click({ button: "right" });
+  await gitTrigger.waitFor();
+  assert.equal(await gitTrigger.getAttribute("aria-haspopup"), "menu");
+  await gitTrigger.hover();
   await gitActions.waitFor();
+  if (process.env.DIRLUME_FILE_MENU_PREVIEW) await page.screenshot({ path: ".smoke/file-submenu-772.png" });
   assert.equal(await menuItem(gitActions, "Show diff").count(), 0);
   assert.equal(await page.evaluate(() => window.fileContextRequest.name), "another.txt");
   await menuItem(gitActions, "Show history").click();
@@ -1194,12 +1202,18 @@ try {
   assert.equal(await anotherRow.getAttribute("data-current"), "true");
   await noteRow.click();
   await right.press("Shift+F10");
+  await gitTrigger.press("ArrowRight");
+  await menuItem(gitActions, "Show history").press("ArrowLeft");
+  await gitActions.waitFor({ state: "hidden" });
+  assert.equal(await gitTrigger.evaluate((button) => button === document.activeElement), true);
+  await gitTrigger.press("ArrowRight");
   await menuItem(gitActions, "Show blame").click();
   await blame.getByText("note.txt", { exact: true }).waitFor();
   await button(blame, "Close").click();
   await page.waitForFunction(() => document.activeElement?.id === "right-files");
   assert.equal(await noteRow.getAttribute("data-current"), "true");
   await right.press("Shift+F10");
+  await gitTrigger.press("ArrowRight");
   await menuItem(gitActions, "Compare with revision…").click();
   await fileComparison.getByRole("combobox", { name: "Comparison revision", exact: true }).selectOption("refs/heads/main");
   await button(fileComparison, "Compare").click();
@@ -1220,6 +1234,7 @@ try {
   await button(fileComparison, "Close").click();
   await page.waitForFunction(() => document.activeElement?.id === "right-files");
   await noteRow.click({ button: "right" });
+  await gitTrigger.click();
   await menuItem(gitActions, "Show diff").click();
   const scopedChanges = page.getByRole("region", { name: "Changes", exact: true });
   await scopedChanges.getByRole("group", { name: "Staged", exact: true }).getByRole("option", { name: /note\.txt/ }).waitFor();
@@ -1242,20 +1257,39 @@ try {
   await noteRow.click({ button: "right" });
   await page.waitForFunction(() => typeof window.finishGitFileContext === "function");
   await anotherRow.click({ button: "right" });
+  await gitTrigger.hover();
   await gitActions.waitFor();
   await page.evaluate(() => window.finishGitFileContext());
   assert.equal(await menuItem(gitActions, "Show diff").count(), 0);
   await menuItem(gitActions, "Show history").click();
   await history.getByRole("option", { name: /Created a different file/ }).waitFor();
   await button(revisionPreview, "Close Git View").click();
-  await right.getByRole("option", { name: /^outside\.txt/ }).click({ button: "right" });
-  await page.waitForFunction(() => window.fileContextRequest?.name === "outside.txt");
-  if (await page.evaluate(() => /Windows/i.test(navigator.userAgent))) {
-    await page.waitForFunction(() => window.nativeFileMenu?.name === "outside.txt");
-  } else {
-    await fileActions.waitFor();
+  const windowsClient = await page.evaluate(() => /Windows/i.test(navigator.userAgent));
+  if (windowsClient) {
+    await noteRow.hover();
+    await page.mouse.down({ button: "right" });
+    await page.getByRole("status", { name: "Release to open the context menu" }).waitFor();
+    await page.mouse.up({ button: "right" });
+    await page.waitForFunction(() => window.nativeFileMenus?.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.nativeFileMenus.map(({ name }) => name)), ["note.txt"]);
+    assert.equal(await fileActions.count(), 0);
   }
-  assert.equal(await gitActions.count(), 0);
+  const outside = right.getByRole("option", { name: /^outside\.txt/ });
+  await outside.click({ button: "right" });
+  await page.waitForFunction(() => window.fileContextRequest?.name === "outside.txt");
+  await fileActions.waitFor();
+  assert.equal(await gitTrigger.count(), 0);
+  assert.equal(await page.evaluate(() => window.nativeFileMenus?.length ?? 0), windowsClient ? 1 : 0);
+  await page.keyboard.press("Escape");
+  await outside.hover();
+  await page.mouse.down({ button: "right" });
+  await page.getByRole("status", { name: "Release to open the context menu" }).waitFor();
+  await page.mouse.up({ button: "right" });
+  if (windowsClient) {
+    await page.waitForFunction(() => window.nativeFileMenus?.length === 2);
+    assert.deepEqual(await page.evaluate(() => window.nativeFileMenus.map(({ name }) => name)), ["note.txt", "outside.txt"]);
+    assert.equal(await fileActions.count(), 0);
+  } else await fileActions.waitFor();
   console.log("Verified Git View, file context actions, paged history, commit details, shortcut customization, and pane restoration.");
 } finally {
   await browser.close();

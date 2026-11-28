@@ -12,7 +12,7 @@ import { timestampSeconds, useTimestamps } from "./useTimestamps";
 import { commandHistoryGroups, commandHistoryParts, historyLimit, readCommandHistory, saveCommandHistory, type CommandEntry } from "./commandHistory";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, Coffee, Copy, Eye, EyeOff, FileDiff,
+  ArrowLeftRight, Bookmark, Braces, CheckSquare, ClipboardCopy, ClipboardPaste, Coffee, Copy, Eye, EyeOff, FileDiff,
   FileClock, FilePlus, FolderPlus, FolderTree, Calculator, CircleHelp, GitBranch, GitCompareArrows, History, Moon, Pencil, Plug, Redo2, RefreshCw,
   ScanEye, Search, Settings2, ShieldAlert, Sun, Terminal as TerminalIcon, TextCursorInput, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
@@ -46,7 +46,7 @@ import type { MenuContext, MenuRun } from "./userMenu";
 import { VerifyHostDialog } from "./SshDialog";
 import { SmbDialog } from "./SmbDialog";
 import { SudoDialog } from "./SudoDialog";
-import { FileContextMenu } from "./FileContextMenu";
+import { FileContextMenu, FileContextSubmenu } from "./FileContextMenu";
 import { canCreateIn, canRenameItem, fileSourceActions } from "./fileSourceActions";
 import { FolderShortcutsDialog, type FolderShortcutScreen } from "./FolderShortcutsDialog";
 import { FileBookmarksDialog } from "./FileBookmarksDialog";
@@ -2562,17 +2562,17 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     });
   }
 
-  function deleteSelection(side: Side, command: "recycle" | "delete", selected: Entry) {
+  function deleteSelection(side: Side, command: "recycle" | "delete", selected: Entry, useMarks = true) {
     const state = panes[side];
     if (busy || state.loading) return;
     if (state.search) {
       const root = localSearchRoot(state);
-      if (root) confirmDeletion(command, root, selectedEntries(side, selected), false, side);
+      if (root) confirmDeletion(command, root, selectedEntries(side, selected, useMarks), false, side);
       return;
     }
     const place = state.place;
     if (place?.kind === "googleDrive") {
-      const items = selectedEntries(side, selected, true, false).filter((entry) => entry.googleDrive);
+      const items = selectedEntries(side, selected, useMarks, false).filter((entry) => entry.googleDrive);
       if (items.length) setModal({
         kind: command, path: placePath(place),
         names: items.map(({ googleDrive }) => googleDrive!.name),
@@ -2582,7 +2582,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     if (place?.kind === "local" || isFileServer(place) || isWritableServerPlace(place) || place?.kind === "archive" && place.writable ||
       place?.kind === "kswitcher" && place.path && place.capabilities?.delete) {
-      confirmDeletion(command, place, selectedEntries(side, selected), trees[side].enabled);
+      confirmDeletion(command, place, selectedEntries(side, selected, useMarks), trees[side].enabled);
     }
   }
 
@@ -2608,7 +2608,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
   }
 
-  function transfer(kind: "copy" | "move", side = active, selected = current) {
+  function transfer(kind: "copy" | "move", side = active, selected = current, useMarks = true) {
     const state = panes[side];
     const source = state.place;
     if (!source || source.kind === "smbRoot" || source.kind === "connections" || !selected || state.loading) {
@@ -2617,7 +2617,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     }
     const targetSide = opposite(side);
     if (kind === "copy" && collectionPanes[targetSide]) {
-      collectReferences(side, transferItems(side, selected).map(({ place, entry }) => collectionReference(place, entry)));
+      collectReferences(side, transferItems(side, selected, useMarks).map(({ place, entry }) => collectionReference(place, entry)));
       return;
     }
     if (kind === "move" && (state.search && !localSearchRoot(state) || !fileSourceActions(source).remove)) return;
@@ -2626,7 +2626,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       (otherPane.place?.kind !== "local" || smbHost(otherPane.place) || paneCovered(targetSide) ||
         processPanels[targetSide] || otherPane.loading) ? null :
       treeFolder(targetSide) ?? otherPane.place;
-    openTransfer(kind, source, transferItems(side, selected), target, false, side);
+    openTransfer(kind, source, transferItems(side, selected, useMarks), target, false, side);
   }
 
   function startDrag(side: Side, entry: Entry, event: PointerEvent) {
@@ -2715,20 +2715,20 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     } catch (failure) { setStatus({ text: describeError(failure), error: true }); }
   }
 
-  function contextActions(side: Side, x: number, y: number, entry?: Entry, preserveMarks = false) {
+  function contextActions(side: Side, x: number, y: number, entry?: Entry, held = false) {
     const request = ++fileMenuRequest.current;
     setActive(side);
     setFileMenu(null);
-    if (entry && !panes[side].marked.includes(entry.name)) {
-      if (preserveMarks) {
-        selectionAnchor.current[side] = entry.name;
-        updatePane(side, (pane) => ({ ...pane, selected: entry.name }));
-      } else selectRow(side, entry, false, false);
+    if (entry) {
+      if (rowRename && (rowRename.side !== side || (rowRename.treeKey ?? rowRename.name) !== entry.name)) setRowRename(null);
+      selectionAnchor.current[side] = entry.name;
+      updatePane(side, (pane) => ({ ...pane, selected: entry.name }));
     }
     const state = panes[side];
     const item = entry ? paneItem(state, entry) : null;
     const place = entry ? item?.place : state.search ? null : state.place;
-    const gitListing = gitPanes[side]?.listing;
+    const multiple = !!entry && state.marked.includes(entry.name) && state.marked.length > 1;
+    const gitListing = multiple ? undefined : gitPanes[side]?.listing;
     const path = entry && item && !item.entry.directory && gitListing ? gitPanePath(gitListing, entry) : undefined;
     const paneGit = path !== undefined && gitListing ? { source: gitListing.source, root: gitListing.status.root, path,
       head: gitListing.status.head, previousPath: gitListing.files.get(path)?.find(({ status }) => status === "R")?.previousPath ?? undefined } : undefined;
@@ -2738,21 +2738,20 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       return fileMenuRequest.current === request && current.active === side && !current.modal && !current.gitView &&
         current.panes[side].place === state.place && current.panes[side].search === state.search;
     }
-    function show(git?: GitFileContext) {
-      if (paneGit || git && (git.head || git.hasDiff)) setFileMenu({ ...menu, git });
-      else if (isTauri() && windowsClient && place?.kind === "local") {
-        void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
-          if (!stillCurrent()) return;
-          setStatus({ text: describeError(failure), error: true });
-          setFileMenu(menu);
-        });
-      } else setFileMenu(menu);
+    if (held && isTauri() && windowsClient && place?.kind === "local" && !smbHost(place)) {
+      void api.windowsItemMenu(place.path, item?.entry.name).catch((failure: unknown) => {
+        if (!stillCurrent()) return;
+        setStatus({ text: describeError(failure), error: true });
+        setFileMenu(menu);
+      });
+      return;
     }
-    const multiFile = !!entry && state.marked.length > 1 && (preserveMarks || state.marked.includes(entry.name));
-    if (isTauri() && !multiFile && item && !item.entry.directory && !item.entry.link && item.place.kind === "local" && !smbHost(item.place)) {
-      void api.gitFileContext(item.place.path, item.entry.name).then(
-        (git) => { if (stillCurrent()) show(git); }, () => { if (stillCurrent()) show(); });
-    } else show();
+    setFileMenu(menu);
+    if (isTauri() && !multiple && item && !item.entry.directory && !item.entry.link && item.place.kind === "local" && !smbHost(item.place)) {
+      void api.gitFileContext(item.place.path, item.entry.name).then((git) => {
+        if (stillCurrent() && git && (git.head || git.hasDiff)) setFileMenu((current) => current === menu ? { ...current, git } : current);
+      }, () => {});
+    }
   }
 
   function finishDrag(event: PointerEvent<HTMLDivElement>) {
@@ -4044,7 +4043,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             fileContextMenuShortcut={shortcuts.fileContextMenu}
             onShowExecutable={(path) => revealProcessExecutable(side, path)}
             onProcessFeedback={(text, error) => setStatus({ text, error })}
-            onContext={(x, y, entry, preserveMarks) => contextActions(side, x, y, entry, preserveMarks)}
+            onContext={(x, y, entry, held) => contextActions(side, x, y, entry, held)}
             onRevealResult={(entry) => {
               const item = paneItem(panes[side], entry);
               if (item) revealResult(side, item.place, item.entry.name);
@@ -4482,12 +4481,22 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
         const { side, x, y, entry, git, paneGit } = fileMenu;
         const state = panes[side];
         const item = entry ? paneItem(state, entry) : null;
-        const document = fileFor(side, entry);
-        const driveEditor = driveEditorLink(item?.entry);
-        const driveLink = driveEditor ?? item?.entry.googleDrive?.webViewLink;
-        const kswitcherItem = item?.place.kind === "kswitcher" ? item.place : undefined;
+        const useMarks = !!entry && state.marked.includes(entry.name);
+        const itemCount = useMarks ? state.marked.length : 1;
+        const single = itemCount === 1;
+        const document = single ? fileFor(side, entry) : null;
+        const driveEditor = single ? driveEditorLink(item?.entry) : null;
+        const driveLink = driveEditor ?? (single ? item?.entry.googleDrive?.webViewLink : undefined);
         const target = panes[opposite(side)];
         const toCollection = collectionPanes[opposite(side)] !== null;
+        const canChange = !!entry && !!item && !state.loading && !busy && (!state.search || !!localSearchRoot(state));
+        const canRemove = canChange && fileSourceActions(item.place).remove;
+        const trash = item?.place.kind === "googleDrive" || item?.place.kind === "local" && !smbHost(item.place) ? "Move to Trash" :
+          item?.place.kind === "kswitcher" || isFileServer(item?.place) && item.place.environment?.recycleBin?.keepDeleted
+            ? "Move to remote recycle bin" : null;
+        const usesWindowsMenu = windowsClient && isTauri() && item?.place.kind === "local" && !smbHost(item.place);
+        const actionLabel = (label: string) => itemCount > 1 ? t("{0} ({1})", t(label), itemCount) : t(label);
+
         function openGitFile(action: GitFileLaunch["action"]) {
           if (!git) return;
           const file: GitFileLaunch | undefined = action === "diff" ? { action, path: git.path } :
@@ -4502,24 +4511,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           setFileMenu(null);
           setModal({ kind: "gitPane", side, target: { ...paneGit, action } });
         }
-        return <FileContextMenu x={x} y={y} className={git || paneGit ? "file-menu-with-git" : undefined}
-          onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
-          {(git || paneGit) && <>
-            <div role="group" aria-label="Git" className="file-git-actions">
-              <div className="file-git-heading" aria-hidden="true">Git</div>
-              {(paneGit || git?.hasHistory) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("history") : openGitFile("history")}><FileClock aria-hidden="true" />{t("Show history")}</Button>}
-              {git?.hasBlame && <Button role="menuitem" onClick={() => openGitFile("blame")}><Search aria-hidden="true" />{t("Show blame")}</Button>}
-              {paneGit && <Button role="menuitem" onClick={() => inspectGitPane("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with HEAD")}</Button>}
-              {git?.head && <Button role="menuitem" onClick={() => openGitFile("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with revision…")}</Button>}
-              {(paneGit || git?.hasDiff) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("diff") : openGitFile("diff")}><FileDiff aria-hidden="true" />{t("Show diff")}</Button>}
-            </div>
-            <div role="separator" className="main-menu-separator" />
-            {windowsClient && item?.place.kind === "local" && <Button role="menuitem" onClick={() => {
-              if (item.place.kind !== "local") return;
-              setFileMenu(null);
-              void api.windowsItemMenu(item.place.path, item.entry.name).catch((error) => setStatus({ text: describeError(error), error: true }));
-            }}>{t("Windows context menu…")}</Button>}
-          </>}
+        return <FileContextMenu x={x} y={y} className="file-item-menu" onClose={() => setFileMenu(null)} onReturn={() => focus(side)}>
           {state.place?.kind === "connections" && (() => {
             const { source } = state.place;
             return <>
@@ -4539,122 +4531,56 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             setFileMenu(null);
             open(side, entry);
           }}>{t("Open")}</Button>}
-          {state.search && item && <Button role="menuitem" onClick={() => {
+          {state.search && item && single && <Button role="menuitem" onClick={() => {
             setFileMenu(null);
             revealResult(side, item.place, item.entry.name);
           }}>{t("Open original location")}</Button>}
-          {item?.place.kind === "googleDrive" && entry && <>
-            {item.entry.directory && <Button role="menuitem" onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>}
+          {item && entry && <>
+            {single && item.entry.directory && <Button role="menuitem" onClick={() => {
+              setFileMenu(null);
+              open(side, entry);
+            }}>{t("Open")}</Button>}
             {driveLink && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               openGoogleDriveLink(driveLink);
             }}>{t(driveEditor ? "Edit in browser" : "Open in browser")}</Button>}
-            {fileFor(side, entry) && (driveEditor ? ["view"] as const : ["view", "edit"] as const).map((action) => <Button key={action} role="menuitem" onClick={() => {
-              const file = fileFor(side, entry);
-              setFileMenu(null);
-              if (file) openDocument(file, action === "edit", { fromPane: side });
-            }}>{t(action === "view" ? "View" : "Edit")}</Button>)}
-            {(["copy", "move"] as const).map((action) => <Button key={action} role="menuitem" disabled={toCollection && action === "move" || !!target.search}
-              onClick={() => { setFileMenu(null); transfer(action, side, entry); }}>{t(action === "copy" ? toCollection ? "Add to collection" : "Copy" : "Move")}</Button>)}
-            {!busy && !state.loading && item.entry.googleDrive && <>
-              <Button role="menuitem" onClick={() => {
-                const { place } = item;
-                if (place.kind !== "googleDrive" || !item.entry.googleDrive) return;
-                setFileMenu(null);
-                setModal({ kind: "rename", path: placePath(place), name: item.entry.googleDrive.name,
-                  drive: { place, side, itemIds: [item.entry.googleDrive.id] } });
-              }}>{t("Rename")}</Button>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
-            </>}
-          </>}
-          {item && item.place.kind !== "googleDrive" && <>
-            {item.entry.directory && entry && <Button role="menuitem"
-              onClick={() => { setFileMenu(null); open(side, entry); }}>{t("Open")}</Button>}
             {document && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               openDocument(document, false, { fromPane: side });
-            }}>{t("View")}</Button>}
-            {document && (imageType(document.name) ? canEditImage(document) : writableTextPlace(document.place)) &&
+            }}><Eye aria-hidden="true" />{t("View")}</Button>}
+            {document && !driveEditor && (imageType(document.name) ? canEditImage(document) : writableTextPlace(document.place)) &&
               <Button role="menuitem" onClick={() => {
                 setFileMenu(null);
                 openDocument(document, true, { fromPane: side });
-              }}>{t("Edit")}</Button>}
-            <Button role="menuitem" disabled={!toCollection && item.place.kind === "kswitcher" && (!item.place.path || item.entry.link)}
+              }}><Pencil aria-hidden="true" />{t("Edit")}</Button>}
+            <Button role="menuitem" disabled={!toCollection && item.place.kind === "kswitcher" && (!item.place.path || item.entry.link) ||
+                item.place.kind === "googleDrive" && !!target.search}
               onClick={() => {
+                setFileMenu(null);
+                const items = transferItems(side, entry, useMarks);
+                if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
+                else openTransfer("copy", item.place, items, target.search ? null : treeFolder(opposite(side)) ?? target.place, false, side);
+              }}><Copy aria-hidden="true" />{actionLabel(toCollection ? "Add to collection" : "Copy")}</Button>
+            {canRemove && !toCollection && !(item.entry.link && (item.place.kind === "kswitcher" || item.place.kind === "archive")) &&
+              <Button role="menuitem" onClick={() => {
+                setFileMenu(null);
+                transfer("move", side, entry, useMarks);
+              }}><ArrowLeftRight aria-hidden="true" />{actionLabel("Move")}</Button>}
+            {canChange && single && !state.search && canRenameItem(item.place, item.entry) &&
+              <Button role="menuitem" onClick={() => { setFileMenu(null); perform("rename"); }}><TextCursorInput aria-hidden="true" />{t("Rename")}</Button>}
+            {canRemove && trash && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
-              const items = transferItems(side, entry!, state.marked.includes(entry!.name));
-              if (toCollection) collectReferences(side, items.map(({ place, entry }) => collectionReference(place, entry)));
-              else openTransfer("copy", item.place, items,
-                target.search ? null :
-                  treeFolder(opposite(side)) ?? target.place, false, side);
-            }}>{t(toCollection ? "Add to collection" : "Copy")}</Button>
-            {isWritableServerPlace(item.place) && entry && !state.search && !state.loading && !busy && <>
-              {!toCollection && <Button role="menuitem" onClick={() => {
-                setFileMenu(null);
-                transfer("move", side, entry);
-              }}>{t("Move")}</Button>}
-              {!item.entry.link && <Button role="menuitem" onClick={() => {
-                setFileMenu(null);
-                const place = item.place;
-                if (isWritableServerPlace(place)) setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, shared: place });
-              }}>{t("Rename")}</Button>}
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
-            </>}
-            {kswitcherItem?.path && !state.search && !state.loading && !busy && <>
-              {!item.entry.link && kswitcherItem.capabilities?.delete && !toCollection && <Button role="menuitem" onClick={() => {
-                setFileMenu(null);
-                transfer("move", side, entry);
-              }}>{t("Move")}</Button>}
-              {!item.entry.link && kswitcherItem.capabilities?.write && <>
-                <Button role="menuitem" onClick={() => {
-                  setFileMenu(null);
-                  setModal({ kind: "rename", side, path: kswitcherItem.path, name: item.entry.name, kswitcher: kswitcherItem });
-                }}>{t("Rename")}</Button>
-              </>}
-              {kswitcherItem.capabilities?.delete && entry && <>
-                <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
-                <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
-              </>}
-            </>}
-            {localSearchRoot(state) && entry && !state.loading && !busy && <>
-              {!toCollection && <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to Trash")}</Button>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
-            </>}
-            {item.place.kind === "ssh" && !state.search && !state.loading && !busy && <Button role="menuitem" onClick={() => {
+              deleteSelection(side, "recycle", entry, useMarks);
+            }}><Trash2 aria-hidden="true" />{actionLabel(trash)}</Button>}
+            {canRemove && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
-              const place = item.place;
-              if (place.kind === "ssh") setModal({ kind: "rename", side, path: placePath(place), name: item.entry.name, remote: place });
-            }}>{t("Rename")}</Button>}
-            {isFileServer(item.place) && entry && !toCollection && !state.search && !state.loading && !busy &&
-              <Button role="menuitem" onClick={() => { setFileMenu(null); transfer("move", side, entry); }}>{t("Move")}</Button>}
-            {item.place.kind === "archive" && item.place.writable && entry && !state.search && !state.loading && !busy && (() => {
-              const archive = item.place;
-              return <>
-                {!item.entry.link && !toCollection && <Button role="menuitem" onClick={() => {
-                  setFileMenu(null);
-                  transfer("move", side, entry);
-                }}>{t("Move")}</Button>}
-                {!item.entry.link && archive.canAdd && <Button role="menuitem" onClick={() => {
-                  setFileMenu(null);
-                  setModal({ kind: "rename", side, path: placePath(archive), name: item.entry.name, archive });
-                }}>{t("Rename")}</Button>}
-                <Button role="menuitem" onClick={() => {
-                  setFileMenu(null);
-                  deleteSelection(side, "delete", entry);
-                }}>{t("Delete permanently")}</Button>
-              </>;
-            })()}
-            {isFileServer(item.place) && item.place.environment?.recycleBin?.keepDeleted && entry && !state.search && !state.loading && !busy && <>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "recycle", entry); }}>{t("Move to remote recycle bin")}</Button>
-              <Button role="menuitem" onClick={() => { setFileMenu(null); deleteSelection(side, "delete", entry); }}>{t("Delete permanently")}</Button>
-            </>}
+              deleteSelection(side, "delete", entry, useMarks);
+            }}><Trash2 aria-hidden="true" />{actionLabel("Delete permanently")}</Button>}
             {item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
-              void copyClipboard(side, entry, !!entry && state.marked.includes(entry.name));
-            }}>{t("Copy files to clipboard")}</Button>}
-            {windowsClient && item.place.kind === "local" && <Button role="menuitem" onClick={() => {
+              void copyClipboard(side, entry, useMarks);
+            }}><ClipboardCopy aria-hidden="true" />{actionLabel("Copy files to clipboard")}</Button>}
+            {single && windowsClient && item.place.kind === "local" && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               showLockingProcesses(side, item);
             }}>{t("Find locking processes")}</Button>}
@@ -4664,14 +4590,29 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
             <Button role="menuitem" onClick={() => { setFileMenu(null); perform("newFile"); }}>{t("New file")}</Button>
           </>}
           {state.place?.kind === "local" && !state.search && <>
-            <Button role="menuitem" onClick={() => { setFileMenu(null); void pasteClipboard(side); }}>{t("Paste files")}</Button>
+            <Button role="menuitem" onClick={() => { setFileMenu(null); void pasteClipboard(side); }}><ClipboardPaste aria-hidden="true" />{t("Paste files")}</Button>
             {!entry && <Button role="menuitem" onClick={() => {
               setFileMenu(null);
               const place = state.place;
               if (place?.kind === "local") setModal({ kind: "mkdir", side, place });
             }}>{t("New folder")}</Button>}
           </>}
-          <Button role="menuitem" onClick={() => { setFileMenu(null); refresh(side, true); focus(side); }}>{t("Refresh")}</Button>
+          {single && (git || paneGit) && <>
+            <div role="separator" className="main-menu-separator" />
+            <FileContextSubmenu label="Git" icon={<GitBranch aria-hidden="true" />}>
+              {(paneGit || git?.hasHistory) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("history") : openGitFile("history")}><FileClock aria-hidden="true" />{t("Show history")}</Button>}
+              {git?.hasBlame && <Button role="menuitem" onClick={() => openGitFile("blame")}><Search aria-hidden="true" />{t("Show blame")}</Button>}
+              {paneGit && <Button role="menuitem" onClick={() => inspectGitPane("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with HEAD")}</Button>}
+              {git?.head && <Button role="menuitem" onClick={() => openGitFile("compare")}><GitCompareArrows aria-hidden="true" />{t("Compare with revision…")}</Button>}
+              {(paneGit || git?.hasDiff) && <Button role="menuitem" onClick={() => paneGit ? inspectGitPane("diff") : openGitFile("diff")}><FileDiff aria-hidden="true" />{t("Show diff")}</Button>}
+            </FileContextSubmenu>
+          </>}
+          {single && usesWindowsMenu && <Button role="menuitem" onClick={() => {
+            if (item.place.kind !== "local") return;
+            setFileMenu(null);
+            void api.windowsItemMenu(item.place.path, item.entry.name).catch((error) => setStatus({ text: describeError(error), error: true }));
+          }}>{t("Windows context menu…")}</Button>}
+          <Button role="menuitem" onClick={() => { setFileMenu(null); refresh(side, true); focus(side); }}><RefreshCw aria-hidden="true" />{t("Refresh")}</Button>
         </FileContextMenu>;
       })()}
       {modal?.kind === "smb" && (

@@ -92,9 +92,13 @@ try {
     await right.getByText("remote-topic", { exact: true }).waitFor();
     await left.getByText("local-main", { exact: true }).waitFor();
     const menu = page.getByRole("menu", { name: "File actions", exact: true });
-    const action = (name) => menu.getByRole("menuitem", { name, exact: true });
+    const gitTrigger = menu.getByRole("menuitem", { name: "Git", exact: true });
+    const action = async (name) => {
+      await gitTrigger.hover();
+      await menu.getByRole("menu", { name: "Git", exact: true }).getByRole("menuitem", { name, exact: true }).click();
+    };
     await marker.click();
-    await action("Show diff").click();
+    await action("Show diff");
     const diff = page.getByRole("dialog", { name: "Show diff", exact: true });
     await diff.locator(".diff-text").filter({ hasText: "Staged line" }).waitFor();
     await diff.getByRole("combobox", { name: "Change to compare" }).selectOption("unstaged");
@@ -106,13 +110,16 @@ try {
     await page.waitForFunction(() => document.activeElement?.id === "left-files");
     const remoteNote = rightFiles.getByRole("option", { name: /^note ł\.txt/ });
     await remoteNote.click({ button: "right" });
-    await action("Compare with HEAD").click();
+    await action("Compare with HEAD");
     const compare = page.getByRole("dialog", { name: "Compare with HEAD" });
     await compare.getByLabel("File differences", { exact: true }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.fixture.lastRead.source), { kind: "ssh", id: 37, segments: ["remote"] });
     await button(compare, "Close").click();
-    await remoteNote.click({ button: "right" });
-    await action("Show history").click();
+    await remoteNote.hover();
+    await page.mouse.down({ button: "right" });
+    await page.getByRole("status", { name: "Release to open the context menu" }).waitFor();
+    await page.mouse.up({ button: "right" });
+    await action("Show history");
     const history = page.getByRole("dialog", { name: "File history" });
     await history.getByRole("option", { name: /Initial file/ }).waitFor({ state: "attached" });
     await history.getByLabel("File differences", { exact: true }).waitFor();
@@ -141,7 +148,7 @@ try {
     await left.getByText("local-main · No commits yet", { exact: true }).waitFor();
     await note.waitFor();
     await note.click({ button: "right" });
-    await action("Compare with HEAD").click();
+    await action("Compare with HEAD");
     await compare.getByText("This repository has no commits yet.", { exact: true }).waitFor();
     await button(compare, "Close").click();
     await left.locator(".file-columns .col-git").click({ button: "right" });
