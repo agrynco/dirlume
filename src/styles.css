@@ -171,26 +171,6 @@
   --overlay: #20303f66;
 }
 
-[data-theme="slate"] {
-  --canvas: #161a26;
-  --surface: #1d2332;
-  --raised: #252d40;
-  --hover: #323c54;
-  --line: #39445d;
-  --subtle: #2c364d;
-  --ink: #eaf0fa;
-  --muted: #adb9d3;
-  --accent: #a8beff;
-  --accent-fill: #b7c8ff;
-  --on-accent: #182343;
-  --active-row: #303f64;
-  --active-neutral: #2b3650;
-  --folder: #efc787;
-  --panel-marked: #f5c26b;
-  --panel-current-marked-bg: #40527b;
-  --panel-current-marked-outline: #a8beff;
-}
-
 [data-theme="classic-blue"] {
   --dialog-bg: #bfbfbf;
   --dialog-header: #bfbfbf;
@@ -2576,7 +2556,7 @@ button.color-swatch {
 .sort-sequence-row :is(input, select) { width: 100%; min-width: 0; }
 .sort-sequence-row > p { grid-column: 1 / -1; }
 
-/* Modern themes: Lavender, Emerald, Aurora and Midnight blue. */
+/* Modern themes: Lavender, Emerald, Midnight blue, and Sunrise. */
 [data-theme="lavender"] {
   color-scheme: light;
   --canvas: #eef0fa;
@@ -2686,59 +2666,6 @@ button.color-swatch {
     linear-gradient(180deg, #050d0c 0%, #030807 100%);
 }
 
-[data-theme="aurora"] {
-  --canvas: #0d0923;
-  --surface: #120d2e;
-  --raised: #19133d;
-  --hover: #261d57;
-  --line: #2f2665;
-  --subtle: #1d1746;
-  --ink: #f1ecff;
-  --muted: #b4aadb;
-  --accent: #c77dff;
-  --accent-fill: #a855f7;
-  --accent-alt: #ec4899;
-  --on-accent: #ffffff;
-  --active-row: #3a2378;
-  --active-neutral: #231c4d;
-  --folder: #a98bff;
-  --panel-bg: #110c2c;
-  --panel-header: #150f34;
-  --panel-selection: #4b2a92;
-  --panel-selected-ink: #ffffff;
-  --panel-inactive-selection: #241c50;
-  --panel-marked: #ffcf5c;
-  --panel-current-marked-bg: #6046a8;
-  --panel-current-marked-outline: #e0b2ff;
-  --file-source: #a5b4ff;
-  --file-text: #ddd6fe;
-  --file-document: #ff9ccb;
-  --file-image: #c9a8ff;
-  --file-media: #f0abfc;
-  --file-archive: #f7c6e0;
-  --file-config: #8ec5ff;
-  --file-executable: #ff9f8a;
-  --file-hidden: #a59bd0;
-  --file-system: #ff8a9e;
-  --text-bg: #0b0820;
-  --danger: #ffa3bd;
-  --danger-bg: #4a1838;
-  --added: #1b3a3a;
-  --removed: #4a1f45;
-  --overlay: #05021399;
-  --syntax-keyword: #e0a3ff;
-  --syntax-type: #c77dff;
-  --glow: #b45cff;
-  --card-opacity: 72%;
-  --card-shadow: 0 14px 38px #04011a8c;
-  --backdrop:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 1000' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='0' x2='1' y1='1' y2='0'%3E%3Cstop offset='0' stop-color='%237c3aed' stop-opacity='0'/%3E%3Cstop offset='.5' stop-color='%23a855f7' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%23f472b6' stop-opacity='.8'/%3E%3C/linearGradient%3E%3ClinearGradient id='c' x1='0' x2='0' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7' stop-opacity='.28'/%3E%3Cstop offset='1' stop-color='%23a855f7' stop-opacity='0'/%3E%3C/linearGradient%3E%3Cfilter id='b'%3E%3CfeGaussianBlur stdDeviation='8'/%3E%3C/filter%3E%3C/defs%3E%3Cpath d='M820 1000C1080 760 1330 860 1600 560V1000Z' fill='url(%23c)'/%3E%3Cg fill='none' stroke='url(%23a)'%3E%3Cpath d='M820 1000C1080 760 1330 860 1600 560' stroke-width='16' filter='url(%23b)' opacity='.55'/%3E%3Cpath d='M820 1000C1080 760 1330 860 1600 560' stroke-width='2'/%3E%3Cpath d='M1080 0C1240 110 1420 40 1600 160' stroke-width='10' filter='url(%23b)' opacity='.45'/%3E%3Cpath d='M1080 0C1240 110 1420 40 1600 160' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat,
-    radial-gradient(45% 45% at 78% 0%, #6d28d955 0%, transparent 70%),
-    radial-gradient(55% 55% at 95% 100%, #c026d350 0%, transparent 70%),
-    radial-gradient(40% 50% at 0% 100%, #4c1d9540 0%, transparent 70%),
-    linear-gradient(180deg, #110b2c 0%, #0a0720 100%);
-}
-
 [data-theme="midnight"] {
   --canvas: #040b1a;
   --surface: #071328;
@@ -2846,57 +2773,6 @@ button.color-swatch {
     radial-gradient(60% 55% at 0% -12%, #ffe0c8 0%, transparent 70%),
     radial-gradient(55% 55% at 106% 112%, #ffdbe8 0%, transparent 70%),
     linear-gradient(180deg, #fbf7f2 0%, #f3ede5 100%);
-}
-
-[data-theme="graphite"] {
-  --canvas: #111214;
-  --surface: #17181b;
-  --raised: #1f2125;
-  --hover: #2a2c31;
-  --line: #2f3237;
-  --subtle: #22242a;
-  --ink: #f3f1ee;
-  --muted: #a9a59f;
-  --accent: #ffa94d;
-  --accent-fill: #ff9a2e;
-  --accent-alt: #ff5f6d;
-  --on-accent: #241303;
-  --active-row: #3d2b16;
-  --active-neutral: #26282d;
-  --folder: #ffb547;
-  --panel-bg: #18191c;
-  --panel-header: #1b1c20;
-  --panel-selection: #3d2b16;
-  --panel-selected-ink: #fff8f0;
-  --panel-inactive-selection: #25272c;
-  --panel-marked: #ff7a8a;
-  --panel-current-marked-bg: #594020;
-  --panel-current-marked-outline: #ffb769;
-  --file-source: #8ab4ff;
-  --file-text: #ddd8d1;
-  --file-document: #ff9fc4;
-  --file-image: #ffb27a;
-  --file-media: #d5a8ff;
-  --file-archive: #ecd28c;
-  --file-config: #7dd8d0;
-  --file-executable: #ff8f80;
-  --file-hidden: #9d9891;
-  --file-system: #ff8aa8;
-  --text-bg: #121315;
-  --danger: #ffa7a7;
-  --danger-bg: #4a2226;
-  --added: #1e3a2a;
-  --removed: #47262b;
-  --overlay: #000000a8;
-  --syntax-keyword: #ff9fc4;
-  --syntax-type: #ffa94d;
-  --glow: #ff8a2a;
-  --card-opacity: 90%;
-  --card-shadow: 0 12px 34px #0008;
-  --backdrop:
-    radial-gradient(50% 45% at 100% 0%, #ff8a2a24 0%, transparent 70%),
-    radial-gradient(50% 50% at 0% 100%, #ff5f6d1c 0%, transparent 70%),
-    linear-gradient(180deg, #141518 0%, #0e0f11 100%);
 }
 
 [data-look="modern"] {
@@ -3031,23 +2907,12 @@ button.color-swatch {
   border-color: color-mix(in srgb, var(--accent) 70%, transparent);
   box-shadow: 0 0 12px color-mix(in srgb, var(--glow) 25%, transparent);
 }
-/* Aurora fills the active row with a violet gradient. */
-[data-theme="aurora"] .pane.active .file-row[data-current="true"] {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-fill) 60%, var(--panel-bg)), color-mix(in srgb, var(--accent-alt) 34%, var(--panel-bg)));
-  border-color: color-mix(in srgb, var(--accent) 80%, transparent);
-}
 /* Lavender keeps the selection soft and the cards flat. */
 [data-theme="lavender"] .pane.active { box-shadow: var(--card-shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent); }
 [data-theme="lavender"] .pane.active .file-row[data-current="true"] { border-color: color-mix(in srgb, var(--accent) 28%, transparent); box-shadow: none; }
 /* Sunrise keeps the cards flat and the selection a soft peach. */
 [data-theme="sunrise"] .pane.active { box-shadow: var(--card-shadow), 0 0 0 1px color-mix(in srgb, var(--glow) 22%, transparent); }
 [data-theme="sunrise"] .pane.active .file-row[data-current="true"] { border-color: color-mix(in srgb, var(--glow) 40%, transparent); box-shadow: none; }
-/* Graphite marks the active row with a warm amber glow. */
-[data-theme="graphite"] .pane.active .file-row[data-current="true"] {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-fill) 24%, var(--panel-bg)), color-mix(in srgb, var(--accent-alt) 10%, var(--panel-bg)));
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-
 .pane.active[data-layout] .file-row.marked[data-current="true"], .preview-file-current-marked {
   background: var(--panel-current-marked-bg);
   outline: 2px solid var(--panel-current-marked-outline);

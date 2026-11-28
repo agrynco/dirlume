@@ -107,12 +107,12 @@ async function checkSharedSettings(browser, portable) {
   const administrator = await openWindow(browser, { administrator: true, portable, shared });
   await administrator.locator('html[data-theme="lavender"]').waitFor();
   assert.equal(shared.writes, 1);
-  await administrator.locator(".topbar-scheme").selectOption("slate");
-  await administrator.waitForFunction(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme === "slate");
-  assert.equal(shared.file.theme, "slate");
+  await administrator.locator(".topbar-scheme").selectOption("midnight");
+  await administrator.waitForFunction(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme === "midnight");
+  assert.equal(shared.file.theme, "midnight");
 
   const next = await openWindow(browser, { portable, shared, settings: legacy });
-  await next.locator('html[data-theme="slate"]').waitFor();
+  await next.locator('html[data-theme="midnight"]').waitFor();
   shared.writable = false;
   const optionsWindow = await openWindow(browser, { portable, shared, label: "options" });
   const options = optionsWindow.getByRole("dialog", { name: "Options", exact: true });
@@ -120,9 +120,9 @@ async function checkSharedSettings(browser, portable) {
   await options.getByRole("combobox", { name: "Color scheme", exact: true }).selectOption("sunrise");
   await options.getByRole("button", { name: "Done", exact: true }).click();
   await options.getByRole("alert").filter({ hasText: "Could not save dirlume-settings.json" }).waitFor();
-  assert.equal(shared.file.theme, "slate");
-  assert.equal(await next.locator("html").getAttribute("data-theme"), "slate");
-  assert.equal(await optionsWindow.evaluate(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme), "slate");
+  assert.equal(shared.file.theme, "midnight");
+  assert.equal(await next.locator("html").getAttribute("data-theme"), "midnight");
+  assert.equal(await optionsWindow.evaluate(() => JSON.parse(localStorage.getItem("dirlume.preferences.v1")).theme), "midnight");
 
   shared.writable = true;
   await options.getByRole("button", { name: "Apply", exact: true }).click();
@@ -159,7 +159,7 @@ function contrast(first, second) {
 async function checkBadge(browser) {
   const custom = { id: "badge-match", name: "Matching badge", base: "light",
     colors: { surface: "#7f2332", raised: "#7f2332", line: "#7f2332" }, fonts: {} };
-  const themes = ["light", "dark", "slate", "classic-blue", "lavender", "emerald", "aurora", "midnight", "sunrise", "graphite", "custom:badge-match"];
+  const themes = ["light", "dark", "classic-blue", "lavender", "emerald", "midnight", "sunrise", "custom:badge-match"];
   for (const [language, label] of [["en", "Administrator"], ["uk", "Адміністратор"], ["ru", "Администратор"]]) {
     const page = await openWindow(browser, { administrator: true, settings: {
       language, theme: "light", showTitlebarScheme: true, schemes: [custom],
@@ -258,12 +258,12 @@ try {
 
     await source.keyboard.press("Escape");
     await source.getByRole("dialog").waitFor({ state: "hidden" });
-    await source.locator(".topbar-scheme").selectOption("slate");
+    await source.locator(".topbar-scheme").selectOption("midnight");
     await denyRename(source, side).then((action) => action.click());
     await source.waitForFunction(() => window.elevationRequests.length === 3);
     const changed = await source.evaluate(() => window.elevationRequests.at(-1));
     const reopened = await openWindow(browser, { administrator: true, workspace: changed, portable, missing: true });
-    await reopened.locator('html[data-theme="slate"]').waitFor();
+    await reopened.locator('html[data-theme="midnight"]').waitFor();
     await reopened.getByText("Item no longer found: Protected folder", { exact: true }).waitFor();
     await reopened.waitForFunction((side) => document.activeElement?.id === `${side}-files`, side);
     await Promise.all([source.close(), launched.close(), reopened.close()]);

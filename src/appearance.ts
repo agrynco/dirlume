@@ -6,14 +6,11 @@ export const builtInThemes = {
   system: "System",
   dark: "Dark",
   light: "Light",
-  slate: "Slate",
   "classic-blue": "Classic blue",
   lavender: "Lavender",
   emerald: "Emerald",
-  aurora: "Aurora",
   midnight: "Midnight blue",
   sunrise: "Sunrise",
-  graphite: "Graphite",
 } as const;
 
 export type Theme = keyof typeof builtInThemes;
@@ -31,8 +28,10 @@ export const baseThemes = Object.keys(builtInThemes).filter(isBaseTheme);
 
 const lightThemes = new Set<BaseTheme>(["light", "lavender", "sunrise"]);
 // These themes share rounded cards, glowing backgrounds and chip-style key buttons.
-const modernThemes = new Set<BaseTheme>(["lavender", "emerald", "aurora", "midnight", "sunrise", "graphite"]);
+const modernThemes = new Set<BaseTheme>(["lavender", "emerald", "midnight", "sunrise"]);
+const retiredThemes = new Set<string>(["aurora", "graphite", "slate"]);
 
+export const isRetiredTheme = (value: unknown) => typeof value === "string" && retiredThemes.has(value);
 export const isLightTheme = (theme: BaseTheme) => lightThemes.has(theme);
 export const readTheme = (value: unknown): Theme => isTheme(value) ? value : "system";
 
@@ -414,10 +413,11 @@ export function resolveAppearance(preferences: Preferences, system: "light" | "d
 export function readSchemes(value: unknown): Scheme[] {
   if (!Array.isArray(value)) return [];
   const result: Scheme[] = [];
-  for (const scheme of value as Partial<Scheme>[]) {
+  for (const scheme of value as (Omit<Partial<Scheme>, "base"> & { base?: unknown })[]) {
     if (!scheme || typeof scheme.id !== "string" || typeof scheme.name !== "string" ||
-        result.some(({ id }) => id === scheme.id) ||
-        !isBaseTheme(scheme.base)) continue;
+        result.some(({ id }) => id === scheme.id)) continue;
+    const base = isBaseTheme(scheme.base) ? scheme.base : isRetiredTheme(scheme.base) ? "dark" : null;
+    if (!base) continue;
     const palette: Palette = {};
     for (const color of colors) {
       const value = scheme.colors?.[color];
@@ -433,7 +433,7 @@ export function readSchemes(value: unknown): Scheme[] {
         size: typeof size === "number" && Number.isInteger(size) && size >= minFontSize && size <= maxFontSize ? size : undefined,
       };
     }
-    result.push({ id: scheme.id, name: scheme.name.slice(0, maxSchemeNameLength), base: scheme.base, colors: palette, fonts,
+    result.push({ id: scheme.id, name: scheme.name.slice(0, maxSchemeNameLength), base, colors: palette, fonts,
       documentHeaderUsesTheme: scheme.documentHeaderUsesTheme === true ? true : undefined,
       fileTypes: readFileTypeGroups(scheme.fileTypes) });
   }

@@ -162,7 +162,7 @@ async function testProfiles(browser, userAgent) {
     await page.evaluate((key) => {
       const prefs = JSON.parse(localStorage.getItem(key));
       prefs.activeSettingsProfile = "missing";
-      prefs.settingsProfiles[0].values.theme = "slate";
+      prefs.settingsProfiles[0].values.theme = "midnight";
       prefs.settingsProfiles[0].values.colorSchemeId = "missing-color";
       localStorage.setItem(key, JSON.stringify(prefs));
     }, storageKey);
@@ -172,9 +172,9 @@ async function testProfiles(browser, userAgent) {
     await openProfiles();
     await choose("Before switching");
     await button(switchDialog, "Discard and switch").click();
-    await options.getByText("The saved color scheme is missing. The profile uses Slate.", { exact: true }).waitFor();
+    await options.getByText("The saved color scheme is missing. The profile uses Midnight blue.", { exact: true }).waitFor();
     await done();
-    await waitTheme("slate");
+    await waitTheme("midnight");
     assert.deepEqual((await preferences()).profileBindings.clearMarks, []);
   } finally {
     await page.close();
