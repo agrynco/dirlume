@@ -13,7 +13,7 @@ const fallbackLabels = {
 function RevisionInput({ label, initial, repository }: { label: string; initial?: string; repository: GitRepository }) {
   const options = repository.branches.map(({ name, reference, tip }) => ({ name, reference, value: tip }));
   const tags = repository.tags ?? [];
-  const [kind, setKind] = useState(() => options.find(({ value }) => value === initial)?.reference ??
+  const [kind, setKind] = useState(() => options.find(({ value, reference }) => value === initial || reference === initial)?.reference ??
     (initial && initial === repository.head ? "HEAD" : ""));
   const value = options.find(({ reference }) => reference === kind)?.value ??
     (kind === "HEAD" ? repository.head ?? "" : kind);

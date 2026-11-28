@@ -535,6 +535,25 @@ export interface GitLfsState { installed: boolean; version: string | null; statu
 export type GitLfsAction = "fetch" | "pull" | "push";
 export interface GitBisectState { start: string; head: string; log: string; concluded: boolean }
 export type GitBisectAction = "good" | "bad" | "skip" | "reset";
+export type GitSetupAction = "clone" | "init" | "open";
+export interface GitRemote { name: string; fetchUrls: string[]; pushUrls: string[]; stamp: number[] }
+export type GitRemoteAction = "add" | "rename" | "setFetchUrl" | "setPushUrl" | "clearPushUrl" | "remove";
+export interface GitUpstream {
+  headRef: string | null;
+  head: string | null;
+  reference: string | null;
+  remote: string | null;
+  remoteRef: string | null;
+  tip: string | null;
+}
+export interface GitRemoteRefReview {
+  remote: GitRemote;
+  pushUrl: string;
+  source: string | null;
+  object: string | null;
+  destination: string;
+  deleteTip: string | null;
+}
 
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
@@ -855,6 +874,20 @@ export const api = {
     invoke<void>("git_start_bisect", { root, expectedRef, expectedHead, good, bad }),
   gitUpdateBisect: (root: string, review: GitBisectState, action: GitBisectAction) =>
     invoke<void>("git_update_bisect", { root, review, action }),
+  gitRepositorySetup: (action: GitSetupAction, path: string, url: string | null) =>
+    invoke<string>("git_repository_setup", { action, path, url }),
+  gitRemotes: (root: string) => invoke<GitRemote[]>("git_remotes", { root }),
+  gitConfigureRemote: (root: string, action: GitRemoteAction, remote: GitRemote | null, value: string, url: string | null) =>
+    invoke<void>("git_configure_remote", { root, action, remote, value, url }),
+  gitFetchRemote: (root: string, remote: GitRemote, prune: boolean) =>
+    invoke<string>("git_fetch_remote", { root, remote, prune }),
+  gitUpstream: (root: string) => invoke<GitUpstream>("git_upstream", { root }),
+  gitSetUpstream: (root: string, expected: GitUpstream, reference: string | null) =>
+    invoke<void>("git_set_upstream", { root, expected, reference }),
+  gitRemoteRefReview: (root: string, remote: GitRemote, source: string | null, destination: string) =>
+    invoke<GitRemoteRefReview>("git_remote_ref_review", { root, remote, source, destination }),
+  gitTransferRemoteRef: (root: string, review: GitRemoteRefReview) =>
+    invoke<string>("git_transfer_remote_ref", { root, review }),
   gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
