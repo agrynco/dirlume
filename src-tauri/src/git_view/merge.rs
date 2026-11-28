@@ -29,8 +29,18 @@ pub struct MergePlan {
 #[derive(Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeSession {
+    operation: Operation,
     head: String,
     sources: Vec<String>,
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum Operation {
+    Merge,
+    CherryPick,
+    Revert,
+    Rebase,
 }
 
 #[derive(Deserialize, PartialEq, Serialize)]
@@ -49,8 +59,8 @@ pub struct MergeConflict {
 
 #[derive(Serialize)]
 pub struct MergeState {
-    session: MergeSession,
-    conflicts: Vec<MergeConflict>,
+    pub(super) session: MergeSession,
+    pub(super) conflicts: Vec<MergeConflict>,
 }
 
 #[derive(Serialize)]
@@ -83,7 +93,7 @@ pub enum Resolution {
     Working,
 }
 
-fn verify_worktree(git: &Path, root: &Path) -> Result<()> {
+pub(super) fn verify_worktree(git: &Path, root: &Path) -> Result<()> {
     let actual = line(success(run(git, root, &["rev-parse", "--show-toplevel"])?)?)?;
     if Path::new(&actual)
         .canonicalize()
@@ -95,21 +105,42 @@ fn verify_worktree(git: &Path, root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn merge_state(git: &Path, root: &Path) -> Result<Option<MergeState>> {
-    verify_worktree(git, root)?;
-    let path = writes::git_path(git, root, "MERGE_HEAD")?;
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(super::process_error(error)),
-    };
-    let sources = contents
-        .lines()
-        .map(|value| oid(value).map(str::to_owned))
-        .collect::<Result<Vec<_>>>()?;
-    if sources.is_empty() {
-        return Err(GitError::Unreadable);
+fn read_state_file(git: &Path, root: &Path, name: &str) -> Result<Option<String>> {
+    match fs::read_to_string(writes::git_path(git, root, name)?) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(super::process_error(error)),
     }
+}
+
+fn active_operation(git: &Path, root: &Path) -> Result<Option<(Operation, Vec<String>)>> {
+    for (operation, name) in [
+        (Operation::Rebase, "rebase-merge/onto"),
+        (Operation::Rebase, "rebase-apply/onto"),
+        (Operation::Merge, "MERGE_HEAD"),
+        (Operation::CherryPick, "CHERRY_PICK_HEAD"),
+        (Operation::Revert, "REVERT_HEAD"),
+    ] {
+        let Some(contents) = read_state_file(git, root, name)? else {
+            continue;
+        };
+        let sources = contents
+            .lines()
+            .map(|value| oid(value).map(str::to_owned))
+            .collect::<Result<Vec<_>>>()?;
+        if sources.is_empty() {
+            return Err(GitError::Unreadable);
+        }
+        return Ok(Some((operation, sources)));
+    }
+    Ok(None)
+}
+
+pub(super) fn merge_state(git: &Path, root: &Path) -> Result<Option<MergeState>> {
+    verify_worktree(git, root)?;
+    let Some((operation, sources)) = active_operation(git, root)? else {
+        return Ok(None);
+    };
     let head = line(success(run(
         git,
         root,
@@ -145,7 +176,11 @@ fn merge_state(git: &Path, root: &Path) -> Result<Option<MergeState>> {
         });
     }
     Ok(Some(MergeState {
-        session: MergeSession { head, sources },
+        session: MergeSession {
+            operation,
+            head,
+            sources,
+        },
         conflicts: conflicts.into_values().collect(),
     }))
 }
@@ -204,12 +239,28 @@ fn plan(git: &Path, root: &Path, source: &str) -> WriteResult<MergePlan> {
     })
 }
 
-fn execute(output: Output) -> WriteResult<()> {
+pub(super) fn execute(output: Output) -> WriteResult<()> {
     if output.status.success() {
         return Ok(());
     }
     let detail = String::from_utf8_lossy(&output.stderr);
     Err(WriteError::Failed(detail.trim().to_owned()))
+}
+
+pub(super) fn operation_result(
+    git: &Path,
+    root: &Path,
+    operation: Operation,
+    output: Output,
+) -> WriteResult<()> {
+    if !output.status.success()
+        && merge_state(git, root)?.is_some_and(|state| {
+            state.session.operation == operation && !state.conflicts.is_empty()
+        })
+    {
+        return Ok(());
+    }
+    execute(output)
 }
 
 fn start(git: &Path, root: &Path, review: &MergeReview, mode: MergeMode) -> WriteResult<()> {
@@ -226,13 +277,7 @@ fn start(git: &Path, root: &Path, review: &MergeReview, mode: MergeMode) -> Writ
         root,
         &["merge", option, "--no-edit", "--", oid(&review.source_tip)?],
     )?;
-    if !output.status.success()
-        && merge_state(git, root)?.is_some_and(|state| !state.conflicts.is_empty())
-    {
-        // Conflicts are part of an active merge and can be resolved from its actual state.
-        return Ok(());
-    }
-    execute(output)
+    operation_result(git, root, Operation::Merge, output)
 }
 
 fn matching_state(git: &Path, root: &Path, session: &MergeSession) -> WriteResult<MergeState> {
@@ -352,15 +397,39 @@ fn resolve(
     execute(run(git, root, &["--literal-pathspecs", "add", "--", path])?)
 }
 
-fn finish(git: &Path, root: &Path, session: &MergeSession, abort: bool) -> WriteResult<()> {
+pub(super) fn finish(
+    git: &Path,
+    root: &Path,
+    session: &MergeSession,
+    abort: bool,
+) -> WriteResult<()> {
     let state = matching_state(git, root, session)?;
-    if abort {
-        return execute(run(git, root, &["merge", "--abort"])?);
-    }
-    if !state.conflicts.is_empty() {
+    if !abort && !state.conflicts.is_empty() {
         return Err(WriteError::OperationInProgress);
     }
-    execute(run(git, root, &["commit", "--no-edit"])?)
+    let operation = session.operation;
+    if operation == Operation::Merge && !abort {
+        return execute(run(git, root, &["commit", "--no-edit"])?);
+    }
+    if operation == Operation::Rebase && !abort {
+        let output = super::rebase::continue_rebase(git, root)?;
+        return operation_result(git, root, operation, output);
+    }
+    let subcommand = match operation {
+        Operation::Merge => "merge",
+        Operation::CherryPick => "cherry-pick",
+        Operation::Revert => "revert",
+        Operation::Rebase => "rebase",
+    };
+    let argument = if abort { "--abort" } else { "--continue" };
+    let output = super::command(git, root, &[subcommand, argument])
+        .env("GIT_EDITOR", "true")
+        .output()?;
+    if abort {
+        execute(output)
+    } else {
+        operation_result(git, root, operation, output)
+    }
 }
 
 async fn write<T: Send + 'static>(
@@ -426,6 +495,57 @@ pub async fn git_finish_merge(root: String, session: MergeSession, abort: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resumes_cherry_pick_and_aborts_revert_from_git_state() {
+        let git = executable().unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        let cli = |args: &[&str]| super::super::tests::git(root, args);
+        cli(&["init", "-b", "main"]);
+        cli(&["config", "user.name", "Fixture"]);
+        cli(&["config", "user.email", "fixture@example.invalid"]);
+        cli(&["config", "commit.gpgsign", "false"]);
+        cli(&["config", "core.autocrlf", "false"]);
+        let commit = |value: &str| {
+            fs::write(root.join("shared.txt"), format!("{value}\n")).unwrap();
+            cli(&["add", "--", "shared.txt"]);
+            cli(&["commit", "-m", value]);
+            cli(&["rev-parse", "HEAD"])
+        };
+        commit("Base");
+        cli(&["switch", "-c", "topic"]);
+        let topic = commit("Topic");
+        cli(&["switch", "main"]);
+        commit("Main");
+        let picking = run(&git, root, &["cherry-pick", "--", &topic]).unwrap();
+        operation_result(&git, root, Operation::CherryPick, picking).unwrap();
+        let state = merge_state(&git, root).unwrap().unwrap();
+        assert!(state.session.operation == Operation::CherryPick);
+        resolve(
+            &git,
+            root,
+            &state.session,
+            &state.conflicts[0],
+            Resolution::Theirs,
+        )
+        .unwrap();
+        finish(&git, root, &state.session, false).unwrap();
+        assert!(merge_state(&git, root).unwrap().is_none());
+        let picked = cli(&["rev-parse", "HEAD"]);
+        let edited = commit("Later edit");
+        let reverting = run(&git, root, &["revert", "--no-edit", "--", &picked]).unwrap();
+        operation_result(&git, root, Operation::Revert, reverting).unwrap();
+        let state = merge_state(&git, root).unwrap().unwrap();
+        assert!(state.session.operation == Operation::Revert);
+        finish(&git, root, &state.session, true).unwrap();
+        assert_eq!(cli(&["rev-parse", "HEAD"]), edited);
+        assert_eq!(
+            fs::read_to_string(root.join("shared.txt")).unwrap(),
+            "Later edit\n"
+        );
+        assert!(merge_state(&git, root).unwrap().is_none());
+    }
 
     #[test]
     fn previews_stale_refs_and_recovers_conflicted_merges() {

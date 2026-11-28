@@ -4,7 +4,8 @@ import { api, type GitBranch as Branch, type GitBranchAction, type GitBranchRequ
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitChanges, writeError } from "./GitChanges";
-import { GitMerge } from "./GitMerge";
+import { GitHistoryTools } from "./GitHistoryTools";
+import { GitMerge, gitOperationStatus } from "./GitMerge";
 import { GitRevisionComparison } from "./GitRevisionComparison";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
@@ -28,7 +29,7 @@ const branchActions: Record<GitBranchAction, string> = {
   rename: "Rename branch", delete: "Delete branch",
 };
 
-function ChangeDetails({ root, commit }: { root: string; commit: GitCommit }) {
+function ChangeDetails({ root, commit, onTarget }: { root: string; commit: GitCommit; onTarget: (hash: string) => void }) {
   const [details, setDetails] = useState<GitDetails | null>(null);
   const [error, setError] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -43,6 +44,7 @@ function ChangeDetails({ root, commit }: { root: string; commit: GitCommit }) {
       <code title={commit.hash}>{commit.shortHash}</code>
       <Button onClick={() => { void api.copyText(commit.hash).then(() => setCopyStatus(t("Commit hash copied.")),
         () => setCopyStatus(t("Could not copy the commit hash."))); }}>{t("Copy commit hash")}</Button>
+      <Button onClick={() => onTarget(commit.hash)}>{t("Use in history actions")}</Button>
     </header>
     {copyStatus && <p role="status">{copyStatus}</p>}
     {error ? <p role="alert">{error}</p> : details ? <>
@@ -58,7 +60,7 @@ function ChangeDetails({ root, commit }: { root: string; commit: GitCommit }) {
   </section>;
 }
 
-function History({ root, tip, file }: { root: string; tip?: string; file?: string }) {
+function History({ root, tip, file, onTarget }: { root: string; tip?: string; file?: string; onTarget: (hash: string) => void }) {
   const [result, setResult] = useState<GitHistory>({ commits: [], nextOffset: tip ? 0 : null });
   const [request, setRequest] = useState<{ offset: number } | null>(tip ? { offset: 0 } : null);
   const [open, setOpen] = useState<string | null>(null);
@@ -88,7 +90,7 @@ function History({ root, tip, file }: { root: string; tip?: string; file?: strin
             <> <span aria-hidden="true">·</span> {formatDate(Math.floor(Date.parse(commit.date) / 1000))}</>}</small></span>
         <code>{commit.shortHash}</code>
       </Button>
-      {open === commit.hash && <ChangeDetails root={root} commit={commit} />}
+      {open === commit.hash && <ChangeDetails root={root} commit={commit} onTarget={onTarget} />}
     </div>)}
     {request && <p className="pane-empty" role="status">{t("Loading commits…")}</p>}
     {error && <p className="pane-empty git-error" role="alert">{error}</p>}
@@ -147,7 +149,7 @@ function Blame({ root, tip, path }: { root: string; tip: string; path: string })
     : <p>{t("This file has no lines.")}</p>;
 }
 
-function FileRevision({ root, tip }: { root: string; tip: string }) {
+function FileRevision({ root, tip, onTarget }: { root: string; tip: string; onTarget: (hash: string) => void }) {
   const [path, setPath] = useState("");
   const [opened, setOpened] = useState<{ path: string; mode: "history" | "blame" }>();
   return <div className="git-scroll git-revision-comparison">
@@ -162,7 +164,7 @@ function FileRevision({ root, tip }: { root: string; tip: string }) {
       <Button type="button" disabled={!path} onClick={() => setOpened({ path, mode: "blame" })}>{t("Show blame")}</Button>
     </form>
     {opened && (opened.mode === "history"
-      ? <History key={opened.path} root={root} tip={tip} file={opened.path} />
+      ? <History key={opened.path} root={root} tip={tip} file={opened.path} onTarget={onTarget} />
       : <Blame key={opened.path} root={root} tip={tip} path={opened.path} />)}
   </div>;
 }
@@ -181,7 +183,8 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState("");
   const [changes, setChanges] = useState(false);
-  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge">("history");
+  const [historyMode, setHistoryMode] = useState<"history" | "graph" | "file" | "compare" | "merge" | "tools">("history");
+  const [historyTarget, setHistoryTarget] = useState<string>();
   const [mergeState, setMergeState] = useState<GitMergeState | null>(null);
   const [selectedChange, setSelectedChange] = useState("");
   const [draft, setDraft] = useState<{ root: string; message: string }>();
@@ -220,6 +223,14 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
   const checkedOut = repository?.headRef ?? "HEAD";
   const branch = repository?.branches.find(({ reference }) => reference === selected);
   const tip = branch?.tip ?? (selected === checkedOut ? repository?.head ?? undefined : undefined);
+  function useHistoryTarget(hash: string) {
+    if (mergeState) {
+      setHistoryMode("merge");
+      return;
+    }
+    setHistoryTarget(hash);
+    setHistoryMode("tools");
+  }
   const allBranches: Branch[] = repository ? [...repository.branches] : [];
   if (repository && !allBranches.some(({ reference }) => reference === checkedOut)) {
     allBranches.unshift({ reference: checkedOut, name: repository.headRef?.replace(/^refs\/heads\//, "") ?? t("Detached HEAD"),
@@ -346,19 +357,24 @@ export default function GitView({ path, side, refresh, onRefresh, onClose, onOpe
           <Button disabled={!repository || !!error} aria-pressed={historyMode === "compare"}
             onClick={() => setHistoryMode(historyMode === "compare" ? "history" : "compare")}>{t("Compare revisions")}</Button>
           <Button disabled={(!branch || selected === checkedOut) && !mergeState} aria-pressed={historyMode === "merge"}
-            onClick={() => setHistoryMode(historyMode === "merge" ? "history" : "merge")}>{t(mergeState ? "Merge in progress" : "Merge branch")}</Button>
+            onClick={() => setHistoryMode(historyMode === "merge" ? "history" : "merge")}>{t(mergeState ? gitOperationStatus(mergeState.session.operation) : "Merge branch")}</Button>
+          <Button disabled={!repository || !!error || !!mergeState} aria-pressed={historyMode === "tools"}
+            onClick={() => { setHistoryTarget(undefined); setHistoryMode(historyMode === "tools" ? "history" : "tools"); }}>{t("History actions")}</Button>
         </div>
       </header>
       {repository && !changes && (historyMode === "merge"
         ? <GitMerge key={repository.root} root={repository.root} source={branch && selected !== checkedOut ? branch.reference : ""}
           state={mergeState} refresh={refresh} onRefresh={onRefresh} onOpen={onOpen} canEdit={canEdit} />
+        : historyMode === "tools"
+        ? <GitHistoryTools key={repository.root + ":" + (historyTarget ?? "")} repository={repository}
+          initialTarget={historyTarget ?? tip} initialRef={historyTarget ? undefined : branch?.reference} onRefresh={onRefresh} />
         : historyMode === "compare"
         ? <GitRevisionComparison key={repository.root + ":" + selected + ":" + refresh} repository={repository} target={tip} />
         : historyMode === "graph" && tip
           ? <CommitGraph key={tip + ":" + refresh} root={repository.root} tip={tip} />
           : historyMode === "file" && tip
-            ? <FileRevision key={tip + ":" + refresh} root={repository.root} tip={tip} />
-          : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} />)}
+            ? <FileRevision key={tip + ":" + refresh} root={repository.root} tip={tip} onTarget={useHistoryTarget} />
+          : <History key={selected + ":" + (tip ?? "") + ":" + refresh} root={repository.root} tip={tip} onTarget={useHistoryTarget} />)}
     </section>
     {branchReview && <Dialog title={t(branchActions[branchReview.request.action])} helpTopic="gitView"
       onClose={branchWorking ? undefined : () => setBranchReview(undefined)} footer={<>

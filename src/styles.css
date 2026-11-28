@@ -1014,6 +1014,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-revision-comparison h3 { margin: 0; font-size: 1em; }
 .git-revision-commits { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 8px; }
 .git-revision-comparison .git-patch { margin-block-start: 8px; max-block-size: 24rem; }
+.git-rebase-list { display: grid; gap: 6px; margin-block: 0; }
+.git-rebase-list > li { padding: 6px 0; border-block-end: 1px solid var(--line); }
+.git-rebase-list p { margin: 0 0 4px; }
+.git-rebase-list .git-branch-actions { padding-inline: 0; }
 .git-branch-group { margin-block-end: 5px; }
 .git-branch-group h3, .git-details h3 { margin: 0; padding: 4px 8px; color: var(--panel-muted); font: 600 .88em/1.4 var(--ui-font); }
 .git-branch-group button, .git-commit > button {

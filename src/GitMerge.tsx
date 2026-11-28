@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type GitConflictPreview, type GitMergeConflict, type GitMergeMode, type GitMergePlan,
-  type GitMergeResolution, type GitMergeReview, type GitMergeSession, type GitMergeState, type NamedFile } from "./api";
+  type GitMergeResolution, type GitMergeReview, type GitMergeSession, type GitMergeState, type GitOperation, type NamedFile } from "./api";
 import { bookmarkFile } from "./fileBookmarks";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
@@ -11,6 +11,16 @@ const sections = [["base", "Base"], ["ours", "Ours"], ["theirs", "Theirs"]] as c
 const resolutionLabels: Record<GitMergeResolution, string> = {
   ours: "Use ours", theirs: "Use theirs", working: "Stage working result",
 };
+const operationLabels: Record<GitOperation, { status: string; resume: string; abort: string }> = {
+  merge: { status: "Merge in progress", resume: "Continue merge", abort: "Abort merge" },
+  cherryPick: { status: "Cherry-pick in progress", resume: "Continue cherry-pick", abort: "Abort cherry-pick" },
+  revert: { status: "Revert in progress", resume: "Continue revert", abort: "Abort revert" },
+  rebase: { status: "Rebase in progress", resume: "Continue rebase", abort: "Abort rebase" },
+};
+
+export function gitOperationStatus(operation: GitOperation) {
+  return operationLabels[operation].status;
+}
 
 type Confirmation = { action: "start"; mode: GitMergeMode; review: GitMergeReview } |
   { action: "finish"; abort: boolean; session: GitMergeSession };
@@ -61,7 +71,7 @@ function Conflict({ root, state, conflict, busy, execute, onOpen, canEdit }: {
       <p><code>{root}</code></p><p>{conflict.path}</p>
       {review !== "working" && <p>{t(conflict[review]
         ? "This replaces the working result with the selected version."
-        : "This side deleted the path. Confirm to remove it from the merge result.")}</p>}
+        : "This side deleted the path. Confirm to remove it from the result.")}</p>}
     </Dialog>}
   </section>;
 }
@@ -99,7 +109,9 @@ export function GitMerge({ root, source, state, refresh, onRefresh, onOpen, canE
     }
   }
   const selection = state?.conflicts.find(({ path }) => path === selected) ?? state?.conflicts[0];
-  const reviewTitle = confirmation?.action === "finish" ? confirmation.abort ? "Abort merge" : "Continue merge" :
+  const labels = operationLabels[state?.session.operation ?? "merge"];
+  const confirmLabels = confirmation?.action === "finish" ? operationLabels[confirmation.session.operation] : labels;
+  const reviewTitle = confirmation?.action === "finish" ? confirmation.abort ? confirmLabels.abort : confirmLabels.resume :
     confirmation?.mode === "fastForward" ? "Fast-forward only" : "Create merge commit";
   function applyReview() {
     setConfirmation(undefined);
@@ -113,14 +125,14 @@ export function GitMerge({ root, source, state, refresh, onRefresh, onOpen, canE
     <p><code>{root}</code></p>
     {error && <p role="alert">{error}</p>}
     {state ? <>
-      <p role="status">{t("Merge in progress")}</p>
+      <p role="status">{t(labels.status)}</p>
       <p><code title={state.session.head}>{state.session.head.slice(0, 12)}</code>
         {" ← "}{state.session.sources.map((hash) => <code key={hash} title={hash}>{hash.slice(0, 12)}{" "}</code>)}</p>
       <div className="git-branch-actions">
         <Button disabled={pending || state.conflicts.length > 0} onClick={() =>
-          setConfirmation({ action: "finish", abort: false, session: state.session })}>{t("Continue merge")}</Button>
+          setConfirmation({ action: "finish", abort: false, session: state.session })}>{t(labels.resume)}</Button>
         <Button disabled={pending} onClick={() =>
-          setConfirmation({ action: "finish", abort: true, session: state.session })}>{t("Abort merge")}</Button>
+          setConfirmation({ action: "finish", abort: true, session: state.session })}>{t(labels.abort)}</Button>
       </div>
       <section aria-label={t("Unresolved paths")}>
         <h3>{t("Unresolved paths")}</h3>
@@ -150,7 +162,7 @@ export function GitMerge({ root, source, state, refresh, onRefresh, onOpen, canE
         <Button onClick={applyReview}>{t(reviewTitle)}</Button></>}>
       <p><code>{root}</code></p>
       {confirmation.action === "finish"
-        ? <p>{t(confirmation.abort ? "Abort the active merge and discard changes made to resolve it." : "Commit the resolved merge.")}</p>
+        ? <p>{t(confirmation.abort ? "Abort the active operation and discard changes made to resolve it." : "Continue the active Git operation.")}</p>
         : <p>{confirmation.review.sourceRef} → {confirmation.review.headRef}</p>}
     </Dialog>}
   </div>;

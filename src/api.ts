@@ -457,7 +457,8 @@ export interface GitMergePlan {
   upToDate: boolean;
   changes: GitDetails["changes"];
 }
-export interface GitMergeSession { head: string; sources: string[] }
+export type GitOperation = "merge" | "cherryPick" | "revert" | "rebase";
+export interface GitMergeSession { operation: GitOperation; head: string; sources: string[] }
 interface GitMergeVersion { mode: string; oid: string }
 export interface GitMergeConflict {
   path: string;
@@ -475,6 +476,44 @@ export interface GitConflictPreview {
 }
 export type GitMergeResolution = "ours" | "theirs" | "working";
 export type GitMergeMode = "fastForward" | "mergeCommit";
+
+export type GitHistoryAction = "cherryPick" | "revert" | "softReset" | "mixedReset" | "hardReset";
+export interface GitHistoryReview {
+  action: GitHistoryAction;
+  head: string;
+  headRef: string | null;
+  target: string;
+  parent: number | null;
+  index: GitIndexSnapshot;
+  trackedChanges: number[] | null;
+}
+export interface GitHistoryPlan {
+  review: GitHistoryReview;
+  parents: string[];
+  paths: GitDetails["changes"];
+  localChanges: GitWorkingChange[];
+}
+export interface GitRebaseReview {
+  head: string;
+  headRef: string;
+  base: string;
+  baseRef: string | null;
+  index: GitIndexSnapshot;
+}
+export interface GitRebasePlan { review: GitRebaseReview; commits: GitCommit[]; merges: string[] }
+export type GitRebaseAction = "pick" | "reword" | "squash" | "drop";
+export interface GitRebaseStep { hash: string; action: GitRebaseAction; message: string | null }
+export interface GitReflogEntry { hash: string; selector: string; action: string; subject: string }
+export interface GitReflog { entries: GitReflogEntry[]; nextOffset: number | null }
+export interface GitPushReview {
+  head: string;
+  headRef: string;
+  remote: string;
+  destination: string;
+  expected: string;
+  url: string;
+  urlDigest: number[];
+}
 
 export type GitChangeGroup = "staged" | "unstaged" | "untracked";
 export type GitWorkingChange = GitDetails["changes"][number] & { group: GitChangeGroup };
@@ -728,6 +767,21 @@ export const api = {
     invoke<void>("git_resolve_merge", { root, session, conflict, resolution }),
   gitFinishMerge: (root: string, session: GitMergeSession, abort: boolean) =>
     invoke<void>("git_finish_merge", { root, session, abort }),
+  gitHistoryPlan: (root: string, action: GitHistoryAction, target: string, parent: number | null) =>
+    invoke<GitHistoryPlan>("git_history_plan", { root, action, target, parent }),
+  gitEditHistory: (root: string, review: GitHistoryReview) =>
+    invoke<void>("git_edit_history", { root, review }),
+  gitRebasePlan: (root: string, target: string) => invoke<GitRebasePlan>("git_rebase_plan", { root, target }),
+  gitStartRebase: (root: string, review: GitRebaseReview, steps: GitRebaseStep[]) =>
+    invoke<void>("git_start_rebase", { root, review, steps }),
+  gitReflog: (root: string, offset: number) => invoke<GitReflog>("git_reflog", { root, offset }),
+  gitRecoverCommit: (root: string, target: string, name: string) =>
+    invoke<void>("git_recover_commit", { root, target, name }),
+  gitPushRemotes: (root: string) => invoke<string[]>("git_push_remotes", { root }),
+  gitPushLeasePlan: (root: string, remote: string, branch: string) =>
+    invoke<GitPushReview>("git_push_lease_plan", { root, remote, branch }),
+  gitPushWithLease: (root: string, review: GitPushReview) =>
+    invoke<void>("git_push_with_lease", { root, review }),
   gitIndexState: (root: string) => invoke<GitWorkingIndex>("git_index_state", { root }),
   gitUpdateIndex: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange, action: GitIndexAction, replace: boolean) =>
     invoke<void>("git_update_index", { root, expected, change, action, replace }),

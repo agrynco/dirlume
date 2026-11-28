@@ -175,6 +175,14 @@ fn snapshot(git: &Path, root: &Path) -> Result<IndexState> {
     })
 }
 
+pub(super) fn review_index(git: &Path, root: &Path) -> WriteResult<IndexSnapshot> {
+    let state = snapshot(git, root)?;
+    if state.write_blocked {
+        return Err(WriteError::OperationInProgress);
+    }
+    Ok(state.snapshot)
+}
+
 struct IndexWrite {
     index: PathBuf,
     lock: TempPath,

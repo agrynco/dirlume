@@ -83,7 +83,7 @@ function writeFailure(error: unknown) {
 export function writeError(error: unknown) {
   const failure = writeFailure(error);
   const message = failure?.kind ? writeErrors[failure.kind] : undefined;
-  return message ? t(message) : failure?.detail || t("Git could not complete the operation.");
+  return message ? t(message) : t(failure?.detail || "Git could not complete the operation.");
 }
 
 export function GitChanges({ side, root, refresh, selected, onSelect, header, repository, onOpen, canEdit, onRefresh,
