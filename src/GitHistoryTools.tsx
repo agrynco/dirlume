@@ -5,7 +5,7 @@ import {
 } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
-import { writeError } from "./GitChanges";
+import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
 const actionLabels = {
