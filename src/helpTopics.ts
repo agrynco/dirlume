@@ -9,7 +9,7 @@ const controlHelpTopics = {
   paneSources: { title: "Drives and pane sources", keys: ["leftLocations", "rightLocations"] },
   paneFilter: { title: "Filter folder", keys: ["filter", "search", "quickSearch"] },
   paneColumns: { title: "Columns and panel modes", keys: [] },
-  paneSelection: { title: "Current row and marks", keys: ["mark", "selectUpRow", "selectDownRow"] },
+  paneSelection: { title: "Current row and marks", keys: ["mark", "selectUpRow", "selectDownRow", "selectLeftRow", "selectRightRow"] },
   paneStatus: { title: "Pane details and progress", keys: [] },
   paneViews: { title: "File pane view", keys: [] },
   fileBookmarks: { title: "File bookmarks", keys: ["bookmarkLine", "fileBookmarks"] },
@@ -34,7 +34,7 @@ const { filePanels, viewer, editor, terminal } = featureOptions;
 
 export const helpTopics = {
   ...controlHelpTopics,
-  files: { title: filePanels.label, keys: ["switchPane", "open", "parent", "mark", "selectUpRow", "selectDownRow", "hidden", "leftLocations", "rightLocations", "addFolderShortcut"] },
+  files: { title: filePanels.label, keys: ["switchPane", "open", "parent", "mark", "selectUpRow", "selectDownRow", "selectLeftRow", "selectRightRow", "hidden", "leftLocations", "rightLocations", "addFolderShortcut"] },
   operations: { title: "File operations", keys: ["copy", "move", "mkdir", "recycle", "delete", "copyClipboard", "pasteClipboard"] },
   archives: { title: "Archives", keys: ["createArchive", "open", "parent", "copy", "view", "edit", "recycle"] },
   search: { title: "Find files", keys: ["quickSearch", "search"] },

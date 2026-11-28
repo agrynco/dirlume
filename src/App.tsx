@@ -217,7 +217,7 @@ const rowCommands = {
 };
 
 function isRangeCommand(command: Command) {
-  return command === "selectUpRow" || command === "selectDownRow";
+  return command === "selectUpRow" || command === "selectDownRow" || command === "selectLeftRow" || command === "selectRightRow";
 }
 
 function isTerminalInput(target: EventTarget | null) {
@@ -3429,6 +3429,14 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
       }
       if (isRangeCommand(command) || command === "mark") return;
     }
+    if (command === "selectLeftRow" || command === "selectRightRow") {
+      const items = entries[active];
+      updatePane(active, (pane) => {
+        const index = paneCursorIndex(pane, items);
+        return index < 0 ? pane : toggleMarkAndMoveCursor(pane, items, index, index);
+      });
+      command = command === "selectLeftRow" ? "leftRow" : "rightRow";
+    }
     if (command in rowCommands) {
       if (trees[active].enabled && currentRow && (command === "leftRow" || command === "rightRow")) {
         if (command === "rightRow" && currentRow.tree?.expanded) {
@@ -3748,7 +3756,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
     if (command === "copyItemNames" && (!onFiles || inField || !canCopyItemNames)) return;
     if (command === "attributes" && (!onFiles || inField || panelsHidden || processPanels[active])) return;
     if (isRangeCommand(command) && (!onFiles || processPanels[active])) return;
-    const fileNavigation = command in rowCommands || command === "open";
+    const fileNavigation = command in rowCommands || command === "open" || isRangeCommand(command);
     if (inField && !fileKey && command !== "terminal" && command !== "toggleTerminal" &&
         (!inCommandLine || (fileNavigation && (commandLine || panelsHidden)))) return;
     if ((fileNavigation || command === "switchPane" || command === "mark") && !onFiles && !inCommandLine) return;
