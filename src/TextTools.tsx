@@ -621,8 +621,9 @@ function WholeTextWindow({ file, editing, active, theme, shortcuts, fontSizes, v
         {diagnosticVisible && <DiagnosticLog source={document.text} />}
         <div className="source-surface" hidden={!sourceVisible}>
           <Suspense fallback={<p className="text-view" role="status">{t("Loading text tools…")}</p>}>
-            <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving} active={active && sourceVisible}
+            <CodeSurface key={sourceRevision} file={file} editing={editing} locked={saving || !writable} active={active && sourceVisible}
               fontSize={fontSize} readingWidth={editing ? undefined : viewerContentWidth} value={text} onChange={setText}
+              indentationShortcuts={shortcuts}
               textTabWidth={textTabWidth} showTextWhitespace={showTextWhitespace}
               bookmarkLines={bookmarkLines} bookmarkJump={bookmarkJump && "line" in bookmarkJump ? bookmarkJump : undefined} onBookmarkResult={setBookmarkResult}
               onBookmarkLine={localBookmarkPath ? (line, lineText) =>

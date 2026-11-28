@@ -168,6 +168,8 @@ export const commands = {
   documentSelectAll: { label: "Select all document text", key: `${documentModifier}+A` },
   documentUndo: { label: "Undo text edit", key: `${documentModifier}+Z` },
   documentRedo: { label: "Redo text edit", key: macDocumentKeys ? "Meta+Shift+Z" : "Ctrl+Y" },
+  documentInsertTab: { label: "Insert tab in Editor", key: "Tab" },
+  documentOutdent: { label: "Outdent lines in Editor", key: "Shift+Tab" },
   documentStart: { label: "Go to start of document", key: macDocumentKeys ? "Meta+ArrowUp" : "Ctrl+Home" },
   documentEnd: { label: "Go to end of document", key: macDocumentKeys ? "Meta+ArrowDown" : "Ctrl+End" },
   bookmarkLine: { label: "Bookmark line", key: `${documentModifier}+Alt+B` },

@@ -118,6 +118,7 @@ Drag the Options title bar to position it independently of the main window. Drag
 | Alt+letter | Jump to a matching name in the current pane. Refine the prefix in the Quick search field. |
 | Alt+F7 | Find files by name or mask in the active folder and its subfolders. |
 | F2 | Rename the selected file or folder in its row. |
+| Tab / Shift+Tab in editable text | Insert a tab character or outdent the current or selected lines. |
 | Configurable | Open **User Menu** from a local file pane. Set **Open User Menu** in **Options → Keyboard shortcuts**. |
 | Shift+F1 | Create an archive from local files and folders. |
 | F7 / F8 or Delete / Shift+Delete | Create folders or directory links, send selected items to Trash, or permanently delete after confirmation. |
