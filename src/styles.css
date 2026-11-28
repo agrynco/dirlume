@@ -1164,11 +1164,9 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-file-version-heading + .git-file-version-heading { border-inline-start: 1px solid var(--line); }
 .git-file-version-heading small, .git-file-version-heading code { color: var(--panel-muted); }
 .git-file-feedback { margin: 8px; overflow-wrap: anywhere; }
-.git-file-rows {
-  --comparison-columns: minmax(0, 1fr) 0px minmax(0, 1fr);
-  flex: 1; min-height: 0; overflow: auto; color: var(--compare-ink); background: var(--compare-bg);
-  font: var(--compare-size)/1.5 var(--compare-font);
-}
+.file-comparison-embedded { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.file-comparison-embedded .comparison { flex: 1; min-height: 0; scroll-padding-block-start: var(--comparison-header-block-size, 2.4em); }
+.file-comparison-embedded .comparison-head > .git-file-version-heading { min-width: 0; flex: 1; }
 .git-working-comparison { flex: none; display: grid; gap: 8px; overflow-wrap: anywhere; }
 .git-working-comparison-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .git-working-comparison-controls > div { flex: 1 1 12rem; min-width: 0; }

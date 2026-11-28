@@ -1,7 +1,7 @@
 use super::{
     bounded, comparison::resolve_commit, directory, executable, oid, optional_line, parse_changes,
     query, relative_file, run, text_patch, working_changes, working_file, worktree_root, Change,
-    Commit, GitError, Result, PAGE_SIZE, PATCH_LIMIT, STATUS_LIMIT,
+    ChangeGroup, Commit, GitError, Result, WorkingChange, PAGE_SIZE, PATCH_LIMIT, STATUS_LIMIT,
 };
 use serde::Serialize;
 use std::{fs::File, io::Read, path::Path};
@@ -316,14 +316,20 @@ fn file_content(bytes: Vec<u8>) -> FileContent {
     }
 }
 
+fn blob_content(git: &Path, root: &Path, hash: Option<String>) -> Result<FileContent> {
+    match hash {
+        Some(hash) => Ok(
+            bounded(git, root, &["cat-file", "blob", &hash], PATCH_LIMIT)?
+                .map_or(FileContent::Oversized, file_content),
+        ),
+        None => Ok(FileContent::Missing),
+    }
+}
+
 fn file_revision(git: &Path, root: &Path, revision: &str, path: &str) -> Result<FileRevision> {
     relative_file(path)?;
     let revision = resolve_commit(git, root, revision)?;
-    let content = match stored_blob(git, root, &revision, path)? {
-        Some(hash) => bounded(git, root, &["cat-file", "blob", &hash], PATCH_LIMIT)?
-            .map_or(FileContent::Oversized, file_content),
-        None => FileContent::Missing,
-    };
+    let content = blob_content(git, root, stored_blob(git, root, &revision, path)?)?;
     Ok(FileRevision {
         revision,
         path: path.into(),
@@ -415,6 +421,75 @@ fn working_content(root: &Path, path: &str) -> Result<FileContent> {
     } else {
         file_content(bytes)
     })
+}
+
+#[derive(Serialize)]
+pub(super) struct WorkingVersions {
+    left: FileContent,
+    right: FileContent,
+}
+
+fn index_content(git: &Path, root: &Path, path: &str) -> Result<FileContent> {
+    let data = bounded(
+        git,
+        root,
+        &[
+            "--literal-pathspecs",
+            "ls-files",
+            "--stage",
+            "-z",
+            "--",
+            path,
+        ],
+        STATUS_LIMIT,
+    )?
+    .ok_or(GitError::Unreadable)?;
+    let mut blob = None;
+    for row in data.split(|byte| *byte == 0).filter(|row| !row.is_empty()) {
+        let metadata = row
+            .split(|byte| *byte == b'\t')
+            .next()
+            .ok_or(GitError::Unreadable)?;
+        let mut fields = std::str::from_utf8(metadata)
+            .map_err(|_| GitError::Unreadable)?
+            .split_whitespace();
+        if let (Some("100644" | "100755"), Some(hash), Some("0")) =
+            (fields.next(), fields.next(), fields.next())
+        {
+            blob = Some(oid(hash)?.to_owned());
+            break;
+        }
+    }
+    blob_content(git, root, blob)
+}
+
+pub(super) fn working_versions(
+    git: &Path,
+    root: &Path,
+    change: &WorkingChange,
+    head: Option<&str>,
+) -> Result<WorkingVersions> {
+    let before = change.previous_path.as_deref().unwrap_or(&change.path);
+    relative_file(before)?;
+    relative_file(&change.path)?;
+    let (left, right) = match change.group {
+        ChangeGroup::Staged => {
+            let previous = match head {
+                Some(head) => stored_blob(git, root, oid(head)?, before)?,
+                None => None,
+            };
+            (
+                blob_content(git, root, previous)?,
+                index_content(git, root, &change.path)?,
+            )
+        }
+        ChangeGroup::Unstaged => (
+            index_content(git, root, before)?,
+            working_content(root, &change.path)?,
+        ),
+        ChangeGroup::Untracked => (FileContent::Missing, working_content(root, &change.path)?),
+    };
+    Ok(WorkingVersions { left, right })
 }
 
 #[tauri::command]
@@ -519,6 +594,29 @@ mod tests {
         assert_eq!(in_nested.path, "folder/note.txt");
         assert_ne!(in_nested.head, in_linked.head);
         assert!(in_nested.has_history && in_nested.has_blame && in_nested.has_diff);
+        let changes = working_changes(&exe, &nested).unwrap();
+        let staged = changes
+            .iter()
+            .find(|change| change.group == ChangeGroup::Staged)
+            .unwrap();
+        let unstaged = changes
+            .iter()
+            .find(|change| change.group == ChangeGroup::Unstaged)
+            .unwrap();
+        let staged = working_versions(&exe, &nested, staged, in_nested.head.as_deref()).unwrap();
+        let unstaged = working_versions(&exe, &nested, unstaged, None).unwrap();
+        let available = |content| match content {
+            FileContent::Available { text } => text,
+            _ => panic!("expected text"),
+        };
+        assert_eq!(
+            [available(staged.left), available(staged.right)],
+            ["nested content\n", "staged content\n"]
+        );
+        assert_eq!(
+            [available(unstaged.left), available(unstaged.right)],
+            ["staged content\n", "working content\n"]
+        );
         assert!(
             matches!(working_content(&nested, &in_nested.path).unwrap(), FileContent::Available { text }
             if text == "working content\n")

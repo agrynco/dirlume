@@ -185,6 +185,7 @@ export const translations: Readonly<Record<string, readonly [uk: string, ru: str
   "Show diff": ["Показати різницю", "Показать различия"],
   "Stored revision": ["Збережена ревізія", "Сохранённая ревизия"],
   "Working file": ["Робочий файл", "Рабочий файл"],
+  "Index": ["Індекс", "Индекс"],
   "No changes for this file.": ["У цьому файлі немає змін.", "В этом файле нет изменений."],
   "The working file is unavailable.": ["Робочий файл недоступний.", "Рабочий файл недоступен."],
   "The working file contains binary data.": ["Робочий файл містить двійкові дані.", "Рабочий файл содержит двоичные данные."],

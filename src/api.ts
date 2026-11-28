@@ -641,6 +641,7 @@ export interface GitWorkingDiff {
   patch: string | null;
   fallback: "binary" | "conflict" | "oversized" | "unsupported" | null;
   unborn: boolean;
+  versions?: { left: GitFileContent; right: GitFileContent } | null;
 }
 
 export type EnvironmentScope = "user" | "system" | "process";
@@ -945,7 +946,7 @@ export const api = {
     invoke<GitRemoteRefReview>("git_remote_ref_review", { root, remote, source, destination }),
   gitTransferRemoteRef: (root: string, review: GitRemoteRefReview) =>
     invoke<string>("git_transfer_remote_ref", { root, review }),
-  gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
+  gitWorkingDiff: (root: string, change: GitWorkingChange, compare = false) => invoke<GitWorkingDiff>("git_working_diff", { root, change, compare }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),
   saveEnvironment: (scope: EnvironmentScope, edits: EnvironmentEdit[], integrate = false) =>

@@ -520,6 +520,7 @@ pub struct WorkingDiff {
     patch: Option<String>,
     fallback: Option<&'static str>,
     unborn: bool,
+    versions: Option<file::WorkingVersions>,
 }
 
 fn working_changes(git: &Path, root: &Path) -> Result<Vec<WorkingChange>> {
@@ -609,7 +610,12 @@ fn text_patch(bytes: Vec<u8>) -> std::result::Result<String, &'static str> {
     Ok(text)
 }
 
-fn working_diff(git: &Path, root: &Path, change: &WorkingChange) -> Result<WorkingDiff> {
+fn working_diff(
+    git: &Path,
+    root: &Path,
+    change: &WorkingChange,
+    compare: bool,
+) -> Result<WorkingDiff> {
     let relative = relative_file(&change.path)?;
     if let Some(previous) = &change.previous_path {
         relative_file(previous)?;
@@ -623,13 +629,16 @@ fn working_diff(git: &Path, root: &Path, change: &WorkingChange) -> Result<Worki
     let working_text = working_path.as_ref().is_some_and(|path| {
         fs::File::open(path).is_ok_and(|file| crate::desktop::decode_text(file).is_ok())
     });
-    let unborn = change.group == ChangeGroup::Staged
-        && optional_line(run(
+    let head = if change.group == ChangeGroup::Staged {
+        optional_line(run(
             git,
             root,
             &["rev-parse", "--verify", "--quiet", "HEAD"],
         )?)?
-        .is_none();
+    } else {
+        None
+    };
+    let unborn = change.group == ChangeGroup::Staged && head.is_none();
     let preview = if change.status == 'U' {
         Err("conflict")
     } else if change.group == ChangeGroup::Untracked {
@@ -696,12 +705,18 @@ fn working_diff(git: &Path, root: &Path, change: &WorkingChange) -> Result<Worki
         Ok(patch) => (Some(patch), None),
         Err(reason) => (None, Some(reason)),
     };
+    let versions = if compare && fallback.is_none() && change.status != 'T' {
+        file::working_versions(git, root, change, head.as_deref()).ok()
+    } else {
+        None
+    };
     Ok(WorkingDiff {
         working_path,
         working_text,
         patch,
         fallback,
         unborn,
+        versions,
     })
 }
 
@@ -711,8 +726,20 @@ pub async fn git_working_changes(root: String) -> Result<Vec<WorkingChange>> {
 }
 
 #[tauri::command]
-pub async fn git_working_diff(root: String, change: WorkingChange) -> Result<WorkingDiff> {
-    query(move || working_diff(&executable()?, directory(&root)?, &change)).await
+pub async fn git_working_diff(
+    root: String,
+    change: WorkingChange,
+    compare: Option<bool>,
+) -> Result<WorkingDiff> {
+    query(move || {
+        working_diff(
+            &executable()?,
+            directory(&root)?,
+            &change,
+            compare.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -757,7 +784,7 @@ mod tests {
         fs::write(root.join(path), "first\n").unwrap();
         git(root, &["add", "--", path]);
         let initial = working_changes(&exe, root).unwrap();
-        let added = working_diff(&exe, root, &initial[0]).unwrap();
+        let added = working_diff(&exe, root, &initial[0], false).unwrap();
         assert!(added.unborn && added.patch.unwrap().contains("+first"));
         fs::write(root.join("move.txt"), "rename content\n").unwrap();
         fs::write(root.join("remove.txt"), "deleted content\n").unwrap();
@@ -781,7 +808,7 @@ mod tests {
                 .iter()
                 .find(|change| change.path == name && change.group == group)
                 .unwrap();
-            working_diff(&exe, root, change).unwrap()
+            working_diff(&exe, root, change, false).unwrap()
         };
         let staged = diff(ChangeGroup::Staged, path);
         assert!(!staged.unborn && staged.working_path.is_some());
@@ -810,7 +837,7 @@ mod tests {
             .find(|change| change.path == "moved ł.txt")
             .unwrap();
         assert_eq!(rename.previous_path.as_deref(), Some("move.txt"));
-        assert!(working_diff(&exe, root, rename)
+        assert!(working_diff(&exe, root, rename, false)
             .unwrap()
             .patch
             .unwrap()

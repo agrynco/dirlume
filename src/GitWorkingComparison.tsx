@@ -5,13 +5,14 @@ import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { GitFileVersions } from "./GitFileVersions";
 import { RevisionInput } from "./GitRevisionComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { t } from "./i18n";
 
-export function GitWorkingComparison({ repository, path, head, onClose }: {
-  repository: GitRepository; path: string; head: string; onClose: () => void;
+export function GitWorkingComparison({ repository, path, head, onClose, shortcuts }: {
+  repository: GitRepository; path: string; head: string; onClose: () => void; shortcuts: ComparisonShortcuts;
 }) {
   const [selection, setSelection] = useState<{ revision: string; request: number }>();
-  return <Dialog title={t("Compare with revision…")} wide resizeKey="git-working-revision" helpTopic="gitView" onClose={onClose}
+  return <Dialog title={t("Compare with revision…")} wide resizeKey="git-working-revision" helpTopic="gitView" fontZoom="compare" onClose={onClose}
     footer={<Button onClick={onClose}>{t("Close")}</Button>}>
     <form className="dialog-body git-working-comparison" onSubmit={(event) => {
       event.preventDefault();
@@ -28,7 +29,7 @@ export function GitWorkingComparison({ repository, path, head, onClose }: {
       </div>
     </form>
     {selection && <div className="git-working-comparison-result">
-      <GitFileVersions key={selection.request} root={repository.root}
+      <GitFileVersions key={selection.request} root={repository.root} shortcuts={shortcuts}
         left={{ revision: selection.revision, label: t("Stored revision"), path }}
         right={{ revision: null, label: t("Working file"), path, working: true }} />
     </div>}

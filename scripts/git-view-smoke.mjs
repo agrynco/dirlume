@@ -437,9 +437,14 @@ try {
             assertRoot(args.root);
             const { group, path } = args.change;
             const deleted = path === "removed.txt";
+            const texts = { head: "Committed change\n", staged: "Staged change\n", working: "Working change\n" };
+            const versions = fileContextFixture && args.compare && path === "note.txt" ? {
+              left: { state: "available", text: group === "staged" ? texts.head : texts.staged },
+              right: { state: "available", text: group === "staged" ? texts.staged : texts.working },
+            } : null;
             return { workingPath: deleted ? null : root + (windows ? "\\" : "/") + path, workingText: !deleted,
               patch: deleted ? "-deleted\n" : "+" + (path === "note.txt" ? group === "unstaged" && window.gitSaved || group : path) + "\n",
-              fallback: null, unborn: false };
+              fallback: null, unborn: false, versions };
           }
           case "read_text": return { text: window.gitSaved ?? "saved working text", encoding: "utf8" };
           case "save_text": window.gitSaved = args.text; return null;
@@ -631,7 +636,7 @@ try {
   const renamed = history.getByRole("option", { name: /Renamed tracked note/ });
   await editedRevision.waitFor();
   await revisionPreview.getByText("Parent revision", { exact: true }).waitFor();
-  await revisionPreview.getByLabel("Side-by-side revision diff").waitFor();
+  await revisionPreview.getByLabel("File differences", { exact: true }).waitFor();
   await editedRevision.press("ArrowDown");
   assert.equal(await renamed.getAttribute("aria-selected"), "true");
   await revisionPreview.getByText("old-note.txt", { exact: true }).waitFor();
@@ -653,7 +658,7 @@ try {
   await fileComparison.getByRole("combobox", { name: "Comparison revision", exact: true }).selectOption("refs/heads/main");
   await button(fileComparison, "Compare").click();
   await revisionPreview.getByText("Comparison revision", { exact: true }).waitFor();
-  await revisionPreview.getByLabel("Side-by-side revision diff").waitFor();
+  await revisionPreview.getByLabel("File differences", { exact: true }).waitFor();
   await button(revisionPreview, "Show parent comparison").click();
   await button(history, "Load more").click();
   await history.getByRole("option", { name: /Added original note/ }).click();
@@ -1188,7 +1193,15 @@ try {
   await button(fileComparison, "Compare").click();
   await fileComparison.getByText("Stored revision", { exact: true }).waitFor();
   await fileComparison.getByText("Working file", { exact: true }).waitFor();
-  await fileComparison.getByLabel("Side-by-side revision diff").waitFor();
+  const workingDiffView = fileComparison.getByLabel("File differences", { exact: true });
+  await workingDiffView.waitFor();
+  await button(fileComparison, "Options").click();
+  await fileComparison.getByRole("combobox", { name: "Layout", exact: true }).selectOption("unified");
+  assert.equal(await workingDiffView.getAttribute("data-layout"), "unified");
+  assert.equal(await fileComparison.getByLabel("Edit files").count(), 0);
+  await fileComparison.getByRole("combobox", { name: "Layout", exact: true }).selectOption("side-by-side");
+  assert.equal(await workingDiffView.getAttribute("data-layout"), "side-by-side");
+  await button(fileComparison, "Options").click();
   await fileComparison.getByRole("combobox", { name: "Comparison revision", exact: true }).selectOption("refs/tags/v1");
   await button(fileComparison, "Compare").click();
   await fileComparison.getByText("File absent at this revision.", { exact: true }).waitFor();
@@ -1199,8 +1212,16 @@ try {
   const scopedChanges = page.getByRole("region", { name: "Changes", exact: true });
   await scopedChanges.getByRole("group", { name: "Staged", exact: true }).getByRole("option", { name: /note\.txt/ }).waitFor();
   await preview.getByText("HEAD → Index", { exact: true }).waitFor();
+  const scopedDiff = preview.getByLabel("File differences", { exact: true });
+  await scopedDiff.locator(".diff-text").filter({ hasText: "Committed change" }).waitFor();
   await scopedChanges.getByRole("group", { name: "Unstaged", exact: true }).getByRole("option", { name: /note\.txt/ }).click();
   await preview.getByText("Index → Working file", { exact: true }).waitFor();
+  await scopedDiff.locator(".diff-text").filter({ hasText: "Working change" }).waitFor();
+  await button(preview, "Options").click();
+  await preview.getByRole("combobox", { name: "Layout", exact: true }).selectOption("unified");
+  assert.equal(await scopedDiff.getAttribute("data-layout"), "unified");
+  await preview.getByRole("combobox", { name: "Layout", exact: true }).selectOption("side-by-side");
+  await button(preview, "Options").click();
   assert.equal(await button(preview, "Stage").count(), 0);
   assert.equal(await scopedChanges.getByRole("option").count(), 2);
   await button(scopedChanges, "Close Git View").click();

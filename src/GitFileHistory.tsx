@@ -6,12 +6,13 @@ import { Dialog } from "./Dialog";
 import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { GitFileVersions, type GitFileSide } from "./GitFileVersions";
 import { RevisionInput } from "./GitRevisionComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { t } from "./i18n";
 import { opposite, type Side } from "./panes";
 
 type HistoryPage = { commits: GitFileCommit[]; nextOffset: number | null };
 
-export function GitFileHistory({ repository, tip, side, initial, refresh, historyHeader, previewControls, commitActions, onBlame }: {
+export function GitFileHistory({ repository, tip, side, initial, refresh, historyHeader, previewControls, commitActions, onBlame, compareShortcuts }: {
   repository: GitRepository;
   tip: string;
   side: Side;
@@ -21,6 +22,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
   previewControls: ReactNode;
   commitActions: (commit: GitCommit) => GitAction[];
   onBlame: (path: string, revision: string) => void;
+  compareShortcuts: ComparisonShortcuts;
 }) {
   const menu = useGitMenu();
   const [path, setPath] = useState(initial?.path ?? "");
@@ -107,7 +109,7 @@ export function GitFileHistory({ repository, tip, side, initial, refresh, histor
       </header>
       {!!revisionActions.length && <div className="git-branch-actions"><GitActionButtons actions={revisionActions} /></div>}
       {row && before && after ? <GitFileVersions key={JSON.stringify([row.hash, before.revision, refresh])} root={root}
-        left={before} right={after} showRevision /> : <p className="pane-empty">{t("Select a file revision to preview its changes.")}</p>}
+        left={before} right={after} shortcuts={compareShortcuts} showRevision /> : <p className="pane-empty">{t("Select a file revision to preview its changes.")}</p>}
     </section>
     <section className={"pane git-pane git-pane-" + opposite(side)} aria-label={t("Commit history")}
       tabIndex={-1} data-help-topic="gitView" data-pane-side={opposite(side)} {...menu(pathActions)}>

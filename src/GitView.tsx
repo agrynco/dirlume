@@ -17,6 +17,7 @@ import { GitRepositorySetup } from "./GitRepositorySetup";
 import { GitRevisionComparison, GitRevisionPatch } from "./GitRevisionComparison";
 import { GitSyncTools } from "./GitSyncTools";
 import { GitWorkingComparison } from "./GitWorkingComparison";
+import type { ComparisonShortcuts } from "./TextTools";
 import { t } from "./i18n";
 import { useTimestamps } from "./useTimestamps";
 import { opposite, type Side } from "./panes";
@@ -171,9 +172,10 @@ type GitViewProps = {
   onTerminal: (path: string) => void;
   canEdit: (file: NamedFile) => boolean;
   file?: GitFileLaunch;
+  compareShortcuts: ComparisonShortcuts;
 };
 
-function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpenWorktree, onTerminal, canEdit, file }: GitViewProps) {
+function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpenWorktree, onTerminal, canEdit, file, compareShortcuts }: GitViewProps) {
   const menu = useGitMenu();
   const [repository, setRepository] = useState<GitRepository | null>(null);
   const [error, setError] = useState("");
@@ -425,6 +427,7 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     side={side} refresh={refresh} selected={selectedChange} onSelect={setSelectedChange} header={fileDiff ? fileDiffHeader : header}
     paneActions={fileDiff ? fileDiffActions : paneActions}
     repository={location} onOpen={onOpen} canEdit={canEdit} onRefresh={onRefresh}
+    compareShortcuts={{ ...compareShortcuts, swapShortcut: [] }}
     draft={draft?.root === repository.root ? draft.message : ""}
     onDraft={(message) => setDraft({ root: repository.root, message })} />;
   const fileTip = fileTarget?.tip ?? tip;
@@ -439,13 +442,14 @@ function GitViewContent({ path, side, refresh, onRefresh, onClose, onOpen, onOpe
     <GitFileHistory key={JSON.stringify([repository.root, fileTarget])}
       repository={repository} tip={fileTip} side={side} initial={fileTarget} refresh={refresh} historyHeader={historyHeader}
       previewControls={<GitActionButtons actions={[refreshAction, closeAction]} />} commitActions={inspect.actions}
-      onBlame={(path, tip) => setBlameTarget({ path, tip })} />
+      onBlame={(path, tip) => setBlameTarget({ path, tip })} compareShortcuts={{ ...compareShortcuts, swapShortcut: [] }} />
     {blameViewer}
   </>;
 
   return <>
     {blameViewer}
-    {repository && file?.action === "compare" && <GitWorkingComparison repository={repository} path={file.path} head={file.head} onClose={onClose} />}
+    {repository && file?.action === "compare" && <GitWorkingComparison repository={repository} path={file.path} head={file.head}
+      onClose={onClose} shortcuts={compareShortcuts} />}
     <section className={"pane git-pane git-pane-" + side} aria-label={t(changes ? "Changes" : "Branches")} data-help-topic="gitView" data-pane-side={side}
       tabIndex={-1} {...menu(paneActions)}>
       {header}

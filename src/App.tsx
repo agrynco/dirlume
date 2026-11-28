@@ -3992,6 +3992,7 @@ export default function App({ initialPreferences, portableUpdateError, windowsSe
           <p className="pane-empty" role="status">{t("Reading Git repository…")}</p>
         </section>}>
           <GitView key={gitView.path} side={gitView.side} path={gitView.path} file={gitView.file} refresh={gitRefresh} menuShortcut={shortcuts.gitContextMenu}
+            compareShortcuts={{ previousShortcut: shortcuts.previousChange, nextShortcut: shortcuts.nextChange, swapShortcut: shortcuts.swap }}
             onOpen={openDocument} canEdit={(file) => imageType(file.name) ? canEditImage(file) : writableTextPlace(file.place)}
             onOpenWorktree={(path) => setGitView((current) => current && { ...current, path, file: undefined })}
             onTerminal={openGitTerminal}
