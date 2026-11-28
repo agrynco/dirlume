@@ -156,9 +156,12 @@ async ({ upgraded, reject, portable, replacementFailure, checkClipboard, checkSc
       key, bubbles: true, cancelable: true, ...modifiers,
     }));
     const pane = await waitFor("the left file pane", () => document.querySelector('#left-files[aria-busy="false"]'));
-    const breadcrumbs = await waitFor("the left path breadcrumbs", () => document.querySelector('#left-path .address-breadcrumbs[data-editable="true"]'));
-    breadcrumbs.click();
-    const address = await waitFor("the editable left path", () => document.querySelector("input#left-address"));
+    const address = await waitFor("the editable left path", () => {
+      const field = document.querySelector("input#left-address");
+      if (field) return field;
+      document.querySelector('#left-path .address-breadcrumbs[data-editable="true"]')?.click();
+      return null;
+    });
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(address, fixtureDirectory);
     address.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise(requestAnimationFrame);

@@ -17,11 +17,13 @@ case "click":
           let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
           let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
           let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { exit(1) }
-    move.post(tap: .cgSessionEventTap)
+    // Place the real cursor over the swatch and deliver the click ahead of AppKit's sampler tap.
+    _ = CGWarpMouseCursorPosition(point)
+    move.post(tap: .cghidEventTap)
     Thread.sleep(forTimeInterval: 0.08)
-    down.post(tap: .cgSessionEventTap)
+    down.post(tap: .cghidEventTap)
     Thread.sleep(forTimeInterval: 0.08)
-    up.post(tap: .cgSessionEventTap)
+    up.post(tap: .cghidEventTap)
 default:
     guard let screen = NSScreen.screens.first else { exit(1) }
     let app = NSApplication.shared
