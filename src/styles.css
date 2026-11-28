@@ -1002,12 +1002,22 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-index-summary button { margin-inline-start: auto; }
 .git-index-summary button + button { margin-inline-start: 0; }
 .git-bulk-list, .git-stash-create { display: grid; gap: 7px; }
+.git-stash-list { max-height: 12rem; margin: 8px 0; padding: 0; overflow: auto; list-style: none; }
+.git-stash-list > li > button { width: 100%; justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; }
 .git-bulk-list { max-block-size: 18rem; overflow: auto; padding: 3px; }
 .git-stash-create { margin-block-end: 10px; }
 .git-write-feedback { margin: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .git-filter { min-width: 0; margin: 6px 7px; }
 .git-scroll { flex: 1; min-height: 0; overflow: auto; padding-block: 2px; }
 .git-branch-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 8px; }
+.git-pane button.git-action, .dialog button.git-action {
+  min-height: 28px; max-width: 100%; border-color: var(--line); white-space: normal; overflow-wrap: anywhere;
+  background: var(--raised); text-align: start; font-family: var(--ui-font);
+}
+.git-pane button.git-action:hover:not(:disabled), .dialog button.git-action:hover:not(:disabled) { background: var(--hover); }
+.git-pane button.git-action[aria-pressed="true"], .dialog button.git-action[aria-pressed="true"] { border-color: var(--accent); background: var(--active-row); }
+.git-pane button.git-action.negative, .dialog button.git-action.negative { background: var(--danger-bg); }
+.file-column-menu[data-help-topic="gitView"] button { text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .git-history-heading { flex-wrap: wrap; }
 .git-history-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .git-revision-comparison { display: grid; align-content: start; gap: 10px; padding: 8px; }
@@ -1022,6 +1032,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-rebase-list > li { padding: 6px 0; border-block-end: 1px solid var(--line); }
 .git-rebase-list p { margin: 0 0 4px; }
 .git-rebase-list .git-branch-actions { padding-inline: 0; }
+.git-revision-comparison .git-worktrees { padding-inline-start: 0; list-style: none; }
 .git-branch-group { margin-block-end: 5px; }
 .git-branch-group h3, .git-details h3 { margin: 0; padding: 4px 8px; color: var(--panel-muted); font: 600 .88em/1.4 var(--ui-font); }
 .git-branch-group button, .git-commit > button {
@@ -1041,7 +1052,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-commit > button strong { overflow: hidden; text-overflow: ellipsis; }
 .git-commit > button code, .git-details code { font-family: var(--text-font); }
 .git-details { padding: 5px 8px; background: var(--raised); }
-.git-details header { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.git-details header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; }
 .git-details pre { margin-block: 6px; padding: 6px; background: var(--panel-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .git-details :is(p, ul) { margin: 3px 0; }
 .git-details ul { padding: 0; list-style: none; }
@@ -1049,7 +1060,7 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-details li + li { border-top: 1px solid var(--line); }
 .git-load-more { margin: 6px; }
 .git-pane .git-error { color: var(--danger); }
-.git-tabs { display: flex; flex: 1; gap: 4px; }
+.git-tabs { display: flex; flex: 1 0 auto; flex-wrap: wrap; max-width: 100%; gap: 4px; }
 .git-tabs button[aria-pressed="true"] { color: var(--panel-selected-ink); background: var(--panel-selection); }
 .git-change-summary { display: grid; gap: 5px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .git-change-summary strong { overflow-wrap: anywhere; }
@@ -1065,6 +1076,56 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-patch span { display: block; width: max-content; min-width: 100%; }
 .git-patch [data-diff="added"] { background: var(--compare-added, var(--added)); }
 .git-patch [data-diff="removed"] { background: var(--compare-removed, var(--removed)); }
+.git-commit-graph {
+  --git-lane-0: var(--accent);
+  --git-lane-1: var(--syntax-keyword, var(--accent));
+  --git-lane-2: var(--syntax-function, var(--accent));
+  --git-lane-3: var(--syntax-string, var(--accent));
+  --git-lane-4: var(--folder, var(--accent));
+  display: flex; flex: 1; flex-direction: column; min-height: 0;
+}
+.git-graph-scope, .git-graph-search, .git-graph-compare {
+  display: flex; align-items: end; flex-wrap: wrap; gap: 8px; padding: 4px 8px;
+}
+.git-graph-scope { color: var(--panel-muted); overflow-wrap: anywhere; }
+.git-graph-scope code { color: var(--panel-ink); }
+.git-graph-search > .field, .git-graph-compare > div { flex: 1 1 11em; min-width: 0; }
+.git-graph-status, .git-commit-graph > .git-error { margin: 6px 8px; }
+.git-graph-scroll { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; }
+.git-graph-rows { width: max(100%, calc(var(--git-graph-width) + 11em)); list-style: none; margin: 0; padding: 0; }
+.git-graph-rows > li + li { box-shadow: 0 -1px 0 var(--line); }
+.git-graph-row {
+  display: grid; grid-template-columns: var(--git-graph-width) minmax(0, 1fr) auto auto;
+  align-items: stretch; gap: 6px; width: 100%; min-height: 30px; padding: 0 8px 0 0;
+  border: 0; border-radius: 0; text-align: start;
+}
+.git-graph-row[aria-expanded="true"] { background: var(--panel-selection); color: var(--panel-selected-ink); }
+.git-graph-row:focus-visible { outline-offset: -2px; }
+.git-graph-expanded { display: grid; grid-template-columns: var(--git-graph-width) minmax(0, 1fr); min-width: 0; }
+.git-graph-lanes { position: relative; min-height: 100%; }
+.git-graph-lanes > span { position: absolute; pointer-events: none; }
+.git-lane-through, .git-lane-incoming { inset-block-start: 0; block-size: 100%; border-inline-start: 2px solid; }
+.git-lane-incoming { block-size: 50%; }
+.git-lane-edge {
+  inset-block-start: 50%; block-size: 50%; min-width: 2px; border-block-start: 2px solid; border-inline-end: 2px solid;
+}
+.git-lane-edge.to-left { border-inline: 2px solid transparent; border-inline-start-color: currentColor; }
+.git-lane-outside { inset-block-start: 50%; block-size: 35%; border-inline-start: 2px dashed; }
+.git-lane-node {
+  inset-block-start: 50%; width: 9px; height: 9px; border: 2px solid; border-radius: 50%;
+  background: var(--panel-bg); transform: translate(-4px, -50%);
+}
+.git-graph-summary { display: grid; align-content: center; gap: 3px; min-width: 0; padding-block: 4px; }
+.git-graph-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-graph-badges { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.git-graph-badges > span {
+  max-width: 100%; padding-inline: 4px; border-radius: 4px; border: 1px solid var(--line);
+  background: var(--raised); color: var(--ink); font-size: .86em; overflow-wrap: anywhere; white-space: normal;
+}
+.git-graph-badges .git-graph-side { border-color: var(--accent); color: var(--accent); }
+.git-graph-more-parents { grid-column: 3; align-self: center; }
+.git-graph-row > code { grid-column: 4; align-self: center; color: var(--panel-muted); }
+.git-graph-footer { flex: none; padding: 3px 8px; border-block-start: 1px solid var(--line); }
 .environment-pane { overflow: hidden; }
 .environment-pane .pane-title { flex: 1; }
 .environment-pane .pane-title svg { width: 15px; height: 15px; flex: none; }
@@ -1387,6 +1448,14 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
   row-gap: var(--dialog-control-gap);
 }
 .dialog-body p { margin-block: 0; overflow-wrap: anywhere; }
+.git-tools-review, .git-tools-review dl { display: grid; gap: 12px; }
+.git-tools-review dl { margin: 0; overflow-wrap: anywhere; }
+.git-tools-review dt { color: var(--muted); font-weight: 600; }
+.git-tools-review dd { margin: 3px 0 0; }
+.dialog[data-tone="warning"] .git-tools-review dl > :first-child {
+  padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised);
+}
+.dialog[data-tone="warning"] .git-tools-review dl > :first-child dt { color: var(--ink); }
 .release-notes { display: grid; gap: 10px; overflow-wrap: anywhere; }
 .release-notes ul { margin: 0; padding-inline-start: 1.4em; }
 .release-notes li + li { margin-top: 4px; }

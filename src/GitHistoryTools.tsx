@@ -1,10 +1,12 @@
 import { useEffect, useId, useState } from "react";
+import { ArrowDown, ArrowUp, GitBranchPlus, History, ListChecks, Undo2, Upload } from "lucide-react";
 import {
   api, type GitHistoryAction, type GitHistoryPlan, type GitPushReview, type GitRebaseAction,
   type GitRebasePlan, type GitRebaseStep, type GitReflog, type GitReflogEntry, type GitRepository,
 } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { GitActionButtons, useGitMenu, type GitAction } from "./GitActions";
 import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
@@ -13,7 +15,8 @@ const actionLabels = {
   mixedReset: "Mixed reset", hardReset: "Hard reset", rebase: "Rebase branch",
   reflog: "Reflog", push: "Force-push with lease",
 } as const;
-type Action = keyof typeof actionLabels;
+export type HistoryAction = keyof typeof actionLabels;
+type Action = HistoryAction;
 const stepLabels: Record<GitRebaseAction, string> = {
   pick: "Pick", reword: "Reword", squash: "Squash", drop: "Drop",
 };
@@ -70,8 +73,9 @@ function PushImpact({ review }: { review: GitPushReview }) {
 }
 
 export function GitHistoryTools({ repository, initialTarget, initialRef, initialAction, onRefresh }: {
-  repository: GitRepository; initialTarget?: string; initialRef?: string; initialAction?: "rebase"; onRefresh: () => void;
+  repository: GitRepository; initialTarget?: string; initialRef?: string; initialAction?: Action; onRefresh: () => void;
 }) {
+  const menu = useGitMenu();
   const root = repository.root;
   const refs = useId();
   const [action, setAction] = useState<Action>(initialAction ?? "cherryPick");
@@ -187,8 +191,17 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
     step.action === "squash" && !steps.slice(0, index).some(({ action }) => action !== "drop"));
   const missingTarget = action === "push" ? !remote || !branch.trim() : action !== "reflog" && !target.trim();
   const heading = confirmation?.kind === "recover" ? "Recover into new branch" : actionLabels[action];
+  const destructive = action === "push" || action.endsWith("Reset");
+  const prepare: GitAction = { label: action === "reflog" ? "Read reflog" : "Review changes",
+    icon: action === "reflog" ? History : ListChecks, disabled: pending || missingTarget, run: () => void requestPreview(), submit: true };
+  const submit: GitAction[] = preview && !mustChooseParent ? [{
+    label: actionLabels[action], icon: action === "push" ? Upload : Undo2, destructive,
+    disabled: pending || preview.kind === "rebase" && invalidSteps,
+    run: () => setConfirmation(preview.kind === "rebase" ? { ...preview, steps: [...steps] } : preview),
+  }] : [];
 
-  return <div className="git-scroll git-revision-comparison" aria-label={t("History actions")}>
+  return <div className="git-scroll git-revision-comparison" aria-label={t("History actions")} tabIndex={-1}
+    {...menu([prepare, ...submit])}>
     <p><code>{root}</code></p>
     <form onSubmit={(event) => { event.preventDefault(); void requestPreview(); }}>
       <label className="field">{t("History action")}
@@ -216,7 +229,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
           {repository.branches.map(({ reference }) => <option value={reference} key={reference} />)}
         </datalist>}
       </>}
-      <Button type="submit" disabled={pending || missingTarget}>{t(action === "reflog" ? "Read reflog" : "Review changes")}</Button>
+      <GitActionButtons actions={[prepare]} />
     </form>
     {pending && <p role="status">{t("Working with Git…")}</p>}
     {error && <p role="alert">{error}</p>}
@@ -240,7 +253,11 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
       <h3>{t("Commit sequence")}</h3>
       {steps.length ? <ol className="git-rebase-list">{steps.map((step, index) => {
         const commit = preview.value.commits.find(({ hash }) => hash === step.hash);
-        return <li key={step.hash}>
+        const moves: GitAction[] = [
+          { label: "Move earlier", icon: ArrowUp, disabled: pending || index === 0, run: () => moveStep(index, -1) },
+          { label: "Move later", icon: ArrowDown, disabled: pending || index === steps.length - 1, run: () => moveStep(index, 1) },
+        ];
+        return <li key={step.hash} tabIndex={0} {...menu(moves)}>
           <p><CommitHash hash={step.hash} /> {commit?.subject}</p>
           <div className="git-branch-actions">
             <select aria-label={t("Rebase action")} value={step.action} onChange={(event) => {
@@ -249,8 +266,7 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
             }}>
               {Object.entries(stepLabels).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </select>
-            <Button disabled={index === 0} onClick={() => moveStep(index, -1)}>{t("Move earlier")}</Button>
-            <Button disabled={index === steps.length - 1} onClick={() => moveStep(index, 1)}>{t("Move later")}</Button>
+            <GitActionButtons actions={moves} />
           </div>
           {step.action === "reword" && <label className="field">{t("Replacement commit message")}
             <textarea value={step.message ?? ""} onChange={(event) =>
@@ -260,21 +276,23 @@ export function GitHistoryTools({ repository, initialTarget, initialRef, initial
       })}</ol> : <p>{t("No commits to replay.")}</p>}
       {invalidSteps && <p role="status">{t("Reword needs a message. Squash needs an earlier commit.")}</p>}
     </>}
-    {preview && !mustChooseParent && <Button disabled={pending || preview.kind === "rebase" && invalidSteps}
-      onClick={() => setConfirmation(preview.kind === "rebase" ? { ...preview, steps: [...steps] } : preview)}>{t(actionLabels[action])}</Button>}
+    <GitActionButtons actions={submit} />
     {action === "reflog" && reflog && <>
-      {reflog.entries.length ? <ul className="git-rebase-list">{reflog.entries.map((entry, index) =>
-        <li key={entry.selector + index}>
+      {reflog.entries.length ? <ul className="git-rebase-list">{reflog.entries.map((entry, index) => {
+        const recover: GitAction[] = [{ label: "Recover into new branch", icon: GitBranchPlus, disabled: pending,
+          run: () => setConfirmation({ kind: "recover", entry, branch: "" }) }];
+        return <li key={entry.selector + index} tabIndex={0} {...menu(recover)}>
           <p><CommitHash hash={entry.hash} /> {entry.subject}</p><p>{entry.selector} · {entry.action}</p>
-          <Button disabled={pending} onClick={() => setConfirmation({ kind: "recover", entry, branch: "" })}>{t("Recover into new branch")}</Button>
-        </li>)}</ul> : <p>{t("No reflog entries.")}</p>}
+          <GitActionButtons actions={recover} />
+        </li>; })}</ul> : <p>{t("No reflog entries.")}</p>}
       {reflog.nextOffset !== null && <Button disabled={pending}
         onClick={() => void requestPreview(null, reflog.nextOffset ?? 0)}>{t("Load more")}</Button>}
     </>}
     {confirmation && <Dialog title={t(heading)} helpTopic="gitView" onClose={pending ? undefined : () => setConfirmation(undefined)}
       footer={<>
-        <Button disabled={pending} onClick={() => setConfirmation(undefined)}>{t("Cancel")}</Button>
+        <Button disabled={pending} data-initial-focus={destructive || undefined} onClick={() => setConfirmation(undefined)}>{t("Cancel")}</Button>
         <Button disabled={pending || confirmation.kind === "recover" && !confirmation.branch.trim()}
+          className={destructive ? "negative" : undefined}
           onClick={() => void runConfirmed()}>{t(heading)}</Button>
       </>}>
       <p><code>{root}</code></p>

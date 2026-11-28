@@ -1,0 +1,8 @@
+{
+  "version": "0.1.44",
+  "highlights": [
+    "Git View commands have visible icon buttons and tooltips. Right-click branches, commits, changes, and repository items for actions on that item.",
+    "Browse the interactive commit graph, inspect parent links and branch tips, and compare incoming and outgoing commits or two local revisions.",
+    "Worktree removal identifies the folder and its checked-out revision, wraps long paths, and focuses Cancel by default."
+  ]
+}

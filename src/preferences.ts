@@ -93,6 +93,7 @@ export const commands = {
   netboxPreviousPage: { label: "Previous NetBox settings page", key: "Ctrl+PageUp" },
   netboxNextPage: { label: "Next NetBox settings page", key: "Ctrl+PageDown" },
   gitView: { label: "Git View", key: "Ctrl+Shift+G" },
+  gitContextMenu: { label: "Open Git context menu", key: "Shift+F10" },
   environmentVariables: { label: "Environment variables", key: "" },
   analyzeSpace: { label: "Analyze space", key: "Ctrl+Shift+D" },
   diskInformation: { label: "Disk information", key: "Ctrl+Shift+L" },
@@ -244,6 +245,7 @@ export function commandScope(command: Command) {
   if (command === "zoomFont") return "wheel";
   if (command === "pasteTerminalText" || command === "copyTerminalText") return "terminal";
   if (command === "processContextMenu") return "processPane";
+  if (command === "gitContextMenu") return "gitPane";
   if (command.endsWith("Sources")) return "sources";
   if (command === "addNetBoxProfile" || command === "editNetBoxProfile") return "netbox";
   if (command === "netboxPreviousPage" || command === "netboxNextPage") return "netboxEditor";
