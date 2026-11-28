@@ -4,7 +4,7 @@ import { api, type GitConflictPreview, type GitMergeConflict, type GitMergeMode,
 import { bookmarkFile } from "./fileBookmarks";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
-import { writeError } from "./GitChanges";
+import { writeError } from "./gitWriteError";
 import { t } from "./i18n";
 
 const sections = [["base", "Base"], ["ours", "Ours"], ["theirs", "Theirs"]] as const;

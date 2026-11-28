@@ -530,6 +530,20 @@ export interface GitWorkingIndex {
   changes: GitWorkingChange[];
 }
 export type GitIndexAction = "stage" | "unstage";
+export interface GitBulkPlan {
+  expected: GitIndexSnapshot;
+  changes: GitWorkingChange[];
+  action: GitIndexAction;
+  stamps: unknown[];
+}
+export interface GitHunkReview { expected: GitIndexSnapshot; change: GitWorkingChange; stamp: number[] }
+export interface GitHunkPlan { review: GitHunkReview; hunks: string[] }
+export interface GitDiscardReview { expected: GitIndexSnapshot; change: GitWorkingChange; stamps: unknown[] }
+export interface GitDiscardPlan { review: GitDiscardReview; diff: GitWorkingDiff }
+export interface GitStashEntry { hash: string; position: number; subject: string }
+export interface GitStashPreview { combined: GitRevisionDiff; staged: GitRevisionDiff; working: GitRevisionDiff }
+export type GitStashAction = "apply" | "pop" | "drop";
+export interface GitStashResult { changes: GitWorkingChange[]; error: string | null }
 export interface GitWorkingDiff {
   workingPath: string | null;
   workingText: boolean;
@@ -787,6 +801,26 @@ export const api = {
     invoke<void>("git_update_index", { root, expected, change, action, replace }),
   gitCommitChanges: (root: string, expected: GitIndexSnapshot, message: string) =>
     invoke<string>("git_commit_changes", { root, expected, message }),
+  gitAmendChanges: (root: string, expected: GitIndexSnapshot, message: string) =>
+    invoke<string>("git_amend_changes", { root, expected, message }),
+  gitBulkPlan: (root: string, expected: GitIndexSnapshot, changes: GitWorkingChange[], action: GitIndexAction) =>
+    invoke<GitBulkPlan>("git_bulk_plan", { root, expected, changes, action }),
+  gitApplyBulk: (root: string, plan: GitBulkPlan) => invoke<void>("git_apply_bulk", { root, plan }),
+  gitHunkPlan: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange) =>
+    invoke<GitHunkPlan | null>("git_hunk_plan", { root, expected, change }),
+  gitApplyHunk: (root: string, review: GitHunkReview, index: number) =>
+    invoke<void>("git_apply_hunk", { root, review, index }),
+  gitDiscardPlan: (root: string, expected: GitIndexSnapshot, change: GitWorkingChange) =>
+    invoke<GitDiscardPlan>("git_discard_plan", { root, expected, change }),
+  gitDiscardWorktree: (root: string, review: GitDiscardReview) =>
+    invoke<void>("git_discard_worktree", { root, review }),
+  gitStashes: (root: string) => invoke<GitStashEntry[]>("git_stashes", { root }),
+  gitStashPreview: (root: string, entry: GitStashEntry) =>
+    invoke<GitStashPreview>("git_stash_preview", { root, entry }),
+  gitCreateStash: (root: string, expected: GitIndexSnapshot, message: string, untracked: boolean) =>
+    invoke<void>("git_create_stash", { root, expected, message, untracked }),
+  gitUpdateStash: (root: string, expected: GitIndexSnapshot, entry: GitStashEntry, action: GitStashAction, restoreIndex: boolean) =>
+    invoke<GitStashResult>("git_update_stash", { root, expected, entry, action, restoreIndex }),
   gitWorkingDiff: (root: string, change: GitWorkingChange) => invoke<GitWorkingDiff>("git_working_diff", { root, change }),
   environmentScope: (scope: EnvironmentScope) => invoke<{ rows: EnvironmentRow[]; info: EnvironmentInfo }>("environment_scope", { scope }),
   environmentValue: (scope: EnvironmentScope, name: string) => invoke<EnvironmentValue | null>("environment_value", { scope, name }),

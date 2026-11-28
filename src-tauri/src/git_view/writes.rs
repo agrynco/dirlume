@@ -4,6 +4,7 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
     fmt::Write as _,
     fs::{self, OpenOptions},
@@ -37,11 +38,22 @@ pub struct WorkingIndex {
     changes: Vec<WorkingChange>,
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IndexAction {
     Stage,
     Unstage,
+}
+
+fn change_paths(change: &WorkingChange) -> WriteResult<Vec<&str>> {
+    super::relative_file(&change.path)?;
+    let mut paths = vec![change.path.as_str()];
+    if change.status == 'R' {
+        let previous = change.previous_path.as_deref().ok_or(WriteError::Stale)?;
+        super::relative_file(previous)?;
+        paths.push(previous);
+    }
+    Ok(paths)
 }
 
 #[derive(Debug, Serialize)]
@@ -294,18 +306,39 @@ fn update_index(
     action: IndexAction,
     replace: bool,
 ) -> WriteResult<()> {
+    update_selection(git, root, expected, &[change], action, replace, None)
+}
+
+fn update_selection(
+    git: &Path,
+    root: &Path,
+    expected: &IndexSnapshot,
+    selected: &[WorkingChange],
+    action: IndexAction,
+    replace: bool,
+    reviewed: Option<&[FileStamp]>,
+) -> WriteResult<()> {
+    if selected.is_empty() {
+        return Err(WriteError::UnsupportedChange);
+    }
     let transaction = IndexWrite::open(git_path(git, root, "index")?)?;
     let state = checked_snapshot(git, root, expected)?;
     let changes = working_changes(git, root)?;
-    if !changes.contains(&change) {
-        return Err(WriteError::Stale);
+    let mut paths = BTreeSet::new();
+    for change in selected {
+        let compatible = match action {
+            IndexAction::Stage => change.group != ChangeGroup::Staged,
+            IndexAction::Unstage => change.group == ChangeGroup::Staged,
+        };
+        if !compatible || !changes.contains(change) {
+            return Err(WriteError::Stale);
+        }
+        paths.extend(change_paths(change)?);
     }
-    let mut paths = vec![change.path.as_str()];
-    super::relative_file(&change.path)?;
-    if change.status == 'R' {
-        let previous = change.previous_path.as_deref().ok_or(WriteError::Stale)?;
-        super::relative_file(previous)?;
-        paths.push(previous);
+    if let Some(reviewed) = reviewed {
+        if worktree_stamps(git, root, selected)? != reviewed {
+            return Err(WriteError::Stale);
+        }
     }
     if paths.iter().any(|path| {
         state.submodules.iter().any(|item| item == path)
@@ -313,8 +346,8 @@ fn update_index(
     }) {
         return Err(WriteError::UnsupportedChange);
     }
-    let mut args = match (action, change.group, state.snapshot.head.as_deref()) {
-        (IndexAction::Stage, ChangeGroup::Unstaged | ChangeGroup::Untracked, _) => {
+    let mut args = match (action, state.snapshot.head.as_deref()) {
+        (IndexAction::Stage, _) => {
             if !replace
                 && changes.iter().any(|row| {
                     row.group == ChangeGroup::Staged && paths.contains(&row.path.as_str())
@@ -324,13 +357,12 @@ fn update_index(
             }
             vec!["add", "-A"]
         }
-        (IndexAction::Unstage, ChangeGroup::Staged, Some(head)) => {
+        (IndexAction::Unstage, Some(head)) => {
             vec!["reset", "--quiet", head]
         }
-        (IndexAction::Unstage, ChangeGroup::Staged, None) => {
+        (IndexAction::Unstage, None) => {
             vec!["rm", "--cached", "--force", "--quiet"]
         }
-        _ => return Err(WriteError::Stale),
     };
     args.insert(0, "--literal-pathspecs");
     args.push("--");
@@ -338,7 +370,7 @@ fn update_index(
     let before = index_entries(transaction.command(git, root, INDEX_ARGS))?;
     operation_output(transaction.command(git, root, &args))?;
     let after = index_entries(transaction.command(git, root, INDEX_ARGS))?;
-    let unrelated = |path: &str| !paths.contains(&path);
+    let unrelated = |path: &str| !paths.contains(path);
     if !index_records(&before)
         .filter(|&(_, path)| unrelated(path))
         .eq(index_records(&after).filter(|&(_, path)| unrelated(path)))
@@ -351,8 +383,315 @@ fn update_index(
     {
         return Err(WriteError::UnsupportedChange);
     }
+    if let Some(reviewed) = reviewed {
+        if worktree_stamps(git, root, selected)? != reviewed {
+            return Err(WriteError::Stale);
+        }
+    }
     checked_snapshot(git, root, expected)?;
     transaction.save()
+}
+
+#[derive(Deserialize, PartialEq, Serialize)]
+struct FileStamp {
+    path: String,
+    content: Option<String>,
+    executable: bool,
+    symlink: bool,
+}
+
+fn worktree_stamps(
+    git: &Path,
+    root: &Path,
+    changes: &[WorkingChange],
+) -> WriteResult<Vec<FileStamp>> {
+    let mut paths = BTreeSet::new();
+    for change in changes
+        .iter()
+        .filter(|change| change.group != ChangeGroup::Staged)
+    {
+        paths.extend(change_paths(change)?);
+    }
+    paths
+        .into_iter()
+        .map(|path| {
+            let (content, executable, symlink) = match fs::symlink_metadata(root.join(path)) {
+                Ok(metadata) if metadata.is_file() => {
+                    if super::working_file(root, Path::new(path)).is_none() {
+                        return Err(WriteError::UnsupportedChange);
+                    }
+                    #[cfg(unix)]
+                    let executable = {
+                        use std::os::unix::fs::PermissionsExt;
+                        metadata.permissions().mode() & 0o111 != 0
+                    };
+                    #[cfg(not(unix))]
+                    let executable = false;
+                    (
+                        Some(line(operation_output(command(
+                            git,
+                            root,
+                            &["hash-object", "--no-filters", "--", path],
+                        ))?)?),
+                        executable,
+                        false,
+                    )
+                }
+                Ok(metadata) if metadata.is_symlink() => (
+                    Some(
+                        fs::read_link(root.join(path))?
+                            .to_str()
+                            .ok_or(GitError::Unreadable)?
+                            .to_owned(),
+                    ),
+                    false,
+                    true,
+                ),
+                Ok(_) => return Err(WriteError::UnsupportedChange),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => (None, false, false),
+                Err(error) => return Err(error.into()),
+            };
+            Ok(FileStamp {
+                path: path.into(),
+                content,
+                executable,
+                symlink,
+            })
+        })
+        .collect()
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct BulkPlan {
+    expected: IndexSnapshot,
+    changes: Vec<WorkingChange>,
+    action: IndexAction,
+    stamps: Vec<FileStamp>,
+}
+
+fn bulk_plan(
+    git: &Path,
+    root: &Path,
+    expected: IndexSnapshot,
+    changes: Vec<WorkingChange>,
+    action: IndexAction,
+) -> WriteResult<BulkPlan> {
+    checked_snapshot(git, root, &expected)?;
+    let actual = working_changes(git, root)?;
+    if changes.is_empty() || !changes.iter().all(|change| actual.contains(change)) {
+        return Err(WriteError::Stale);
+    }
+    let stamps = worktree_stamps(git, root, &changes)?;
+    Ok(BulkPlan {
+        expected,
+        changes,
+        action,
+        stamps,
+    })
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct HunkReview {
+    expected: IndexSnapshot,
+    change: WorkingChange,
+    stamp: [u8; 32],
+}
+
+#[derive(Serialize)]
+pub struct HunkPlan {
+    review: HunkReview,
+    hunks: Vec<String>,
+}
+
+fn hunk_patch(git: &Path, root: &Path, change: &WorkingChange) -> WriteResult<Option<String>> {
+    if change.status != 'M' || change.group == ChangeGroup::Untracked {
+        return Ok(None);
+    }
+    super::relative_file(&change.path)?;
+    let mut args = vec![
+        "--literal-pathspecs",
+        "diff",
+        "--patch",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "--no-relative",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--ignore-submodules=none",
+        "--submodule=short",
+    ];
+    if change.group == ChangeGroup::Staged {
+        args.push("--cached");
+    }
+    args.extend(["--", &change.path]);
+    let bytes = super::bounded(git, root, &args, super::PATCH_LIMIT)?;
+    Ok(bytes
+        .and_then(|bytes| super::text_patch(bytes).ok())
+        .filter(|patch| {
+            patch.starts_with("diff --git ")
+                && !patch.lines().any(|line| {
+                    line.starts_with("old mode ")
+                        || line.starts_with("new mode ")
+                        || line.starts_with("Submodule ")
+                })
+        }))
+}
+
+fn hunk_ranges(patch: &str) -> Vec<usize> {
+    patch
+        .match_indices("\n@@ ")
+        .map(|(position, _)| position + 1)
+        .chain(std::iter::once(patch.len()))
+        .collect()
+}
+
+fn patch_stamp(patch: &str) -> WriteResult<[u8; 32]> {
+    Ok(
+        ring::digest::digest(&ring::digest::SHA256, patch.as_bytes())
+            .as_ref()
+            .try_into()
+            .map_err(|_| GitError::Unreadable)?,
+    )
+}
+
+fn hunk_plan(
+    git: &Path,
+    root: &Path,
+    expected: IndexSnapshot,
+    change: WorkingChange,
+) -> WriteResult<Option<HunkPlan>> {
+    let state = checked_snapshot(git, root, &expected)?;
+    if state.submodules.contains(&change.path) || !working_changes(git, root)?.contains(&change) {
+        return Ok(None);
+    }
+    let Some(patch) = hunk_patch(git, root, &change)? else {
+        return Ok(None);
+    };
+    let ranges = hunk_ranges(&patch);
+    if ranges.len() < 2 {
+        return Ok(None);
+    }
+    let hunks = ranges
+        .windows(2)
+        .map(|ends| patch[ends[0]..ends[1]].to_owned())
+        .collect();
+    let review = HunkReview {
+        expected,
+        change,
+        stamp: patch_stamp(&patch)?,
+    };
+    Ok(Some(HunkPlan { review, hunks }))
+}
+
+fn apply_hunk(git: &Path, root: &Path, review: &HunkReview, index: usize) -> WriteResult<()> {
+    let transaction = IndexWrite::open(git_path(git, root, "index")?)?;
+    let state = checked_snapshot(git, root, &review.expected)?;
+    if state.submodules.contains(&review.change.path)
+        || !working_changes(git, root)?.contains(&review.change)
+    {
+        return Err(WriteError::Stale);
+    }
+    let patch = hunk_patch(git, root, &review.change)?.ok_or(WriteError::Stale)?;
+    if patch_stamp(&patch)? != review.stamp {
+        return Err(WriteError::Stale);
+    }
+    let ranges = hunk_ranges(&patch);
+    let range = ranges
+        .windows(2)
+        .nth(index)
+        .ok_or(WriteError::UnsupportedChange)?;
+    let selected = format!("{}{}", &patch[..ranges[0]], &patch[range[0]..range[1]]);
+    let file = transaction.temporary.path().join("reviewed.patch");
+    fs::write(&file, selected)?;
+    let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
+    if review.change.group == ChangeGroup::Staged {
+        args.push("--reverse");
+    }
+    let mut process = transaction.command(git, root, &args);
+    process.arg("--").arg(file);
+    let before = index_entries(transaction.command(git, root, INDEX_ARGS))?;
+    operation_output(process)?;
+    let after = index_entries(transaction.command(git, root, INDEX_ARGS))?;
+    let unrelated = |path: &str| path != review.change.path;
+    if !index_records(&before)
+        .filter(|&(_, path)| unrelated(path))
+        .eq(index_records(&after).filter(|&(_, path)| unrelated(path)))
+    {
+        return Err(WriteError::UnsupportedChange);
+    }
+    if hunk_patch(git, root, &review.change)?.as_deref() != Some(&patch) {
+        return Err(WriteError::Stale);
+    }
+    checked_snapshot(git, root, &review.expected)?;
+    transaction.save()
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DiscardReview {
+    expected: IndexSnapshot,
+    change: WorkingChange,
+    stamps: Vec<FileStamp>,
+}
+
+#[derive(Serialize)]
+pub struct DiscardPlan {
+    review: DiscardReview,
+    diff: super::WorkingDiff,
+}
+
+fn review_discard(
+    git: &Path,
+    root: &Path,
+    expected: IndexSnapshot,
+    change: WorkingChange,
+) -> WriteResult<DiscardPlan> {
+    let state = checked_snapshot(git, root, &expected)?;
+    if change.group == ChangeGroup::Staged
+        || matches!(change.status, 'R' | 'C' | 'U')
+        || state.submodules.contains(&change.path)
+    {
+        return Err(WriteError::UnsupportedChange);
+    }
+    if !working_changes(git, root)?.contains(&change) {
+        return Err(WriteError::Stale);
+    }
+    let stamps = worktree_stamps(git, root, std::slice::from_ref(&change))?;
+    let diff = super::working_diff(git, root, &change)?;
+    if worktree_stamps(git, root, std::slice::from_ref(&change))? != stamps {
+        return Err(WriteError::Stale);
+    }
+    Ok(DiscardPlan {
+        review: DiscardReview {
+            expected,
+            change,
+            stamps,
+        },
+        diff,
+    })
+}
+
+fn discard(git: &Path, root: &Path, review: DiscardReview) -> WriteResult<()> {
+    let transaction = IndexWrite::open(git_path(git, root, "index")?)?;
+    let reviewed = review_discard(git, root, review.expected, review.change)?;
+    if reviewed.review.stamps != review.stamps {
+        return Err(WriteError::Stale);
+    }
+    let change = reviewed.review.change;
+    let args = if change.group == ChangeGroup::Untracked {
+        vec!["--literal-pathspecs", "clean", "-f", "--", &change.path]
+    } else {
+        vec![
+            "--literal-pathspecs",
+            "restore",
+            "--worktree",
+            "--",
+            &change.path,
+        ]
+    };
+    operation_output(transaction.command(git, root, &args))?;
+    Ok(())
 }
 
 // Git calls the prepared hook after locking the branch update and before writing
@@ -405,6 +744,16 @@ fn commit_changes(
     expected: &IndexSnapshot,
     message: &str,
 ) -> WriteResult<String> {
+    write_commit(git, root, expected, message, false)
+}
+
+fn write_commit(
+    git: &Path,
+    root: &Path,
+    expected: &IndexSnapshot,
+    message: &str,
+    amend: bool,
+) -> WriteResult<String> {
     if message.trim().is_empty() || message.contains('\0') {
         return Err(WriteError::EmptyCommit);
     }
@@ -427,9 +776,11 @@ fn commit_changes(
     }
     let transaction = IndexWrite::open(git_path(git, root, "index")?)?;
     checked_snapshot(git, root, expected)?;
-    if !working_changes(git, root)?
-        .iter()
-        .any(|row| row.group == ChangeGroup::Staged)
+    if amend && expected.head.is_none()
+        || !amend
+            && !working_changes(git, root)?
+                .iter()
+                .any(|row| row.group == ChangeGroup::Staged)
     {
         return Err(WriteError::EmptyCommit);
     }
@@ -465,7 +816,12 @@ fn commit_changes(
         "core.hooksPath={}",
         hooks.to_string_lossy().replace('\\', "/")
     );
-    let mut process = transaction.command(git, root, &["-c", &hooks_option, "commit", "--file"]);
+    let mut args = vec!["-c", &hooks_option, "commit"];
+    if amend {
+        args.extend(["--amend", "--allow-empty"]);
+    }
+    args.push("--file");
+    let mut process = transaction.command(git, root, &args);
     process
         .arg(&message_file)
         .env("DIRLUME_GIT_BRANCH", branch)
@@ -543,6 +899,81 @@ pub async fn git_update_index(
 }
 
 #[tauri::command]
+pub async fn git_bulk_plan(
+    root: String,
+    expected: IndexSnapshot,
+    changes: Vec<WorkingChange>,
+    action: IndexAction,
+) -> WriteResult<BulkPlan> {
+    super::history_edits::write(root, move |git, root| {
+        bulk_plan(git, root, expected, changes, action)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_apply_bulk(root: String, plan: BulkPlan) -> WriteResult<()> {
+    super::history_edits::write(root, move |git, root| {
+        update_selection(
+            git,
+            root,
+            &plan.expected,
+            &plan.changes,
+            plan.action,
+            true,
+            Some(&plan.stamps),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_hunk_plan(
+    root: String,
+    expected: IndexSnapshot,
+    change: WorkingChange,
+) -> WriteResult<Option<HunkPlan>> {
+    super::history_edits::write(root, move |git, root| {
+        hunk_plan(git, root, expected, change)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_apply_hunk(root: String, review: HunkReview, index: usize) -> WriteResult<()> {
+    super::history_edits::write(root, move |git, root| apply_hunk(git, root, &review, index)).await
+}
+
+#[tauri::command]
+pub async fn git_discard_plan(
+    root: String,
+    expected: IndexSnapshot,
+    change: WorkingChange,
+) -> WriteResult<DiscardPlan> {
+    super::history_edits::write(root, move |git, root| {
+        review_discard(git, root, expected, change)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_discard_worktree(root: String, review: DiscardReview) -> WriteResult<()> {
+    super::history_edits::write(root, move |git, root| discard(git, root, review)).await
+}
+
+#[tauri::command]
+pub async fn git_amend_changes(
+    root: String,
+    expected: IndexSnapshot,
+    message: String,
+) -> WriteResult<String> {
+    super::history_edits::write(root, move |git, root| {
+        write_commit(git, root, &expected, &message, true)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_commit_changes(
     root: String,
     expected: IndexSnapshot,
@@ -576,6 +1007,7 @@ mod tests {
             &["config", "user.email", "fixture@example.test"],
         );
         git(&executable, root, &["config", "commit.gpgsign", "false"]);
+        git(&executable, root, &["config", "core.autocrlf", "false"]);
         let hooks = root.join(".git").join("hooks");
         git(
             &executable,
@@ -583,6 +1015,209 @@ mod tests {
             &["config", "core.hooksPath", hooks.to_str().unwrap()],
         );
         (executable, fixture)
+    }
+
+    #[test]
+    fn stages_and_unstages_a_hunk_without_changing_the_working_file() {
+        let (exe, fixture) = fixture();
+        let root = fixture.path();
+        let original = (0..35)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>();
+        fs::write(root.join("partial.txt"), &original).unwrap();
+        git(&exe, root, &["add", "--", "partial.txt"]);
+        git(&exe, root, &["commit", "-m", "Base"]);
+        let edited = original
+            .replace("line 2\n", "first edit\n")
+            .replace("line 29\n", "last edit\n");
+        fs::write(root.join("partial.txt"), &edited).unwrap();
+        let plan = hunk_plan(
+            &exe,
+            root,
+            review_index(&exe, root).unwrap(),
+            change(&exe, root, "partial.txt", ChangeGroup::Unstaged),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(plan.hunks.len(), 2);
+        apply_hunk(&exe, root, &plan.review, 0).unwrap();
+        let staged = git(&exe, root, &["diff", "--cached"]);
+        assert!(staged.contains("+first edit"));
+        assert!(!staged.contains("last edit"));
+        assert!(git(&exe, root, &["diff"]).contains("+last edit"));
+        assert_eq!(
+            fs::read_to_string(root.join("partial.txt")).unwrap(),
+            edited
+        );
+        let plan = hunk_plan(
+            &exe,
+            root,
+            review_index(&exe, root).unwrap(),
+            change(&exe, root, "partial.txt", ChangeGroup::Staged),
+        )
+        .unwrap()
+        .unwrap();
+        apply_hunk(&exe, root, &plan.review, 0).unwrap();
+        assert!(git(&exe, root, &["diff", "--cached"]).is_empty());
+        let plan = hunk_plan(
+            &exe,
+            root,
+            review_index(&exe, root).unwrap(),
+            change(&exe, root, "partial.txt", ChangeGroup::Unstaged),
+        )
+        .unwrap()
+        .unwrap();
+        fs::write(
+            root.join("partial.txt"),
+            edited.replace("first edit", "new content"),
+        )
+        .unwrap();
+        assert!(matches!(
+            apply_hunk(&exe, root, &plan.review, 0),
+            Err(WriteError::Stale)
+        ));
+        assert!(git(&exe, root, &["diff", "--cached"]).is_empty());
+    }
+
+    #[test]
+    fn reviews_bulk_changes_discard_and_amend_on_a_partly_staged_tree() {
+        let (exe, fixture) = fixture();
+        let root = fixture.path();
+        for path in ["a.txt", "b.txt", "other.txt"] {
+            fs::write(root.join(path), "base\n").unwrap();
+        }
+        git(&exe, root, &["add", "."]);
+        git(&exe, root, &["commit", "-m", "Base"]);
+        fs::write(root.join("other.txt"), "already staged\n").unwrap();
+        git(&exe, root, &["add", "--", "other.txt"]);
+        for path in ["a.txt", "b.txt"] {
+            fs::write(root.join(path), "bulk review\n").unwrap();
+        }
+        let selected = || {
+            ["a.txt", "b.txt"]
+                .iter()
+                .map(|path| change(&exe, root, path, ChangeGroup::Unstaged))
+                .collect::<Vec<_>>()
+        };
+        let plan = bulk_plan(
+            &exe,
+            root,
+            review_index(&exe, root).unwrap(),
+            selected(),
+            IndexAction::Stage,
+        )
+        .unwrap();
+        fs::write(root.join("b.txt"), "new bulk contents\n").unwrap();
+        assert!(matches!(
+            update_selection(
+                &exe,
+                root,
+                &plan.expected,
+                &plan.changes,
+                plan.action,
+                true,
+                Some(&plan.stamps)
+            ),
+            Err(WriteError::Stale)
+        ));
+        assert_eq!(
+            git(&exe, root, &["diff", "--cached", "--name-only"]),
+            "other.txt"
+        );
+        let plan = bulk_plan(
+            &exe,
+            root,
+            review_index(&exe, root).unwrap(),
+            selected(),
+            IndexAction::Stage,
+        )
+        .unwrap();
+        update_selection(
+            &exe,
+            root,
+            &plan.expected,
+            &plan.changes,
+            plan.action,
+            true,
+            Some(&plan.stamps),
+        )
+        .unwrap();
+        assert_eq!(
+            git(&exe, root, &["diff", "--cached", "--name-only"]),
+            "a.txt\nb.txt\nother.txt"
+        );
+        fs::write(root.join("a.txt"), "discard me\n").unwrap();
+        let view = || {
+            review_discard(
+                &exe,
+                root,
+                review_index(&exe, root).unwrap(),
+                change(&exe, root, "a.txt", ChangeGroup::Unstaged),
+            )
+            .unwrap()
+        };
+        let plan = view();
+        fs::write(root.join("a.txt"), "new working edit\n").unwrap();
+        assert!(matches!(
+            discard(&exe, root, plan.review),
+            Err(WriteError::Stale)
+        ));
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).unwrap(),
+            "new working edit\n"
+        );
+        discard(&exe, root, view().review).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).unwrap(),
+            "bulk review\n"
+        );
+        let staged = ["a.txt", "b.txt"]
+            .iter()
+            .map(|path| change(&exe, root, path, ChangeGroup::Staged))
+            .collect();
+        let plan = bulk_plan(
+            &exe,
+            root,
+            review_index(&exe, root).unwrap(),
+            staged,
+            IndexAction::Unstage,
+        )
+        .unwrap();
+        update_selection(
+            &exe,
+            root,
+            &plan.expected,
+            &plan.changes,
+            plan.action,
+            true,
+            Some(&plan.stamps),
+        )
+        .unwrap();
+        assert_eq!(
+            git(&exe, root, &["diff", "--cached", "--name-only"]),
+            "other.txt"
+        );
+        write_commit(
+            &exe,
+            root,
+            &review_index(&exe, root).unwrap(),
+            "Amended base",
+            true,
+        )
+        .unwrap();
+        assert_eq!(git(&exe, root, &["rev-list", "--count", "HEAD"]), "1");
+        assert_eq!(
+            git(&exe, root, &["log", "-1", "--format=%s"]),
+            "Amended base"
+        );
+        assert_eq!(
+            git(&exe, root, &["show", "HEAD:other.txt"]),
+            "already staged"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("b.txt")).unwrap(),
+            "new bulk contents\n"
+        );
     }
 
     fn change(git: &Path, root: &Path, path: &str, group: ChangeGroup) -> WorkingChange {

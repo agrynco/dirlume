@@ -22,6 +22,7 @@ try {
     });
     window.gitEvents = [];
     let indexVersion = 0;
+    let stashes = [];
     const conflictState = (operation) => ({ session: { operation, head: hash("a"), sources: [hash("c")] }, conflicts: [
       { path: "conflict.txt", base: { mode: "100644", oid: hash("a") },
         ours: { mode: "100644", oid: hash("b") }, theirs: { mode: "100644", oid: hash("c") } },
@@ -150,6 +151,11 @@ try {
           case "git_index_state":
             assertRoot(args.root);
             if (window.workingError) throw "unreadable";
+            if (window.gitExtraChanges) {
+              window.gitExtraChanges = false;
+              rows.push({ group: "unstaged", status: "M", path: "note.txt", previousPath: null },
+                { group: "untracked", status: "?", path: "bulk.txt", previousPath: null });
+            }
             return { snapshot: { headRef: window.gitDetached ? null : "refs/heads/main",
               head: window.gitEmpty ? null : hash("a"), index: String(indexVersion), gitDir: root + "/.git" },
             writeBlocked: false, submodules: [], changes: window.workingClean ? [] : rows };
@@ -179,6 +185,57 @@ try {
             rows = rows.filter((row) => row.group !== "staged");
             indexVersion++;
             return "abcdef0";
+          case "git_amend_changes":
+            assertRoot(args.root);
+            window.gitAmended = args.message;
+            return "abcdef1";
+          case "git_hunk_plan":
+            assertRoot(args.root);
+            return { review: { expected: args.expected, change: args.change, stamp: [] },
+              hunks: ["@@ -4 +4 @@\n-before\n+first hunk\n", "@@ -24 +24 @@\n-before\n+second hunk\n"] };
+          case "git_apply_hunk":
+            assertRoot(args.root);
+            window.gitStagedHunk = { path: args.review.change.path, index: args.index };
+            indexVersion++;
+            return null;
+          case "git_bulk_plan":
+            assertRoot(args.root);
+            return { expected: args.expected, changes: args.changes, action: args.action, stamps: [] };
+          case "git_apply_bulk":
+            assertRoot(args.root);
+            window.gitBulk = args.plan.changes.map(({ path }) => path);
+            indexVersion++;
+            return null;
+          case "git_discard_plan":
+            assertRoot(args.root);
+            return { review: { expected: args.expected, change: args.change, stamps: [] },
+              diff: { patch: "+discard preview\n", fallback: null } };
+          case "git_discard_worktree":
+            assertRoot(args.root);
+            window.gitDiscarded = args.review.change.path;
+            rows = rows.filter((row) => row.path !== args.review.change.path);
+            return null;
+          case "git_stashes":
+            assertRoot(args.root);
+            return stashes;
+          case "git_create_stash":
+            assertRoot(args.root);
+            window.gitStashCreated = { message: args.message, untracked: args.untracked };
+            stashes = [{ hash: hash("b"), position: 0, subject: args.message }];
+            return null;
+          case "git_stash_preview":
+            assertRoot(args.root);
+            return { combined: { patch: "+saved stash diff\n", fallback: null },
+              staged: { patch: "+saved staged version\n", fallback: null }, working: { patch: "+saved working version\n", fallback: null } };
+          case "git_update_stash":
+            assertRoot(args.root);
+            window.gitStashAction = { hash: args.entry.hash, action: args.action, restoreIndex: args.restoreIndex };
+            if (args.action === "drop") {
+              stashes = [];
+              return { changes: [], error: null };
+            }
+            return { changes: [{ group: "unstaged", status: "U", path: "stash-conflict.txt", previousPath: null }],
+              error: "Git reported a conflict." };
           case "git_working_diff": {
             assertRoot(args.root);
             const { group, path } = args.change;
@@ -426,6 +483,62 @@ try {
   assert.deepEqual(await page.evaluate(() => window.gitCommitted),
     { message: "Review two files", ref: "refs/heads/main", paths: ["new ł.txt", "note.txt"] });
   await changeFilter.fill("");
+  await page.evaluate(() => { window.gitExtraChanges = true; });
+  await button(changes, "Refresh").click();
+  await edited.click();
+  await button(preview, "Stage hunk…").click();
+  const hunks = page.getByRole("dialog", { name: "Review text hunks", exact: true });
+  await hunks.getByRole("combobox", { name: "Hunk", exact: true }).selectOption("1");
+  await hunks.getByLabel("Inline diff", { exact: true }).filter({ hasText: "+second hunk" }).waitFor();
+  await button(hunks, "Stage this hunk").click();
+  await page.waitForFunction(() => window.gitStagedHunk?.index === 1);
+  assert.deepEqual(await page.evaluate(() => window.gitStagedHunk), { path: "note.txt", index: 1 });
+  await button(changes, "Select files…").click();
+  const selectFiles = page.getByRole("dialog", { name: "Select changed files", exact: true });
+  await selectFiles.getByRole("checkbox", { name: "note.txt", exact: true }).check();
+  await selectFiles.getByRole("checkbox", { name: "bulk.txt", exact: true }).check();
+  await button(selectFiles, "Review changes").click();
+  const bulk = page.getByRole("dialog", { name: "Stage selected files", exact: true });
+  await bulk.getByText("bulk.txt", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitBulk), undefined);
+  await button(bulk, "Stage selected files").click();
+  await page.waitForFunction(() => window.gitBulk?.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.gitBulk)).sort(), ["bulk.txt", "note.txt"]);
+  await edited.click();
+  await button(preview, "Discard…").click();
+  const discard = page.getByRole("dialog", { name: "Discard working change", exact: true });
+  await discard.getByLabel("Inline diff", { exact: true }).filter({ hasText: "+discard preview" }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitDiscarded), undefined);
+  await button(discard, "Discard working change").click();
+  await page.waitForFunction(() => window.gitDiscarded === "note.txt");
+  await button(changes, "Amend…").click();
+  const amend = page.getByRole("dialog", { name: "Amend current commit", exact: true });
+  const amendMessage = amend.getByRole("textbox", { name: "Commit message", exact: true });
+  assert.match(await amendMessage.inputValue(), /Full commit body/);
+  await amendMessage.fill("Amend the reviewed commit");
+  await button(amend, "Amend commit").click();
+  await changes.getByText("Amended commit abcdef1.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitAmended), "Amend the reviewed commit");
+  await button(changes, "Stashes…").click();
+  const stashes = page.getByRole("dialog", { name: "Git stashes", exact: true });
+  await stashes.getByRole("textbox", { name: "Stash message", exact: true }).fill("Fixture stash");
+  await stashes.getByRole("checkbox", { name: "Include untracked files", exact: true }).check();
+  await button(stashes, "Create stash").click();
+  await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved stash diff" }).waitFor();
+  await button(stashes, "Staged").click();
+  await stashes.getByLabel("Stash diff", { exact: true }).filter({ hasText: "+saved staged version" }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.gitStashCreated), { message: "Fixture stash", untracked: true });
+  await button(stashes, "Apply stash").click();
+  const apply = page.getByRole("dialog", { name: "Apply stash", exact: true });
+  await button(apply, "Apply stash").click();
+  await stashes.getByText("stash-conflict.txt", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.gitStashAction.restoreIndex), true);
+  await button(stashes, "Drop stash").click();
+  const drop = page.getByRole("dialog", { name: "Drop stash", exact: true });
+  assert.equal(await page.evaluate(() => window.gitStashAction.action), "apply");
+  await button(drop, "Drop stash").click();
+  await stashes.getByText("No stashes.", { exact: true }).waitFor();
+  await button(stashes, "Close").click();
   await page.evaluate(() => { window.workingClean = true; });
   await button(changes, "Refresh").click();
   await changes.getByText("Working tree is clean.").waitFor();

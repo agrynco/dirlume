@@ -13,6 +13,7 @@ pub(crate) mod history_edits;
 pub(crate) mod merge;
 pub(crate) mod rebase;
 pub(crate) mod remote_push;
+pub(crate) mod stash;
 pub(crate) mod writes;
 
 #[derive(Debug, Serialize)]

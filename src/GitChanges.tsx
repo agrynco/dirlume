@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { FileDiff } from "lucide-react";
-import { api, type GitChangeGroup, type GitIndexAction, type GitIndexSnapshot, type GitWorkingChange, type GitWorkingDiff,
+import { api, type GitBulkPlan, type GitChangeGroup, type GitDiscardPlan, type GitHunkPlan, type GitIndexAction, type GitIndexSnapshot, type GitWorkingChange, type GitWorkingDiff,
   type GitWorkingIndex, type NamedFile } from "./api";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 import { bookmarkFile } from "./fileBookmarks";
+import { GitStashes } from "./GitStashes";
+import { writeError, writeErrors, writeFailure } from "./gitWriteError";
 import { imageType } from "./ImageViewport";
 import { t } from "./i18n";
 import { opposite, type Side } from "./panes";
@@ -66,24 +68,66 @@ function Preview({ root, change, onOpen, canEdit, actions }: {
   </>;
 }
 
-const writeErrors: Record<string, string> = {
-  stale: "The checked-out branch or staged changes changed. Review the refreshed changes and try again.",
-  busy: "The Git index is locked. Finish the other Git operation and refresh.",
-  operationInProgress: "Finish the current Git operation or resolve its conflicts before writing changes.",
-  detached: "Switch to a branch to create a commit.",
-  unsupportedChange: "Use Git in a terminal to change this submodule or directory entry.",
-  emptyCommit: "Stage files and enter a commit message first.",
-  gitTooOld: "Update Git to 2.29 or newer to commit from Git View.",
-};
-
-function writeFailure(error: unknown) {
-  return (error instanceof Error ? error.cause : error) as { kind?: string; detail?: string } | null;
-}
-
-export function writeError(error: unknown) {
-  const failure = writeFailure(error);
-  const message = failure?.kind ? writeErrors[failure.kind] : undefined;
-  return message ? t(message) : t(failure?.detail || "Git could not complete the operation.");
+function BulkSelection({ root, index, onClose, onRefresh }: {
+  root: string; index: GitWorkingIndex; onClose: () => void; onRefresh: () => void;
+}) {
+  const [action, setAction] = useState<GitIndexAction>("stage");
+  const [marked, setMarked] = useState<string[]>([]);
+  const [review, setReview] = useState<GitBulkPlan>();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const rows = index.changes.filter((row) => (row.group === "staged") === (action === "unstage") &&
+    !index.submodules.includes(row.path));
+  const verb = action === "stage" ? "Stage selected files" : "Unstage selected files";
+  async function next() {
+    setPending(true);
+    setError("");
+    try {
+      if (review) {
+        await api.gitApplyBulk(root, review);
+        onClose();
+        onRefresh();
+      } else {
+        setReview(await api.gitBulkPlan(root, index.snapshot, rows.filter((row) => marked.includes(changeId(row))), action));
+      }
+    } catch (error) {
+      setError(writeError(error));
+      setReview(undefined);
+      onRefresh();
+    } finally {
+      setPending(false);
+    }
+  }
+  return <Dialog title={t(review ? verb : "Select changed files")} helpTopic="gitView" wide
+    onClose={pending ? undefined : onClose} footer={<>
+      <Button disabled={pending} onClick={onClose}>{t("Cancel")}</Button>
+      <Button disabled={pending || !marked.length} onClick={() => void next()}>{t(review ? verb : "Review changes")}</Button>
+    </>}>
+    <p><code>{root}</code></p>
+    {error && <p role="alert">{error}</p>}
+    {review ? <>
+      {action === "stage" && <p>{t("Stage the full working versions of these files, including replacements for any staged versions.")}</p>}
+      <ul>{review.changes.map((row) => <li key={changeId(row)}>{changeLabel(row)}</li>)}</ul>
+    </> : <>
+      <label className="field">{t("Index action")}
+        <select value={action} disabled={pending} onChange={(event) => {
+          setAction(event.target.value as GitIndexAction);
+          setMarked([]);
+        }}>
+          <option value="stage">{t("Stage")}</option><option value="unstage">{t("Unstage")}</option>
+        </select>
+      </label>
+      <Button disabled={pending || !rows.length} onClick={() =>
+        setMarked(marked.length === rows.length ? [] : rows.map(changeId))}>{t(marked.length && marked.length === rows.length ? "Clear selection" : "Select all")}</Button>
+      <div className="git-bulk-list">{rows.map((row) => {
+        const id = changeId(row);
+        return <label key={id} className="field-checkbox">
+          <input type="checkbox" disabled={pending} checked={marked.includes(id)} onChange={(event) =>
+            setMarked(event.target.checked ? [...marked, id] : marked.filter((path) => path !== id))} />{changeLabel(row)}
+        </label>;
+      })}</div>
+    </>}
+  </Dialog>;
 }
 
 export function GitChanges({ side, root, refresh, selected, onSelect, header, repository, onOpen, canEdit, onRefresh,
@@ -103,11 +147,15 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
 }) {
   const [filter, setFilter] = useState("");
   const [result, setResult] = useState<{ refresh: number; index: GitWorkingIndex | null }>();
-  const [pending, setPending] = useState<GitIndexAction | "commit">();
+  const [pending, setPending] = useState<GitIndexAction | "commit" | "review">();
   const [feedback, setFeedback] = useState<{ error: boolean; message: string }>();
   const [replacement, setReplacement] = useState<{ change: GitWorkingChange; snapshot: GitIndexSnapshot }>();
-  const [review, setReview] = useState<{ changes: GitWorkingChange[]; snapshot: GitIndexSnapshot }>();
+  const [review, setReview] = useState<{ changes: GitWorkingChange[]; snapshot: GitIndexSnapshot; amendMessage?: string }>();
   const [reviewPath, setReviewPath] = useState("");
+  const [bulk, setBulk] = useState<GitWorkingIndex>();
+  const [stash, setStash] = useState(false);
+  const [patchReview, setPatchReview] = useState<{ kind: "hunks"; plan: GitHunkPlan } | { kind: "discard"; plan: GitDiscardPlan }>();
+  const [hunk, setHunk] = useState(0);
   const mounted = useRef(false);
   const writing = useRef(false);
   const refocus = useRef<string | null>(null);
@@ -137,6 +185,8 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
   const current = change ? changeId(change) : "";
   const isSubmodule = !!(change && index?.submodules.includes(change.path));
   const selectedReview = review?.changes.find((row) => changeId(row) === reviewPath);
+  const amend = review?.amendMessage !== undefined;
+  const commitMessage = review?.amendMessage ?? draft;
 
   useLayoutEffect(() => {
     if (!index || refocus.current === null) return;
@@ -174,15 +224,16 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
   }
 
   async function commit() {
-    if (!review || writing.current || !draft.trim()) return;
+    if (!review || writing.current || !commitMessage.trim()) return;
     writing.current = true;
     setPending("commit");
     setFeedback(undefined);
     try {
-      const hash = await api.gitCommitChanges(root, review.snapshot, draft);
+      const command = amend ? api.gitAmendChanges : api.gitCommitChanges;
+      const hash = await command(root, review.snapshot, commitMessage);
       if (mounted.current) {
-        onDraft("");
-        setFeedback({ error: false, message: t("Created commit {0}.", hash) });
+        if (!amend) onDraft("");
+        setFeedback({ error: false, message: t(amend ? "Amended commit {0}." : "Created commit {0}.", hash) });
       }
     } catch (error) {
       if (mounted.current) setFeedback({ error: true, message: writeError(error) });
@@ -195,6 +246,59 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
         onRefresh();
       }
     }
+  }
+  async function gitReview(run: () => Promise<void>, refreshAfter = false) {
+    if (writing.current) return;
+    writing.current = true;
+    setPending("review");
+    setFeedback(undefined);
+    try {
+      await run();
+    } catch (error) {
+      if (mounted.current) setFeedback({ error: true, message: writeError(error) });
+      refreshAfter = true;
+    } finally {
+      writing.current = false;
+      if (mounted.current) {
+        setPending(undefined);
+        if (refreshAfter) {
+          refocus.current = change?.path ?? "";
+          onRefresh();
+        }
+      }
+    }
+  }
+  function startAmend(current: GitWorkingIndex) {
+    const { head } = current.snapshot;
+    if (!head) return;
+    void gitReview(async () => {
+      const details = await api.gitDetails(root, head);
+      setReview({ changes: staged, snapshot: current.snapshot, amendMessage: details.message.trimEnd() });
+      setReviewPath("");
+    });
+  }
+  function startPatchReview(kind: "discard" | "hunks", target: GitWorkingChange, snapshot: GitIndexSnapshot) {
+    void gitReview(async () => {
+      if (kind === "discard") {
+        setPatchReview({ kind, plan: await api.gitDiscardPlan(root, snapshot, target) });
+      } else {
+        const plan = await api.gitHunkPlan(root, snapshot, target);
+        if (plan) {
+          setHunk(0);
+          setPatchReview({ kind, plan });
+        } else {
+          setFeedback({ error: false, message: t("No independently stageable text hunks.") });
+        }
+      }
+    });
+  }
+  function applyPatch() {
+    if (!patchReview) return;
+    setPatchReview(undefined);
+    void gitReview(async () => {
+      if (patchReview.kind === "hunks") await api.gitApplyHunk(root, patchReview.plan.review, hunk);
+      else await api.gitDiscardWorktree(root, patchReview.plan.review);
+    }, true);
   }
   function handleKeys(event: KeyboardEvent) {
     if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
@@ -217,13 +321,17 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
           setReview({ changes: staged, snapshot: index.snapshot });
           setReviewPath("");
         }}>{t("Commit…")}</Button>
+        <Button disabled={!index.snapshot.head || !branchName || index.writeBlocked || !!pending}
+          onClick={() => startAmend(index)}>{t("Amend…")}</Button>
+        <Button disabled={!rows?.length || index.writeBlocked || !!pending} onClick={() => setBulk(index)}>{t("Select files…")}</Button>
+        <Button disabled={!!pending} onClick={() => setStash(true)}>{t("Stashes…")}</Button>
       </div>}
       {index?.writeBlocked && <p className="git-write-feedback">{t(writeErrors.operationInProgress)}</p>}
       {index && !branchName && <p className="git-write-feedback">{t(writeErrors.detached)}</p>}
       {feedback && <p className={"git-write-feedback" + (feedback.error ? " git-error" : "")}
         role={feedback.error ? "alert" : "status"}>{feedback.message}</p>}
       {pending && pending !== "commit" && <p className="git-write-feedback" role="status">
-        {t(pending === "stage" ? "Staging…" : "Unstaging…")}</p>}
+        {t(pending === "review" ? "Working with Git…" : pending === "stage" ? "Staging…" : "Unstaging…")}</p>}
       <input className="git-filter" ref={filterField} type="search" value={filter} aria-label={t("Filter changed paths")}
         placeholder={t("Filter changed paths")} onChange={(event) => setFilter(event.target.value)}
         onKeyDown={(event) => {
@@ -255,7 +363,7 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
       data-help-topic="gitView" data-pane-side={opposite(side)}>
       <header className="pane-heading"><span className="pane-title"><FileDiff aria-hidden="true" />{t("Change preview")}</span></header>
       {change && index && <Preview key={JSON.stringify([root, refresh, current])} root={root} change={change} onOpen={onOpen} canEdit={canEdit}
-        actions={isSubmodule ? <span>{t(writeErrors.unsupportedChange)}</span> : <Button
+        actions={isSubmodule ? <span>{t(writeErrors.unsupportedChange)}</span> : <><Button
           disabled={!!pending || index.writeBlocked} onClick={() => {
             if (change.group !== "staged" && staged.some((row) => row.path === change.path ||
               change.previousPath && row.path === change.previousPath)) {
@@ -263,7 +371,16 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
             } else void changeIndex(change, index.snapshot, change.group === "staged" ? "unstage" : "stage", false);
           }}>
           {t(change.group === "staged" ? "Unstage" : "Stage")}
-        </Button>} />}
+        </Button>
+          {change.group !== "untracked" && change.status === "M" &&
+            <Button disabled={!!pending || index.writeBlocked} onClick={() => startPatchReview("hunks", change, index.snapshot)}>
+              {t(change.group === "staged" ? "Unstage hunk…" : "Stage hunk…")}
+            </Button>}
+          {change.group !== "staged" && !["R", "C", "U"].includes(change.status) &&
+            <Button disabled={!!pending || index.writeBlocked} onClick={() => startPatchReview("discard", change, index.snapshot)}>
+              {t("Discard…")}
+            </Button>}
+        </>} />}
     </section>
     {replacement && <Dialog title={t("Replace staged changes?")} helpTopic="gitView" onClose={() => setReplacement(undefined)}
       footer={<>
@@ -275,13 +392,15 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
       </>}>
       <p>{t("Stage the entire working version of {0} and replace its staged changes?", changeLabel(replacement.change))}</p>
     </Dialog>}
-    {review && <Dialog title={t("Commit staged changes")} helpTopic="gitView" wide onClose={() => {
+    {review && <Dialog title={t(amend ? "Amend current commit" : "Commit staged changes")} helpTopic="gitView" wide onClose={() => {
       if (!writing.current) setReview(undefined);
     }} footer={<>
       <Button disabled={!!pending} onClick={() => setReview(undefined)}>{t("Cancel")}</Button>
-      <Button disabled={!!pending || !draft.trim()} onClick={() => void commit()}>{t(pending === "commit" ? "Committing…" : "Commit")}</Button>
+      <Button disabled={!!pending || !commitMessage.trim()}
+        onClick={() => void commit()}>{t(pending === "commit" ? "Committing…" : amend ? "Amend commit" : "Commit")}</Button>
     </>}>
       <p className="git-commit-context"><strong>{root}</strong><span>{t("Branch {0}", review.snapshot.headRef?.replace(/^refs\/heads\//, "") ?? "")}</span></p>
+      {amend && <p>{t("Replace current commit {0}.", review.snapshot.head?.slice(0, 12) ?? "")}</p>}
       <p>{t("Staged files: {0}", review.changes.length)}</p>
       <ul className="git-commit-paths">
         {review.changes.map((row) => <li key={changeId(row)}><Button aria-pressed={reviewPath === changeId(row)}
@@ -291,8 +410,34 @@ export function GitChanges({ side, root, refresh, selected, onSelect, header, re
         <Preview key={reviewPath} root={root} change={selectedReview} />
       </div>}
       <label className="field">{t("Commit message")}
-        <textarea data-initial-focus value={draft} rows={4} disabled={!!pending} onChange={(event) => onDraft(event.target.value)} />
+        <textarea data-initial-focus value={commitMessage} rows={4} disabled={!!pending} onChange={(event) => {
+          if (amend) setReview({ ...review, amendMessage: event.target.value });
+          else onDraft(event.target.value);
+        }} />
       </label>
+    </Dialog>}
+    {bulk && <BulkSelection root={root} index={index ?? bulk} onClose={() => setBulk(undefined)} onRefresh={onRefresh} />}
+    {stash && <GitStashes root={root} index={index} refresh={refresh} onClose={() => setStash(false)} onRefresh={onRefresh} />}
+    {patchReview && <Dialog title={t(patchReview.kind === "discard" ? "Discard working change" : "Review text hunks")}
+      helpTopic="gitView" wide onClose={() => setPatchReview(undefined)} footer={<>
+        <Button onClick={() => setPatchReview(undefined)}>{t("Cancel")}</Button>
+        <Button disabled={!!pending} onClick={applyPatch}>{t(patchReview.kind === "discard" ? "Discard working change" :
+          patchReview.plan.review.change.group === "staged" ? "Unstage this hunk" : "Stage this hunk")}</Button>
+      </>}>
+      <p><code>{root}</code></p><p>{changeLabel(patchReview.plan.review.change)}</p>
+      {patchReview.kind === "discard" ? <>
+        <p>{t(patchReview.plan.review.change.group === "untracked" ?
+          "Remove this untracked file from the working tree." : "Restore the working file from the index. Staged changes are preserved.")}</p>
+        {patchReview.plan.diff.fallback ? <p>{t(fallbacks[patchReview.plan.diff.fallback])}</p> :
+          <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")}>{patchReview.plan.diff.patch}</pre>}
+      </> : <>
+        <label className="field">{t("Hunk")}
+          <select value={hunk} onChange={(event) => setHunk(Number(event.target.value))}>
+            {patchReview.plan.hunks.map((patch, index) => <option key={index} value={index}>{patch.split("\n", 1)[0]}</option>)}
+          </select>
+        </label>
+        <pre className="git-patch" tabIndex={0} aria-label={t("Inline diff")}>{patchReview.plan.hunks[hunk]}</pre>
+      </>}
     </Dialog>}
   </>;
 }
