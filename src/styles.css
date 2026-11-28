@@ -1576,6 +1576,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .google-drive-sign-in-status > svg { flex: none; width: 20px; height: 20px; color: var(--accent); }
 .google-drive-remove { margin-inline-end: auto; }
 .transfer-body, .command-menu { display: grid; gap: 10px; }
+.dialog:has(> .command-menu) { width: min(680px, calc(100vw - 36px)); }
 .transfer-options { row-gap: var(--dialog-control-gap); }
 .help-layout {
   display: grid; grid-template-columns: minmax(130px, 29%) minmax(0, 1fr); min-height: 0;
@@ -1666,6 +1667,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .command-history-group { display: grid; gap: 4px; min-width: 0; }
 .command-history-group h3 { margin: 0; font-size: inherit; color: var(--muted); }
 .command-history-group button { justify-content: flex-start; text-align: left; border-color: var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.command-history-group code { min-width: 0; font-family: var(--panel-font); line-height: 1.45; }
 .folder-shortcut-editor, .folder-shortcut-picker { display: grid; gap: var(--dialog-control-gap); }
 .folder-shortcut-list {
   max-height: min(40vh, 320px);

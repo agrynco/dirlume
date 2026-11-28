@@ -54,5 +54,5 @@ export async function testInlineRename(page, root) {
   await row("right", "renamed.txt").and(pane("right").locator("[data-current='true']")).waitFor();
   assert.equal(await readFile(join(right, "renamed.txt"), "utf8"), "Preserved contents.");
   assert.equal(await row("right", "note.txt").count(), 0);
-  console.log("Verified F2 inline rename in both panes, Escape cancellation, and editable name after a conflict.");
+  console.log("Verified inline rename from the Files menu in both panes, Escape cancellation, and editable name after a conflict.");
 }
