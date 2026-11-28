@@ -1,3 +1,4 @@
+import { openMainMenu } from "./menu-header-smoke.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
@@ -539,7 +540,7 @@ try {
   await button(permissions, "Continue with sudo").click();
   await row(sudoPage, "right", "upload.txt").waitFor({ state: "detached" });
   await row(sudoPage, "right", "first-file.txt").click();
-  await list(sudoPage, "right").press("F2");
+  await (await openMainMenu(sudoPage, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
   const rename = sudoPage.getByRole("dialog", { name: "Rename", exact: true });
   await rename.getByLabel("Name", { exact: true }).fill("renamed.txt");
   await button(rename, "Rename").click();

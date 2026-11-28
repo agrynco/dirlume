@@ -83,7 +83,7 @@ export const commands = {
   attributes: { label: "File attributes", key: "Ctrl+A" },
   quickSearch: { label: "Quick search by name", key: "Alt+Letter" },
   hidden: { label: "Show or hide hidden files", key: "Ctrl+H" },
-  rename: { label: "Rename", key: "F2" },
+  rename: { label: "Rename", key: "" },
   lockingProcesses: { label: "Find locking processes", key: "" },
   processContextMenu: { label: "Open process context menu", key: "Shift+F10" },
   fileContextMenu: { label: "Open file context menu", key: "Shift+F10" },
@@ -105,7 +105,7 @@ export const commands = {
   copy: { label: "Copy", key: "F5" },
   move: { label: "Move", key: "F6" },
   fileOperationHistory: { label: "File operation history", key: "" },
-  userMenu: { label: "Open User Menu", key: "" },
+  userMenu: { label: "Open User Menu", key: "F2" },
   undoFileOperation: { label: "Undo file operation", key: "" },
   redoFileOperation: { label: "Redo file operation", key: "" },
   mkdir: { label: "New folder", key: "F7" },
@@ -373,7 +373,7 @@ export const maxMermaidScale = 400;
 export const maxTerminalResizeRows = 50;
 
 export const preferenceKey = "dirlume.preferences.v1";
-export const preferenceBindingVersion = 11;
+export const preferenceBindingVersion = 12;
 const mac = /Mac/i.test(navigator.userAgent);
 const metaKeyLabel = windowsClient ? "Win" : /Linux/i.test(navigator.userAgent) ? "Super" : "Meta";
 export const commandNames = Object.keys(commands) as Command[];
@@ -434,6 +434,12 @@ function readBindings(saved: Record<string, unknown> | undefined, version: numbe
   };
   const candidates = commandNames.flatMap((command) => {
     const value = saved?.[command];
+    const isOldRenameDefault = value === "F2" || Array.isArray(value) && value.length === 1 && value[0] === "F2";
+    const isOldMenuDefault = value === "" || Array.isArray(value) && value.length === 0;
+    // Older schemes stored every effective binding, including defaults.
+    if (version < 12 && (command === "rename" && isOldRenameDefault || command === "userMenu" && isOldMenuDefault)) {
+      return defaultBindings[command].map((key) => ({ command, key, configured: false }));
+    }
     if (command === "analyzeSpace" && version < 9 && (value === defaultBindings.analyzeSpace[0] ||
         Array.isArray(value) && value.length === 1 && value[0] === defaultBindings.analyzeSpace[0])) {
       return defaultBindings.analyzeSpace.map((key) => ({ command, key, configured: false }));

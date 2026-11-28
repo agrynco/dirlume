@@ -1459,6 +1459,21 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .user-menu-body label.user-menu-check { display: flex; align-items: center; gap: 8px; }
 .user-menu-body :is(input:not([type="checkbox"]), select, textarea) { min-width: 0; width: 100%; }
 .user-menu-body textarea { resize: vertical; }
+.user-menu-source { max-width: min(210px, 38vw); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-menu-manage { margin-inline-end: auto; }
+.user-menu-notice { color: var(--muted); }
+.user-menu-editor { display: grid; align-content: start; gap: 12px; min-width: 0; border: none; margin: 0; padding: 0; }
+.user-menu-commands { display: grid; gap: 5px; }
+.user-menu-commands textarea { font-family: var(--panel-font); }
+.user-menu-command-tools { display: flex; flex-wrap: wrap; gap: 5px 12px; align-items: center; justify-content: space-between; }
+.user-menu-command-tools small { color: var(--muted); }
+.user-menu-body .user-menu-command-tools select { width: auto; max-width: 100%; }
+.user-menu-advanced { min-width: 0; border-block-start: 1px solid var(--line); }
+.user-menu-advanced > summary { padding: 8px 4px 5px; cursor: pointer; color: var(--ink); }
+.user-menu-advanced-fields, .user-menu-review-entries { display: grid; gap: 8px; }
+.user-menu-entry-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px; }
+.user-menu-review-entries { margin: 0; padding-inline-start: 16px; }
+.user-menu-review-entries strong { display: block; margin-block: 4px; overflow-wrap: anywhere; }
 .user-menu-body pre { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px;
   white-space: pre-wrap; overflow-wrap: anywhere; max-height: 38vh; overflow: auto; }
 .user-menu-path { color: var(--muted); }
@@ -1471,7 +1486,6 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .user-menu-list hr { margin: 4px 10px; border: 0; border-top: 1px solid var(--line); }
 .user-menu-empty { display: grid; justify-items: start; align-content: start; gap: 8px; padding: 12px 0; }
 .user-menu-empty p { color: var(--muted); }
-.user-menu-empty .primary { margin-block-start: 3px; }
 .user-menu-tools { display: flex; flex-wrap: wrap; gap: 6px; }
 .user-menu-prompt { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 6px; align-items: end; }
 @media (max-width: 560px) {
@@ -1520,6 +1534,7 @@ kbd { background: var(--raised); border-radius: 3px; color: var(--muted); paddin
 .dialog-window > .settings-layout { height: auto; }
 .dialog-window > .dialog-footer { flex: none; }
 .dialog-heading h2 { margin: 0; font-size: 1.15em; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog-heading-actions { min-width: 0; margin-inline-start: auto; display: flex; align-items: center; }
 .dialog-form { display: flex; flex-direction: column; min-height: 0; }
 .dialog-body { padding: 16px; overflow: auto; }
 .dialog-body:where(:has(> .field, > .setting, > .field-checkbox)) {

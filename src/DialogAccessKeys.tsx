@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 
 import { locale } from "./i18n";
 
 const controls = "input, select, textarea, button, [role='button'], [role='checkbox'], [role='combobox'], [role='radio'], [role='slider'], [role='switch'], [role='tab'], [role='textbox']";
-const unavailable = ":disabled, [aria-disabled='true'], [aria-hidden='true'], [hidden], [inert]";
+const unavailable = ":disabled, [aria-disabled='true'], [aria-hidden='true'], [hidden], [inert], details:not([open]) > :not(summary)";
 
 function labelNodes(node: Node): Text[] {
   if (node instanceof Text) return [node];

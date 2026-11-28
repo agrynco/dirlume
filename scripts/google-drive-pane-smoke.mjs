@@ -285,7 +285,7 @@ try {
       await action.waitFor({ state: "hidden" });
     }
     await row("left", "Demo.txt").click();
-    await list("left").press("F2");
+    await (await openMainMenu(page, "Files")).getByRole("menuitem", { name: "Rename", exact: true }).click();
     const rename = page.getByRole("dialog", { name: "Rename", exact: true });
     await rename.getByRole("textbox", { name: "Name", exact: true }).fill("Renamed.txt");
     await button(rename, "Rename").click();
