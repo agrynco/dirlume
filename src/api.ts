@@ -477,6 +477,22 @@ export interface GitFileContext {
   hasDiff: boolean;
 }
 export type GitFileLaunch = { path: string; action: "history" | "blame" | "compare"; head: string } | { path: string; action: "diff" };
+export type GitPaneSource = { kind: "local"; directory: string } | { kind: "ssh"; id: number; segments: string[] };
+export interface GitPaneStatus {
+  root: string;
+  prefix: string;
+  head: string | null;
+  headRef: string | null;
+  metadata: string | null;
+  changes: GitWorkingChange[];
+}
+export type GitPaneRequest = { kind: "diff"; path: string; head: string | null } |
+  { kind: "compare"; path: string; revision: string; previousPath?: string } |
+  { kind: "revision"; path: string; revision: string } | { kind: "history"; path: string; tip: string; offset: number };
+export type GitTextVersions = { left: GitFileContent; right: GitFileContent };
+export type GitPaneFileDiff = { change: GitWorkingChange; versions: GitTextVersions | null };
+export type GitFileHistoryPage = { commits: GitFileCommit[]; nextOffset: number | null };
+type GitPaneReadResults = { diff: GitPaneFileDiff[]; compare: GitTextVersions; history: GitFileHistoryPage; revision: GitFileContent };
 export interface GitBlameLine {
   number: number;
   original: number;
@@ -876,6 +892,9 @@ export const api = {
   gitFileBlame: (root: string, tip: string, path: string) =>
     invoke<GitFileBlame>("git_file_blame", { root, tip, path }),
   gitFileContext: (directory: string, name: string) => invoke<GitFileContext>("git_file_context", { directory, name }),
+  gitPaneStatus: (source: GitPaneSource) => invoke<GitPaneStatus>("git_pane_status", { source }),
+  gitPaneRead: <Request extends GitPaneRequest>(source: GitPaneSource, root: string, request: Request) =>
+    invoke<GitPaneReadResults[Request["kind"]]>("git_pane_read", { source, root, request }),
   gitWorkingFileContent: (root: string, path: string) => invoke<GitFileContent>("git_working_file_content", { root, path }),
   gitDetails: (root: string, hash: string) => invoke<GitDetails>("git_details", { root, hash }),
   gitUpdateBranch: (root: string, request: GitBranchRequest) =>

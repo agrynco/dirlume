@@ -41,12 +41,13 @@ function VersionHeading({ side }: { side: FileVersion }) {
   </div>;
 }
 
-export function GitFileVersions({ root, left, right, shortcuts, showRevision = false }: {
+export function GitFileVersions({ root, left, right, shortcuts, showRevision = false, readContent }: {
   root: string;
   left: GitFileSide;
   right: GitFileSide;
   shortcuts: ComparisonShortcuts;
   showRevision?: boolean;
+  readContent?: (revision: string, path: string) => Promise<GitFileContent>;
 }) {
   const [versions, setVersions] = useState<{ left: FileVersion; right: FileVersion }>();
   const [error, setError] = useState(false);
@@ -57,12 +58,14 @@ export function GitFileVersions({ root, left, right, shortcuts, showRevision = f
     let active = true;
     setVersions(undefined);
     setError(false);
+    const read = async (side: GitFileSide): Promise<FileVersion> => readContent && side.revision && !side.absent && !side.working
+      ? { ...side, content: await readContent(side.revision, side.path) } : readVersion(root, side);
     void Promise.all([
-      readVersion(root, { revision: leftRevision, path: leftPath, label: leftLabel, absent: leftAbsent }),
-      readVersion(root, { revision: rightRevision, path: rightPath, label: rightLabel, absent: rightAbsent, working: rightWorking }),
+      read({ revision: leftRevision, path: leftPath, label: leftLabel, absent: leftAbsent }),
+      read({ revision: rightRevision, path: rightPath, label: rightLabel, absent: rightAbsent, working: rightWorking }),
     ]).then(([left, right]) => { if (active) setVersions({ left, right }); }, () => { if (active) setError(true); });
     return () => { active = false; };
-  }, [root, leftRevision, leftPath, leftLabel, leftAbsent, rightRevision, rightPath, rightLabel, rightAbsent, rightWorking]);
+  }, [root, leftRevision, leftPath, leftLabel, leftAbsent, rightRevision, rightPath, rightLabel, rightAbsent, rightWorking, readContent]);
   if (error) return <p role="alert" className="git-file-feedback">{t("Could not read the file revision. Check that the revision is available locally.")}</p>;
   if (!versions) return <p role="status" className="git-file-feedback">{t("Reading change…")}</p>;
   const canCompare = [versions.left, versions.right].every(comparable);

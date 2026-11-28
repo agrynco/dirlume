@@ -232,6 +232,9 @@ jobs:
       - name: Verify Git View
         if: github.event.action != 'closed'
         run: node scripts/git-view-smoke.mjs
+      - name: Verify Git status and comparisons in file panes
+        if: github.event.action != 'closed'
+        run: node scripts/git-pane-status-smoke.mjs
       - name: Verify environment variable panes and copy review
         if: github.event.action != 'closed'
         run: node scripts/environment-panes-smoke.mjs

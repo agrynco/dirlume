@@ -181,6 +181,8 @@ Open **Commit graph** to browse the selected branch, see its parent links and re
 
 Right-click a local file or press **Shift+F10** on its row to open the **Git** group. **Show history** and **Show blame** start at the checked-out revision. **Compare with revision…** compares the working file with a stored revision. **Show diff** shows staged and unstaged changes for that file. Git text comparisons use the built-in File Compare controls. Choose **Options → Layout** for **Unified** or **Side-by-side**. On Windows, choose **Windows context menu…** to open the system menu for the file.
 
+Each regular file pane shows the current branch and a **Git** column inside a working tree. The column shows `S` for staged changes and `W` for working-file changes, followed by the Git status letter. `?` marks untracked files and `Δ` marks folders with changes below them. Hover over a marker for details or open it for **Show diff**, **Compare with HEAD**, and **Show history**. These actions use File Compare and keep both panes in place. Right-click a column heading to hide Git. Local changes update the markers automatically. For a Linux SFTP connection with Git and SSH command access, use **Refresh** to update its status.
+
 Select a changed path in **Compare revisions**, commit details, a cherry-pick or revert review, or a stash to compare its versions with the same controls.
 
 The branch pane can create a local branch at the selected commit, switch to an existing local branch, rename or safely delete a local branch, or create and switch to a local branch that tracks the selected remote branch. Review the repository and branch in the dialog before applying an action. Git checks whether local changes can be preserved on switch and whether deletion is safe.

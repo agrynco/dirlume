@@ -23,7 +23,7 @@ struct FileCommit {
     change: Change,
 }
 
-fn file_history(
+pub(super) fn file_history(
     git: &Path,
     root: &Path,
     tip: &str,
@@ -31,35 +31,50 @@ fn file_history(
     offset: u32,
 ) -> Result<FileHistory> {
     relative_file(path)?;
-    let offset = offset as usize;
     // Git's --skip skips rename detection as well as output, losing the old path on later pages.
-    let limit = format!("--max-count={}", offset.saturating_add(PAGE_SIZE + 1));
+    let limit = history_limit(offset);
     let data = bounded(
         git,
         root,
-        &[
-            "--literal-pathspecs",
-            "log",
-            "--follow",
-            "--show-pulls",
-            "--diff-merges=first-parent",
-            "--date-order",
-            "--no-color",
-            "--no-decorate",
-            "--no-notes",
-            "--no-show-signature",
-            "--name-status",
-            "-z",
-            "--format=%x00%H%x00%h%x00%an%x00%aI%x00%s%x00%P",
-            &limit,
-            oid(tip)?,
-            "--",
-            path,
-        ],
+        &history_args(oid(tip)?, path, &limit),
         STATUS_LIMIT,
     )?
     .ok_or(GitError::Unreadable)?;
-    let data = String::from_utf8_lossy(&data);
+    parse_file_history(&data, offset)
+}
+
+pub(super) fn history_limit(offset: u32) -> String {
+    format!(
+        "--max-count={}",
+        (offset as usize).saturating_add(PAGE_SIZE + 1)
+    )
+}
+
+pub(super) fn history_args<'a>(tip: &'a str, path: &'a str, limit: &'a str) -> [&'a str; 17] {
+    [
+        "--literal-pathspecs",
+        "log",
+        "--follow",
+        "--show-pulls",
+        "--diff-merges=first-parent",
+        "--date-order",
+        "--no-color",
+        "--no-decorate",
+        "--no-notes",
+        "--no-show-signature",
+        "--name-status",
+        "-z",
+        "--format=%x00%H%x00%h%x00%an%x00%aI%x00%s%x00%P",
+        limit,
+        tip,
+        "--",
+        path,
+    ]
+}
+
+pub(super) fn parse_file_history(data: &[u8], offset: u32) -> Result<FileHistory> {
+    let offset = offset as usize;
+    let data = String::from_utf8_lossy(data);
     let mut fields = data.split_terminator('\0');
     if fields.next().is_some_and(|marker| !marker.is_empty()) {
         return Err(GitError::Unreadable);
@@ -126,7 +141,7 @@ pub enum FileContent {
 pub struct FileRevision {
     revision: String,
     path: String,
-    content: FileContent,
+    pub(super) content: FileContent,
 }
 
 #[derive(Serialize)]
@@ -294,6 +309,10 @@ fn stored_blob(git: &Path, root: &Path, revision: &str, path: &str) -> Result<Op
         STATUS_LIMIT,
     )?
     .ok_or(GitError::Unreadable)?;
+    parse_stored_blob(&entry)
+}
+
+pub(super) fn parse_stored_blob(entry: &[u8]) -> Result<Option<String>> {
     let metadata = entry
         .split(|value| *value == b'\t')
         .next()
@@ -308,7 +327,7 @@ fn stored_blob(git: &Path, root: &Path, revision: &str, path: &str) -> Result<Op
     }
 }
 
-fn file_content(bytes: Vec<u8>) -> FileContent {
+pub(super) fn file_content(bytes: Vec<u8>) -> FileContent {
     match text_patch(bytes) {
         Ok(text) => FileContent::Available { text },
         Err("oversized") => FileContent::Oversized,
@@ -326,7 +345,12 @@ fn blob_content(git: &Path, root: &Path, hash: Option<String>) -> Result<FileCon
     }
 }
 
-fn file_revision(git: &Path, root: &Path, revision: &str, path: &str) -> Result<FileRevision> {
+pub(super) fn file_revision(
+    git: &Path,
+    root: &Path,
+    revision: &str,
+    path: &str,
+) -> Result<FileRevision> {
     relative_file(path)?;
     let revision = resolve_commit(git, root, revision)?;
     let content = blob_content(git, root, stored_blob(git, root, &revision, path)?)?;
@@ -406,7 +430,7 @@ fn file_context(git: &Path, directory: &Path, name: &str) -> Result<FileContext>
     })
 }
 
-fn working_content(root: &Path, path: &str) -> Result<FileContent> {
+pub(super) fn working_content(root: &Path, path: &str) -> Result<FileContent> {
     let Some(path) = working_file(root, relative_file(path)?) else {
         return Ok(FileContent::Missing);
     };
@@ -424,9 +448,9 @@ fn working_content(root: &Path, path: &str) -> Result<FileContent> {
 }
 
 #[derive(Serialize)]
-pub(super) struct WorkingVersions {
-    left: FileContent,
-    right: FileContent,
+pub struct WorkingVersions {
+    pub(super) left: FileContent,
+    pub(super) right: FileContent,
 }
 
 fn index_content(git: &Path, root: &Path, path: &str) -> Result<FileContent> {
@@ -444,7 +468,10 @@ fn index_content(git: &Path, root: &Path, path: &str) -> Result<FileContent> {
         STATUS_LIMIT,
     )?
     .ok_or(GitError::Unreadable)?;
-    let mut blob = None;
+    blob_content(git, root, parse_index_blob(&data)?)
+}
+
+pub(super) fn parse_index_blob(data: &[u8]) -> Result<Option<String>> {
     for row in data.split(|byte| *byte == 0).filter(|row| !row.is_empty()) {
         let metadata = row
             .split(|byte| *byte == b'\t')
@@ -456,11 +483,10 @@ fn index_content(git: &Path, root: &Path, path: &str) -> Result<FileContent> {
         if let (Some("100644" | "100755"), Some(hash), Some("0")) =
             (fields.next(), fields.next(), fields.next())
         {
-            blob = Some(oid(hash)?.to_owned());
-            break;
+            return Ok(Some(oid(hash)?.to_owned()));
         }
     }
-    blob_content(git, root, blob)
+    Ok(None)
 }
 
 pub(super) fn working_versions(

@@ -812,6 +812,12 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .file-name .link-icon { width: 12px; margin-left: -3px; }
 .file-size, .file-date, .file-time { font-variant-numeric: tabular-nums; font-size: .88em; text-align: right; padding-inline: 5px; }
 .file-size svg { width: 13px; height: 13px; vertical-align: text-bottom; }
+.pane-git-branch { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 9px 4px; font: .85em var(--ui-font); color: var(--panel-muted); }
+.pane-git-branch svg { width: 13px; height: 13px; flex: none; }
+.pane-git-branch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-git-status { min-width: 0; display: flex; align-items: center; justify-content: center; font: .85em var(--panel-font); }
+.file-git-status button { min-width: 0; min-height: 20px; padding: 0 3px; gap: 3px; font: inherit; }
+.file-git-status [data-git-group="staged"] { font-weight: 700; }
 .pane-empty { padding: 22px 10px; color: var(--muted); text-align: center; }
 .pane-error { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px; background: var(--danger-bg); color: var(--danger); }
 .pane-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -1172,6 +1178,10 @@ input[type=checkbox] { accent-color: var(--accent-fill); align-self: center; }
 .git-working-comparison-controls > div { flex: 1 1 12rem; min-width: 0; }
 .git-working-comparison-controls button > svg { width: 1em; height: 1em; }
 .git-working-comparison-result { flex: 1 1 min(56vh, 34rem); min-height: 0; display: flex; flex-direction: column; border-block-start: 1px solid var(--line); }
+.git-pane-inspection { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.git-pane-inspection > p { margin: 0; }
+.git-pane-inspection .git-file-history-target > small { color: var(--panel-muted); overflow-wrap: anywhere; }
+.git-pane-inspection > .git-working-comparison-result { min-height: min(48vh, 15rem); }
 .git-blame-viewer { flex: 1 1 min(66vh, 42rem); height: auto; border: 0; min-inline-size: 0; }
 .document-heading.git-blame-heading { grid-template-columns: minmax(0, 1fr) max-content; align-items: center; }
 .git-blame-heading strong { grid-column: 1; overflow-wrap: anywhere; }

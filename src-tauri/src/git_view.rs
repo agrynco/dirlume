@@ -13,6 +13,7 @@ pub(crate) mod file;
 pub(crate) mod graph;
 pub(crate) mod history_edits;
 pub(crate) mod merge;
+pub(crate) mod pane;
 pub(crate) mod rebase;
 pub(crate) mod remote_push;
 pub(crate) mod stash;
@@ -523,21 +524,22 @@ pub struct WorkingDiff {
     versions: Option<file::WorkingVersions>,
 }
 
+const WORKING_STATUS_ARGS: &[&str] = &[
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+    "--renames",
+    "--ignore-submodules=none",
+];
+
 fn working_changes(git: &Path, root: &Path) -> Result<Vec<WorkingChange>> {
-    let bytes = bounded(
-        git,
-        root,
-        &[
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-            "--renames",
-            "--ignore-submodules=none",
-        ],
-        STATUS_LIMIT,
-    )?
-    .ok_or(GitError::Unreadable)?;
+    let bytes =
+        bounded(git, root, WORKING_STATUS_ARGS, STATUS_LIMIT)?.ok_or(GitError::Unreadable)?;
+    parse_working_changes(bytes)
+}
+
+fn parse_working_changes(bytes: Vec<u8>) -> Result<Vec<WorkingChange>> {
     let status = String::from_utf8(bytes).map_err(|_| GitError::Unreadable)?;
     let mut records = status.split_terminator('\0');
     let mut changes = Vec::new();
