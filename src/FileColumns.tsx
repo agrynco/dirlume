@@ -43,7 +43,7 @@ export function columnGroupTrack(groups: PanelColumn[][], index: number): CSSPro
 }
 
 const autoWidths: Record<PanelField, number> = {
-  name: 5, markedName: 5, rightName: 5, git: 5, size: 9, bytes: 12, date: 13, time: 9, owner: 15, links: 5,
+  name: 5, markedName: 5, rightName: 5, git: 4, size: 9, bytes: 12, date: 13, time: 9, owner: 15, links: 5,
 };
 export type ColumnSamples = Partial<Record<PanelField, readonly string[]>>;
 const panelColumnFields = Object.keys(panelFields) as PanelField[];
